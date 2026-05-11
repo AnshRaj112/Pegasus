@@ -1,0 +1,14 @@
+Missing from target
+10309
+Rows present in the source (expected) file but absent in the target (actual) file for the same UID.
+No sample rows in this category
+There are 10309 missing row(s); increase the sample limit to include them in the response.
+Extra in target
+250
+Rows present in the target file with no matching UID in the source file.
+No sample rows in this category
+There are 250 extra row(s); increase the sample limit to include them in the response.
+Mismatched values
+23016
+Same UID in both files, but one or more compared columns differ. Open a column to see sample diffs for that field.
+Sample rows (column breakdown unavailable).

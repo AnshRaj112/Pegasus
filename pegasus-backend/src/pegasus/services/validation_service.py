@@ -38,6 +38,7 @@ class ValidationRunResult:
     source_row_count: int
     target_row_count: int
     compared_column_count: int
+    compared_columns: list[str]
 
 
 class ValidationService:
@@ -116,7 +117,9 @@ class ValidationService:
 
         src_cols = set(source_df.columns)
         tgt_cols = set(target_df.columns)
-        compared = len((src_cols & tgt_cols) - {uid})
+        shared = src_cols & tgt_cols
+        compared_columns = sorted(shared - {uid})
+        compared = len(compared_columns)
 
         comparator = UIDBasedComparator(stringify_null_in_report=True)
         try:
@@ -141,6 +144,7 @@ class ValidationService:
             source_row_count=source_df.height,
             target_row_count=target_df.height,
             compared_column_count=compared,
+            compared_columns=compared_columns,
         )
 
     def _resolve_delimiter(

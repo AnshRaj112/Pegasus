@@ -30,7 +30,8 @@ def test_validate_happy_path(client: TestClient) -> None:
     assert body["summary"]["target_row_count"] == 2
     assert body["summary"]["is_match"] is False
     assert body["mismatch_counts"]["value_mismatch"] >= 1
-    assert len(body["mismatch_samples"]) >= 1
+    assert len(body["mismatch_sample_groups"]["value_mismatch"]) >= 1
+    assert "name" in body["compared_columns"]
     assert body.get("run_id") is None
 
 

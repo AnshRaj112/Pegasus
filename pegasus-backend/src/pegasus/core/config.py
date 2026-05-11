@@ -43,7 +43,10 @@ class Settings(BaseSettings):
         default=100,
         ge=0,
         le=10_000,
-        description="Max mismatch rows returned in mismatch_samples",
+        description=(
+            "Max mismatch sample rows returned across mismatch_sample_groups (split by category). "
+            "If set to 0, the API uses an automatic cap (up to 10_000) so the UI still receives samples."
+        ),
     )
     enable_validation_persistence: bool = Field(
         default=False,

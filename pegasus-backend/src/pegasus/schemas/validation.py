@@ -75,14 +75,29 @@ class MismatchCounts(BaseModel):
     value_mismatch: int = Field(ge=0)
 
 
+class MismatchSampleGroups(BaseModel):
+    """Sample mismatch rows split by category (each list obeys the global sample budget)."""
+
+    missing_in_target: list[MismatchSampleRow] = Field(default_factory=list)
+    extra_in_target: list[MismatchSampleRow] = Field(default_factory=list)
+    value_mismatch: list[MismatchSampleRow] = Field(default_factory=list)
+
+
 class ValidateResponse(BaseModel):
     """Response body for POST /validate."""
 
     summary: ValidationSummary
     mismatch_counts: MismatchCounts
-    mismatch_samples: list[MismatchSampleRow] = Field(
+    mismatch_sample_groups: MismatchSampleGroups = Field(
+        description="Sample rows per mismatch category (see validation_mismatch_sample_limit)",
+    )
+    value_mismatch_by_column: dict[str, int] = Field(
+        default_factory=dict,
+        description="Total value_mismatch row counts per compared column (full report, not just samples)",
+    )
+    compared_columns: list[str] = Field(
         default_factory=list,
-        description="First N mismatch records (see settings validation_mismatch_sample_limit)",
+        description="Shared non-UID column names that were compared (order is stable for UI grouping)",
     )
     run_id: UUID | None = Field(
         default=None,

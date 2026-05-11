@@ -15,6 +15,7 @@ from pegasus.api.deps import AppSettings, ValidationServiceDep
 from pegasus.core.database import AsyncSessionLocal
 from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.schemas.validation import (
+    MismatchSampleGroups,
     MismatchSampleRow,
     ValidateResponse,
     ValidationSummary,
@@ -22,6 +23,8 @@ from pegasus.schemas.validation import (
 )
 from pegasus.services.exceptions import ValidationBadRequestError
 from pegasus.services.validation_service import ValidationRunResult
+
+from .mismatch_sample import build_grouped_mismatch_samples, value_mismatch_counts_by_column
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +100,7 @@ async def validate_csv_files(
 ) -> ValidateResponse:
     """Accept two CSV uploads and return mismatch summary plus sample rows."""
     max_bytes = settings.validation_max_upload_bytes
-    sample_limit = settings.validation_mismatch_sample_limit
+    raw_sample_limit = settings.validation_mismatch_sample_limit
 
     source_path: Path | None = None
     target_path: Path | None = None
@@ -166,18 +169,30 @@ async def validate_csv_files(
 
     assert run_result is not None
     mismatches = run_result.report.mismatches
-    # Stable sampling: sort first so one mismatch column type doesn't dominate
-    # truncated previews when sample_limit is small.
-    if sample_limit > 0 and mismatches.height > 0:
-        sample_df = (
-            mismatches.sort(
-                by=["uid", "mismatch_type", "column_name"],
-                nulls_last=True,
-            ).head(sample_limit)
-        )
+    # Treat non-positive sample limits as misconfiguration: returning zero rows makes the UI unusable.
+    sample_limit = raw_sample_limit
+    if mismatches.height > 0:
+        if sample_limit <= 0:
+            sample_limit = min(10_000, mismatches.height)
+            logger.info(
+                "validation_mismatch_sample_limit was %s; using effective sample_limit=%s for this run",
+                raw_sample_limit,
+                sample_limit,
+            )
+        # Cap to configured ceiling when the user set a positive limit (avoid accidental huge payloads).
+        if raw_sample_limit > 0:
+            sample_limit = min(sample_limit, raw_sample_limit)
+        miss_df, ext_df, val_df = build_grouped_mismatch_samples(mismatches, sample_limit)
     else:
-        sample_df = mismatches.slice(0, 0)
-    samples = [MismatchSampleRow.model_validate(row) for row in sample_df.to_dicts()]
+        empty = mismatches.slice(0, 0)
+        miss_df = ext_df = val_df = empty
+
+    sample_groups = MismatchSampleGroups(
+        missing_in_target=[MismatchSampleRow.model_validate(r) for r in miss_df.to_dicts()],
+        extra_in_target=[MismatchSampleRow.model_validate(r) for r in ext_df.to_dicts()],
+        value_mismatch=[MismatchSampleRow.model_validate(r) for r in val_df.to_dicts()],
+    )
+    value_by_col = value_mismatch_counts_by_column(mismatches)
 
     counts_model = build_mismatch_counts(run_result.report.summary)
     total_records = mismatches.height
@@ -192,6 +207,8 @@ async def validate_csv_files(
     return ValidateResponse(
         summary=summary,
         mismatch_counts=counts_model,
-        mismatch_samples=samples,
+        mismatch_sample_groups=sample_groups,
+        value_mismatch_by_column=value_by_col,
+        compared_columns=run_result.compared_columns,
         run_id=run_id,
     )
