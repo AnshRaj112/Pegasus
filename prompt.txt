@@ -1,134 +1,52 @@
-We are building a production-grade large-scale CSV/data reconciliation engine called Pegasus.
+Pegasus now needs to support large-scale external-memory CSV reconciliation for files up to 100GB.
 
-Goal:
-Validate source and target datasets efficiently for files ranging from MBs to 100GB+ while being highly memory, RAM, CPU, and disk efficient.
+Redesign the comparison architecture with the following requirements:
 
-Core Requirements:
-- Stream-based processing only
-- Never load entire files into memory
-- Support multiple source and target files
-- UID/key-based validation
-- Generate mismatch/missing/extra reports
-- Support sorted and unsorted datasets
-- Handle enterprise-scale datasets
+Core Goals:
 
-Architecture Requirements:
+* memory efficient
+* streaming-first
+* external-memory reconciliation
+* scalable to 100GB+
+* support multiple source and target files
 
-1. Streaming CSV Processing
-- Use Node.js streams
-- Use fast-csv or equivalent streaming parser
-- Process rows incrementally
-- Support backpressure handling
+Required Comparison Strategies:
 
-2. Sorted Merge Validation Engine
-If source and target files are sorted by UID:
-- Implement merge-join style validation
-- Use pointer-based comparison
-- O(1) or near-constant memory usage
-- Compare rows sequentially
+1. Ordered stream comparison for sorted files
+2. Sliding window comparison for mostly sorted files
+3. Hash partition comparison for unordered files
+4. External merge-sort comparison for huge unsorted files
 
-Logic:
-- source.uid == target.uid → validate row
-- source.uid < target.uid → missing in target
-- source.uid > target.uid → extra in target
+Requirements:
 
-3. Sliding Window Matching
-Implement configurable sliding window reconciliation:
-- Example window size: 1000 rows
-- Handle slightly out-of-order records
-- Search nearby rows before declaring mismatch
-- Useful for delayed/skewed ingestion pipelines
+* Use Polars where appropriate
+* Avoid loading entire files into memory
+* Use chunk-based processing
+* Implement configurable chunk/window sizes
+* Support spill-to-disk architecture
+* Add temp-file management
+* Add deterministic UID generation
+* Support partition-based reconciliation
+* Design for future distributed execution
 
-4. External Sorting for Unsorted Files
-If datasets are not sorted:
-- Implement external merge sort
-- Split files into chunks
-- Sort chunks individually
-- Merge sorted chunks using k-way merge
-- Avoid memory-heavy sorting
+Create modular architecture for:
 
-5. Hash Partition Validation
-Implement partition-based validation:
-- Partition rows by UID hash
-- Example: hash(uid) % N
-- Ensure same UID lands in same partition
-- Validate partition-by-partition
-- Designed for 100GB+ datasets
+* stream readers
+* partition managers
+* merge sort engine
+* window comparator
+* mismatch collector
+* reconciliation coordinator
 
-6. Validation Modes
-System should automatically detect and choose:
-- In-memory validation for small files
-- Merge validation for sorted files
-- External sort + merge for unsorted large files
-- Hash partition validation for massive datasets
+Add:
 
-7. Report Generation
-- Stream report writing
-- Never store all mismatches in memory
-- Generate:
-  - missing rows
-  - extra rows
-  - mismatched fields
-  - validation summary
-- Support CSV/JSON reports
+* production-grade logging
+* metrics hooks
+* retry-safe processing
+* resumable execution design
+* clean interfaces
+* type hints
+* docstrings
 
-8. Row Hashing
-Implement row fingerprinting:
-- Generate normalized row hashes
-- Compare hashes before field-level validation
-- Avoid unnecessary deep comparisons
-
-9. Multi-file Reconciliation
-Support:
-- multiple source files
-- multiple target files
-- many-to-one validation
-- one-to-many validation
-
-10. Fault Tolerance
-- Add checkpointing
-- Resume validation after crashes
-- Track progress by byte offset or row number
-
-11. Performance Requirements
-Target:
-- Process 100GB+ datasets
-- Minimal RAM usage
-- Sequential disk access preferred
-- Avoid random disk I/O
-- Parallel worker support later
-
-12. Future Extensibility
-Design architecture for:
-- worker queues
-- distributed processing
-- GCS/S3 support
-- parquet support
-- compressed file streaming
-- column-level validation rules
-
-Implementation Instructions:
-- Build modular architecture
-- Separate parser, validator, comparator, partitioner, sorter, and reporter
-- Use TypeScript
-- Use interfaces and strategy patterns
-- Avoid monolithic functions
-- Add benchmarking and profiling utilities
-- Add test datasets and stress tests
-
-Current Phase Priority:
-1. Streaming CSV parser
-2. Sorted merge validation
-3. Sliding window comparison
-4. Streamed report generation
-5. External sorting
-6. Partition validation
-
-Generate:
-- Folder structure
-- Core architecture
-- Interfaces
-- Validation pipeline
-- Initial implementation plan
-- Benchmarks strategy
-- Memory optimization techniques
+Do NOT implement Kubernetes, Spark, or GCS yet.
+Focus only on the core external-memory reconciliation engine.
