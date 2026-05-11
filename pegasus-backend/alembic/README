@@ -1,0 +1,7 @@
+Run from `pegasus-backend/` with `PEGASUS_DATABASE_URL` set (async URL, e.g. postgresql+asyncpg://...):
+
+  alembic upgrade head
+
+Generate a new revision after model changes:
+
+  alembic revision --autogenerate -m "describe change"
