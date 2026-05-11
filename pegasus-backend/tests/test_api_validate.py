@@ -61,3 +61,67 @@ def test_validate_duplicate_uid_unprocessable(client: TestClient) -> None:
         data={"uid_column": "id", "delimiter": ","},
     )
     assert r.status_code == 422
+
+
+def test_validate_auto_detects_semicolon_delimiter(client: TestClient) -> None:
+    source = io.BytesIO(b"id;name\n1;alice\n2;bob\n")
+    target = io.BytesIO(b"id;name\n1;alice\n2;robert\n")
+    r = client.post(
+        "/api/v1/validate",
+        files={
+            "source_file": ("s.csv", source, "text/csv"),
+            "target_file": ("t.csv", target, "text/csv"),
+        },
+        data={"uid_column": "id", "delimiter": "auto"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["mismatch_counts"]["value_mismatch"] == 1
+
+
+def test_validate_auto_detects_tab_delimiter_without_user_input(client: TestClient) -> None:
+    source = io.BytesIO(b"id\tname\n1\talice\n2\tbob\n")
+    target = io.BytesIO(b"id\tname\n1\talice\n2\trobert\n")
+    r = client.post(
+        "/api/v1/validate",
+        files={
+            "source_file": ("s.tsv", source, "text/tab-separated-values"),
+            "target_file": ("t.tsv", target, "text/tab-separated-values"),
+        },
+        data={"uid_column": "id"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["mismatch_counts"]["value_mismatch"] == 1
+
+
+def test_validate_explicit_multichar_delimiter_uses_fallback_parser(client: TestClient) -> None:
+    source = io.BytesIO(b"id||name\n1||alice\n2||bob\n")
+    target = io.BytesIO(b"id||name\n1||alice\n2||robert\n")
+    r = client.post(
+        "/api/v1/validate",
+        files={
+            "source_file": ("s.csv", source, "text/csv"),
+            "target_file": ("t.csv", target, "text/csv"),
+        },
+        data={"uid_column": "id", "delimiter": "||"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["mismatch_counts"]["value_mismatch"] == 1
+
+
+def test_validate_auto_detects_multichar_delimiter(client: TestClient) -> None:
+    source = io.BytesIO(b"id::name\n1::alice\n2::bob\n")
+    target = io.BytesIO(b"id::name\n1::alice\n2::robert\n")
+    r = client.post(
+        "/api/v1/validate",
+        files={
+            "source_file": ("s.csv", source, "text/csv"),
+            "target_file": ("t.csv", target, "text/csv"),
+        },
+        data={"uid_column": "id", "delimiter": "auto"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["mismatch_counts"]["value_mismatch"] == 1

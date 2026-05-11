@@ -17,7 +17,7 @@ export function ValidationPanel() {
   const [sourceFile, setSourceFile] = useState(null)
   const [targetFile, setTargetFile] = useState(null)
   const [uidColumn, setUidColumn] = useState('id')
-  const [delimiter, setDelimiter] = useState(',')
+  const [delimiter, setDelimiter] = useState('auto')
   const [phase, setPhase] = useState('idle')
   const [elapsedMs, setElapsedMs] = useState(0)
   const [result, setResult] = useState(null)
@@ -47,7 +47,7 @@ export function ValidationPanel() {
     body.append('source_file', sourceFile)
     body.append('target_file', targetFile)
     body.append('uid_column', uidColumn.trim())
-    body.append('delimiter', delimiter)
+    body.append('delimiter', delimiter.trim() || 'auto')
 
     const url = `${apiBase}/api/v1/validate`
 
@@ -78,7 +78,8 @@ export function ValidationPanel() {
         Upload <strong>source</strong> (expected) and <strong>target</strong>{' '}
         (actual) CSV files. The UI calls{' '}
         <code className="validation-code">POST /api/v1/validate</code> on your
-        Pegasus API.
+        Pegasus API. Leave delimiter as <code className="validation-code">auto</code>{' '}
+        unless you need an override.
       </p>
 
       <form className="validation-form" onSubmit={handleSubmit}>
@@ -127,11 +128,15 @@ export function ValidationPanel() {
               value={delimiter}
               disabled={running}
               onChange={(ev) => setDelimiter(ev.target.value)}
-              maxLength={1}
               className="validation-delimiter"
-              title="Single character, e.g. , or ;"
-              aria-label="CSV delimiter, one character"
+              title="Use auto, tab, \\t, single-char (, ; |), or multi-char (||, ::)"
+              aria-label="CSV delimiter or auto"
+              placeholder="auto"
             />
+            <span className="validation-field-help">
+              Recommended: <code>auto</code>. You can also use <code>tab</code>,{' '}
+              <code>\t</code>, <code>|</code>, <code>||</code>, <code>::</code>.
+            </span>
           </label>
         </div>
 

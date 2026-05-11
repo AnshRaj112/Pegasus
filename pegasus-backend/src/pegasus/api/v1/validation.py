@@ -84,7 +84,16 @@ async def validate_csv_files(
     source_file: Annotated[UploadFile, File(description="Expected / golden CSV")],
     target_file: Annotated[UploadFile, File(description="Actual / candidate CSV")],
     uid_column: Annotated[str, Form(description="Column name to join on (must exist in both files)")],
-    delimiter: Annotated[str, Form(description="Single-character field separator")] = ",",
+    delimiter: Annotated[
+        str,
+        Form(
+            description=(
+                "Field separator. Use 'auto' (default) to infer, "
+                "'tab'/'\\t' for tab, or provide explicit separator "
+                "(single-char via Polars; multi-char via pandas fallback)."
+            )
+        ),
+    ] = "auto",
 ) -> ValidateResponse:
     """Accept two CSV uploads and return mismatch summary plus sample rows."""
     max_bytes = settings.validation_max_upload_bytes
@@ -157,7 +166,17 @@ async def validate_csv_files(
 
     assert run_result is not None
     mismatches = run_result.report.mismatches
-    sample_df = mismatches.head(sample_limit) if sample_limit > 0 and mismatches.height > 0 else mismatches.slice(0, 0)
+    # Stable sampling: sort first so one mismatch column type doesn't dominate
+    # truncated previews when sample_limit is small.
+    if sample_limit > 0 and mismatches.height > 0:
+        sample_df = (
+            mismatches.sort(
+                by=["uid", "mismatch_type", "column_name"],
+                nulls_last=True,
+            ).head(sample_limit)
+        )
+    else:
+        sample_df = mismatches.slice(0, 0)
     samples = [MismatchSampleRow.model_validate(row) for row in sample_df.to_dicts()]
 
     counts_model = build_mismatch_counts(run_result.report.summary)

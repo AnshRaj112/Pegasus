@@ -14,3 +14,6 @@ pydantic-settings>=2.6.0,<3.0.0
 
 # Validation engine (columnar / streaming CSV)
 polars>=1.0.0,<2.0.0
+clevercsv>=0.8.2,<1.0.0
+pandas>=2.2.0,<3.0.0
+pyarrow>=17.0.0,<20.0.0
