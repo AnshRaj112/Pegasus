@@ -1,75 +1,75 @@
-Pegasus backend is still crashing when validating two 4.4GB CSV files because the current architecture still contains hidden in-memory operations.
+Pegasus DuckDB reconciliation engine is still too slow for 10M–100M row CSV files.
 
-Redesign the reconciliation engine into a true external-memory streaming architecture.
+Redesign the architecture for high-performance analytical reconciliation.
 
-Critical Requirements:
+Critical Architecture Changes:
 
-- FastAPI must NOT perform validation inline
-- Validation must run as background jobs/processes
-- Do NOT load entire files or partitions into memory
-- Do NOT accumulate mismatches in RAM
-- Do NOT use full dataframe joins
-- Do NOT use giant Python dict/hashmaps for reconciliation
+1. CSV Should Only Be Ingestion Format
 
-Required Architecture Changes:
+- Convert CSV to Parquet immediately after ingestion
+- Use Parquet as internal working format
+- Add streaming CSV-to-Parquet conversion
+- Add configurable row group sizes
 
-1. Validation Execution
+2. Partitioned Reconciliation
 
-- Move validation outside request lifecycle
-- API should only create validation jobs
-- Validation should execute in separate background workers/processes
+- Partition datasets using:
+  partition_id = hash(uid) % N
+- Compare partitions independently
+- Avoid giant global joins
 
-2. Streaming Processing
+3. DuckDB Optimization
 
-- Read files in bounded chunks
-- Process rows immediately
-- Release memory immediately after processing
-- Avoid dataframe accumulation
+- Enable parallel execution:
+  PRAGMA threads=<cpu_cores>
+- Use vectorized SQL operations
+- Avoid Python row-by-row loops entirely
+- Avoid full outer joins on gigantic datasets
 
-3. External-Memory Reconciliation
+4. Streaming + External Memory
 
-- Use DuckDB for external joins and disk-backed processing
-- Use streaming partition-based reconciliation for unsorted files
-- Support spill-to-disk architecture
+- Use lazy scanning
+- Avoid materializing full datasets
+- Use spill-to-disk execution
+- Keep memory bounded
 
-4. Partition Lifecycle
+5. UID Optimization
 
-- Partition rows incrementally
-- Flush partitions to disk immediately
-- Avoid keeping partition buffers in memory
-- Add automatic temp-file cleanup
+- Replace SHA256 with faster deterministic hashing
+- Consider xxhash or murmurhash
+- Avoid repeated hash generation
 
-5. Mismatch Handling
+6. Mismatch Handling
 
-- Write mismatches incrementally to JSONL or CSV
-- Never keep mismatch lists in RAM
+- Write mismatches incrementally
+- Avoid collecting mismatch arrays in memory
 - Return only summary metadata to API
 
-6. Memory Safety
+7. Query Optimization
 
-- Add memory profiling
-- Log RSS memory usage periodically
-- Add configurable chunk sizes
-- Add backpressure and bounded buffers
+- Push filters early
+- Use column pruning
+- Compare only required columns
+- Add partition-level statistics
 
-7. Required Modules
+Required Modules:
 
-- BackgroundValidationRunner
-- StreamCSVReader
+- CSVIngestionPipeline
+- ParquetConverter
 - PartitionManager
-- ExternalMergeComparator
 - DuckDBReconciliationEngine
+- MergeStreamComparator
 - IncrementalMismatchWriter
-- MemoryMonitor
+- PerformanceMonitor
 
 Technical Constraints:
 
-- Use DuckDB as primary external-memory engine
-- Use Polars only for bounded chunk operations
-- Avoid in-memory reconciliation patterns entirely
-- Use generators/iterators everywhere possible
-- Add production-grade logging
-- Add cleanup handling for crashes/interruption
+- Avoid Python loops for reconciliation
+- Use SQL/vectorized execution
+- Use generators/iterators
+- Add configurable chunk sizes
+- Add temp-file cleanup
+- Add memory + timing metrics
 
-Focus ONLY on making validation stable for multi-GB files.
-Do not add distributed execution yet.
+Focus ONLY on making 10M–100M row reconciliation fast and stable.
+Do not add distributed Spark execution yet.
