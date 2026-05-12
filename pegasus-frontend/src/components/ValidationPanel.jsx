@@ -8,7 +8,9 @@ function formatDetail(detail) {
   if (detail == null) return 'Request failed'
   if (typeof detail === 'string') return detail
   if (Array.isArray(detail)) {
-    return detail.map((e) => e.msg ?? JSON.stringify(e)).join('; ')
+    return detail
+      .map((e) => (typeof e === 'object' && e != null ? e.msg ?? e.message : null) ?? JSON.stringify(e))
+      .join('; ')
   }
   return JSON.stringify(detail)
 }
@@ -57,10 +59,18 @@ export function ValidationPanel() {
         body,
       })
 
-      const data = await res.json().catch(() => ({}))
+      const raw = await res.text()
+      let data = {}
+      if (raw) {
+        try {
+          data = JSON.parse(raw)
+        } catch {
+          data = { detail: raw.trim().slice(0, 800) || `Non-JSON response (${res.status})` }
+        }
+      }
 
       if (!res.ok) {
-        const msg = formatDetail(data.detail)
+        const msg = formatDetail(data.detail) || raw?.trim()?.slice(0, 800) || ''
         throw new Error(msg || `${res.status} ${res.statusText}`)
       }
 

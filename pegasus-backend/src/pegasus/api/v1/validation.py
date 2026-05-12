@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import gc
+import json
 import logging
 import os
 import tempfile
@@ -9,28 +11,186 @@ import uuid
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile, status
 
-from pegasus.api.deps import AppSettings, ValidationServiceDep
+from pegasus.api.deps import AppSettings
+from pegasus.core.config import Settings
 from pegasus.core.database import AsyncSessionLocal
+from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.schemas.validation import (
+    LocalPathValidateRequest,
     MismatchSampleGroups,
     MismatchSampleRow,
     ValidateResponse,
+    ValidationJobAcceptedResponse,
+    ValidationJobDetailResponse,
     ValidationSummary,
     build_mismatch_counts,
 )
+from pegasus.services.background_validation_runner import BackgroundValidationRunner
 from pegasus.services.exceptions import ValidationBadRequestError
 from pegasus.services.validation_service import ValidationRunResult
+from pegasus.validation.comparators.models import MismatchReport, MismatchType, empty_mismatch_frame
 
-from .mismatch_sample import build_grouped_mismatch_samples, value_mismatch_counts_by_column
+from .mismatch_sample import (
+    build_grouped_mismatch_samples,
+    load_mismatch_polars_for_api,
+    value_mismatch_counts_by_column,
+    value_mismatch_counts_by_column_ndjson,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["validation"])
 
 _DEFAULT_UPLOAD_SUFFIX = ".csv"
+
+
+def resolve_local_csv_path(raw: str, settings: Settings) -> Path:
+    """Resolve *raw* to an absolute file path that lies under an allowed root."""
+    if not settings.validation_allow_local_paths:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="Local path validation is disabled (set PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS=true).",
+        )
+    roots = settings.validation_local_path_root_list()
+    if not roots:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PEGASUS_VALIDATION_LOCAL_PATH_ROOTS must list one or more allowed directory prefixes.",
+        )
+    path = Path(raw.strip()).expanduser()
+    try:
+        resolved = path.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Path not found: {raw!r}") from exc
+    if not resolved.is_file():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Not a regular file: {resolved}")
+    for root in roots:
+        root_exp = root.expanduser()
+        try:
+            root_res = root_exp.resolve(strict=True)
+        except FileNotFoundError:
+            continue
+        if not root_res.exists():
+            continue
+        try:
+            resolved.relative_to(root_res)
+            return resolved
+        except ValueError:
+            continue
+    raise HTTPException(
+        status.HTTP_403_FORBIDDEN,
+        detail=f"Path is outside configured roots ({settings.validation_local_path_roots!r}): {resolved}",
+    )
+
+
+def _build_validate_response(
+    *,
+    settings: Settings,
+    run_result: ValidationRunResult,
+    run_id: uuid.UUID | None,
+) -> ValidateResponse:
+    """Turn a :class:`ValidationRunResult` into API JSON; drops the large mismatch frame from memory."""
+    summary_dict = run_result.report.summary
+    counts_model = build_mismatch_counts(summary_dict)
+    total_records = (
+        counts_model.missing_in_target + counts_model.extra_in_target + counts_model.value_mismatch
+    )
+
+    artifact = run_result.mismatch_artifact_path or run_result.report.mismatch_artifact_path
+    raw_sample_limit = settings.validation_mismatch_sample_limit
+    n_rows_cap: int | None = None
+    if artifact is not None and artifact.is_file() and total_records > 0:
+        eff = raw_sample_limit if raw_sample_limit > 0 else min(10_000, total_records)
+        if raw_sample_limit > 0:
+            eff = min(eff, raw_sample_limit)
+        n_rows_cap = min(2_000_000, max(eff * 200, 200_000))
+
+    mismatches = load_mismatch_polars_for_api(
+        mismatches=run_result.report.mismatches,
+        mismatch_artifact_path=artifact,
+        n_rows=n_rows_cap,
+    )
+    sample_limit = raw_sample_limit
+    if total_records > 0:
+        if sample_limit <= 0:
+            sample_limit = min(10_000, total_records)
+            logger.info(
+                "validation_mismatch_sample_limit was %s; using effective sample_limit=%s for this run",
+                raw_sample_limit,
+                sample_limit,
+            )
+        if raw_sample_limit > 0:
+            sample_limit = min(sample_limit, raw_sample_limit)
+        category_counts = (
+            counts_model.missing_in_target,
+            counts_model.extra_in_target,
+            counts_model.value_mismatch,
+        )
+        miss_df, ext_df, val_df = build_grouped_mismatch_samples(
+            mismatches,
+            sample_limit,
+            category_counts=category_counts,
+        )
+    else:
+        miss_df = ext_df = val_df = mismatches.slice(0, 0)
+
+    sample_groups = MismatchSampleGroups(
+        missing_in_target=[MismatchSampleRow.model_validate(r) for r in miss_df.to_dicts()],
+        extra_in_target=[MismatchSampleRow.model_validate(r) for r in ext_df.to_dicts()],
+        value_mismatch=[MismatchSampleRow.model_validate(r) for r in val_df.to_dicts()],
+    )
+
+    cap = settings.validation_value_mismatch_column_stats_max_rows
+    val_n = counts_model.value_mismatch
+    if cap == 0 or val_n <= cap:
+        if artifact is not None and artifact.is_file():
+            value_by_col = value_mismatch_counts_by_column_ndjson(artifact, max_rows=None)
+        else:
+            value_by_col = value_mismatch_counts_by_column(mismatches, max_rows=None)
+        vm_omitted = False
+    else:
+        if artifact is not None and artifact.is_file():
+            value_by_col = value_mismatch_counts_by_column_ndjson(artifact, max_rows=cap)
+        else:
+            value_by_col = value_mismatch_counts_by_column(mismatches, max_rows=cap)
+        vm_omitted = value_by_col == {} and val_n > cap
+
+    run_result.report.mismatches = empty_mismatch_frame()
+    gc.collect()
+
+    summary = ValidationSummary(
+        source_row_count=run_result.source_row_count,
+        target_row_count=run_result.target_row_count,
+        compared_column_count=run_result.compared_column_count,
+        total_mismatch_records=total_records,
+        is_match=total_records == 0,
+    )
+
+    return ValidateResponse(
+        summary=summary,
+        mismatch_counts=counts_model,
+        mismatch_sample_groups=sample_groups,
+        value_mismatch_by_column=value_by_col,
+        compared_columns=run_result.compared_columns,
+        run_id=run_id,
+        value_mismatch_by_column_omitted=vm_omitted,
+    )
+
+
+def _human_upload_limit(n: int) -> str:
+    """Short human-readable size for error messages (binary units)."""
+    gib = 1024**3
+    if n >= gib and n % gib == 0:
+        return f"{n // gib} GiB"
+    if n >= gib:
+        return f"{n / gib:.1f} GiB"
+    mib = 1024**2
+    if n >= mib:
+        return f"{n / mib:.0f} MiB"
+    return f"{n} bytes"
 
 
 async def _spool_upload_to_temp(
@@ -54,7 +214,10 @@ async def _spool_upload_to_temp(
             if total > max_bytes:
                 raise HTTPException(
                     status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail=f"{label} exceeds maximum upload size of {max_bytes} bytes",
+                    detail=(
+                        f"{label} exceeds maximum upload size ({max_bytes} bytes, {_human_upload_limit(max_bytes)}). "
+                        "Raise PEGASUS_VALIDATION_MAX_UPLOAD_BYTES in the API environment and restart."
+                    ),
                 )
             os.write(fd, chunk)
         if total == 0:
@@ -70,11 +233,59 @@ async def _spool_upload_to_temp(
             path.unlink(missing_ok=True)
 
 
+def _validation_jobs_root(settings: Settings) -> Path:
+    raw = (settings.validation_jobs_directory or "").strip()
+    base = Path(raw).expanduser() if raw else Path(tempfile.gettempdir()) / "pegasus_validation_jobs"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.UUID | None]:
+    meta = json.loads((job_dir / "meta.json").read_text(encoding="utf-8"))
+    res = json.loads((job_dir / "result.json").read_text(encoding="utf-8"))
+    rid = meta.get("run_id")
+    run_uuid = uuid.UUID(str(rid)) if rid else None
+    summary_raw = res.get("summary") or {}
+    summary = {
+        MismatchType.MISSING_IN_TARGET.value: int(summary_raw.get(MismatchType.MISSING_IN_TARGET.value, 0)),
+        MismatchType.EXTRA_IN_TARGET.value: int(summary_raw.get(MismatchType.EXTRA_IN_TARGET.value, 0)),
+        MismatchType.VALUE_MISMATCH.value: int(summary_raw.get(MismatchType.VALUE_MISMATCH.value, 0)),
+    }
+    rel = res.get("mismatch_artifact_rel")
+    apath = (job_dir / str(rel)) if rel else None
+    report = MismatchReport(mismatches=empty_mismatch_frame(), summary=summary, mismatch_artifact_path=apath)
+    vr = ValidationRunResult(
+        report=report,
+        source_row_count=int(res["source_row_count"]),
+        target_row_count=int(res["target_row_count"]),
+        compared_column_count=int(res["compared_column_count"]),
+        compared_columns=list(res.get("compared_columns") or []),
+        mismatch_artifact_path=apath,
+    )
+    return vr, run_uuid
+
+
+async def _maybe_persist_completed_job(
+    settings: Settings,
+    *,
+    run_id: uuid.UUID | None,
+    run_result: ValidationRunResult,
+) -> None:
+    if not settings.enable_validation_persistence or run_id is None:
+        return
+    async with AsyncSessionLocal() as session:
+        run = await ValidationRunRepository.get_run(session, run_id)
+        if run is None or run.status != ValidationRunStatus.RUNNING:
+            return
+        await ValidationRunRepository.complete_success(session, run_id, run_result)
+        await session.commit()
+
+
 @router.post(
     "/validate",
-    response_model=ValidateResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Compare two CSV files by UID",
+    response_model=ValidationJobAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue comparison of two CSV files by UID (runs in a background subprocess)",
     responses={
         400: {"description": "Invalid files, delimiter, or missing uid column"},
         413: {"description": "Upload exceeds configured size limit"},
@@ -83,7 +294,6 @@ async def _spool_upload_to_temp(
 )
 async def validate_csv_files(
     settings: AppSettings,
-    validation_service: ValidationServiceDep,
     source_file: Annotated[UploadFile, File(description="Expected / golden CSV")],
     target_file: Annotated[UploadFile, File(description="Actual / candidate CSV")],
     uid_column: Annotated[str, Form(description="Column name to join on (must exist in both files)")],
@@ -97,15 +307,17 @@ async def validate_csv_files(
             )
         ),
     ] = "auto",
-) -> ValidateResponse:
-    """Accept two CSV uploads and return mismatch summary plus sample rows."""
+) -> ValidationJobAcceptedResponse:
+    """Accept two CSV uploads, persist them under a job directory, and spawn a worker process."""
     max_bytes = settings.validation_max_upload_bytes
-    raw_sample_limit = settings.validation_mismatch_sample_limit
+    job_id = uuid.uuid4()
+    jobs_root = _validation_jobs_root(settings)
+    job_dir = jobs_root / str(job_id)
+    job_dir.mkdir(parents=True, exist_ok=False)
 
     source_path: Path | None = None
     target_path: Path | None = None
     run_id: uuid.UUID | None = None
-    run_result: ValidationRunResult | None = None
 
     try:
         source_path = await _spool_upload_to_temp(source_file, max_bytes=max_bytes, label="source")
@@ -130,35 +342,38 @@ async def validate_csv_files(
                     detail="Could not persist validation run; check database connectivity",
                 ) from exc
 
-        try:
-            run_result = await validation_service.validate_csv_pair(
-                source_path=source_path,
-                target_path=target_path,
-                uid_column=uid_column,
-                delimiter=delimiter,
-            )
-        except Exception as exc:
-            if run_id is not None:
-                try:
-                    async with AsyncSessionLocal() as session:
-                        await ValidationRunRepository.mark_failed(session, run_id, detail=repr(exc))
-                        await session.commit()
-                except Exception as persist_exc:
-                    logger.error("Failed to record validation failure in database: %s", persist_exc)
-            raise
+        dest_s = job_dir / "source.csv"
+        dest_t = job_dir / "target.csv"
+        dest_s.write_bytes(source_path.read_bytes())
+        dest_t.write_bytes(target_path.read_bytes())
 
-        if settings.enable_validation_persistence and run_id is not None and run_result is not None:
+        meta = {
+            "uid_column": uid_column.strip(),
+            "delimiter": delimiter,
+            "memory_log_interval_seconds": settings.validation_memory_log_interval_seconds,
+            "run_id": str(run_id) if run_id else None,
+        }
+        (job_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        (job_dir / "status.json").write_text(json.dumps({"status": "queued"}), encoding="utf-8")
+
+        proc = BackgroundValidationRunner().start_job(job_dir)
+        if proc.poll() is not None:
+            err = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Validation worker failed to start: {err}",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if run_id is not None:
             try:
                 async with AsyncSessionLocal() as session:
-                    await ValidationRunRepository.complete_success(session, run_id, run_result)
+                    await ValidationRunRepository.mark_failed(session, run_id, detail=repr(exc))
                     await session.commit()
-            except Exception as exc:
-                logger.exception("Failed to persist validation results: %s", exc)
-                raise HTTPException(
-                    status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Validation succeeded but results could not be saved; check database logs",
-                ) from exc
-
+            except Exception as persist_exc:
+                logger.error("Failed to record validation failure in database: %s", persist_exc)
+        raise
     finally:
         for p in (source_path, target_path):
             if p is not None:
@@ -167,48 +382,101 @@ async def validate_csv_files(
                 except OSError as exc:
                     logger.warning("Failed to remove temp upload %s: %s", p, exc)
 
-    assert run_result is not None
-    mismatches = run_result.report.mismatches
-    # Treat non-positive sample limits as misconfiguration: returning zero rows makes the UI unusable.
-    sample_limit = raw_sample_limit
-    if mismatches.height > 0:
-        if sample_limit <= 0:
-            sample_limit = min(10_000, mismatches.height)
-            logger.info(
-                "validation_mismatch_sample_limit was %s; using effective sample_limit=%s for this run",
-                raw_sample_limit,
-                sample_limit,
-            )
-        # Cap to configured ceiling when the user set a positive limit (avoid accidental huge payloads).
-        if raw_sample_limit > 0:
-            sample_limit = min(sample_limit, raw_sample_limit)
-        miss_df, ext_df, val_df = build_grouped_mismatch_samples(mismatches, sample_limit)
-    else:
-        empty = mismatches.slice(0, 0)
-        miss_df = ext_df = val_df = empty
+    poll = f"{settings.api_v1_prefix.rstrip('/')}/validate/jobs/{job_id}"
+    return ValidationJobAcceptedResponse(job_id=job_id, status="queued", poll_url=poll)
 
-    sample_groups = MismatchSampleGroups(
-        missing_in_target=[MismatchSampleRow.model_validate(r) for r in miss_df.to_dicts()],
-        extra_in_target=[MismatchSampleRow.model_validate(r) for r in ext_df.to_dicts()],
-        value_mismatch=[MismatchSampleRow.model_validate(r) for r in val_df.to_dicts()],
-    )
-    value_by_col = value_mismatch_counts_by_column(mismatches)
 
-    counts_model = build_mismatch_counts(run_result.report.summary)
-    total_records = mismatches.height
-    summary = ValidationSummary(
-        source_row_count=run_result.source_row_count,
-        target_row_count=run_result.target_row_count,
-        compared_column_count=run_result.compared_column_count,
-        total_mismatch_records=total_records,
-        is_match=total_records == 0,
-    )
+@router.post(
+    "/validate/local",
+    response_model=ValidationJobAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue comparison of two on-disk CSVs by UID (no upload)",
+    responses={
+        400: {"description": "Invalid paths, delimiter, or missing uid column"},
+        403: {"description": "Local path validation disabled or path outside allowed roots"},
+        422: {"description": "Comparison cannot run (e.g. duplicate UIDs)"},
+    },
+)
+async def validate_csv_local_paths(
+    settings: AppSettings,
+    body: Annotated[LocalPathValidateRequest, Body()],
+) -> ValidationJobAcceptedResponse:
+    """Queue validation for paths under ``PEGASUS_VALIDATION_LOCAL_PATH_ROOTS`` (worker reads files in-place)."""
+    source_path = resolve_local_csv_path(body.source_path, settings)
+    target_path = resolve_local_csv_path(body.target_path, settings)
 
-    return ValidateResponse(
-        summary=summary,
-        mismatch_counts=counts_model,
-        mismatch_sample_groups=sample_groups,
-        value_mismatch_by_column=value_by_col,
-        compared_columns=run_result.compared_columns,
-        run_id=run_id,
-    )
+    job_id = uuid.uuid4()
+    jobs_root = _validation_jobs_root(settings)
+    job_dir = jobs_root / str(job_id)
+    job_dir.mkdir(parents=True, exist_ok=False)
+
+    run_id: uuid.UUID | None = None
+    if settings.enable_validation_persistence:
+        try:
+            async with AsyncSessionLocal() as session:
+                run_orm = await ValidationRunRepository.create_running(
+                    session,
+                    source_filename=str(source_path),
+                    target_filename=str(target_path),
+                    uid_column=body.uid_column.strip(),
+                    delimiter=body.delimiter,
+                )
+                await session.commit()
+                run_id = run_orm.id
+        except Exception as exc:
+            logger.exception("Failed to create validation run record: %s", exc)
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Could not persist validation run; check database connectivity",
+            ) from exc
+
+    meta = {
+        "uid_column": body.uid_column.strip(),
+        "delimiter": body.delimiter,
+        "memory_log_interval_seconds": settings.validation_memory_log_interval_seconds,
+        "run_id": str(run_id) if run_id else None,
+        "source_path": str(source_path),
+        "target_path": str(target_path),
+    }
+    (job_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    (job_dir / "status.json").write_text(json.dumps({"status": "queued"}), encoding="utf-8")
+
+    proc = BackgroundValidationRunner().start_job(job_dir)
+    if proc.poll() is not None:
+        err = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Validation worker failed to start: {err}",
+        )
+
+    poll = f"{settings.api_v1_prefix.rstrip('/')}/validate/jobs/{job_id}"
+    return ValidationJobAcceptedResponse(job_id=job_id, status="queued", poll_url=poll)
+
+
+@router.get(
+    "/validate/jobs/{job_id}",
+    response_model=ValidationJobDetailResponse,
+    summary="Poll a queued validation job",
+)
+async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> ValidationJobDetailResponse:
+    job_dir = _validation_jobs_root(settings) / str(job_id)
+    status_path = job_dir / "status.json"
+    if not status_path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown job_id")
+    st = json.loads(status_path.read_text(encoding="utf-8"))
+    status_val = str(st.get("status") or "unknown")
+    if status_val in {"queued", "running"}:
+        return ValidationJobDetailResponse(status=status_val)
+    if status_val == "failed":
+        return ValidationJobDetailResponse(status="failed", error=str(st.get("error") or "failed"))
+    if status_val != "completed":
+        return ValidationJobDetailResponse(status=status_val, error=str(st.get("error") or ""))
+
+    result_path = job_dir / "result.json"
+    if not result_path.is_file():
+        return ValidationJobDetailResponse(status="failed", error="completed but result.json missing")
+
+    run_result, rid = _run_result_from_job_dir(job_dir)
+    await _maybe_persist_completed_job(settings, run_id=rid, run_result=run_result)
+    payload = _build_validate_response(settings=settings, run_result=run_result, run_id=rid)
+    return ValidationJobDetailResponse(status="completed", result=payload)

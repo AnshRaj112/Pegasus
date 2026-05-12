@@ -82,6 +82,17 @@ def test_null_vs_value_is_mismatch():
     assert r["mismatch_type"] == MismatchType.VALUE_MISMATCH.value
 
 
+def test_omit_row_detail_placeholder():
+    source = pl.DataFrame({"uid": ["a"], "x": [1]})
+    target = pl.DataFrame({"uid": ["b"], "x": [2]})
+    report = UIDBasedComparator(omit_row_detail=True).compare_dataframes(
+        source, target, uid_column="uid"
+    )
+    assert report.mismatches.height == 2
+    for r in report.row_dicts():
+        assert r["row_detail"] == "{}"
+
+
 def test_duplicate_uid_raises():
     source = pl.DataFrame({"uid": ["a", "a"], "x": [1, 2]})
     target = pl.DataFrame({"uid": ["a"], "x": [1]})

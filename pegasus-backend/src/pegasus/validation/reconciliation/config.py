@@ -1,0 +1,116 @@
+"""Configuration for external-memory reconciliation strategies."""
+
+from __future__ import annotations
+
+from enum import StrEnum
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class ReconciliationBackend(StrEnum):
+    """Which engine performs disk-backed joins and CSV ingestion."""
+
+    DUCKDB = "duckdb"
+    """DuckDB external-memory joins (recommended for large unsorted CSV pairs)."""
+
+    POLARS = "polars"
+    """Polars spill / hash-partition / external sort pipeline."""
+
+
+class ReconciliationStrategy(StrEnum):
+    """Comparison strategy selection for the coordinator."""
+
+    AUTO = "auto"
+    """Pick a strategy from file size hints and :attr:`ReconciliationRuntimeConfig.assume_sorted`."""
+
+    ORDERED_STREAM = "ordered_stream"
+    """Two-pointer merge on streams; requires globally sorted CSV rows by UID."""
+
+    SLIDING_WINDOW = "sliding_window"
+    """Like :attr:`ORDERED_STREAM` with bounded look-ahead on each side for minor skew."""
+
+    HASH_PARTITION = "hash_partition"
+    """Spill rows into ``hash(uid) % N`` buckets, then compare bucket-wise."""
+
+    EXTERNAL_SORT = "external_sort"
+    """Sort-and-spill each side, then run :attr:`ORDERED_STREAM` on sorted outputs."""
+
+
+class ReconciliationRuntimeConfig(BaseModel):
+    """User-tunable knobs for chunking, partitioning, and temp storage."""
+
+    model_config = {"frozen": True}
+
+    strategy: ReconciliationStrategy = Field(
+        default=ReconciliationStrategy.AUTO,
+        description="Active reconciliation strategy (or AUTO).",
+    )
+    chunk_rows: int = Field(default=50_000, ge=1024, le=5_000_000)
+    partition_buckets: int = Field(default=64, ge=1, le=4096)
+    sliding_window: int = Field(
+        default=0,
+        ge=0,
+        le=1_000_000,
+        description="Row look-ahead on each side for SLIDING_WINDOW; 0 disables look-ahead.",
+    )
+    assume_sorted: bool = Field(
+        default=False,
+        description="If True, ORDERED_STREAM / SLIDING_WINDOW may scan CSV batches sequentially.",
+    )
+    temp_dir: Path | None = Field(
+        default=None,
+        description="Optional base directory for spill files; default uses system temp.",
+    )
+    retry_max_attempts: int = Field(default=3, ge=1, le=10)
+    external_memory_threshold_bytes: int = Field(
+        default=25 * 1024 * 1024,
+        ge=0,
+        description="AUTO uses external strategies when source+target file size exceeds this sum.",
+    )
+    stringify_null_in_report: bool = Field(default=True)
+
+    sub_partition_buckets: int = Field(
+        default=1,
+        ge=1,
+        le=256,
+        description=(
+            "Secondary hash buckets per primary partition (1 = disabled). "
+            "Uses extra SHA-256 digest bits so skewed primary buckets are split on disk."
+        ),
+    )
+    parallel_spill_sides: bool = Field(
+        default=True,
+        description="When True, spill source and target CSVs concurrently (two readers, separate sides).",
+    )
+    disk_headroom_multiplier: float = Field(
+        default=2.0,
+        ge=1.0,
+        le=10.0,
+        description="Minimum free disk bytes >= multiplier × (source_size + target_size) before spill.",
+    )
+    mismatch_ndjson_mirror: bool = Field(
+        default=False,
+        description="When True, append every flushed mismatch chunk to mismatch_mirror.ndjson under the workspace.",
+    )
+    backend: ReconciliationBackend = Field(
+        default=ReconciliationBackend.DUCKDB,
+        description="DUCKDB uses DuckDB for hash-partition style joins; POLARS uses the legacy spill pipeline.",
+    )
+    force_external: bool = Field(
+        default=False,
+        description="When True, AUTO strategy still selects external paths for small combined file sizes.",
+    )
+    stream_mismatches: bool = Field(
+        default=True,
+        description="When True, mismatch rows are appended to NDJSON on disk instead of a giant in-memory frame.",
+    )
+    artifact_export_path: Path | None = Field(
+        default=None,
+        description="When set, streaming mismatch NDJSON is copied here before the spill workspace is removed.",
+    )
+
+    def with_overrides(self, **kwargs: Any) -> ReconciliationRuntimeConfig:
+        """Return a copy with merged fields (convenience for tests)."""
+        return self.model_copy(update=kwargs)

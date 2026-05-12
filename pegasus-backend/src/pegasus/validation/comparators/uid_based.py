@@ -41,6 +41,9 @@ class UIDBasedComparator:
     stringify_null_in_report
         When ``True``, null-like cells appear as the literal ``\"<null>\"`` in the
         report strings instead of Polars/JSON null (easier for logs and CSV exports).
+    omit_row_detail
+        When ``True``, :meth:`compare_dataframes` defaults to emitting placeholder
+        ``row_detail`` (unless overridden per call). Intended for partitioned / huge runs.
 
     Notes
     -----
@@ -48,10 +51,11 @@ class UIDBasedComparator:
     upstream or aggregate first.
     """
 
-    __slots__ = ("_stringify_null_in_report",)
+    __slots__ = ("_stringify_null_in_report", "_omit_row_detail")
 
-    def __init__(self, *, stringify_null_in_report: bool = False) -> None:
+    def __init__(self, *, stringify_null_in_report: bool = False, omit_row_detail: bool = False) -> None:
         self._stringify_null_in_report = stringify_null_in_report
+        self._omit_row_detail = omit_row_detail
 
     def compare_dataframes(
         self,
@@ -60,6 +64,7 @@ class UIDBasedComparator:
         *,
         uid_column: str,
         compare_columns: Sequence[str] | None = None,
+        omit_row_detail: bool | None = None,
     ) -> MismatchReport:
         """Match rows on ``uid_column`` and emit a long-form :class:`MismatchReport`.
 
@@ -74,36 +79,42 @@ class UIDBasedComparator:
         compare_columns
             Columns to diff on intersecting rows. Defaults to all shared columns except
             ``uid_column``.
+        omit_row_detail
+            When ``True``, ``row_detail`` is a tiny placeholder instead of full JSON row
+            snapshots. Use for huge partitioned runs to avoid multi‑GB RAM from millions
+            of mismatch rows (UI still has uid / column / cell values). When ``None``,
+            uses the value from the constructor's ``omit_row_detail``.
 
         Returns
         -------
         MismatchReport
             ``mismatches`` table columns: ``uid``, ``mismatch_type``, ``column_name``,
-            ``source_value``, ``target_value``. Row-level issues use null ``column_name``
-            and null detail columns unless row snapshots are enabled later.
+            ``source_value``, ``target_value``, ``row_detail``.
 
         Raises
         ------
         UIDComparisonError
             Missing UID column, no overlapping compare columns, or duplicate UIDs.
         """
+        omit = self._omit_row_detail if omit_row_detail is None else omit_row_detail
         self._validate_frames(source, target, uid_column)
         compare_cols = self._resolve_compare_columns(source, target, uid_column, compare_columns)
 
         logger.info(
-            "Starting UID comparison uid_column=%r compare_columns=%d source_rows=%d target_rows=%d",
+            "Starting UID comparison uid_column=%r compare_columns=%d source_rows=%d target_rows=%d omit_row_detail=%s",
             uid_column,
             len(compare_cols),
             source.height,
             target.height,
+            omit,
         )
 
         src_uid = source.select(pl.col(uid_column).alias("_pegasus_uid"))
         tgt_uid = target.select(pl.col(uid_column).alias("_pegasus_uid"))
 
-        missing_parts = self._missing_in_target(source, uid_column, tgt_uid)
-        extra_parts = self._extra_in_target(target, uid_column, src_uid)
-        value_parts = self._value_mismatches(source, target, uid_column, compare_cols)
+        missing_parts = self._missing_in_target(source, uid_column, tgt_uid, omit_row_detail=omit)
+        extra_parts = self._extra_in_target(target, uid_column, src_uid, omit_row_detail=omit)
+        value_parts = self._value_mismatches(source, target, uid_column, compare_cols, omit_row_detail=omit)
 
         frames = [f for f in (missing_parts, extra_parts, value_parts) if f.height > 0]
         if not frames:
@@ -205,10 +216,22 @@ class UIDBasedComparator:
         source: pl.DataFrame,
         uid_column: str,
         tgt_uid: pl.DataFrame,
+        *,
+        omit_row_detail: bool,
     ) -> pl.DataFrame:
         missing_rows = source.join(tgt_uid, left_on=uid_column, right_on="_pegasus_uid", how="anti")
         if missing_rows.is_empty():
             return empty_mismatch_frame()
+
+        if omit_row_detail:
+            return missing_rows.select(
+                pl.col(uid_column).cast(pl.String).alias("uid"),
+                pl.lit(MismatchType.MISSING_IN_TARGET.value).cast(pl.String).alias("mismatch_type"),
+                pl.lit(None, dtype=pl.String).alias("column_name"),
+                pl.lit(None, dtype=pl.String).alias("source_value"),
+                pl.lit(None, dtype=pl.String).alias("target_value"),
+                pl.lit("{}").alias("row_detail"),
+            )
 
         records = missing_rows.to_dicts()
         details = [_encode_row_detail(dict(r), None) for r in records]
@@ -236,10 +259,22 @@ class UIDBasedComparator:
         target: pl.DataFrame,
         uid_column: str,
         src_uid: pl.DataFrame,
+        *,
+        omit_row_detail: bool,
     ) -> pl.DataFrame:
         extra_rows = target.join(src_uid, left_on=uid_column, right_on="_pegasus_uid", how="anti")
         if extra_rows.is_empty():
             return empty_mismatch_frame()
+
+        if omit_row_detail:
+            return extra_rows.select(
+                pl.col(uid_column).cast(pl.String).alias("uid"),
+                pl.lit(MismatchType.EXTRA_IN_TARGET.value).cast(pl.String).alias("mismatch_type"),
+                pl.lit(None, dtype=pl.String).alias("column_name"),
+                pl.lit(None, dtype=pl.String).alias("source_value"),
+                pl.lit(None, dtype=pl.String).alias("target_value"),
+                pl.lit("{}").alias("row_detail"),
+            )
 
         records = extra_rows.to_dicts()
         details = [_encode_row_detail(None, dict(r)) for r in records]
@@ -268,6 +303,8 @@ class UIDBasedComparator:
         target: pl.DataFrame,
         uid_column: str,
         compare_columns: Sequence[str],
+        *,
+        omit_row_detail: bool,
     ) -> pl.DataFrame:
         if not compare_columns:
             return empty_mismatch_frame()
@@ -332,7 +369,7 @@ class UIDBasedComparator:
                 for cn in compare_columns:
                     rec_src[cn] = row[f"__src__{cn}"]
                     rec_tgt[cn] = row[f"__tgt__{cn}"]
-                details.append(_encode_row_detail(rec_src, rec_tgt))
+                details.append("{}" if omit_row_detail else _encode_row_detail(rec_src, rec_tgt))
 
             mismatch_chunks.append(
                 pl.DataFrame(

@@ -2,9 +2,55 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import polars as pl
 
 from pegasus.validation.comparators.models import MismatchType
+
+
+def load_mismatch_polars_for_api(
+    *,
+    mismatches: pl.DataFrame,
+    mismatch_artifact_path: Path | None,
+    n_rows: int | None = None,
+) -> pl.DataFrame:
+    """Prefer on-disk NDJSON when present; cap rows read so multi-GB mismatch files stay bounded."""
+    if mismatch_artifact_path is not None and mismatch_artifact_path.is_file():
+        kwargs: dict[str, object] = {"infer_schema_length": 50_000}
+        if n_rows is not None:
+            kwargs["n_rows"] = n_rows
+        return pl.read_ndjson(mismatch_artifact_path, **kwargs)
+    return mismatches
+
+
+def value_mismatch_counts_by_column_ndjson(
+    path: Path,
+    *,
+    max_rows: int | None = None,
+) -> dict[str, int]:
+    """Stream a mismatch NDJSON file and aggregate value_mismatch rows by column (bounded scan)."""
+    counts: dict[str, int] = {}
+    vm_seen = 0
+    with path.open(encoding="utf-8") as fp:
+        for line in fp:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if obj.get("mismatch_type") != MismatchType.VALUE_MISMATCH.value:
+                continue
+            vm_seen += 1
+            if max_rows is not None and max_rows > 0 and vm_seen > max_rows:
+                return {}
+            col = obj.get("column_name")
+            key = str(col) if col not in (None, "") else "(unknown)"
+            counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def stratified_value_mismatch_sample(vm: pl.DataFrame, sample_limit: int) -> pl.DataFrame:
@@ -113,27 +159,70 @@ def allocate_category_sample_limits(n_miss: int, n_ext: int, n_val: int, limit: 
     return (targets[0], targets[1], targets[2])
 
 
+def _empty_sample_frame(mismatches: pl.DataFrame) -> pl.DataFrame:
+    if mismatches.height == 0:
+        return mismatches.slice(0, 0)
+    return pl.DataFrame(schema=mismatches.schema)
+
+
 def build_grouped_mismatch_samples(
-    mismatches: pl.DataFrame, sample_limit: int
+    mismatches: pl.DataFrame,
+    sample_limit: int,
+    *,
+    category_counts: tuple[int, int, int] | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
-    """Return sample frames for missing / extra / value mismatch categories."""
-    miss = mismatches.filter(pl.col("mismatch_type") == pl.lit(MismatchType.MISSING_IN_TARGET.value))
-    ext = mismatches.filter(pl.col("mismatch_type") == pl.lit(MismatchType.EXTRA_IN_TARGET.value))
-    vm = mismatches.filter(pl.col("mismatch_type") == pl.lit(MismatchType.VALUE_MISMATCH.value))
+    """Return sample frames for missing / extra / value mismatch categories.
 
-    lm, le, lv = allocate_category_sample_limits(miss.height, ext.height, vm.height, sample_limit)
+    When *category_counts* ``(n_missing, n_extra, n_value)`` is provided (typically from
+    the report summary), category sizes are taken without three full scans of *mismatches*,
+    and samples are built with bounded ``head`` / lazy scans—much cheaper for huge reports.
+    """
+    empty = _empty_sample_frame(mismatches)
+    if mismatches.is_empty() or sample_limit <= 0:
+        return empty, empty, empty
 
-    miss_s = miss.head(lm) if lm else miss.slice(0, 0)
-    ext_s = ext.head(le) if le else ext.slice(0, 0)
-    val_s = stratified_value_mismatch_sample(vm, lv) if lv else vm.slice(0, 0)
+    miss_lit = pl.lit(MismatchType.MISSING_IN_TARGET.value)
+    ext_lit = pl.lit(MismatchType.EXTRA_IN_TARGET.value)
+    val_lit = pl.lit(MismatchType.VALUE_MISMATCH.value)
 
+    if category_counts is None:
+        miss = mismatches.filter(pl.col("mismatch_type") == miss_lit)
+        ext = mismatches.filter(pl.col("mismatch_type") == ext_lit)
+        vm = mismatches.filter(pl.col("mismatch_type") == val_lit)
+        lm, le, lv = allocate_category_sample_limits(miss.height, ext.height, vm.height, sample_limit)
+        miss_s = miss.head(lm) if lm else empty
+        ext_s = ext.head(le) if le else empty
+        val_s = stratified_value_mismatch_sample(vm, lv) if lv else empty
+        return miss_s, ext_s, val_s
+
+    n_miss, n_ext, n_val = category_counts
+    lm, le, lv = allocate_category_sample_limits(n_miss, n_ext, n_val, sample_limit)
+    lf = mismatches.lazy()
+    miss_s = lf.filter(pl.col("mismatch_type") == miss_lit).head(lm).collect() if lm else empty
+    ext_s = lf.filter(pl.col("mismatch_type") == ext_lit).head(le).collect() if le else empty
+    if lv > 0:
+        vm_cap = min(n_val, max(sample_limit * 64, 2048))
+        vm_partial = lf.filter(pl.col("mismatch_type") == val_lit).head(vm_cap).collect()
+        val_s = stratified_value_mismatch_sample(vm_partial, lv)
+    else:
+        val_s = empty
     return miss_s, ext_s, val_s
 
 
-def value_mismatch_counts_by_column(mismatches: pl.DataFrame) -> dict[str, int]:
-    """Count value-mismatch rows per compared column (full report, not the sample)."""
+def value_mismatch_counts_by_column(
+    mismatches: pl.DataFrame,
+    *,
+    max_rows: int | None = None,
+) -> dict[str, int]:
+    """Count value-mismatch rows per compared column (full report, not the sample).
+
+    When *max_rows* is set (>0) and the value-mismatch slice exceeds it, returns an
+    empty dict so callers can skip an expensive full scan (see API response flag).
+    """
     vm = mismatches.filter(pl.col("mismatch_type") == pl.lit(MismatchType.VALUE_MISMATCH.value))
     if vm.height == 0:
+        return {}
+    if max_rows is not None and max_rows > 0 and vm.height > max_rows:
         return {}
     keyed = vm.with_columns(
         pl.when(pl.col("column_name").is_null() | (pl.col("column_name") == pl.lit("")))

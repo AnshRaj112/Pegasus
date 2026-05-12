@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 import polars as pl
@@ -47,10 +48,14 @@ class MismatchReport:
         Long-form table; one row per reported mismatch (see ``MismatchType``).
     summary
         Aggregate counts keyed by ``MismatchType`` value strings.
+    mismatch_artifact_path
+        When set, full mismatch rows were streamed to this NDJSON file and
+        ``mismatches`` may be empty to avoid holding the full report in RAM.
     """
 
     mismatches: pl.DataFrame
     summary: dict[str, int] = field(default_factory=dict)
+    mismatch_artifact_path: Path | None = None
 
     def row_dicts(self) -> list[dict[str, Any]]:
         """Serialize mismatches as plain dicts (materializes the frame)."""

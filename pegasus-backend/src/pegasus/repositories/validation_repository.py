@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,21 +78,59 @@ class ValidationRunRepository:
 
         summary = result.report.summary
         mismatches = result.report.mismatches
+        artifact = result.mismatch_artifact_path or result.report.mismatch_artifact_path
+
+        total_mismatch = (
+            int(summary.get(MismatchType.MISSING_IN_TARGET.value, 0))
+            + int(summary.get(MismatchType.EXTRA_IN_TARGET.value, 0))
+            + int(summary.get(MismatchType.VALUE_MISMATCH.value, 0))
+        )
 
         run.status = ValidationRunStatus.COMPLETED
         run.missing_in_target_count = int(summary.get(MismatchType.MISSING_IN_TARGET.value, 0))
         run.extra_in_target_count = int(summary.get(MismatchType.EXTRA_IN_TARGET.value, 0))
         run.value_mismatch_count = int(summary.get(MismatchType.VALUE_MISMATCH.value, 0))
-        run.total_mismatch_records = mismatches.height
+        run.total_mismatch_records = total_mismatch
         run.source_row_count = result.source_row_count
         run.target_row_count = result.target_row_count
         run.compared_column_count = result.compared_column_count
-        run.is_match = mismatches.height == 0
+        run.is_match = total_mismatch == 0
         run.completed_at = datetime.now(UTC)
         run.updated_at = datetime.now(UTC)
         run.error_detail = None
 
-        if mismatches.height > 0:
+        if total_mismatch > 0 and artifact is not None and artifact.is_file():
+            p = Path(artifact)
+            batch_orm: list[MismatchReport] = []
+            batch_size = 2_000
+            with p.open(encoding="utf-8") as fp:
+                for line in fp:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        r = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    batch_orm.append(
+                        MismatchReport(
+                            validation_run_id=run_id,
+                            uid=str(r.get("uid") or ""),
+                            mismatch_type=str(r.get("mismatch_type") or ""),
+                            column_name=_optional_str(r.get("column_name")),
+                            source_value=_optional_str(r.get("source_value")),
+                            target_value=_optional_str(r.get("target_value")),
+                            row_detail=_optional_str(r.get("row_detail")),
+                        )
+                    )
+                    if len(batch_orm) >= batch_size:
+                        session.add_all(batch_orm)
+                        await session.flush()
+                        batch_orm.clear()
+            if batch_orm:
+                session.add_all(batch_orm)
+                await session.flush()
+        elif mismatches.height > 0:
             rows = mismatches.to_dicts()
             batch_size = 2_000
             for i in range(0, len(rows), batch_size):
@@ -115,7 +155,7 @@ class ValidationRunRepository:
         logger.info(
             "Completed validation run id=%s mismatches_stored=%d",
             run_id,
-            mismatches.height,
+            total_mismatch,
         )
 
     @staticmethod

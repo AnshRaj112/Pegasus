@@ -83,12 +83,25 @@ class MismatchSampleGroups(BaseModel):
     value_mismatch: list[MismatchSampleRow] = Field(default_factory=list)
 
 
+class LocalPathValidateRequest(BaseModel):
+    """JSON body for POST /validate/local (server-side CSV paths)."""
+
+    source_path: str = Field(description="Absolute or user-home path to the expected / golden CSV on the server")
+    target_path: str = Field(description="Absolute or user-home path to the actual / candidate CSV on the server")
+    uid_column: str = Field(description="Column name to join on (must exist in both files)")
+    delimiter: str = Field(
+        default="auto",
+        description="Field separator: auto, tab, or explicit delimiter (same rules as multipart /validate)",
+    )
+
+
 class ValidateResponse(BaseModel):
     """Response body for POST /validate."""
 
     summary: ValidationSummary
     mismatch_counts: MismatchCounts
     mismatch_sample_groups: MismatchSampleGroups = Field(
+        default_factory=MismatchSampleGroups,
         description="Sample rows per mismatch category (see validation_mismatch_sample_limit)",
     )
     value_mismatch_by_column: dict[str, int] = Field(
@@ -103,6 +116,29 @@ class ValidateResponse(BaseModel):
         default=None,
         description="Database id of the persisted run when PEGASUS_ENABLE_VALIDATION_PERSISTENCE is true",
     )
+    value_mismatch_by_column_omitted: bool = Field(
+        default=False,
+        description=(
+            "True when per-column value_mismatch_by_column was skipped because value_mismatch "
+            "row count exceeded validation_value_mismatch_column_stats_max_rows (saves memory)."
+        ),
+    )
+
+
+class ValidationJobAcceptedResponse(BaseModel):
+    """Returned immediately when a validation job is queued (processing runs in a subprocess)."""
+
+    job_id: UUID
+    status: str = Field(default="queued", description="queued until the worker picks up the job directory")
+    poll_url: str = Field(description="Relative URL to poll for status and the final ValidateResponse payload")
+
+
+class ValidationJobDetailResponse(BaseModel):
+    """Poll response: while running only *status* is set; when completed *result* contains the API payload."""
+
+    status: str
+    error: str | None = None
+    result: ValidateResponse | None = None
 
 
 def build_mismatch_counts(summary_dict: dict[str, int]) -> MismatchCounts:
