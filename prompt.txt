@@ -1,52 +1,88 @@
-Pegasus now needs to support large-scale external-memory CSV reconciliation for files up to 100GB.
+Pegasus validation engine must now support huge unsorted CSV reconciliation for files up to 100GB without crashing memory.
 
-Redesign the comparison architecture with the following requirements:
-
-Core Goals:
-
-* memory efficient
-* streaming-first
-* external-memory reconciliation
-* scalable to 100GB+
-* support multiple source and target files
-
-Required Comparison Strategies:
-
-1. Ordered stream comparison for sorted files
-2. Sliding window comparison for mostly sorted files
-3. Hash partition comparison for unordered files
-4. External merge-sort comparison for huge unsorted files
+The current in-memory dataframe join architecture is failing and must be redesigned into a partitioned external-memory reconciliation engine.
 
 Requirements:
 
-* Use Polars where appropriate
-* Avoid loading entire files into memory
-* Use chunk-based processing
-* Implement configurable chunk/window sizes
-* Support spill-to-disk architecture
-* Add temp-file management
-* Add deterministic UID generation
-* Support partition-based reconciliation
-* Design for future distributed execution
+Core Requirements:
 
-Create modular architecture for:
+- Do NOT load full files into memory
+- Support unsorted CSV files
+- Support files up to 100GB
+- Use streaming/chunk-based processing
+- Keep memory bounded and predictable
 
-* stream readers
-* partition managers
-* merge sort engine
-* window comparator
-* mismatch collector
-* reconciliation coordinator
+Required Architecture:
 
-Add:
+1. UID Generation
 
-* production-grade logging
-* metrics hooks
-* retry-safe processing
-* resumable execution design
-* clean interfaces
-* type hints
-* docstrings
+- Generate deterministic SHA256 UID hashes
+- Support composite UID columns
+- Normalize null values safely
 
-Do NOT implement Kubernetes, Spark, or GCS yet.
-Focus only on the core external-memory reconciliation engine.
+2. Hash Partitioning Engine
+
+- Partition rows using:
+  partition_id = hash(uid) % N
+- Ensure identical UIDs always land in the same partition
+- Write partitions incrementally to disk
+- Avoid keeping partitions in memory
+
+3. Streaming Reader
+
+- Read CSVs in chunks
+- Configurable chunk sizes
+- Support configurable delimiters and encodings
+- Use generators/iterators
+
+4. Partition Comparator
+
+- Compare source and target partitions independently
+- Detect:
+  - missing rows
+  - extra rows
+  - column mismatches
+
+5. Spill-To-Disk Architecture
+
+- Use temp files for partitions
+- Add automatic cleanup
+- Avoid RAM-heavy operations
+
+6. Mismatch Writer
+
+- Write mismatches incrementally
+- Avoid collecting all mismatches in memory
+- Support JSONL or CSV append-based writing
+
+7. Reconciliation Coordinator
+
+- Manage:
+  - chunk processing
+  - partition routing
+  - comparison lifecycle
+  - cleanup lifecycle
+
+Technical Constraints:
+
+- Use Polars only for chunk-level operations
+- Avoid full dataframe joins
+- Avoid full file reads
+- Add memory-safe logging
+- Add type hints
+- Add docstrings
+- Use clean modular architecture
+
+Modules to create:
+
+- StreamCSVReader
+- UIDGenerator
+- PartitionManager
+- PartitionWriter
+- PartitionComparator
+- MismatchWriter
+- ReconciliationCoordinator
+
+Do NOT implement Spark, Kubernetes, Beam, or distributed workers yet.
+
+Focus ONLY on making huge unsorted CSV validation stable and memory-efficient.
