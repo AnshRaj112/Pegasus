@@ -106,6 +106,35 @@ class ReconciliationRuntimeConfig(BaseModel):
         default=True,
         description="When True, mismatch rows are appended to NDJSON on disk instead of a giant in-memory frame.",
     )
+    duckdb_memory_limit_ratio: float = Field(
+        default=1.00,
+        ge=0.10,
+        le=1.00,
+        description="Fraction of total system RAM assigned to DuckDB memory_limit.",
+    )
+    duckdb_network_threads: int = Field(
+        default=2,
+        ge=1,
+        le=64,
+        description="DuckDB threads when source/target live on network filesystems (reduce I/O saturation).",
+    )
+    duckdb_local_threads: int = Field(
+        default=0,
+        ge=0,
+        le=256,
+        description="DuckDB threads on local storage (0 => auto os.cpu_count()).",
+    )
+    duckdb_enable_object_cache: bool = Field(
+        default=True,
+        description="Enable DuckDB object cache for local files.",
+    )
+    duckdb_explain_analyze: bool = Field(
+        default=False,
+        description=(
+            "When True, run EXPLAIN ANALYZE for key DuckDB stages and log operator-level profiles "
+            "(diagnostic mode; adds overhead)."
+        ),
+    )
     artifact_export_path: Path | None = Field(
         default=None,
         description="When set, streaming mismatch NDJSON is copied here before the spill workspace is removed.",

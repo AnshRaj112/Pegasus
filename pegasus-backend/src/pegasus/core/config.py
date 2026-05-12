@@ -60,7 +60,12 @@ class Settings(BaseSettings):
 
     cors_origins: str = Field(
         default="",
-        description="Comma-separated allowed origins; empty disables CORS middleware",
+        description=(
+            "Comma-separated allowed browser origins for cross-origin requests (e.g. the Vite dev URL). "
+            "Required when the UI and API use different host/port (e.g. UI on :5173, API on :8000). "
+            "Include both http://localhost:5173 and http://127.0.0.1:5173 if you use either in the browser. "
+            "When empty and environment is development, defaults to those two origins so local dev works."
+        ),
     )
 
     validation_max_upload_bytes: int = Field(
@@ -158,6 +163,32 @@ class Settings(BaseSettings):
         default=False,
         description="Append mismatch rows to mismatch_mirror.ndjson under the temp workspace (hash runs)",
     )
+    validation_duckdb_memory_limit_ratio: float = Field(
+        default=1.00,
+        ge=0.10,
+        le=1.00,
+        description="Fraction of machine RAM assigned to DuckDB memory_limit for reconciliation jobs.",
+    )
+    validation_duckdb_network_threads: int = Field(
+        default=2,
+        ge=1,
+        le=64,
+        description="DuckDB thread cap when CSVs are on network filesystems (avoid I/O saturation).",
+    )
+    validation_duckdb_local_threads: int = Field(
+        default=0,
+        ge=0,
+        le=256,
+        description="DuckDB thread cap for local disks (0 => auto cpu_count).",
+    )
+    validation_duckdb_enable_object_cache: bool = Field(
+        default=True,
+        description="Enable DuckDB object cache for local-file validation jobs.",
+    )
+    validation_duckdb_explain_analyze: bool = Field(
+        default=False,
+        description="Enable EXPLAIN ANALYZE logging for DuckDB reconciliation stages (diagnostic; slower).",
+    )
     validation_allow_local_paths: bool = Field(
         default=False,
         description="When True, POST /validate/local may read CSVs from server paths (see local_path_roots)",
@@ -187,9 +218,15 @@ class Settings(BaseSettings):
     )
 
     def cors_origin_list(self) -> list[str]:
-        if not self.cors_origins.strip():
-            return []
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        raw = self.cors_origins.strip()
+        if raw:
+            return [o.strip() for o in raw.split(",") if o.strip()]
+        if self.environment.strip().lower() == "development":
+            return [
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+            ]
+        return []
 
     def validation_local_path_root_list(self) -> list[Path]:
         """Allowlist roots for :func:`pegasus.api.v1.validation.resolve_local_csv_path`."""

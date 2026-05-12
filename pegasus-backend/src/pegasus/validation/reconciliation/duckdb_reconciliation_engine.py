@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 
 import duckdb
@@ -21,6 +22,68 @@ logger = logging.getLogger(__name__)
 
 def _quote_ident(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
+
+
+def _quote_sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _total_ram_bytes() -> int | None:
+    """Best-effort physical RAM discovery without extra dependencies."""
+    try:
+        pages = os.sysconf("SC_PHYS_PAGES")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        if isinstance(pages, int) and isinstance(page_size, int) and pages > 0 and page_size > 0:
+            return pages * page_size
+    except (ValueError, OSError, AttributeError):
+        pass
+    return None
+
+
+def _network_fs_types() -> set[str]:
+    return {"nfs", "nfs4", "cifs", "smb3", "fuse.sshfs", "ceph", "glusterfs", "lustre"}
+
+
+def _path_on_network_fs(path: Path) -> bool:
+    """Detect network-backed mounts via /proc/mounts (Linux); fallback False."""
+    try:
+        mounts = Path("/proc/mounts").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    target = path.resolve()
+    best_mount = ""
+    best_type = ""
+    for line in mounts:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        mount_point = parts[1].replace("\\040", " ")
+        fs_type = parts[2]
+        try:
+            mp = Path(mount_point).resolve()
+        except OSError:
+            continue
+        try:
+            target.relative_to(mp)
+        except ValueError:
+            continue
+        if len(str(mp)) > len(best_mount):
+            best_mount = str(mp)
+            best_type = fs_type
+    return best_type in _network_fs_types()
+
+
+def _fetch_explain_text(con: duckdb.DuckDBPyConnection, sql: str, params: list[object]) -> str:
+    """Return combined EXPLAIN ANALYZE text regardless of duckdb-python tuple shape."""
+    rows = con.execute(f"EXPLAIN ANALYZE {sql}", params).fetchall()
+    if not rows:
+        return "(empty EXPLAIN ANALYZE output)"
+    pieces: list[str] = []
+    for row in rows:
+        if not row:
+            continue
+        pieces.append(str(row[-1]))
+    return "\n".join(pieces) if pieces else str(rows)
 
 
 class DuckDBReconciliationEngine:
@@ -60,23 +123,46 @@ class DuckDBReconciliationEngine:
         con = duckdb.connect(database=":memory:")
         try:
             con.execute("SET temp_directory = ?", [str(workspace)])
+            total_ram = _total_ram_bytes()
+            if total_ram is not None:
+                mem_bytes = max(256 * 1024 * 1024, int(total_ram * cfg.duckdb_memory_limit_ratio))
+                con.execute("SET memory_limit = ?", [f"{mem_bytes}B"])
+
+            network_io = _path_on_network_fs(source_path) or _path_on_network_fs(target_path)
+            if network_io:
+                threads = max(1, min(cfg.duckdb_network_threads, int(os.cpu_count() or 1)))
+                con.execute("SET threads = ?", [threads])
+                logger.info("DuckDB using network-I/O mode threads=%d", threads)
+            else:
+                threads = cfg.duckdb_local_threads if cfg.duckdb_local_threads > 0 else max(1, int(os.cpu_count() or 1))
+                con.execute("SET threads = ?", [threads])
+                if cfg.duckdb_enable_object_cache:
+                    con.execute("SET enable_object_cache = true")
+
+            con.execute("SET preserve_insertion_order = false")
 
             src_tbl = "pegasus_src"
             tgt_tbl = "pegasus_tgt"
-            con.execute(
-                f"""
+            q_src = f"""
                 CREATE TABLE {src_tbl} AS
-                SELECT * FROM read_csv_auto(?, delim=?, header=true, ignore_errors=false)
-                """,
-                [str(source_path), delimiter],
-            )
-            con.execute(
-                f"""
+                SELECT * FROM read_csv_auto(
+                    ?, delim=?, header=true, ignore_errors=false, sample_size=-1
+                )
+            """
+            q_tgt = f"""
                 CREATE TABLE {tgt_tbl} AS
-                SELECT * FROM read_csv_auto(?, delim=?, header=true, ignore_errors=false)
-                """,
-                [str(target_path), delimiter],
-            )
+                SELECT * FROM read_csv_auto(
+                    ?, delim=?, header=true, ignore_errors=false, sample_size=-1
+                )
+            """
+            src_params: list[object] = [str(source_path), delimiter]
+            tgt_params: list[object] = [str(target_path), delimiter]
+            if cfg.duckdb_explain_analyze:
+                logger.info("DuckDB EXPLAIN ANALYZE [load_source]\n%s", _fetch_explain_text(con, q_src, src_params))
+                logger.info("DuckDB EXPLAIN ANALYZE [load_target]\n%s", _fetch_explain_text(con, q_tgt, tgt_params))
+            else:
+                con.execute(q_src, src_params)
+                con.execute(q_tgt, tgt_params)
 
             src_n = int(con.execute(f"SELECT count(*) FROM {src_tbl}").fetchone()[0])
             tgt_n = int(con.execute(f"SELECT count(*) FROM {tgt_tbl}").fetchone()[0])
@@ -155,24 +241,56 @@ class DuckDBReconciliationEngine:
                         out.write("\n")
                         summary[MismatchType.EXTRA_IN_TARGET.value] += 1
 
-                for col in compare_columns:
-                    cq = _quote_ident(col)
-                    q_vm = f"""
-                        SELECT s.{uid_q} AS uid, s.{cq} AS sv, t.{cq} AS tv
+                if compare_columns:
+                    vm_joined = "pegasus_vm_joined"
+                    select_cols: list[str] = []
+                    for i, col in enumerate(compare_columns):
+                        cq = _quote_ident(col)
+                        select_cols.append(f"s.{cq} AS s_{i}")
+                        select_cols.append(f"t.{cq} AS t_{i}")
+                    col_block = ",\n                        ".join(select_cols)
+                    q_vm_joined = f"""
+                        CREATE TEMP TABLE {vm_joined} AS
+                        SELECT
+                            s.{uid_q} AS uid,
+                            {col_block}
                         FROM {src_tbl} s
                         INNER JOIN {tgt_tbl} t ON s.{uid_q} = t.{uid_q}
-                        WHERE s.{cq} IS DISTINCT FROM t.{cq}
                     """
+                    if cfg.duckdb_explain_analyze:
+                        logger.info(
+                            "DuckDB EXPLAIN ANALYZE [value_mismatch_joined]\n%s",
+                            _fetch_explain_text(con, q_vm_joined, []),
+                        )
+                    else:
+                        con.execute(q_vm_joined)
+
+                    vm_parts: list[str] = []
+                    for i, col in enumerate(compare_columns):
+                        col_lit = _quote_sql_literal(col)
+                        vm_parts.append(
+                            f"""
+                            SELECT uid, {col_lit} AS column_name, s_{i} AS sv, t_{i} AS tv
+                            FROM {vm_joined}
+                            WHERE s_{i} IS DISTINCT FROM t_{i}
+                            """
+                        )
+                    q_vm = "\nUNION ALL\n".join(vm_parts)
+                    if cfg.duckdb_explain_analyze:
+                        logger.info(
+                            "DuckDB EXPLAIN ANALYZE [value_mismatch_extract]\n%s",
+                            _fetch_explain_text(con, q_vm, []),
+                        )
                     rel = con.execute(q_vm)
                     while True:
                         batch = rel.fetchmany(10_000)
                         if not batch:
                             break
-                        for uid_v, sv, tv in batch:
+                        for uid_v, col_name, sv, tv in batch:
                             row = {
                                 "uid": str(uid_v),
                                 "mismatch_type": MismatchType.VALUE_MISMATCH.value,
-                                "column_name": col,
+                                "column_name": str(col_name),
                                 "source_value": fmt_cell(sv),
                                 "target_value": fmt_cell(tv),
                                 "row_detail": "{}",

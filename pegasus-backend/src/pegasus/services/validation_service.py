@@ -96,6 +96,11 @@ class ValidationService:
             backend=backend,
             force_external=self._settings.validation_force_external_reconciliation,
             stream_mismatches=self._settings.validation_stream_mismatches_to_disk,
+            duckdb_memory_limit_ratio=self._settings.validation_duckdb_memory_limit_ratio,
+            duckdb_network_threads=self._settings.validation_duckdb_network_threads,
+            duckdb_local_threads=self._settings.validation_duckdb_local_threads,
+            duckdb_enable_object_cache=self._settings.validation_duckdb_enable_object_cache,
+            duckdb_explain_analyze=self._settings.validation_duckdb_explain_analyze,
             artifact_export_path=artifact_export,
         )
 

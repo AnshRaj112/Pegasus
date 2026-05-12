@@ -58,6 +58,13 @@ def create_app() -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+        logger.info("CORS enabled for origins: %s", cors_origins)
+    else:
+        logger.warning(
+            "CORS disabled (PEGASUS_CORS_ORIGINS empty and not using development defaults). "
+            "Browser requests from another origin (e.g. Vite on :5173 to API on :8000) will fail with "
+            "\"Failed to fetch\" unless you use a reverse proxy or set PEGASUS_CORS_ORIGINS."
+        )
 
     register_exception_handlers(application)
     application.include_router(api_router, prefix=settings.api_v1_prefix)
