@@ -9,6 +9,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, Callable
 
 from pegasus.validation.comparators.exceptions import UIDComparisonError
 from pegasus.validation.comparators.models import MismatchReport
@@ -157,6 +158,7 @@ class ReconciliationCoordinator:
         delimiter: str,
         compare_columns: list[str],
         cfg: ReconciliationRuntimeConfig,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[MismatchReport, int, int, ReconciliationStrategy]:
         """Execute reconciliation for a single source/target CSV pair on local disk.
 
@@ -191,6 +193,7 @@ class ReconciliationCoordinator:
                     compare_columns=compare_columns,
                     cfg=cfg,
                     strategy=strategy,
+                    progress_callback=progress_callback,
                 )
             except (ReconciliationError, UIDComparisonError, OSError) as exc:
                 last_error = exc
@@ -316,6 +319,7 @@ class ReconciliationCoordinator:
         compare_columns: list[str],
         cfg: ReconciliationRuntimeConfig,
         strategy: ReconciliationStrategy,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[MismatchReport, int, int, ReconciliationStrategy]:
         base_temp = cfg.temp_dir
         with temp_reconciliation_workspace(base_temp) as workspace:
@@ -329,6 +333,7 @@ class ReconciliationCoordinator:
                     delimiter=delimiter,
                     compare_columns=compare_columns,
                     cfg=cfg,
+                    progress_callback=progress_callback,
                 )
                 report = _persist_mismatch_artifact_outside_workspace(workspace, cfg, report)
                 logger.info(

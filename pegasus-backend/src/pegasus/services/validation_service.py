@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable
 
 import pandas as pd
 import polars as pl
@@ -97,10 +98,14 @@ class ValidationService:
             force_external=self._settings.validation_force_external_reconciliation,
             stream_mismatches=self._settings.validation_stream_mismatches_to_disk,
             duckdb_memory_limit_ratio=self._settings.validation_duckdb_memory_limit_ratio,
+            duckdb_memory_os_reserve_bytes=self._settings.validation_duckdb_memory_os_reserve_bytes,
             duckdb_network_threads=self._settings.validation_duckdb_network_threads,
             duckdb_local_threads=self._settings.validation_duckdb_local_threads,
             duckdb_enable_object_cache=self._settings.validation_duckdb_enable_object_cache,
             duckdb_explain_analyze=self._settings.validation_duckdb_explain_analyze,
+            duckdb_ingest_csv_to_parquet=self._settings.validation_duckdb_ingest_csv_to_parquet,
+            duckdb_parquet_row_group_size=self._settings.validation_duckdb_parquet_row_group_size,
+            duckdb_reconciliation_partitions=self._settings.validation_duckdb_reconciliation_partitions,
             artifact_export_path=artifact_export,
         )
 
@@ -112,6 +117,7 @@ class ValidationService:
         uid_column: str,
         delimiter: str,
         artifact_export_parent: Path | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> ValidationRunResult:
         """Run validation off the event loop so Polars work does not block asyncio."""
         return await asyncio.to_thread(
@@ -121,6 +127,7 @@ class ValidationService:
             uid_column,
             delimiter,
             artifact_export_parent,
+            progress_callback,
         )
 
     def _validate_csv_pair_sync(
@@ -130,6 +137,7 @@ class ValidationService:
         uid_column: str,
         delimiter: str,
         artifact_export_parent: Path | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> ValidationRunResult:
         uid = uid_column.strip()
         if not uid:
@@ -284,6 +292,7 @@ class ValidationService:
                     delimiter=delim,
                     compare_columns=compared_columns,
                     cfg=rcfg,
+                    progress_callback=progress_callback,
                 )
             except ReconciliationStrategyError as exc:
                 if (

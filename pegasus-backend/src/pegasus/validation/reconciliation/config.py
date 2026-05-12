@@ -47,7 +47,7 @@ class ReconciliationRuntimeConfig(BaseModel):
         default=ReconciliationStrategy.AUTO,
         description="Active reconciliation strategy (or AUTO).",
     )
-    chunk_rows: int = Field(default=50_000, ge=1024, le=5_000_000)
+    chunk_rows: int = Field(default=500_000, ge=1024, le=5_000_000)
     partition_buckets: int = Field(default=64, ge=1, le=4096)
     sliding_window: int = Field(
         default=0,
@@ -85,7 +85,7 @@ class ReconciliationRuntimeConfig(BaseModel):
         description="When True, spill source and target CSVs concurrently (two readers, separate sides).",
     )
     disk_headroom_multiplier: float = Field(
-        default=2.0,
+        default=1.5,
         ge=1.0,
         le=10.0,
         description="Minimum free disk bytes >= multiplier × (source_size + target_size) before spill.",
@@ -110,7 +110,13 @@ class ReconciliationRuntimeConfig(BaseModel):
         default=1.00,
         ge=0.10,
         le=1.00,
-        description="Fraction of total system RAM assigned to DuckDB memory_limit.",
+        description="Fraction of (physical RAM minus duckdb_memory_os_reserve_bytes) for DuckDB memory_limit.",
+    )
+    duckdb_memory_os_reserve_bytes: int = Field(
+        default=512 * 1024 * 1024,
+        ge=0,
+        le=32 * 1024 * 1024 * 1024,
+        description="RAM reserved for OS / Python when computing DuckDB memory_limit.",
     )
     duckdb_network_threads: int = Field(
         default=2,
@@ -133,6 +139,28 @@ class ReconciliationRuntimeConfig(BaseModel):
         description=(
             "When True, run EXPLAIN ANALYZE for key DuckDB stages and log operator-level profiles "
             "(diagnostic mode; adds overhead)."
+        ),
+    )
+    duckdb_ingest_csv_to_parquet: bool = Field(
+        default=True,
+        description=(
+            "When True, DuckDB streams each CSV into a ZSTD-compressed Parquet working file "
+            "with a precomputed pegasus_part column before reconciliation."
+        ),
+    )
+    duckdb_parquet_row_group_size: int = Field(
+        default=1_048_576,
+        ge=1024,
+        le=10_000_000,
+        description="Target Parquet row group size for DuckDB COPY ... FORMAT PARQUET during CSV ingest.",
+    )
+    duckdb_reconciliation_partitions: int = Field(
+        default=0,
+        ge=0,
+        le=4096,
+        description=(
+            "Partition count for DuckDB hash(uid)%%N reconciliation (0 = use partition_buckets). "
+            "Smaller joins per round reduce peak memory vs one global join."
         ),
     )
     artifact_export_path: Path | None = Field(

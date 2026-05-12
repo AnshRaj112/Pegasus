@@ -44,7 +44,9 @@ def ensure_disk_headroom(
         msg = (
             f"Insufficient disk space for {label}: need at least {need_gib:.2f} GiB free "
             f"({required_free_bytes} bytes) but only {free_gib:.2f} GiB ({free} bytes) available on "
-            f"volume of {resolved}."
+            f"volume of {resolved}. "
+            "Set PEGASUS_VALIDATION_RECONCILIATION_TEMP_DIR to a larger/faster volume or lower "
+            "PEGASUS_VALIDATION_RECONCILIATION_DISK_HEADROOM_MULTIPLIER."
         )
         logger.error(msg)
         raise ReconciliationError(msg)

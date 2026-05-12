@@ -137,6 +137,9 @@ class ValidationJobDetailResponse(BaseModel):
     """Poll response: while running only *status* is set; when completed *result* contains the API payload."""
 
     status: str
+    phase: str | None = None
+    message: str | None = None
+    progress: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
     result: ValidateResponse | None = None
 

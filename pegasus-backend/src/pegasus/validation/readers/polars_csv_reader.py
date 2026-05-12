@@ -47,7 +47,7 @@ class PolarsCSVReader(CSVReader):
     def __init__(
         self,
         *,
-        default_batch_size: int = 50_000,
+        default_batch_size: int = 500_000,
         default_infer_schema_length: int | None = 10_000,
     ) -> None:
         if default_batch_size < 1:

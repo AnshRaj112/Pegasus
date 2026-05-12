@@ -6,8 +6,10 @@ import json
 import logging
 import signal
 import sys
+import time
 import traceback
 from pathlib import Path
+from typing import Any
 
 from pegasus.core.config import get_settings
 from pegasus.services.validation_service import ValidationService
@@ -17,7 +19,9 @@ logger = logging.getLogger(__name__)
 
 
 def _write_json(path: Path, obj: object) -> None:
-    path.write_text(json.dumps(obj, default=str, indent=2), encoding="utf-8")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, default=str, indent=2), encoding="utf-8")
+    tmp.replace(path)
 
 
 def _load_json(path: Path) -> dict[str, object]:
@@ -46,7 +50,16 @@ def main() -> int:
     meta_path = job_dir / "meta.json"
 
     def _fail(msg: str) -> int:
-        _write_json(status_path, {"status": "failed", "error": msg})
+        _write_json(
+            status_path,
+            {
+                "status": "failed",
+                "phase": "failed",
+                "message": "Validation worker failed",
+                "error": msg,
+                "progress": {"failed_at_epoch_s": time.time()},
+            },
+        )
         return 1
 
     if not meta_path.is_file():
@@ -83,16 +96,58 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _on_term)
 
     try:
-        _write_json(status_path, {"status": "running"})
+        start = time.time()
+        _write_json(
+            status_path,
+            {
+                "status": "running",
+                "phase": "initializing",
+                "message": "Worker started, loading settings",
+                "progress": {"started_at_epoch_s": start},
+            },
+        )
         get_settings.cache_clear()
         settings = get_settings()
         service = ValidationService(settings=settings)
+        last_emit = 0.0
+
+        def _progress_cb(event: dict[str, Any]) -> None:
+            nonlocal last_emit
+            now = time.time()
+            # Throttle status writes to avoid too-frequent filesystem updates.
+            if now - last_emit < 2.5 and event.get("percent") not in {100, 99}:
+                return
+            last_emit = now
+            _write_json(
+                status_path,
+                {
+                    "status": "running",
+                    "phase": str(event.get("phase") or "validating"),
+                    "message": str(event.get("message") or "Running external-memory reconciliation"),
+                    "progress": {
+                        "started_at_epoch_s": start,
+                        "percent": float(event.get("percent")) if event.get("percent") is not None else None,
+                        **(event.get("progress") if isinstance(event.get("progress"), dict) else {}),
+                    },
+                },
+            )
+
+        _write_json(
+            status_path,
+            {
+                "status": "running",
+                "phase": "validating",
+                "message": "Running external-memory reconciliation",
+                "progress": {"started_at_epoch_s": start},
+            },
+        )
         result = service._validate_csv_pair_sync(  # noqa: SLF001 — intentional worker entry
             src,
             tgt,
             uid_column,
             delimiter,
             artifact_export_parent=job_dir,
+            progress_callback=_progress_cb,
         )
         artifact = result.mismatch_artifact_path or result.report.mismatch_artifact_path
         out = {
@@ -104,13 +159,34 @@ def main() -> int:
             "mismatch_artifact_rel": artifact.name if artifact and artifact.is_file() else None,
         }
         _write_json(job_dir / "result.json", out)
-        _write_json(status_path, {"status": "completed"})
+        _write_json(
+            status_path,
+            {
+                "status": "completed",
+                "phase": "completed",
+                "message": "Validation finished successfully",
+                "progress": {
+                    "started_at_epoch_s": start,
+                    "completed_at_epoch_s": time.time(),
+                    "source_row_count": result.source_row_count,
+                    "target_row_count": result.target_row_count,
+                    "total_mismatch_records": int(sum(result.report.summary.values())),
+                },
+            },
+        )
         return 0
     except Exception as exc:
         logger.exception("validation job failed: %s", exc)
         _write_json(
             status_path,
-            {"status": "failed", "error": repr(exc), "traceback": traceback.format_exc()},
+            {
+                "status": "failed",
+                "phase": "failed",
+                "message": "Validation worker raised an exception",
+                "error": repr(exc),
+                "traceback": traceback.format_exc(),
+                "progress": {"failed_at_epoch_s": time.time()},
+            },
         )
         _cleanup_partial(job_dir)
         return 1

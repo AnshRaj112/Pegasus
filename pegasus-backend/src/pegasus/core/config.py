@@ -104,10 +104,10 @@ class Settings(BaseSettings):
         description="Stream mismatch rows to NDJSON during spill/DuckDB runs instead of one giant Polars frame.",
     )
     validation_reconciliation_chunk_rows: int = Field(
-        default=50_000,
+        default=500_000,
         ge=1024,
         le=5_000_000,
-        description="Rows per Polars batch for streaming / spill paths",
+        description="Rows per Polars batch for streaming / spill paths (larger batches use more RAM, fewer passes)",
     )
     validation_reconciliation_partition_buckets: int = Field(
         default=512,
@@ -154,7 +154,7 @@ class Settings(BaseSettings):
         description="Spill source and target CSV concurrently in hash-partition mode",
     )
     validation_reconciliation_disk_headroom_multiplier: float = Field(
-        default=2.0,
+        default=1.5,
         ge=1.0,
         le=10.0,
         description="Require free disk >= multiplier × (source+target bytes) before spill/sort",
@@ -167,7 +167,13 @@ class Settings(BaseSettings):
         default=1.00,
         ge=0.10,
         le=1.00,
-        description="Fraction of machine RAM assigned to DuckDB memory_limit for reconciliation jobs.",
+        description="Fraction of (physical RAM minus validation_duckdb_memory_os_reserve_bytes) for DuckDB memory_limit.",
+    )
+    validation_duckdb_memory_os_reserve_bytes: int = Field(
+        default=512 * 1024 * 1024,
+        ge=128 * 1024 * 1024,
+        le=32 * 1024 * 1024 * 1024,
+        description="Bytes reserved for OS / Python when sizing DuckDB memory_limit (avoids OOM thrash at ratio=1).",
     )
     validation_duckdb_network_threads: int = Field(
         default=2,
@@ -188,6 +194,22 @@ class Settings(BaseSettings):
     validation_duckdb_explain_analyze: bool = Field(
         default=False,
         description="Enable EXPLAIN ANALYZE logging for DuckDB reconciliation stages (diagnostic; slower).",
+    )
+    validation_duckdb_ingest_csv_to_parquet: bool = Field(
+        default=True,
+        description="Stream CSV into ZSTD Parquet working files before DuckDB reconciliation.",
+    )
+    validation_duckdb_parquet_row_group_size: int = Field(
+        default=1_048_576,
+        ge=1024,
+        le=10_000_000,
+        description="Parquet row_group_size for DuckDB CSV ingest (larger groups improve throughput on huge files).",
+    )
+    validation_duckdb_reconciliation_partitions: int = Field(
+        default=0,
+        ge=0,
+        le=4096,
+        description="DuckDB hash(uid)%N partition count (0 = use validation_reconciliation_partition_buckets).",
     )
     validation_allow_local_paths: bool = Field(
         default=False,

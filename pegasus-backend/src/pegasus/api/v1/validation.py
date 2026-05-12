@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Annotated
@@ -45,6 +46,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["validation"])
 
 _DEFAULT_UPLOAD_SUFFIX = ".csv"
+# Larger reads reduce asyncio/Starlette overhead on huge uploads.
+_UPLOAD_READ_CHUNK_BYTES = 8 * 1024 * 1024
+# Avoid rewriting status.json on every megabyte (was thrashing disk on 100GB+ runs).
+_UPLOAD_STATUS_EMIT_BYTES = 16 * 1024 * 1024
+
+
+def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    tmp.replace(path)
 
 
 def resolve_local_csv_path(raw: str, settings: Settings) -> Path:
@@ -198,19 +209,36 @@ async def _spool_upload_to_temp(
     *,
     max_bytes: int,
     label: str,
+    on_progress=None,
+    spool_dir: Path | None = None,
+    read_chunk_size: int = _UPLOAD_READ_CHUNK_BYTES,
+    progress_emit_min_bytes: int = _UPLOAD_STATUS_EMIT_BYTES,
 ) -> Path:
-    """Stream upload to a temp file; enforce size limit."""
+    """Stream upload to a temp file; enforce size limit.
+
+    When *spool_dir* is set (e.g. the job directory on fast local disk), the temp file is created
+    there so it can be promoted to ``source.csv`` / ``target.csv`` via ``os.replace`` without a
+    full second copy across filesystems.
+    """
     suffix = Path(upload.filename or _DEFAULT_UPLOAD_SUFFIX).suffix or _DEFAULT_UPLOAD_SUFFIX
-    fd, path_str = tempfile.mkstemp(prefix=f"pegasus_{label}_", suffix=suffix)
+    mk_kw: dict[str, str] = {"prefix": f"pegasus_{label}_", "suffix": suffix}
+    if spool_dir is not None:
+        spool_dir.mkdir(parents=True, exist_ok=True)
+        mk_kw["dir"] = str(spool_dir)
+    fd, path_str = tempfile.mkstemp(**mk_kw)
     path = Path(path_str)
     total = 0
     committed = False
+    last_progress_emit_at = 0
     try:
         while True:
-            chunk = await upload.read(1024 * 1024)
+            chunk = await upload.read(read_chunk_size)
             if not chunk:
                 break
             total += len(chunk)
+            if on_progress is not None and (total - last_progress_emit_at >= progress_emit_min_bytes):
+                on_progress(total)
+                last_progress_emit_at = total
             if total > max_bytes:
                 raise HTTPException(
                     status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -223,6 +251,8 @@ async def _spool_upload_to_temp(
         if total == 0:
             raise ValidationBadRequestError(f"{label} is empty")
         committed = True
+        if on_progress is not None:
+            on_progress(total)
         return path
     finally:
         try:
@@ -314,14 +344,67 @@ async def validate_csv_files(
     jobs_root = _validation_jobs_root(settings)
     job_dir = jobs_root / str(job_id)
     job_dir.mkdir(parents=True, exist_ok=False)
+    status_path = job_dir / "status.json"
 
     source_path: Path | None = None
     target_path: Path | None = None
     run_id: uuid.UUID | None = None
 
     try:
-        source_path = await _spool_upload_to_temp(source_file, max_bytes=max_bytes, label="source")
-        target_path = await _spool_upload_to_temp(target_file, max_bytes=max_bytes, label="target")
+        _atomic_write_json(
+            status_path,
+            {
+                "status": "running",
+                "phase": "uploading",
+                "message": "Uploading files to server scratch space",
+                "progress": {
+                    "source_uploaded_bytes": 0,
+                    "target_uploaded_bytes": 0,
+                    "source_total_hint_bytes": int(getattr(source_file, "size", 0) or 0),
+                    "target_total_hint_bytes": int(getattr(target_file, "size", 0) or 0),
+                },
+            },
+        )
+        source_path = await _spool_upload_to_temp(
+            source_file,
+            max_bytes=max_bytes,
+            label="source",
+            spool_dir=job_dir,
+            on_progress=lambda n: _atomic_write_json(
+                status_path,
+                {
+                    "status": "running",
+                    "phase": "uploading",
+                    "message": "Uploading source CSV",
+                    "progress": {
+                        "source_uploaded_bytes": int(n),
+                        "target_uploaded_bytes": 0,
+                        "source_total_hint_bytes": int(getattr(source_file, "size", 0) or 0),
+                        "target_total_hint_bytes": int(getattr(target_file, "size", 0) or 0),
+                    },
+                },
+            ),
+        )
+        target_path = await _spool_upload_to_temp(
+            target_file,
+            max_bytes=max_bytes,
+            label="target",
+            spool_dir=job_dir,
+            on_progress=lambda n: _atomic_write_json(
+                status_path,
+                {
+                    "status": "running",
+                    "phase": "uploading",
+                    "message": "Uploading target CSV",
+                    "progress": {
+                        "source_uploaded_bytes": int(source_path.stat().st_size if source_path is not None else 0),
+                        "target_uploaded_bytes": int(n),
+                        "source_total_hint_bytes": int(getattr(source_file, "size", 0) or 0),
+                        "target_total_hint_bytes": int(getattr(target_file, "size", 0) or 0),
+                    },
+                },
+            ),
+        )
 
         if settings.enable_validation_persistence:
             try:
@@ -342,10 +425,18 @@ async def validate_csv_files(
                     detail="Could not persist validation run; check database connectivity",
                 ) from exc
 
+        _atomic_write_json(
+            status_path,
+            {
+                "status": "running",
+                "phase": "staging",
+                "message": "Promoting uploads to job workspace (rename)",
+            },
+        )
         dest_s = job_dir / "source.csv"
         dest_t = job_dir / "target.csv"
-        dest_s.write_bytes(source_path.read_bytes())
-        dest_t.write_bytes(target_path.read_bytes())
+        os.replace(source_path, dest_s)
+        os.replace(target_path, dest_t)
 
         meta = {
             "uid_column": uid_column.strip(),
@@ -354,7 +445,18 @@ async def validate_csv_files(
             "run_id": str(run_id) if run_id else None,
         }
         (job_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        (job_dir / "status.json").write_text(json.dumps({"status": "queued"}), encoding="utf-8")
+        _atomic_write_json(
+            status_path,
+            {
+                "status": "queued",
+                "phase": "queued",
+                "message": "Queued for worker execution",
+                "progress": {
+                    "source_uploaded_bytes": int(dest_s.stat().st_size),
+                    "target_uploaded_bytes": int(dest_t.stat().st_size),
+                },
+            },
+        )
 
         proc = BackgroundValidationRunner().start_job(job_dir)
         if proc.poll() is not None:
@@ -439,7 +541,15 @@ async def validate_csv_local_paths(
         "target_path": str(target_path),
     }
     (job_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    (job_dir / "status.json").write_text(json.dumps({"status": "queued"}), encoding="utf-8")
+    _atomic_write_json(
+        job_dir / "status.json",
+        {
+            "status": "queued",
+            "phase": "queued",
+            "message": "Queued for worker execution",
+            "progress": {"mode": "local_paths", "created_at_epoch_s": time.time()},
+        },
+    )
 
     proc = BackgroundValidationRunner().start_job(job_dir)
     if proc.poll() is not None:
@@ -463,20 +573,44 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
     status_path = job_dir / "status.json"
     if not status_path.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown job_id")
-    st = json.loads(status_path.read_text(encoding="utf-8"))
+    try:
+        st = json.loads(status_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return ValidationJobDetailResponse(status="running", phase="updating", message="Refreshing job status")
     status_val = str(st.get("status") or "unknown")
+    phase = st.get("phase")
+    message = st.get("message")
+    progress = st.get("progress") if isinstance(st.get("progress"), dict) else {}
     if status_val in {"queued", "running"}:
-        return ValidationJobDetailResponse(status=status_val)
+        return ValidationJobDetailResponse(status=status_val, phase=phase, message=message, progress=progress)
     if status_val == "failed":
-        return ValidationJobDetailResponse(status="failed", error=str(st.get("error") or "failed"))
+        return ValidationJobDetailResponse(
+            status="failed",
+            phase=phase,
+            message=message,
+            progress=progress,
+            error=str(st.get("error") or "failed"),
+        )
     if status_val != "completed":
-        return ValidationJobDetailResponse(status=status_val, error=str(st.get("error") or ""))
+        return ValidationJobDetailResponse(
+            status=status_val,
+            phase=phase,
+            message=message,
+            progress=progress,
+            error=str(st.get("error") or ""),
+        )
 
     result_path = job_dir / "result.json"
     if not result_path.is_file():
-        return ValidationJobDetailResponse(status="failed", error="completed but result.json missing")
+        return ValidationJobDetailResponse(
+            status="failed",
+            phase=phase,
+            message=message,
+            progress=progress,
+            error="completed but result.json missing",
+        )
 
     run_result, rid = _run_result_from_job_dir(job_dir)
     await _maybe_persist_completed_job(settings, run_id=rid, run_result=run_result)
     payload = _build_validate_response(settings=settings, run_result=run_result, run_id=rid)
-    return ValidationJobDetailResponse(status="completed", result=payload)
+    return ValidationJobDetailResponse(status="completed", phase=phase, message=message, progress=progress, result=payload)

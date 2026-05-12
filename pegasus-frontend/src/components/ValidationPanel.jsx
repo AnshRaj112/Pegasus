@@ -30,7 +30,7 @@ function normalizeValidateResult(data) {
 
 async function pollValidationJob(
   pollPath,
-  { timeoutMs = 0, intervalMs = 400, onPollStatus } = {},
+  { timeoutMs = 0, intervalMs = 400, onPoll } = {},
 ) {
   const url = absoluteApiUrl(pollPath)
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Number.POSITIVE_INFINITY
@@ -49,7 +49,7 @@ async function pollValidationJob(
       throw new Error(formatDetail(payload.detail) || `${res.status} ${res.statusText}`)
     }
     const st = payload.status
-    if (typeof onPollStatus === 'function' && st) onPollStatus(st)
+    if (typeof onPoll === 'function') onPoll(payload)
     if (st === 'completed' && payload.result) return normalizeValidateResult(payload.result)
     if (st === 'failed') throw new Error(payload.error || 'Validation job failed')
     await new Promise((r) => setTimeout(r, intervalMs))
@@ -64,8 +64,36 @@ function jobRunningCopy(phase, jobId) {
       Job id: <code>{jobId}</code>
     </span>
   ) : null
+  if (typeof phase === 'string' && phase.startsWith('duckdb_')) {
+    const pretty = {
+      duckdb_init: 'Initializing DuckDB',
+      duckdb_load_source: 'Loading source CSV',
+      duckdb_load_target: 'Loading target CSV',
+      duckdb_loaded: 'CSV load complete',
+      duckdb_checks: 'Validating UID constraints',
+      duckdb_missing: 'Scanning rows missing in target',
+      duckdb_extra: 'Scanning extra rows in target',
+      duckdb_value_prepare: 'Preparing value mismatch join',
+      duckdb_value_extract: 'Extracting value mismatches',
+      duckdb_export: 'Writing mismatch artifact',
+      duckdb_finalize: 'Finalizing result',
+      duckdb_done: 'DuckDB reconciliation complete',
+    }
+    return {
+      title: pretty[phase] ?? 'DuckDB reconciliation',
+      body: (
+        <>
+          Processing server-side comparison with external-memory DuckDB pipeline.
+          {idLine ? <> {idLine}</> : null}
+        </>
+      ),
+      extra: null,
+    }
+  }
+
   switch (phase) {
     case 'upload':
+    case 'uploading':
       return {
         title: 'Uploading files…',
         body: <>Sending CSVs to the API. The next step returns HTTP 202 and starts a background worker.</>,
@@ -113,6 +141,23 @@ function jobRunningCopy(phase, jobId) {
   }
 }
 
+function formatBytes(n) {
+  if (!Number.isFinite(n) || n <= 0) return '0 B'
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let i = 0
+  let v = n
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i += 1
+  }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+function formatPercent(n) {
+  if (!Number.isFinite(n)) return null
+  return `${Math.max(0, Math.min(100, Number(n))).toFixed(1)}%`
+}
+
 function formatDetail(detail) {
   if (detail == null) return 'Request failed'
   if (typeof detail === 'string') return detail
@@ -140,6 +185,8 @@ export function ValidationPanel() {
   const [jobProgress, setJobProgress] = useState({
     phase: 'upload',
     jobId: null,
+    message: '',
+    progress: {},
   })
 
   const running = phase === 'running'
@@ -167,7 +214,7 @@ export function ValidationPanel() {
     setElapsedMs(0)
     setResult(null)
     setErrorMessage('')
-    setJobProgress({ phase: 'upload', jobId: null })
+    setJobProgress({ phase: 'upload', jobId: null, message: '', progress: {} })
 
     const postUrl = absoluteApiUrl(useLocalPaths ? '/api/v1/validate/local' : '/api/v1/validate')
 
@@ -214,12 +261,18 @@ export function ValidationPanel() {
       let final = data
       if (res.status === 202 && data.poll_url) {
         const jid = data.job_id != null ? String(data.job_id) : null
-        setJobProgress({ phase: 'accepted', jobId: jid })
+        setJobProgress({ phase: 'accepted', jobId: jid, message: '', progress: {} })
         final = await pollValidationJob(data.poll_url, {
           timeoutMs: pollTimeoutMs,
-          onPollStatus: (st) => {
-            if (st === 'queued') setJobProgress((p) => ({ ...p, phase: 'queued' }))
-            if (st === 'running') setJobProgress((p) => ({ ...p, phase: 'running' }))
+          onPoll: (payload) => {
+            const st = payload?.status
+            const phase = payload?.phase || (st === 'running' ? 'running' : st) || 'running'
+            setJobProgress((p) => ({
+              ...p,
+              phase,
+              message: typeof payload?.message === 'string' ? payload.message : '',
+              progress: payload?.progress && typeof payload.progress === 'object' ? payload.progress : {},
+            }))
           },
         })
       } else if (data.summary) {
@@ -376,6 +429,35 @@ export function ValidationPanel() {
             </p>
             <p className="validation-status-title">{jobUi.title}</p>
             <p className="validation-status-detail">{jobUi.body}</p>
+            {jobProgress.message ? <p className="validation-status-extra">{jobProgress.message}</p> : null}
+            {jobProgress.progress?.percent != null ? (
+              <p className="validation-status-extra">
+                Progress: <strong>{formatPercent(jobProgress.progress.percent)}</strong>
+              </p>
+            ) : null}
+            {jobProgress.progress?.total_mismatch_records != null ? (
+              <p className="validation-status-extra">
+                Mismatches emitted so far: <strong>{Number(jobProgress.progress.total_mismatch_records)}</strong>
+              </p>
+            ) : null}
+            {jobProgress.progress?.value_mismatch_done != null ? (
+              <p className="validation-status-extra">
+                Value mismatch rows emitted: <strong>{Number(jobProgress.progress.value_mismatch_done)}</strong>
+                {jobProgress.progress?.value_mismatch_total_estimate != null ? (
+                  <>
+                    {' '}
+                    / est{' '}
+                    <strong>{Number(jobProgress.progress.value_mismatch_total_estimate)}</strong>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
+            {jobProgress.phase === 'uploading' ? (
+              <p className="validation-status-extra">
+                Uploaded source: {formatBytes(Number(jobProgress.progress?.source_uploaded_bytes || 0))} | target:{' '}
+                {formatBytes(Number(jobProgress.progress?.target_uploaded_bytes || 0))}
+              </p>
+            ) : null}
             {jobUi.extra ? <p className="validation-status-extra">{jobUi.extra}</p> : null}
             <p className="validation-status-elapsed">
               <strong>{(elapsedMs / 1000).toFixed(1)}s</strong> elapsed
