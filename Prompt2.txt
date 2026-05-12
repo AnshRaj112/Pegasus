@@ -1,0 +1,75 @@
+Pegasus backend is still crashing when validating two 4.4GB CSV files because the current architecture still contains hidden in-memory operations.
+
+Redesign the reconciliation engine into a true external-memory streaming architecture.
+
+Critical Requirements:
+
+- FastAPI must NOT perform validation inline
+- Validation must run as background jobs/processes
+- Do NOT load entire files or partitions into memory
+- Do NOT accumulate mismatches in RAM
+- Do NOT use full dataframe joins
+- Do NOT use giant Python dict/hashmaps for reconciliation
+
+Required Architecture Changes:
+
+1. Validation Execution
+
+- Move validation outside request lifecycle
+- API should only create validation jobs
+- Validation should execute in separate background workers/processes
+
+2. Streaming Processing
+
+- Read files in bounded chunks
+- Process rows immediately
+- Release memory immediately after processing
+- Avoid dataframe accumulation
+
+3. External-Memory Reconciliation
+
+- Use DuckDB for external joins and disk-backed processing
+- Use streaming partition-based reconciliation for unsorted files
+- Support spill-to-disk architecture
+
+4. Partition Lifecycle
+
+- Partition rows incrementally
+- Flush partitions to disk immediately
+- Avoid keeping partition buffers in memory
+- Add automatic temp-file cleanup
+
+5. Mismatch Handling
+
+- Write mismatches incrementally to JSONL or CSV
+- Never keep mismatch lists in RAM
+- Return only summary metadata to API
+
+6. Memory Safety
+
+- Add memory profiling
+- Log RSS memory usage periodically
+- Add configurable chunk sizes
+- Add backpressure and bounded buffers
+
+7. Required Modules
+
+- BackgroundValidationRunner
+- StreamCSVReader
+- PartitionManager
+- ExternalMergeComparator
+- DuckDBReconciliationEngine
+- IncrementalMismatchWriter
+- MemoryMonitor
+
+Technical Constraints:
+
+- Use DuckDB as primary external-memory engine
+- Use Polars only for bounded chunk operations
+- Avoid in-memory reconciliation patterns entirely
+- Use generators/iterators everywhere possible
+- Add production-grade logging
+- Add cleanup handling for crashes/interruption
+
+Focus ONLY on making validation stable for multi-GB files.
+Do not add distributed execution yet.
