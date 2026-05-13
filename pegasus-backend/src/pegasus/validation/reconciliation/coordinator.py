@@ -13,6 +13,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
 
+import polars as pl
+
 from pegasus.validation.comparators.exceptions import UIDComparisonError
 from pegasus.validation.comparators.models import MismatchReport
 from pegasus.validation.readers.polars_csv_reader import PolarsCSVReader
