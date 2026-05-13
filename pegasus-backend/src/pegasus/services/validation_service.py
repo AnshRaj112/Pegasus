@@ -13,6 +13,15 @@ import pandas as pd
 import polars as pl
 
 from pegasus.core.config import Settings
+from pegasus.core.resource_tuning import (
+    align_partition_buckets_to_threads,
+    cap_partition_buckets,
+    log_swap_pressure_warning,
+    max_reconciliation_partition_buckets,
+    physical_cpu_count,
+    physical_ram_bytes,
+    recommend_parallel_duckdb_csv_ingest,
+)
 from pegasus.services.exceptions import (
     ValidationBadRequestError,
     ValidationUnprocessableError,
@@ -36,6 +45,7 @@ from pegasus.validation.reconciliation.coordinator import (
     ReconciliationCoordinator,
     auto_external_enabled,
 )
+from pegasus.validation.reconciliation.duckdb_session import duckdb_effective_thread_count
 from pegasus.validation.reconciliation.exceptions import ReconciliationError, ReconciliationStrategyError
 from pegasus.validation.reconciliation.partition_manager import multichar_csv_header_frame
 
@@ -74,7 +84,7 @@ class ValidationService:
         try:
             backend = ReconciliationBackend(raw_backend)
         except ValueError:
-            backend = ReconciliationBackend.DUCKDB
+            backend = ReconciliationBackend.POLARS
         temp = self._settings.validation_reconciliation_temp_dir
         artifact_export = None
         if artifact_export_parent is not None:
@@ -109,6 +119,51 @@ class ValidationService:
             duckdb_parallel_csv_ingest=self._settings.validation_duckdb_parallel_csv_ingest,
             artifact_export_path=artifact_export,
         )
+
+    def _apply_host_reconciliation_tuning(
+        self,
+        rcfg: ReconciliationRuntimeConfig,
+        *,
+        source_path: Path,
+        target_path: Path,
+    ) -> ReconciliationRuntimeConfig:
+        """Clamp partition counts and align with DuckDB thread caps; soften settings under swap pressure."""
+        ncpu = physical_cpu_count()
+        ram = physical_ram_bytes()
+        threads = duckdb_effective_thread_count(rcfg, source_path=source_path, target_path=target_path)
+        max_b = max_reconciliation_partition_buckets(ncpu=ncpu, ram_bytes=ram)
+
+        orig_pb = rcfg.partition_buckets
+        pb = cap_partition_buckets(orig_pb, ncpu=ncpu, ram_bytes=ram)
+        pb = align_partition_buckets_to_threads(pb, threads)
+
+        updates: dict[str, object] = {}
+        if pb != orig_pb:
+            updates["partition_buckets"] = pb
+
+        dpp = rcfg.duckdb_reconciliation_partitions
+        if dpp > 0:
+            dpp_new = align_partition_buckets_to_threads(
+                cap_partition_buckets(dpp, ncpu=ncpu, ram_bytes=ram),
+                threads,
+            )
+            if dpp_new != dpp:
+                updates["duckdb_reconciliation_partitions"] = dpp_new
+
+        if rcfg.backend == ReconciliationBackend.DUCKDB and not recommend_parallel_duckdb_csv_ingest():
+            if rcfg.duckdb_parallel_csv_ingest:
+                updates["duckdb_parallel_csv_ingest"] = False
+
+        if updates:
+            logger.info(
+                "Host-tuned reconciliation (cpus=%d max_partition_cap=%d duckdb_threads=%d): %s",
+                ncpu,
+                max_b,
+                threads,
+                ", ".join(f"{k}={v}" for k, v in updates.items()),
+            )
+            return rcfg.model_copy(update=updates)
+        return rcfg
 
     async def validate_csv_pair(
         self,
@@ -160,18 +215,12 @@ class ValidationService:
         except CSVValidationError as exc:
             raise ValidationBadRequestError(str(exc)) from exc
 
+        log_swap_pressure_warning(logger)
+
         combined_bytes = source_path.stat().st_size + target_path.stat().st_size
         use_multichar_streaming = len(delim) > 1
 
-        if not use_multichar_streaming and combined_bytes >= rcfg.external_memory_threshold_bytes:
-            scaled = min(4096, max(rcfg.partition_buckets, combined_bytes // (2 * 1024 * 1024)))
-            if scaled != rcfg.partition_buckets:
-                rcfg = rcfg.model_copy(update={"partition_buckets": int(scaled)})
-                logger.info(
-                    "Scaled partition buckets for large inputs: %d (combined_bytes=%d)",
-                    scaled,
-                    combined_bytes,
-                )
+        rcfg = self._apply_host_reconciliation_tuning(rcfg, source_path=source_path, target_path=target_path)
 
         if not use_multichar_streaming and rcfg.backend == ReconciliationBackend.DUCKDB:
             base_rg = rcfg.duckdb_parquet_row_group_size
@@ -190,17 +239,6 @@ class ValidationService:
                 )
 
         if use_multichar_streaming:
-            scaled_buckets = min(
-                4096,
-                max(rcfg.partition_buckets, max(1, combined_bytes // (2 * 1024 * 1024))),
-            )
-            if scaled_buckets != rcfg.partition_buckets:
-                rcfg = rcfg.model_copy(update={"partition_buckets": int(scaled_buckets)})
-                logger.info(
-                    "Scaled hash partition buckets to %d from combined_bytes=%d",
-                    rcfg.partition_buckets,
-                    combined_bytes,
-                )
             try:
                 src_head = multichar_csv_header_frame(source_path, delimiter=delim)
                 tgt_head = multichar_csv_header_frame(target_path, delimiter=delim)

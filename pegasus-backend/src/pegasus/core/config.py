@@ -5,6 +5,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pegasus import __version__ as package_version
+from pegasus.core.resource_tuning import recommended_reconciliation_partition_buckets
 
 
 def _resolved_dotenv_files() -> tuple[Path, ...]:
@@ -92,8 +93,8 @@ class Settings(BaseSettings):
         description="Reconciliation engine: auto | hash_partition | ordered_stream | sliding_window | external_sort",
     )
     validation_reconciliation_backend: str = Field(
-        default="duckdb",
-        description="duckdb (default) or polars spill/hash pipeline for single-character CSV reconciliation",
+        default="polars",
+        description="polars spill/hash pipeline (default) or duckdb for single-character CSV reconciliation",
     )
     validation_force_external_reconciliation: bool = Field(
         default=True,
@@ -110,10 +111,14 @@ class Settings(BaseSettings):
         description="Rows per Polars batch for streaming / spill paths (larger batches use more RAM, fewer passes)",
     )
     validation_reconciliation_partition_buckets: int = Field(
-        default=512,
+        default_factory=recommended_reconciliation_partition_buckets,
         ge=1,
         le=4096,
-        description="Hash buckets for HASH_PARTITION and AUTO-unsorted spill mode",
+        description=(
+            "Hash buckets for HASH_PARTITION and AUTO-unsorted spill mode. "
+            "Default is host-sized (typically 16-64 on 4-core / <= 16 GiB RAM). "
+            "Values above the host cap are clamped at runtime to limit DuckDB round-trips and memory pressure."
+        ),
     )
     validation_reconciliation_sliding_window: int = Field(
         default=0,
@@ -185,7 +190,7 @@ class Settings(BaseSettings):
         default=0,
         ge=0,
         le=256,
-        description="DuckDB thread cap for local disks (0 => auto cpu_count).",
+        description="DuckDB thread cap for local disks (0 => min(requested, os.cpu_count()); never exceeds CPU count).",
     )
     validation_duckdb_enable_object_cache: bool = Field(
         default=True,
