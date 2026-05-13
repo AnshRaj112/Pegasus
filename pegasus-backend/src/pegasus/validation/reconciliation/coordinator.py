@@ -16,7 +16,7 @@ from typing import Any, Callable
 import polars as pl
 
 from pegasus.validation.comparators.exceptions import UIDComparisonError
-from pegasus.validation.comparators.models import MismatchReport
+from pegasus.validation.comparators.models import MISMATCH_REPORT_SCHEMA, MismatchReport
 from pegasus.validation.readers.polars_csv_reader import PolarsCSVReader
 
 from .config import ReconciliationBackend, ReconciliationRuntimeConfig, ReconciliationStrategy
@@ -147,7 +147,7 @@ def _compare_spilled_hash_partitions(
             if count > 0 and worker_path.exists():
                 # Use bulk append to merge worker results efficiently
                 if hasattr(collector, "bulk_append_from_frame"):
-                    worker_df = pl.read_ndjson(worker_path)
+                    worker_df = pl.read_ndjson(worker_path, schema=MISMATCH_REPORT_SCHEMA)
                     collector.bulk_append_from_frame(worker_df)
                 elif isinstance(collector, StreamingMismatchCollector):
                     with open(worker_path, "rb") as f_in:
