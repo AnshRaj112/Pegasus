@@ -1,18 +1,18 @@
 function RecordCard({ title, record, variant }) {
   if (!record || typeof record !== 'object') return null
   const entries = Object.entries(record)
+  const containerClass =
+    variant === 'source'
+      ? 'rounded-lg border border-emerald-300 border-l-4 border-l-emerald-500 bg-emerald-50 p-3 text-left'
+      : 'rounded-lg border border-rose-300 border-l-4 border-l-rose-500 bg-rose-50 p-3 text-left'
   return (
-    <div
-      className={`validation-record validation-record--${variant}`}
-      role="group"
-      aria-label={title}
-    >
-      <div className="validation-record-title">{title}</div>
-      <dl className="validation-record-dl">
+    <div className={containerClass} role="group" aria-label={title}>
+      <div className="mb-2 text-xs font-semibold text-slate-700">{title}</div>
+      <dl className="space-y-1">
         {entries.map(([key, val]) => (
-          <div key={key} className="validation-record-pair">
-            <dt>{key}</dt>
-            <dd>{val === null || val === undefined ? '—' : String(val)}</dd>
+          <div key={key} className="grid grid-cols-[minmax(5rem,28%)_1fr] items-baseline gap-x-2 text-xs">
+            <dt className="font-medium text-slate-600">{key}</dt>
+            <dd className="break-words font-mono text-slate-900">{val === null || val === undefined ? '—' : String(val)}</dd>
           </div>
         ))}
       </dl>
@@ -33,17 +33,19 @@ export function MismatchSampleRows({ samples }) {
         const isValue = row.mismatch_type === 'value_mismatch'
 
         const mainRow = (
-          <tr key={`${key}-main`}>
-            <td>{row.uid}</td>
-            <td>
-              <code className="validation-type-pill">{row.mismatch_type}</code>
+          <tr key={`${key}-main`} className="border-b border-[#F1F1F1] text-slate-700">
+            <td className="px-3 py-2 font-mono text-xs">{row.uid}</td>
+            <td className="px-3 py-2">
+              <code className="inline-flex rounded-full bg-[#FFFDEF] px-2 py-1 text-xs font-semibold text-[#EB4C4C]">
+                {row.mismatch_type}
+              </code>
             </td>
-            <td>{row.column_name ?? '—'}</td>
+            <td className="px-3 py-2 text-xs">{row.column_name ?? '—'}</td>
             <td
               className={
                 isExtra
-                  ? 'validation-cell-muted'
-                  : 'validation-cell-expected'
+                  ? 'px-3 py-2 font-mono text-xs text-slate-400'
+                  : 'px-3 py-2 font-mono text-xs font-medium text-emerald-800 bg-emerald-100/70'
               }
             >
               {isMissing
@@ -55,8 +57,8 @@ export function MismatchSampleRows({ samples }) {
             <td
               className={
                 isMissing
-                  ? 'validation-cell-muted'
-                  : 'validation-cell-actual'
+                  ? 'px-3 py-2 font-mono text-xs text-slate-400'
+                  : 'px-3 py-2 font-mono text-xs font-medium text-rose-800 bg-rose-100/70'
               }
             >
               {isExtra
@@ -71,9 +73,9 @@ export function MismatchSampleRows({ samples }) {
         const detailRow =
           detail &&
           (detail.source_record || detail.target_record) ? (
-            <tr key={`${key}-detail`} className="validation-detail-row">
-              <td colSpan={5}>
-                <div className="validation-detail-hint">
+            <tr key={`${key}-detail`} className="border-b border-[#F1F1F1] bg-[#FFFDEF]">
+              <td colSpan={5} className="px-3 py-3 align-top">
+                <div className="mb-3 text-xs text-slate-600">
                   {isMissing &&
                     'This row exists in the source file but not in the target — expected values:'}
                   {isExtra &&
@@ -81,7 +83,7 @@ export function MismatchSampleRows({ samples }) {
                   {isValue &&
                     'Full row context (expected vs actual across all compared columns):'}
                 </div>
-                <div className="validation-detail-grid">
+                <div className="grid gap-3 md:grid-cols-2">
                   {detail.source_record ? (
                     <RecordCard
                       variant="source"
