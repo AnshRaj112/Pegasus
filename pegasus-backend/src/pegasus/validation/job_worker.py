@@ -1,8 +1,7 @@
-"""Subprocess entrypoint: run one validation job from files under *job_dir*."""
+"""Subprocess / pool entrypoint: run one validation job from files under *job_dir*."""
 
 from __future__ import annotations
 
-import json
 import logging
 import signal
 import sys
@@ -12,20 +11,21 @@ from pathlib import Path
 from typing import Any
 
 from pegasus.core.config import get_settings
+from pegasus.core.json_util import dumps_bytes, loads_str
 from pegasus.services.validation_service import ValidationService
 from pegasus.validation.reconciliation.memory_monitor import MemoryMonitor
 
 logger = logging.getLogger(__name__)
 
 
-def _write_json(path: Path, obj: object) -> None:
+def _write_json(path: Path, obj: object, *, indent: bool = False) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(obj, default=str, indent=2), encoding="utf-8")
+    tmp.write_bytes(dumps_bytes(obj, indent=indent))
     tmp.replace(path)
 
 
 def _load_json(path: Path) -> dict[str, object]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return loads_str(path.read_text(encoding="utf-8"))
 
 
 def _cleanup_partial(job_dir: Path) -> None:
@@ -37,15 +37,21 @@ def _cleanup_partial(job_dir: Path) -> None:
             pass
 
 
-def main() -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
-    if len(sys.argv) < 2:
-        logger.error("usage: python -m pegasus.validation.job_worker <job_dir>")
-        return 2
-    job_dir = Path(sys.argv[1]).resolve()
+def _configure_file_logging(job_dir: Path) -> None:
+    log_path = job_dir / "worker.log"
+    root = logging.getLogger()
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    fh.setFormatter(fmt)
+    root.handlers.clear()
+    root.addHandler(fh)
+    root.setLevel(logging.INFO)
+
+
+def run_job_directory(job_dir: Path) -> int:
+    """Execute validation for *job_dir*; return Unix-style exit code (0 success)."""
+    job_dir = job_dir.resolve()
+    _configure_file_logging(job_dir)
     status_path = job_dir / "status.json"
     meta_path = job_dir / "meta.json"
 
@@ -114,7 +120,6 @@ def main() -> int:
         def _progress_cb(event: dict[str, Any]) -> None:
             nonlocal last_emit
             now = time.time()
-            # Throttle status writes to avoid too-frequent filesystem updates.
             if now - last_emit < 2.5 and event.get("percent") not in {100, 99}:
                 return
             last_emit = now
@@ -158,7 +163,7 @@ def main() -> int:
             "summary": dict(result.report.summary),
             "mismatch_artifact_rel": artifact.name if artifact and artifact.is_file() else None,
         }
-        _write_json(job_dir / "result.json", out)
+        _write_json(job_dir / "result.json", out, indent=True)
         _write_json(
             status_path,
             {
@@ -193,6 +198,19 @@ def main() -> int:
     finally:
         if monitor:
             monitor.stop()
+
+
+def run_job_directory_str(job_dir: str) -> int:
+    """Picklable pool entry: same as :func:`run_job_directory`."""
+    return run_job_directory(Path(job_dir))
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+        logger.error("usage: python -m pegasus.validation.job_worker <job_dir>")
+        return 2
+    return run_job_directory(Path(sys.argv[1]).resolve())
 
 
 if __name__ == "__main__":

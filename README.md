@@ -80,7 +80,234 @@ npm run dev
 
 Frontend will be available at: `http://localhost:5173`
 
-## Running Tests
+## Validation Workflow & Architecture
+
+### Overview
+
+Pegasus compares two CSV files (source and target) by matching rows using a shared **UID (Unique Identifier) column** and reports three types of mismatches:
+
+1. **Missing in Target**: Rows that exist in the source but not in target
+2. **Extra in Target**: Rows that exist in the target but not in source  
+3. **Value Mismatch**: Rows with matching UIDs but differing column values
+
+### End-to-End Validation Pipeline
+
+```
+CSV Files (Source & Target)
+    ↓
+[Step 1: CSV Reading & Parsing]
+    - Read CSV files with auto-detected or specified delimiters
+    - Parse data into Polars DataFrames
+    ↓
+[Step 2: Data Normalization]
+    - Convert data types and handle null values
+    - Standardize formatting
+    ↓
+[Step 3: UID-Based Reconciliation]
+    - Use shared UID column as join key
+    - Select reconciliation strategy based on file size
+    ↓
+[Step 4: Comparison & Mismatch Detection]
+    - Anti-join to find missing/extra rows
+    - Semi-join to identify value mismatches
+    - Store detailed mismatch records
+    ↓
+[Step 5: Report Generation]
+    - Create structured mismatch report
+    - Summary statistics (count of each type)
+    - Detailed row-level information for root-cause analysis
+    ↓
+Mismatch Report (NDJSON + Metrics)
+```
+
+### How Mismatches Are Detected
+
+#### 1. Missing in Target (Anti-Join)
+- **Logic**: Rows in source but no matching UID in target
+- **Detection Method**: Anti-join from source to target on UID column
+- **Example**:
+  ```
+  Source UID=123, Name="Alice"  →  Target has no UID=123  →  MISSING_IN_TARGET
+  ```
+
+#### 2. Extra in Target (Anti-Join)
+- **Logic**: Rows in target but no matching UID in source
+- **Detection Method**: Anti-join from target to source on UID column
+- **Example**:
+  ```
+  Target UID=456, Name="Bob"  →  Source has no UID=456  →  EXTRA_IN_TARGET
+  ```
+
+#### 3. Value Mismatch (Semi-Join with Column Comparison)
+- **Logic**: Same UID in both but column values differ
+- **Detection Method**: 
+  - Inner-join on UID to get matching rows
+  - Compare each selected column (IS DISTINCT FROM null-aware comparison)
+  - Report each mismatched column separately
+- **Example**:
+  ```
+  UID=789 | Source: Age=30, Status="Active"
+  UID=789 | Target: Age=31, Status="Active"  →  VALUE_MISMATCH on "Age" column
+  ```
+
+### Reconciliation Strategies
+
+Pegasus uses different strategies based on data size and characteristics:
+
+#### 1. **AUTO (Default)**
+- Automatically selects best strategy based on:
+  - Combined file size vs. memory threshold (default: 25MB)
+  - `assume_sorted` configuration
+- Recommendation: Use for most cases
+
+#### 2. **ORDERED_STREAM**
+- **Prerequisite**: Both CSV files must be globally sorted by UID
+- **Method**: Two-pointer merge (like merging sorted linked lists)
+- **Memory**: O(batch_size) - very efficient
+- **Best For**: Pre-sorted datasets, minimal memory constraints
+
+#### 3. **SLIDING_WINDOW**
+- **Prerequisite**: Data mostly sorted by UID (minor skew tolerated)
+- **Method**: Like ORDERED_STREAM but maintains sliding window look-ahead
+- **Window Size**: Configurable (default: 0 = disabled)
+- **Best For**: Nearly-sorted data with occasional out-of-order rows
+
+#### 4. **HASH_PARTITION**
+- **Method**: 
+  1. Hash each row: `bucket_id = hash(uid) % N` (N = partition_buckets)
+  2. Spill rows to disk partitions
+  3. Compare each bucket independently
+- **Storage**: Temporary disk space for spilled partitions
+- **Memory**: Bounded by chunk size and partition count
+- **Best For**: Large unsorted datasets, external memory scenarios
+
+#### 5. **EXTERNAL_SORT**
+- **Method**:
+  1. Sort source and target independently using external merge-sort
+  2. Run ORDERED_STREAM on sorted outputs
+- **Storage**: Temporary disk space for sorted chunks
+- **Best For**: Very large unsorted datasets with stable working directory
+
+### DuckDB Reconciliation Engine
+
+For very large files, Pegasus uses **DuckDB** for efficient external-memory joins:
+
+**Process**:
+1. **CSV Ingestion**: Load CSVs into DuckDB (optionally converting to Parquet for speed)
+2. **Partitioning**: Partition by UID hash into chunks that fit in memory
+3. **Partition Comparison**:
+   - For each partition pair (source & target):
+     - **Anti-join (Missing)**: `source LEFT ANTI JOIN target ON uid`
+     - **Anti-join (Extra)**: `target LEFT ANTI JOIN source ON uid`
+     - **Semi-join (Mismatch)**: `source INNER JOIN target ON uid`, then compare columns
+4. **Streaming Collection**: Stream mismatches to NDJSON format (avoids full RAM materialization)
+
+**Advantages**:
+- Handles 100GB+ files with moderate RAM
+- Efficient SQL query optimization
+- Disk-backed external joins
+- Memory-conscious streaming
+
+### Configuration Parameters
+
+**Key Environment Variables** (in `.env`):
+
+```bash
+# Reconciliation strategy
+VALIDATION_RECONCILIATION_STRATEGY=auto  # auto|ordered_stream|sliding_window|hash_partition|external_sort
+
+# Memory & Chunk Settings
+VALIDATION_RECONCILIATION_CHUNK_ROWS=500000
+VALIDATION_EXTERNAL_MEMORY_THRESHOLD_BYTES=26214400  # 25MB
+
+# Partitioning
+VALIDATION_RECONCILIATION_PARTITION_BUCKETS=64
+VALIDATION_RECONCILIATION_SUB_PARTITION_BUCKETS=1
+
+# Sorting Hints
+VALIDATION_RECONCILIATION_ASSUME_SORTED=false
+VALIDATION_RECONCILIATION_SLIDING_WINDOW=0
+
+# DuckDB Backend
+VALIDATION_RECONCILIATION_BACKEND=duckdb
+VALIDATION_DUCKDB_MEMORY_LIMIT_RATIO=0.8
+VALIDATION_DUCKDB_INGEST_CSV_TO_PARQUET=true
+VALIDATION_DUCKDB_RECONCILIATION_PARTITIONS=32
+
+# Temp Storage
+VALIDATION_RECONCILIATION_TEMP_DIR=/tmp/pegasus
+
+# Report Options
+VALIDATION_STREAM_MISMATCHES_TO_DISK=false  # Stream instead of materializing
+VALIDATION_RECONCILIATION_MISMATCH_NDJSON_MIRROR=false
+```
+
+### Mismatch Report Structure
+
+**Output Format**: NDJSON (one JSON object per line) or in-memory DataFrame
+
+**Each Mismatch Record**:
+```json
+{
+  "uid": "12345",
+  "mismatch_type": "value_mismatch",
+  "column_name": "status",
+  "source_value": "ACTIVE",
+  "target_value": "INACTIVE",
+  "row_detail": "{\"source_record\": {...}, \"target_record\": {...}}"
+}
+```
+
+**Report Summary**:
+```python
+{
+  "missing_in_target": 145,
+  "extra_in_target": 23,
+  "value_mismatch": 1087
+}
+```
+
+### API Endpoint
+
+**POST** `/api/v1/validate`
+
+Request:
+```json
+{
+  "source_path": "/data/source.csv",
+  "target_path": "/data/target.csv",
+  "uid_column": "customer_id",
+  "delimiter": ",",
+  "strategy": "auto"
+}
+```
+
+Response:
+```json
+{
+  "validation_run_id": "uuid-123",
+  "source_row_count": 1000000,
+  "target_row_count": 998500,
+  "compared_columns": ["name", "email", "status"],
+  "mismatch_summary": {
+    "missing_in_target": 2500,
+    "extra_in_target": 0,
+    "value_mismatch": 1200
+  }
+}
+```
+
+### Performance Considerations
+
+| Scenario | Recommended Strategy | Memory Need |
+|----------|----------------------|------------|
+| Small files (<100MB), unsorted | HASH_PARTITION | Low |
+| Small files, pre-sorted | ORDERED_STREAM | Very Low |
+| Large files (1GB+), unsorted | HASH_PARTITION + DuckDB | Moderate |
+| Very large files (100GB+) | EXTERNAL_SORT + DuckDB | Low |
+| Streaming ingestion | HASH_PARTITION with mismatch streaming | Low |
+
+### Running Tests
 
 ### Backend Tests
 

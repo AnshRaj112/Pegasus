@@ -238,6 +238,22 @@ class Settings(BaseSettings):
         le=3600,
         description="RSS logging interval in validation worker subprocesses; 0 disables the memory monitor thread.",
     )
+    validation_worker_pool_size: int = Field(
+        default=0,
+        ge=0,
+        le=32,
+        description=(
+            "When >0, reuse a ProcessPoolExecutor of that size for validation jobs (warmer imports). "
+            "When 0 (default), spawn a fresh subprocess per job."
+        ),
+    )
+    validation_duckdb_parallel_csv_ingest: bool = Field(
+        default=True,
+        description=(
+            "When True and using the DuckDB backend, ingest source+target CSV→Parquet in parallel "
+            "(each connection uses half the configured DuckDB memory ratio)."
+        ),
+    )
 
     def cors_origin_list(self) -> list[str]:
         raw = self.cors_origins.strip()

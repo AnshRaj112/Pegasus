@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import gc
-import json
 import logging
 import os
 import tempfile
+import threading
 import time
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 from typing import Annotated
 
@@ -17,6 +18,7 @@ from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile, stat
 from pegasus.api.deps import AppSettings
 from pegasus.core.config import Settings
 from pegasus.core.database import AsyncSessionLocal
+from pegasus.core.json_util import dumps_bytes, loads_str
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.schemas.validation import (
@@ -45,6 +47,35 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["validation"])
 
+_completed_job_cache: OrderedDict[uuid.UUID, tuple[float, ValidationJobDetailResponse]] = OrderedDict()
+_completed_job_lock = threading.Lock()
+_COMPLETED_JOB_CACHE_MAX = 256
+_COMPLETED_JOB_TTL_SEC = 120.0
+
+
+def _completed_job_cache_get(job_id: uuid.UUID) -> ValidationJobDetailResponse | None:
+    now = time.time()
+    with _completed_job_lock:
+        while len(_completed_job_cache) > _COMPLETED_JOB_CACHE_MAX:
+            _completed_job_cache.popitem(last=False)
+        hit = _completed_job_cache.get(job_id)
+        if not hit:
+            return None
+        t0, resp = hit
+        if now - t0 > _COMPLETED_JOB_TTL_SEC:
+            del _completed_job_cache[job_id]
+            return None
+        _completed_job_cache.move_to_end(job_id)
+        return resp.model_copy(deep=True)
+
+
+def _completed_job_cache_put(job_id: uuid.UUID, resp: ValidationJobDetailResponse) -> None:
+    with _completed_job_lock:
+        _completed_job_cache[job_id] = (time.time(), resp.model_copy(deep=True))
+        _completed_job_cache.move_to_end(job_id)
+        while len(_completed_job_cache) > _COMPLETED_JOB_CACHE_MAX:
+            _completed_job_cache.popitem(last=False)
+
 _DEFAULT_UPLOAD_SUFFIX = ".csv"
 # Larger reads reduce asyncio/Starlette overhead on huge uploads.
 _UPLOAD_READ_CHUNK_BYTES = 8 * 1024 * 1024
@@ -54,7 +85,7 @@ _UPLOAD_STATUS_EMIT_BYTES = 16 * 1024 * 1024
 
 def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    tmp.write_bytes(dumps_bytes(payload, indent=False))
     tmp.replace(path)
 
 
@@ -271,8 +302,8 @@ def _validation_jobs_root(settings: Settings) -> Path:
 
 
 def _run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.UUID | None]:
-    meta = json.loads((job_dir / "meta.json").read_text(encoding="utf-8"))
-    res = json.loads((job_dir / "result.json").read_text(encoding="utf-8"))
+    meta = loads_str((job_dir / "meta.json").read_text(encoding="utf-8"))
+    res = loads_str((job_dir / "result.json").read_text(encoding="utf-8"))
     rid = meta.get("run_id")
     run_uuid = uuid.UUID(str(rid)) if rid else None
     summary_raw = res.get("summary") or {}
@@ -444,7 +475,7 @@ async def validate_csv_files(
             "memory_log_interval_seconds": settings.validation_memory_log_interval_seconds,
             "run_id": str(run_id) if run_id else None,
         }
-        (job_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
         _atomic_write_json(
             status_path,
             {
@@ -458,9 +489,9 @@ async def validate_csv_files(
             },
         )
 
-        proc = BackgroundValidationRunner().start_job(job_dir)
+        proc = BackgroundValidationRunner(settings).start_job(job_dir)
         if proc.poll() is not None:
-            err = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
+            err = proc.failure_detail()
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Validation worker failed to start: {err}",
@@ -540,7 +571,7 @@ async def validate_csv_local_paths(
         "source_path": str(source_path),
         "target_path": str(target_path),
     }
-    (job_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
     _atomic_write_json(
         job_dir / "status.json",
         {
@@ -551,9 +582,9 @@ async def validate_csv_local_paths(
         },
     )
 
-    proc = BackgroundValidationRunner().start_job(job_dir)
+    proc = BackgroundValidationRunner(settings).start_job(job_dir)
     if proc.poll() is not None:
-        err = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
+        err = proc.failure_detail()
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Validation worker failed to start: {err}",
@@ -574,8 +605,8 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
     if not status_path.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown job_id")
     try:
-        st = json.loads(status_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+        st = loads_str(status_path.read_text(encoding="utf-8"))
+    except (UnicodeError, ValueError, TypeError, OSError):
         return ValidationJobDetailResponse(status="running", phase="updating", message="Refreshing job status")
     status_val = str(st.get("status") or "unknown")
     phase = st.get("phase")
@@ -610,7 +641,19 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
             error="completed but result.json missing",
         )
 
+    cached = _completed_job_cache_get(job_id)
+    if cached is not None:
+        return cached
+
     run_result, rid = _run_result_from_job_dir(job_dir)
     await _maybe_persist_completed_job(settings, run_id=rid, run_result=run_result)
     payload = _build_validate_response(settings=settings, run_result=run_result, run_id=rid)
-    return ValidationJobDetailResponse(status="completed", phase=phase, message=message, progress=progress, result=payload)
+    detail = ValidationJobDetailResponse(
+        status="completed",
+        phase=phase,
+        message=message,
+        progress=progress,
+        result=payload,
+    )
+    _completed_job_cache_put(job_id, detail)
+    return detail

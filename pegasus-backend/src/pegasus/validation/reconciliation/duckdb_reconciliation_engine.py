@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,6 +14,7 @@ from pegasus.validation.comparators.models import MismatchReport, MismatchType, 
 from .config import ReconciliationRuntimeConfig, ReconciliationStrategy
 from .csv_ingestion_pipeline import CSVIngestionPipeline
 from .disk_guard import ensure_disk_headroom
+from .duckdb_session import configure_duckdb_connection
 from .exceptions import ReconciliationError
 from .metrics import NoOpReconciliationMetrics, ReconciliationMetrics
 from .parquet_converter import merge_ndjson_chunk_files, path_sql_literal, _delim_sql_literal
@@ -31,49 +31,6 @@ def _quote_sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _total_ram_bytes() -> int | None:
-    try:
-        pages = os.sysconf("SC_PHYS_PAGES")
-        page_size = os.sysconf("SC_PAGE_SIZE")
-        if isinstance(pages, int) and isinstance(page_size, int) and pages > 0 and page_size > 0:
-            return pages * page_size
-    except (ValueError, OSError, AttributeError):
-        pass
-    return None
-
-
-def _network_fs_types() -> set[str]:
-    return {"nfs", "nfs4", "cifs", "smb3", "fuse.sshfs", "ceph", "glusterfs", "lustre"}
-
-
-def _path_on_network_fs(path: Path) -> bool:
-    try:
-        mounts = Path("/proc/mounts").read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return False
-    target = path.resolve()
-    best_mount = ""
-    best_type = ""
-    for line in mounts:
-        parts = line.split()
-        if len(parts) < 3:
-            continue
-        mount_point = parts[1].replace("\\040", " ")
-        fs_type = parts[2]
-        try:
-            mp = Path(mount_point).resolve()
-        except OSError:
-            continue
-        try:
-            target.relative_to(mp)
-        except ValueError:
-            continue
-        if len(str(mp)) > len(best_mount):
-            best_mount = str(mp)
-            best_type = fs_type
-    return best_type in _network_fs_types()
-
-
 def _fetch_explain_text(con: duckdb.DuckDBPyConnection, sql: str, params: list[object]) -> str:
     rows = con.execute(f"EXPLAIN ANALYZE {sql}", params).fetchall()
     if not rows:
@@ -84,43 +41,6 @@ def _fetch_explain_text(con: duckdb.DuckDBPyConnection, sql: str, params: list[o
             continue
         pieces.append(str(row[-1]))
     return "\n".join(pieces) if pieces else str(rows)
-
-
-def _configure_connection(
-    con: duckdb.DuckDBPyConnection,
-    workspace: Path,
-    cfg: ReconciliationRuntimeConfig,
-    *,
-    source_path: Path,
-    target_path: Path,
-) -> None:
-    con.execute("SET temp_directory = ?", [str(workspace)])
-    total_ram = _total_ram_bytes()
-    if total_ram is not None:
-        reserve = max(0, int(cfg.duckdb_memory_os_reserve_bytes))
-        usable = max(256 * 1024 * 1024, total_ram - reserve)
-        mem_bytes = max(256 * 1024 * 1024, int(usable * cfg.duckdb_memory_limit_ratio))
-        con.execute("SET memory_limit = ?", [f"{mem_bytes}B"])
-        logger.info(
-            "DuckDB memory_limit=%sB (phys_ram=%s reserve=%s ratio=%s)",
-            mem_bytes,
-            total_ram,
-            reserve,
-            cfg.duckdb_memory_limit_ratio,
-        )
-
-    network_io = _path_on_network_fs(source_path) or _path_on_network_fs(target_path)
-    if network_io:
-        threads = max(1, min(cfg.duckdb_network_threads, int(os.cpu_count() or 1)))
-        con.execute("SET threads = ?", [threads])
-        logger.info("DuckDB using network-I/O mode threads=%d", threads)
-    else:
-        threads = cfg.duckdb_local_threads if cfg.duckdb_local_threads > 0 else max(1, int(os.cpu_count() or 1))
-        con.execute("SET threads = ?", [threads])
-        if cfg.duckdb_enable_object_cache:
-            con.execute("SET enable_object_cache = true")
-
-    con.execute("SET preserve_insertion_order = false")
 
 
 def _partition_dup_probe(
@@ -459,7 +379,7 @@ class DuckDBReconciliationEngine:
         con = duckdb.connect(database=":memory:")
         try:
             emit("duckdb_init", "Initializing DuckDB runtime", 2.0)
-            _configure_connection(con, workspace, cfg, source_path=source_path, target_path=target_path)
+            configure_duckdb_connection(con, workspace, cfg, source_path=source_path, target_path=target_path)
 
             if not cfg.duckdb_ingest_csv_to_parquet:
                 logger.warning(

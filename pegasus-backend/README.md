@@ -190,6 +190,224 @@ pegasus-backend/
 - `GET /api/v1/validation/runs/{run_id}` - Get specific validation run details
 - `GET /api/v1/validation/runs/{run_id}/mismatches` - Get mismatch records for a validation run
 
+## Validation Engine Architecture
+
+### Core Components
+
+#### 1. **CSV Reader** (`validation/readers/`)
+- **PolarsCSVReader**: Reads CSV files using Polars
+- **Auto-Detection**: Supports automatic delimiter detection
+- **Handles**: Various encodings, missing columns, data type inference
+
+#### 2. **UID-Based Comparator** (`validation/comparators/uid_based.py`)
+- **Main Logic**: 
+  ```python
+  def compare_dataframes(
+      source, target, 
+      uid_column="id", 
+      compare_columns=["col1", "col2"]
+  )
+  ```
+- **Comparison Operations**:
+  1. Anti-join on `uid_column` to find **MISSING_IN_TARGET** rows
+  2. Anti-join to find **EXTRA_IN_TARGET** rows
+  3. Inner-join + column comparison for **VALUE_MISMATCH** rows
+
+#### 3. **Reconciliation Coordinator** (`validation/reconciliation/coordinator.py`)
+- **Orchestrates** strategy selection and execution
+- **Selects** best strategy based on:
+  - File size vs. memory threshold
+  - `assume_sorted` configuration
+  - Available disk space
+- **Manages** temporary workspace and cleanup
+
+#### 4. **DuckDB Reconciliation Engine** (`validation/reconciliation/duckdb_reconciliation_engine.py`)
+- **External Memory Joins**: Handles datasets larger than RAM
+- **Process**:
+  1. Ingest CSVs → optionally convert to Parquet
+  2. Partition by `hash(uid) % N`
+  3. Run comparison queries per partition
+  4. Stream results to NDJSON
+- **Key Methods**:
+  - `_partition_dup_probe()`: Detect duplicate UIDs
+  - `_export_partition_mismatches()`: Generate mismatch records
+
+#### 5. **Partition Comparator** (`validation/reconciliation/partition_comparator.py`)
+- **Handles** comparison of individual partitions
+- **Sub-partitioning**: Optional secondary bucketing for skewed data
+- **Sort-Merge**: Compares shards within each partition
+
+#### 6. **External Merge Sort** (`validation/reconciliation/external_merge_sort.py`)
+- **For**: Very large unsorted datasets
+- **Process**:
+  1. Read CSV in chunks
+  2. Sort each chunk independently
+  3. Spill sorted chunks to disk
+  4. Merge sorted chunks during read-back
+
+### Mismatch Detection Logic
+
+#### Finding Missing Rows (ANTI-JOIN)
+```sql
+-- DuckDB equivalent
+SELECT source.uid
+FROM source
+ANTI JOIN target ON source.uid = target.uid
+```
+- Returns UIDs that exist in source but not in target
+- Each represents a **MISSING_IN_TARGET** mismatch
+
+#### Finding Extra Rows (ANTI-JOIN)
+```sql
+-- DuckDB equivalent
+SELECT target.uid
+FROM target
+ANTI JOIN source ON target.uid = source.uid
+```
+- Returns UIDs that exist in target but not in source
+- Each represents an **EXTRA_IN_TARGET** mismatch
+
+#### Finding Value Mismatches (COLUMN COMPARISON)
+```sql
+-- DuckDB equivalent
+SELECT source.uid, 'column_name' AS column_name, 
+       source.column_name, target.column_name
+FROM source
+INNER JOIN target ON source.uid = target.uid
+WHERE source.column_name IS DISTINCT FROM target.column_name
+```
+- Finds rows with matching UIDs but differing values
+- `IS DISTINCT FROM` handles NULL comparisons correctly
+- Each differing column generates a separate **VALUE_MISMATCH** record
+
+### Data Flow Through Pipeline
+
+```
+1. ValidationService.validate_csv_pair()
+   ├─ Detect delimiter (if auto)
+   ├─ Load CSV files (Polars)
+   ├─ Select reconciliation strategy (Coordinator)
+   └─ Execute comparison
+
+2. ReconciliationCoordinator
+   ├─ Check file sizes
+   ├─ Decide: In-Memory vs. Disk-Backed
+   └─ Route to appropriate engine
+
+3. For Small Files (In-Memory):
+   ├─ Load both CSVs into Polars DataFrames
+   ├─ Call UIDBasedComparator.compare_dataframes()
+   └─ Return MismatchReport
+
+4. For Large Files (Disk-Backed):
+   ├─ DuckDBReconciliationEngine.run()
+   ├─ Hash-partition or sort files
+   ├─ Process partitions sequentially
+   ├─ Stream mismatches to NDJSON
+   └─ Return MismatchReport with artifact path
+
+5. MismatchReport
+   ├─ DataFrame with all mismatches
+   ├─ Summary stats (counts by type)
+   └─ Optional NDJSON artifact file
+```
+
+### Configuration Details
+
+**Reconciliation Strategies** (in `.env`):
+
+```bash
+# AUTO: Automatically chooses based on file size
+VALIDATION_RECONCILIATION_STRATEGY=auto
+
+# ORDERED_STREAM: For pre-sorted CSV files (fastest if applicable)
+VALIDATION_RECONCILIATION_STRATEGY=ordered_stream
+
+# SLIDING_WINDOW: For mostly-sorted files with minor skew
+VALIDATION_RECONCILIATION_STRATEGY=sliding_window
+VALIDATION_RECONCILIATION_SLIDING_WINDOW=1000
+
+# HASH_PARTITION: For unsorted large files
+VALIDATION_RECONCILIATION_STRATEGY=hash_partition
+VALIDATION_RECONCILIATION_PARTITION_BUCKETS=64
+
+# EXTERNAL_SORT: For very large unsorted files
+VALIDATION_RECONCILIATION_STRATEGY=external_sort
+VALIDATION_RECONCILIATION_CHUNK_ROWS=500000
+```
+
+**Memory Management**:
+
+```bash
+# Trigger external memory strategies at this threshold
+VALIDATION_EXTERNAL_MEMORY_THRESHOLD_BYTES=26214400  # 25MB
+
+# DuckDB memory limit (ratio of available system memory)
+VALIDATION_DUCKDB_MEMORY_LIMIT_RATIO=0.8
+
+# Chunk size for reading/spilling
+VALIDATION_RECONCILIATION_CHUNK_ROWS=500000
+
+# Partition count for hash partitioning
+VALIDATION_RECONCILIATION_PARTITION_BUCKETS=64
+
+# Secondary hash buckets for skewed data
+VALIDATION_RECONCILIATION_SUB_PARTITION_BUCKETS=1
+
+# Reserve disk space headroom multiplier
+VALIDATION_RECONCILIATION_DISK_HEADROOM_MULTIPLIER=2.0
+```
+
+**Performance Tuning**:
+
+```bash
+# Assume CSVs are sorted by UID (enables faster streaming algorithms)
+VALIDATION_RECONCILIATION_ASSUME_SORTED=false
+
+# Enable streaming mismatches to disk (reduce peak memory)
+VALIDATION_STREAM_MISMATCHES_TO_DISK=false
+
+# DuckDB-specific optimizations
+VALIDATION_DUCKDB_INGEST_CSV_TO_PARQUET=true
+VALIDATION_DUCKDB_PARALLEL_CSV_INGEST=true
+VALIDATION_DUCKDB_LOCAL_THREADS=4
+VALIDATION_DUCKDB_NETWORK_THREADS=1
+
+# Row group size for Parquet conversion
+VALIDATION_DUCKDB_PARQUET_ROW_GROUP_SIZE=65536
+```
+
+### Mismatch Report Output
+
+**Structure**:
+```python
+MismatchReport(
+    mismatches: DataFrame[uid, mismatch_type, column_name, source_value, target_value, row_detail],
+    summary: {
+        "missing_in_target": int,
+        "extra_in_target": int,
+        "value_mismatch": int
+    },
+    mismatch_artifact_path: Path (optional NDJSON file)
+)
+```
+
+**Example NDJSON Output** (`mismatches.ndjson`):
+```json
+{"uid":"USR001","mismatch_type":"missing_in_target","column_name":null,"source_value":null,"target_value":null,"row_detail":"{\"source_record\":{...},\"target_record\":null}"}
+{"uid":"ORD002","mismatch_type":"extra_in_target","column_name":null,"source_value":null,"target_value":null,"row_detail":"{\"source_record\":null,\"target_record\":{...}}"}
+{"uid":"INV003","mismatch_type":"value_mismatch","column_name":"amount","source_value":"100.50","target_value":"100.75","row_detail":"{\"source_record\":{...},\"target_record\":{...}}"}
+```
+
+### Error Handling
+
+**Key Exceptions**:
+- `CSVFileNotFoundError`: Input file doesn't exist
+- `CSVParseError`: Invalid CSV format
+- `UIDComparisonError`: Duplicate UIDs found
+- `ReconciliationError`: Strategy-specific issues
+- `ValidationBadRequestError`: Invalid request parameters
+
 ## Running Tests
 
 Run all tests:

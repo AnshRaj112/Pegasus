@@ -28,7 +28,9 @@ def _fmt_upload_limit(n: int) -> str:
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     yield
     from pegasus.core.database import dispose_engine
+    from pegasus.services.validation_worker_pool import shutdown_validation_worker_pool
 
+    shutdown_validation_worker_pool(wait=True)
     await dispose_engine()
 
 

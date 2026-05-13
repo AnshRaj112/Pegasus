@@ -106,6 +106,7 @@ class ValidationService:
             duckdb_ingest_csv_to_parquet=self._settings.validation_duckdb_ingest_csv_to_parquet,
             duckdb_parquet_row_group_size=self._settings.validation_duckdb_parquet_row_group_size,
             duckdb_reconciliation_partitions=self._settings.validation_duckdb_reconciliation_partitions,
+            duckdb_parallel_csv_ingest=self._settings.validation_duckdb_parallel_csv_ingest,
             artifact_export_path=artifact_export,
         )
 
@@ -169,6 +170,22 @@ class ValidationService:
                 logger.info(
                     "Scaled partition buckets for large inputs: %d (combined_bytes=%d)",
                     scaled,
+                    combined_bytes,
+                )
+
+        if not use_multichar_streaming and rcfg.backend == ReconciliationBackend.DUCKDB:
+            base_rg = rcfg.duckdb_parquet_row_group_size
+            if combined_bytes >= 20 * 1024 * 1024 * 1024:
+                tuned_rg = min(10_000_000, max(base_rg, 2_097_152))
+            elif combined_bytes >= 512 * 1024 * 1024:
+                tuned_rg = min(4_000_000, max(base_rg, 1_572_864))
+            else:
+                tuned_rg = base_rg
+            if tuned_rg != base_rg:
+                rcfg = rcfg.model_copy(update={"duckdb_parquet_row_group_size": int(tuned_rg)})
+                logger.info(
+                    "Tuned DuckDB parquet row_group_size to %d for combined_bytes=%d",
+                    tuned_rg,
                     combined_bytes,
                 )
 

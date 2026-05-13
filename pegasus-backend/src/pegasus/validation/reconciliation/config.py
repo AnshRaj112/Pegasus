@@ -163,6 +163,13 @@ class ReconciliationRuntimeConfig(BaseModel):
             "Smaller joins per round reduce peak memory vs one global join."
         ),
     )
+    duckdb_parallel_csv_ingest: bool = Field(
+        default=True,
+        description=(
+            "When True, DuckDB CSV→Parquet ingest runs source and target in parallel threads "
+            "(each with its own DuckDB connection; memory_limit is halved per connection)."
+        ),
+    )
     artifact_export_path: Path | None = Field(
         default=None,
         description="When set, streaming mismatch NDJSON is copied here before the spill workspace is removed.",

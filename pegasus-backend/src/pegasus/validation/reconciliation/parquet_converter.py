@@ -82,7 +82,30 @@ def csv_to_partitioned_parquet(
     )
 
 
+def _parquet_row_count_from_metadata(con: duckdb.DuckDBPyConnection, parquet_path: Path) -> int | None:
+    """Row count from Parquet footers only (avoids a full table scan)."""
+    lit = _path_sql_literal(parquet_path)
+    sql = f"""
+        SELECT COALESCE(sum(rg_rows), 0)::BIGINT
+        FROM (
+            SELECT row_group_id, max(row_group_num_rows) AS rg_rows
+            FROM parquet_metadata({lit})
+            GROUP BY row_group_id
+        ) s
+    """
+    try:
+        row = con.execute(sql).fetchone()
+        if row and row[0] is not None:
+            return int(row[0])
+    except Exception as exc:
+        logger.warning("parquet_metadata row count failed for %s, falling back to scan: %s", parquet_path, exc)
+    return None
+
+
 def parquet_row_count(con: duckdb.DuckDBPyConnection, parquet_path: Path) -> int:
+    fast = _parquet_row_count_from_metadata(con, parquet_path)
+    if fast is not None:
+        return fast
     lit = _path_sql_literal(parquet_path)
     return int(con.execute(f"SELECT count(*) FROM read_parquet({lit})").fetchone()[0])
 
