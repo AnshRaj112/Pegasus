@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 .app-header {
   padding: 28px 20px 8px;
   text-align: center;

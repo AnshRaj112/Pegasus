@@ -291,15 +291,6 @@ export function ValidationPanel() {
 
   return (
     <div className="validation-panel">
-      <p className="validation-lead">
-        Upload <strong>source</strong> (expected) and <strong>target</strong>{' '}
-        (actual) CSV files.         The UI calls{' '}
-        <code className="validation-code">POST /api/v1/validate</code> — the API
-        returns <strong>202 Accepted</strong> and runs validation in a background
-        worker; the UI polls until results are ready. Leave delimiter as{' '}
-        <code className="validation-code">auto</code> unless you need an override.
-      </p>
-
       <form className="validation-form" onSubmit={handleSubmit}>
         <label className="validation-field">
           <span className="validation-label">Input mode</span>
@@ -465,14 +456,14 @@ export function ValidationPanel() {
           </div>
         ) : null}
 
-        {phase === 'idle' ? (
+        {/* {phase === 'idle' ? (
           <p className="validation-status-hint">
             Start the API on port <code>8000</code> and use{' '}
             <code>npm run dev</code> so requests proxy to <code>/api</code>. For
             very large files already on server disk, switch to{' '}
             <strong>Use server local file paths</strong> to skip uploads.
           </p>
-        ) : null}
+        ) : null} */}
 
         {phase === 'success' && result ? (
           <div className="validation-result validation-result-success">
