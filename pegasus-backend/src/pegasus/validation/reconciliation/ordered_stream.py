@@ -20,49 +20,11 @@ from .mismatch_collector import MismatchSink, compare_aligned_row_dicts
 logger = logging.getLogger(__name__)
 
 
-class _RowCursor:
-    """Sequential row iterator over Polars ``collect_batches`` streams."""
+from more_itertools import peekable
 
-    __slots__ = ("_uid_column", "_it", "_batch", "_idx", "_rows_dicts")
-
-    def __init__(self, batch_iter: Iterator[pl.DataFrame], *, uid_column: str) -> None:
-        self._uid_column = uid_column
-        self._it = batch_iter
-        self._batch: pl.DataFrame | None = None
-        self._idx = 0
-        self._rows_dicts: list[dict[str, Any]] | None = None
-
-    def _load_next_batch(self) -> bool:
-        try:
-            self._batch = next(self._it)
-        except StopIteration:
-            self._batch = None
-            self._rows_dicts = None
-            self._idx = 0
-            return False
-        self._rows_dicts = self._batch.to_dicts()
-        self._idx = 0
-        return True
-
-    def _ensure(self) -> bool:
-        if self._batch is None and self._rows_dicts is None:
-            return self._load_next_batch()
-        if self._rows_dicts is not None and self._idx >= len(self._rows_dicts):
-            return self._load_next_batch()
-        return self._batch is not None and self._rows_dicts is not None
-
-    def peek(self) -> dict[str, Any] | None:
-        if not self._ensure():
-            return None
-        assert self._rows_dicts is not None
-        return self._rows_dicts[self._idx]
-
-    def pop(self) -> dict[str, Any] | None:
-        row = self.peek()
-        if row is None:
-            return None
-        self._idx += 1
-        return row
+def _batch_to_dict_iter(batch_iter: Iterator[pl.DataFrame]) -> Iterator[dict[str, Any]]:
+    for batch in batch_iter:
+        yield from batch.to_dicts()
 
 
 def merge_sorted_csv_streams(
@@ -296,19 +258,19 @@ def _merge_parquet_sliding(
     m = metrics or NoOpReconciliationMetrics()
     src_it = pl.scan_parquet(source_path).collect_batches(chunk_size=batch_rows, engine="streaming")
     tgt_it = pl.scan_parquet(target_path).collect_batches(chunk_size=batch_rows, engine="streaming")
-    src_cursor = _RowCursor(src_it, uid_column=uid_column)
-    tgt_cursor = _RowCursor(tgt_it, uid_column=uid_column)
+    src_cursor = peekable(_batch_to_dict_iter(src_it))
+    tgt_cursor = peekable(_batch_to_dict_iter(tgt_it))
 
     src_buf: deque[dict[str, Any]] = deque()
     tgt_buf: deque[dict[str, Any]] = deque()
 
-    def _fill_side(buf: deque[dict[str, Any]], cur: _RowCursor, *, max_total: int) -> None:
+    def _fill_side(buf: deque[dict[str, Any]], cur: peekable, *, max_total: int) -> None:
         while len(buf) < max_total:
-            row = cur.peek()
+            row = cur.peek(None)
             if row is None:
                 return
             buf.append(row)
-            cur.pop()
+            next(cur)
 
     src_rows = tgt_rows = 0
     m.on_phase_start("sliding_window_parquet_merge", window=window)

@@ -87,6 +87,10 @@ def _compare_spilled_hash_partitions(
 ) -> None:
     """Walk spilled Parquet shards (optional sub-buckets) and run sort-merge per cell."""
     sub = cfg.sub_partition_buckets
+    logger.info(
+        "Starting hash-partition reconciliation comparison (buckets=%d, sub_buckets=%d, parallel=%s)",
+        cfg.partition_buckets, sub, cfg.parallel_partition_comparison
+    )
     
     # Prepare partition tasks
     tasks = []
@@ -112,52 +116,48 @@ def _compare_spilled_hash_partitions(
 
     # Use parallel processes if enabled, otherwise sequential
     if cfg.parallel_partition_comparison and len(tasks) > 1:
-        logger.info("Comparing %d partitions in parallel using ProcessPoolExecutor", len(tasks))
-        worker_dir = workspace / "workers"
-        worker_dir.mkdir(parents=True, exist_ok=True)
+        from joblib import Parallel, delayed
         
         # Limit workers to avoid thread thrashing on limited core systems
         max_workers = max(1, (os.cpu_count() or 4) - 1)
         
-        with ProcessPoolExecutor(max_workers=max_workers) as pool:
-            futures = []
-            for pid, sid, src_files, tgt_files in tasks:
-                worker_out = worker_dir / f"mismatch_{pid}_{sid}.ndjson"
-                futures.append(pool.submit(
-                    _run_partition_worker,
-                    workspace=workspace,
-                    partition_id=pid,
-                    sub_partition_id=sid,
-                    source_shards=src_files,
-                    target_shards=tgt_files,
-                    uid_column=uid_column,
-                    compare_columns=compare_columns,
-                    chunk_rows=cfg.chunk_rows,
-                    out_path=worker_out,
-                ))
+        logger.info("Comparing %d partitions in parallel using Joblib (max_workers=%d)", len(tasks), max_workers)
+        worker_dir = workspace / "workers"
+        worker_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Parallel execution with joblib
+        results = Parallel(n_jobs=max_workers, prefer="processes")(
+            delayed(_run_partition_worker)(
+                workspace=workspace,
+                partition_id=pid,
+                sub_partition_id=sid,
+                source_shards=src_files,
+                target_shards=tgt_files,
+                uid_column=uid_column,
+                compare_columns=compare_columns,
+                chunk_rows=cfg.chunk_rows,
+                out_path=worker_dir / f"mismatch_{pid}_{sid}.ndjson"
+            )
+            for pid, sid, src_files, tgt_files in tasks
+        )
+        
+        for p_id, s_id, count, worker_path in results:
+            if count > 0 and worker_path.exists():
+                # Use bulk append to merge worker results efficiently
+                if hasattr(collector, "bulk_append_from_frame"):
+                    worker_df = pl.read_ndjson(worker_path)
+                    collector.bulk_append_from_frame(worker_df)
+                elif isinstance(collector, StreamingMismatchCollector):
+                    with open(worker_path, "rb") as f_in:
+                        with open(collector._path, "ab") as f_out:
+                            shutil.copyfileobj(f_in, f_out)
+                else:
+                    import json
+                    with open(worker_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            collector._apply_raw_mismatch(json.loads(line))
             
-            for fut in as_completed(futures):
-                try:
-                    p_id, s_id, count, worker_path = fut.result()
-                    if count > 0 and worker_path.exists():
-                        # Use bulk append to merge worker results efficiently
-                        if hasattr(collector, "bulk_append_from_frame"):
-                            worker_df = pl.read_ndjson(worker_path)
-                            collector.bulk_append_from_frame(worker_df)
-                        elif isinstance(collector, StreamingMismatchCollector):
-                            with open(worker_path, "rb") as f_in:
-                                with open(collector._path, "ab") as f_out:
-                                    shutil.copyfileobj(f_in, f_out)
-                        else:
-                            import json
-                            with open(worker_path, "r", encoding="utf-8") as f:
-                                for line in f:
-                                    collector._apply_raw_mismatch(json.loads(line))
-                    
-                    metrics.on_partition_done(p_id, sub_partitions=sub if sub > 1 else 0)
-                except Exception as exc:
-                    logger.error("Partition worker failed: %s", exc)
-                    raise ReconciliationError("Parallel partition comparison failed") from exc
+            metrics.on_partition_done(p_id, sub_partitions=sub if sub > 1 else 0)
     else:
         part_cmp = PartitionComparator(metrics=metrics)
         for pid, sid, src_files, tgt_files in tasks:

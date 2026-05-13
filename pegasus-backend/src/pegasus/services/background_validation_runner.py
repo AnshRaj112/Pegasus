@@ -93,12 +93,13 @@ class BackgroundValidationRunner:
             env["PYTHONPATH"] = root if not prev else f"{root}{os.pathsep}{prev}"
             cmd = [sys.executable, "-m", "pegasus.validation.job_worker", str(job_dir)]
             logger.info("Starting validation worker cmd=%s cwd=%s log=%s", cmd, job_dir.parent, log_path)
+            # Use subprocess.PIPE or None to inherit stdout/stderr so logs are visible in terminal
             proc = subprocess.Popen(
                 cmd,
                 cwd=str(job_dir.parent),
                 env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=log_f,
+                stdout=None, 
+                stderr=subprocess.STDOUT,
                 close_fds=True,
             )
         finally:

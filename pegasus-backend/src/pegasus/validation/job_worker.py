@@ -43,8 +43,11 @@ def _configure_file_logging(job_dir: Path) -> None:
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
     fh.setFormatter(fmt)
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(fmt)
     root.handlers.clear()
     root.addHandler(fh)
+    root.addHandler(sh)
     root.setLevel(logging.INFO)
 
 
@@ -154,6 +157,15 @@ def run_job_directory(job_dir: Path) -> int:
             artifact_export_parent=job_dir,
             progress_callback=_progress_cb,
         )
+        end = time.time()
+        validation_duration = end - start
+        upload_duration = float(meta.get("upload_duration_seconds") or 0)
+        
+        logger.info(
+            "Validation complete job_dir=%s upload=%.2fs validation=%.2fs total=%.2fs",
+            job_dir.name, upload_duration, validation_duration, upload_duration + validation_duration
+        )
+        
         artifact = result.mismatch_artifact_path or result.report.mismatch_artifact_path
         out = {
             "source_row_count": result.source_row_count,
@@ -162,6 +174,11 @@ def run_job_directory(job_dir: Path) -> int:
             "compared_columns": result.compared_columns,
             "summary": dict(result.report.summary),
             "mismatch_artifact_rel": artifact.name if artifact and artifact.is_file() else None,
+            "durations": {
+                "upload_seconds": upload_duration,
+                "validation_seconds": validation_duration,
+                "total_seconds": upload_duration + validation_duration,
+            }
         }
         _write_json(job_dir / "result.json", out, indent=True)
         _write_json(
@@ -176,6 +193,8 @@ def run_job_directory(job_dir: Path) -> int:
                     "source_row_count": result.source_row_count,
                     "target_row_count": result.target_row_count,
                     "total_mismatch_records": int(sum(result.report.summary.values())),
+                    "upload_seconds": upload_duration,
+                    "validation_seconds": validation_duration,
                 },
             },
         )
