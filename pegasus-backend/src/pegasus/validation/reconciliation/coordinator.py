@@ -113,12 +113,13 @@ def _compare_spilled_hash_partitions(
     # Use parallel processes if enabled, otherwise sequential
     if cfg.parallel_partition_comparison and len(tasks) > 1:
         logger.info("Comparing %d partitions in parallel using ProcessPoolExecutor", len(tasks))
-        # Since collectors/metrics are complex, we have each worker write to a separate NDJSON 
-        # and then merge them. This avoids serialization/pickle issues.
         worker_dir = workspace / "workers"
         worker_dir.mkdir(parents=True, exist_ok=True)
         
-        with ProcessPoolExecutor() as pool:
+        # Limit workers to avoid thread thrashing on limited core systems
+        max_workers = max(1, (os.cpu_count() or 4) - 1)
+        
+        with ProcessPoolExecutor(max_workers=max_workers) as pool:
             futures = []
             for pid, sid, src_files, tgt_files in tasks:
                 worker_out = worker_dir / f"mismatch_{pid}_{sid}.ndjson"
@@ -139,15 +140,15 @@ def _compare_spilled_hash_partitions(
                 try:
                     p_id, s_id, count, worker_path = fut.result()
                     if count > 0 and worker_path.exists():
-                        # Append worker results to main collector
-                        # (Assumes StreamingMismatchCollector can merge or we just manually append files)
-                        if isinstance(collector, StreamingMismatchCollector):
+                        # Use bulk append to merge worker results efficiently
+                        if hasattr(collector, "bulk_append_from_frame"):
+                            worker_df = pl.read_ndjson(worker_path)
+                            collector.bulk_append_from_frame(worker_df)
+                        elif isinstance(collector, StreamingMismatchCollector):
                             with open(worker_path, "rb") as f_in:
                                 with open(collector._path, "ab") as f_out:
                                     shutil.copyfileobj(f_in, f_out)
                         else:
-                            # For in-memory collector, we'd need to parse the NDJSON back
-                            # but usually we use streaming for large files.
                             import json
                             with open(worker_path, "r", encoding="utf-8") as f:
                                 for line in f:
@@ -187,6 +188,9 @@ def _run_partition_worker(
     out_path: Path,
 ) -> tuple[int, int, int, Path]:
     """Independent worker function for ProcessPoolExecutor."""
+    # Crucial for Linux: prevent nested parallelism from thrashing the 4 CPU cores
+    os.environ["POLARS_MAX_THREADS"] = "1"
+    
     # Create a transient collector for this worker
     from .streaming_mismatch_collector import StreamingMismatchCollector
     worker_collector = StreamingMismatchCollector(out_path)

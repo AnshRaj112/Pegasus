@@ -79,69 +79,83 @@ def merge_sorted_csv_streams(
 ) -> tuple[int, int]:
     """Two-pointer merge for **globally sorted** UTF-8 CSV inputs (``window=0`` semantics)."""
     m = metrics or NoOpReconciliationMetrics()
+    m.on_phase_start("vectorized_csv_merge", source=str(source_path), target=str(target_path))
+    
+    # Use Polars to read both sorted CSVs and join them
     read_opts: dict[str, object] = {
         "separator": delimiter,
-        "encoding": "utf-8",
         "has_header": True,
+        "encoding": "utf8-lossy",
     }
+    
+    src_lf = pl.scan_csv(str(source_path), **read_opts)
+    tgt_lf = pl.scan_csv(str(target_path), **read_opts)
+    
+    # Join
+    joined = src_lf.join(tgt_lf, on=uid_column, how="outer", suffix="_target")
+    
+    # 1. Missing
+    missing = joined.filter(pl.col(f"{uid_column}_target").is_null()).select([
+        pl.col(uid_column).cast(pl.String).alias("uid"),
+        pl.lit("missing_in_target").alias("mismatch_type"),
+        pl.lit(None, dtype=pl.String).alias("column_name"),
+        pl.lit(None, dtype=pl.String).alias("source_value"),
+        pl.lit(None, dtype=pl.String).alias("target_value"),
+        pl.lit("{}", dtype=pl.String).alias("row_detail")
+    ])
+    
+    # 2. Extra
+    extra = joined.filter(pl.col(uid_column).is_null()).select([
+        pl.col(f"{uid_column}_target").cast(pl.String).alias("uid"),
+        pl.lit("extra_in_target").alias("mismatch_type"),
+        pl.lit(None, dtype=pl.String).alias("column_name"),
+        pl.lit(None, dtype=pl.String).alias("source_value"),
+        pl.lit(None, dtype=pl.String).alias("target_value"),
+        pl.lit("{}", dtype=pl.String).alias("row_detail")
+    ])
+    
+    # 3. Value Mismatch
+    both = joined.filter(pl.col(uid_column).is_not_null() & pl.col(f"{uid_column}_target").is_not_null())
+    mismatch_dfs = []
+    for col in compare_columns:
+        col_mismatch = both.filter(
+            (pl.col(col) != pl.col(f"{col}_target")) | (pl.col(col).is_null() != pl.col(f"{col}_target").is_null())
+        ).select([
+            pl.col(uid_column).cast(pl.String).alias("uid"),
+            pl.lit("value_mismatch").alias("mismatch_type"),
+            pl.lit(col).alias("column_name"),
+            pl.col(col).cast(pl.String).alias("source_value"),
+            pl.col(f"{col}_target").cast(pl.String).alias("target_value"),
+            pl.lit("{}", dtype=pl.String).alias("row_detail")
+        ])
+        mismatch_dfs.append(col_mismatch)
 
-    def _batches(path: Path) -> Iterator[pl.DataFrame]:
-        return iter(reader.iter_batches(path, batch_size=batch_rows, read_options=read_opts))
+    src_rows = src_lf.select(pl.len()).collect().item()
+    tgt_rows = tgt_lf.select(pl.len()).collect().item()
 
-    src_cursor = _RowCursor(_batches(source_path), uid_column=uid_column)
-    tgt_cursor = _RowCursor(_batches(target_path), uid_column=uid_column)
-
-    src_rows = 0
-    tgt_rows = 0
-    m.on_phase_start("ordered_stream_merge", source=str(source_path), target=str(target_path))
-    try:
-        while True:
-            s_row = src_cursor.peek()
-            t_row = tgt_cursor.peek()
-            if s_row is None and t_row is None:
-                break
-            if s_row is None:
-                assert t_row is not None
-                tgt_rows += 1
-                uid = str(t_row[uid_column])
-                collector.add_extra(uid=uid, target_record=t_row)
-                tgt_cursor.pop()
-                continue
-            if t_row is None:
-                src_rows += 1
-                uid = str(s_row[uid_column])
-                collector.add_missing(uid=uid, source_record=s_row)
-                src_cursor.pop()
-                continue
-
-            s_uid = str(s_row[uid_column])
-            t_uid = str(t_row[uid_column])
-            if s_uid == t_uid:
-                src_rows += 1
-                tgt_rows += 1
-                compare_aligned_row_dicts(
-                    uid=s_uid,
-                    uid_column=uid_column,
-                    compare_columns=compare_columns,
-                    source_row=s_row,
-                    target_row=t_row,
-                    collector=collector,
+    if hasattr(collector, "bulk_append_from_frame"):
+        collector.bulk_append_from_frame(missing.collect(engine="streaming"))
+        collector.bulk_append_from_frame(extra.collect(engine="streaming"))
+        for df in mismatch_dfs:
+            collector.bulk_append_from_frame(df.collect(engine="streaming"))
+    else:
+        # Fallback
+        for rec in missing.collect(engine="streaming").to_dicts():
+            collector.add_missing(uid=str(rec["uid"]), source_record=rec)
+        for rec in extra.collect(engine="streaming").to_dicts():
+            collector.add_extra(uid=str(rec["uid"]), target_record=rec)
+        for df in mismatch_dfs:
+            for rec in df.collect(engine="streaming").to_dicts():
+                collector.add_value_mismatch(
+                    uid=str(rec["uid"]),
+                    column_name=str(rec["column_name"]),
+                    source_value=rec["source_value"],
+                    target_value=rec["target_value"],
+                    source_record={},
+                    target_record={},
                 )
-                src_cursor.pop()
-                tgt_cursor.pop()
-            elif s_uid < t_uid:
-                src_rows += 1
-                collector.add_missing(uid=s_uid, source_record=s_row)
-                src_cursor.pop()
-            else:
-                tgt_rows += 1
-                collector.add_extra(uid=t_uid, target_record=t_row)
-                tgt_cursor.pop()
-    except pl_exc.PolarsError as exc:
-        logger.exception("Ordered stream merge failed")
-        raise ReconciliationError("Ordered stream merge failed while reading CSV batches") from exc
 
-    m.on_phase_end("ordered_stream_merge", source_rows=src_rows, target_rows=tgt_rows)
+    m.on_phase_end("vectorized_csv_merge", source_rows=src_rows, target_rows=tgt_rows)
     return src_rows, tgt_rows
 
 
@@ -201,34 +215,67 @@ def _merge_parquet_two_pointer(
     # Outer join to find all differences
     joined = src_lf.join(tgt_lf, on=uid_column, how="outer", suffix="_target")
     
-    # Missing in target
-    missing = joined.filter(pl.col(f"{uid_column}_target").is_null())
-    # Extra in target
-    extra = joined.filter(pl.col(uid_column).is_null())
-    # Mismatch
+    # 1. Missing in Target (Missing)
+    missing = joined.filter(pl.col(f"{uid_column}_target").is_null()).select([
+        pl.col(uid_column).cast(pl.String).alias("uid"),
+        pl.lit("missing_in_target").alias("mismatch_type"),
+        pl.lit(None, dtype=pl.String).alias("column_name"),
+        pl.lit(None, dtype=pl.String).alias("source_value"),
+        pl.lit(None, dtype=pl.String).alias("target_value"),
+        pl.lit("{}", dtype=pl.String).alias("row_detail")
+    ])
+    
+    # 2. Extra in Target (Extra)
+    extra = joined.filter(pl.col(uid_column).is_null()).select([
+        pl.col(f"{uid_column}_target").cast(pl.String).alias("uid"),
+        pl.lit("extra_in_target").alias("mismatch_type"),
+        pl.lit(None, dtype=pl.String).alias("column_name"),
+        pl.lit(None, dtype=pl.String).alias("source_value"),
+        pl.lit(None, dtype=pl.String).alias("target_value"),
+        pl.lit("{}", dtype=pl.String).alias("row_detail")
+    ])
+    
+    # 3. Value Mismatch
     both = joined.filter(pl.col(uid_column).is_not_null() & pl.col(f"{uid_column}_target").is_not_null())
-    mismatch_filter = pl.lit(False)
+    mismatch_dfs = []
     for col in compare_columns:
-        mismatch_filter |= (pl.col(col) != pl.col(f"{col}_target")) | (pl.col(col).is_null() != pl.col(f"{col}_target").is_null())
-    mismatched = both.filter(mismatch_filter)
+        col_mismatch = both.filter(
+            (pl.col(col) != pl.col(f"{col}_target")) | (pl.col(col).is_null() != pl.col(f"{col}_target").is_null())
+        ).select([
+            pl.col(uid_column).cast(pl.String).alias("uid"),
+            pl.lit("value_mismatch").alias("mismatch_type"),
+            pl.lit(col).alias("column_name"),
+            pl.col(col).cast(pl.String).alias("source_value"),
+            pl.col(f"{col}_target").cast(pl.String).alias("target_value"),
+            pl.lit("{}", dtype=pl.String).alias("row_detail")
+        ])
+        mismatch_dfs.append(col_mismatch)
 
     src_rows = src_lf.select(pl.len()).collect().item()
     tgt_rows = tgt_lf.select(pl.len()).collect().item()
 
-    # Stream results to collector
-    for rec in missing.collect(engine="streaming").to_dicts():
-        collector.add_missing(uid=str(rec[uid_column]), source_record=rec)
-    
-    for rec in extra.collect(engine="streaming").to_dicts():
-        uid = str(rec[f"{uid_column}_target"])
-        clean_rec = {k.replace("_target", ""): v for k, v in rec.items() if k != uid_column}
-        collector.add_extra(uid=uid, target_record=clean_rec)
-        
-    for rec in mismatched.collect(engine="streaming").to_dicts():
-        uid = str(rec[uid_column])
-        src_rec = {k: v for k, v in rec.items() if not k.endswith("_target")}
-        tgt_rec = {k.replace("_target", ""): v for k, v in rec.items() if k.endswith("_target") or k == uid_column}
-        collector.add_mismatch(uid=uid, source_record=src_rec, target_record=tgt_rec)
+    # Bulk append to collector
+    if hasattr(collector, "bulk_append_from_frame"):
+        collector.bulk_append_from_frame(missing.collect(engine="streaming"))
+        collector.bulk_append_from_frame(extra.collect(engine="streaming"))
+        for df in mismatch_dfs:
+            collector.bulk_append_from_frame(df.collect(engine="streaming"))
+    else:
+        # Fallback
+        for rec in missing.collect(engine="streaming").to_dicts():
+            collector.add_missing(uid=str(rec["uid"]), source_record=rec)
+        for rec in extra.collect(engine="streaming").to_dicts():
+            collector.add_extra(uid=str(rec["uid"]), target_record=rec)
+        for df in mismatch_dfs:
+            for rec in df.collect(engine="streaming").to_dicts():
+                collector.add_value_mismatch(
+                    uid=str(rec["uid"]),
+                    column_name=str(rec["column_name"]),
+                    source_value=rec["source_value"],
+                    target_value=rec["target_value"],
+                    source_record={},
+                    target_record={},
+                )
 
     m.on_phase_end("vectorized_parquet_merge", source_rows=src_rows, target_rows=tgt_rows)
     return src_rows, tgt_rows
