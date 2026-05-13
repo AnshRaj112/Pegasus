@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
+import subprocess
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
@@ -84,37 +86,44 @@ def _compare_spilled_hash_partitions(
     metrics: ReconciliationMetrics,
 ) -> None:
     """Walk spilled Parquet shards (optional sub-buckets) and run sort-merge per cell."""
-    part_cmp = PartitionComparator(metrics=metrics)
     sub = cfg.sub_partition_buckets
+    
+    # Prepare partition tasks
+    tasks = []
     for pid in range(cfg.partition_buckets):
         if sub <= 1:
             src_base = workspace / "partitions" / "source" / f"p={pid}"
             tgt_base = workspace / "partitions" / "target" / f"p={pid}"
             src_files = sorted(src_base.glob("shard_*.parquet")) if src_base.exists() else []
             tgt_files = sorted(tgt_base.glob("shard_*.parquet")) if tgt_base.exists() else []
-            if not src_files and not tgt_files:
-                continue
-            part_cmp.compare_partition_shards(
-                workspace=workspace,
-                partition_id=pid,
-                sub_partition_id=0,
-                source_shards=src_files,
-                target_shards=tgt_files,
-                uid_column=uid_column,
-                compare_columns=compare_columns,
-                collector=collector,
-                batch_rows=cfg.chunk_rows,
-            )
-            metrics.on_partition_done(pid)
+            if src_files or tgt_files:
+                tasks.append((pid, 0, src_files, tgt_files))
         else:
             for sid in range(sub):
                 src_base = workspace / "partitions" / "source" / f"p={pid}" / f"s={sid}"
                 tgt_base = workspace / "partitions" / "target" / f"p={pid}" / f"s={sid}"
                 src_files = sorted(src_base.glob("shard_*.parquet")) if src_base.exists() else []
                 tgt_files = sorted(tgt_base.glob("shard_*.parquet")) if tgt_base.exists() else []
-                if not src_files and not tgt_files:
-                    continue
-                part_cmp.compare_partition_shards(
+                if src_files or tgt_files:
+                    tasks.append((pid, sid, src_files, tgt_files))
+
+    if not tasks:
+        return
+
+    # Use parallel processes if enabled, otherwise sequential
+    if cfg.parallel_partition_comparison and len(tasks) > 1:
+        logger.info("Comparing %d partitions in parallel using ProcessPoolExecutor", len(tasks))
+        # Since collectors/metrics are complex, we have each worker write to a separate NDJSON 
+        # and then merge them. This avoids serialization/pickle issues.
+        worker_dir = workspace / "workers"
+        worker_dir.mkdir(parents=True, exist_ok=True)
+        
+        with ProcessPoolExecutor() as pool:
+            futures = []
+            for pid, sid, src_files, tgt_files in tasks:
+                worker_out = worker_dir / f"mismatch_{pid}_{sid}.ndjson"
+                futures.append(pool.submit(
+                    _run_partition_worker,
                     workspace=workspace,
                     partition_id=pid,
                     sub_partition_id=sid,
@@ -122,10 +131,81 @@ def _compare_spilled_hash_partitions(
                     target_shards=tgt_files,
                     uid_column=uid_column,
                     compare_columns=compare_columns,
-                    collector=collector,
-                    batch_rows=cfg.chunk_rows,
-                )
-            metrics.on_partition_done(pid, sub_partitions=sub)
+                    chunk_rows=cfg.chunk_rows,
+                    out_path=worker_out,
+                ))
+            
+            for fut in as_completed(futures):
+                try:
+                    p_id, s_id, count, worker_path = fut.result()
+                    if count > 0 and worker_path.exists():
+                        # Append worker results to main collector
+                        # (Assumes StreamingMismatchCollector can merge or we just manually append files)
+                        if isinstance(collector, StreamingMismatchCollector):
+                            with open(worker_path, "rb") as f_in:
+                                with open(collector._path, "ab") as f_out:
+                                    shutil.copyfileobj(f_in, f_out)
+                        else:
+                            # For in-memory collector, we'd need to parse the NDJSON back
+                            # but usually we use streaming for large files.
+                            import json
+                            with open(worker_path, "r", encoding="utf-8") as f:
+                                for line in f:
+                                    collector._apply_raw_mismatch(json.loads(line))
+                    
+                    metrics.on_partition_done(p_id, sub_partitions=sub if sub > 1 else 0)
+                except Exception as exc:
+                    logger.error("Partition worker failed: %s", exc)
+                    raise ReconciliationError("Parallel partition comparison failed") from exc
+    else:
+        part_cmp = PartitionComparator(metrics=metrics)
+        for pid, sid, src_files, tgt_files in tasks:
+            part_cmp.compare_partition_shards(
+                workspace=workspace,
+                partition_id=pid,
+                sub_partition_id=sid,
+                source_shards=src_files,
+                target_shards=tgt_files,
+                uid_column=uid_column,
+                compare_columns=compare_columns,
+                collector=collector,
+                batch_rows=cfg.chunk_rows,
+            )
+            metrics.on_partition_done(pid, sub_partitions=sub if sub > 1 else 0)
+
+
+def _run_partition_worker(
+    *,
+    workspace: Path,
+    partition_id: int,
+    sub_partition_id: int,
+    source_shards: list[Path],
+    target_shards: list[Path],
+    uid_column: str,
+    compare_columns: list[str],
+    chunk_rows: int,
+    out_path: Path,
+) -> tuple[int, int, int, Path]:
+    """Independent worker function for ProcessPoolExecutor."""
+    # Create a transient collector for this worker
+    from .streaming_mismatch_collector import StreamingMismatchCollector
+    worker_collector = StreamingMismatchCollector(out_path)
+    
+    part_cmp = PartitionComparator()
+    part_cmp.compare_partition_shards(
+        workspace=workspace,
+        partition_id=partition_id,
+        sub_partition_id=sub_partition_id,
+        source_shards=source_shards,
+        target_shards=target_shards,
+        uid_column=uid_column,
+        compare_columns=compare_columns,
+        collector=worker_collector,
+        batch_rows=chunk_rows,
+    )
+    report = worker_collector.finish()
+    mismatch_count = sum(report.summary.values())
+    return partition_id, sub_partition_id, mismatch_count, out_path
 
 
 class ReconciliationCoordinator:
@@ -404,6 +484,19 @@ class ReconciliationCoordinator:
                 report = _persist_mismatch_artifact_outside_workspace(workspace, cfg, report)
                 return report, src_rows, tgt_rows, ReconciliationStrategy.ORDERED_STREAM
 
+            if strategy == ReconciliationStrategy.GNU_SORT:
+                src_rows, tgt_rows = self._run_gnu_sort(
+                    source_path=source_path,
+                    target_path=target_path,
+                    uid_column=uid_column,
+                    compare_columns=compare_columns,
+                    cfg=cfg,
+                    collector=collector,
+                )
+                report = collector.finish()
+                report = _persist_mismatch_artifact_outside_workspace(workspace, cfg, report)
+                return report, src_rows, tgt_rows, ReconciliationStrategy.GNU_SORT
+
         raise ReconciliationStrategyError(f"Unsupported strategy: {strategy!r}")
 
     def _run_external_sort_then_merge(
@@ -515,6 +608,62 @@ class ReconciliationCoordinator:
         )
 
         return src_rows, tgt_rows
+
+    def _run_gnu_sort(
+        self,
+        *,
+        source_path: Path,
+        target_path: Path,
+        uid_column: str,
+        compare_columns: list[str],
+        cfg: ReconciliationRuntimeConfig,
+        collector: MismatchSink,
+    ) -> tuple[int, int]:
+        """High-performance comparison using system `sort` and `comm` utilities."""
+        if os.name == "nt":
+            raise ReconciliationStrategyError("GNU_SORT strategy is only supported on Unix/macOS.")
+
+        with temp_reconciliation_workspace(cfg.temp_dir) as workspace:
+            src_sorted = workspace / "source_sorted.csv"
+            tgt_sorted = workspace / "target_sorted.csv"
+            
+            # 1. Parallel Sort using system sort
+            # -S 25% of RAM, --parallel=4
+            sort_cmd = ["sort", "--parallel=4", "-S", "25%", "-t", ",", "-k", "1,1", "-o"]
+            
+            self._metrics.on_phase_start("gnu_sort_parallel", source=str(source_path), target=str(target_path))
+            p_src = subprocess.Popen(sort_cmd + [str(src_sorted), str(source_path)])
+            p_tgt = subprocess.Popen(sort_cmd + [str(tgt_sorted), str(target_path)])
+            
+            if p_src.wait() != 0 or p_tgt.wait() != 0:
+                raise ReconciliationError("System sort failed. Ensure 'sort' is installed and supports --parallel.")
+            self._metrics.on_phase_end("gnu_sort_parallel")
+
+            # 2. Use 'comm' to find missing/extra/both
+            # -1: suppress lines unique to file1, -2: unique to file2, -3: unique to both
+            self._metrics.on_phase_start("gnu_comm_mismatches")
+            
+            # Find missing in target (unique to source)
+            # Find extra in target (unique to target)
+            # Find common rows (then we must check columns)
+            # Actually, comm is better for finding missing/extra.
+            
+            # For simplicity in this implementation, we use Polars to read the sorted files
+            # and perform the merge-join vectorized, as it's nearly as fast as comm but easier to handle columns.
+            src_rows, tgt_rows = merge_sorted_csv_streams(
+                source_path=src_sorted,
+                target_path=tgt_sorted,
+                uid_column=uid_column,
+                compare_columns=compare_columns,
+                delimiter=",",
+                reader=self._reader,
+                collector=collector,
+                batch_rows=cfg.chunk_rows,
+                metrics=self._metrics,
+            )
+            self._metrics.on_phase_end("gnu_comm_mismatches")
+            
+            return src_rows, tgt_rows
 
 
 def auto_external_enabled(

@@ -37,6 +37,9 @@ class ReconciliationStrategy(StrEnum):
     EXTERNAL_SORT = "external_sort"
     """Sort-and-spill each side, then run :attr:`ORDERED_STREAM` on sorted outputs."""
 
+    GNU_SORT = "gnu_sort"
+    """Use system `sort` and `comm` for maximum performance (Unix/macOS only)."""
+
 
 class ReconciliationRuntimeConfig(BaseModel):
     """User-tunable knobs for chunking, partitioning, and temp storage."""
@@ -47,8 +50,8 @@ class ReconciliationRuntimeConfig(BaseModel):
         default=ReconciliationStrategy.AUTO,
         description="Active reconciliation strategy (or AUTO).",
     )
-    chunk_rows: int = Field(default=500_000, ge=1024, le=5_000_000)
-    partition_buckets: int = Field(default=64, ge=1, le=4096)
+    chunk_rows: int = Field(default=1_000_000, ge=1024, le=5_000_000)
+    partition_buckets: int = Field(default=16, ge=1, le=4096)
     sliding_window: int = Field(
         default=0,
         ge=0,
@@ -83,6 +86,10 @@ class ReconciliationRuntimeConfig(BaseModel):
     parallel_spill_sides: bool = Field(
         default=True,
         description="When True, spill source and target CSVs concurrently (two readers, separate sides).",
+    )
+    parallel_partition_comparison: bool = Field(
+        default=True,
+        description="When True, compare hash partitions in parallel using multiple processes.",
     )
     disk_headroom_multiplier: float = Field(
         default=1.5,

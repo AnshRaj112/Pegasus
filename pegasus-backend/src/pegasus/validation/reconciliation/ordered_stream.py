@@ -193,60 +193,44 @@ def _merge_parquet_two_pointer(
     metrics: ReconciliationMetrics | None,
 ) -> tuple[int, int]:
     m = metrics or NoOpReconciliationMetrics()
-    src_it = pl.scan_parquet(source_path).collect_batches(chunk_size=batch_rows, engine="streaming")
-    tgt_it = pl.scan_parquet(target_path).collect_batches(chunk_size=batch_rows, engine="streaming")
-    src_cursor = _RowCursor(src_it, uid_column=uid_column)
-    tgt_cursor = _RowCursor(tgt_it, uid_column=uid_column)
+    m.on_phase_start("vectorized_parquet_merge", source=str(source_path), target=str(target_path))
+    
+    src_lf = pl.scan_parquet(source_path)
+    tgt_lf = pl.scan_parquet(target_path)
+    
+    # Outer join to find all differences
+    joined = src_lf.join(tgt_lf, on=uid_column, how="outer", suffix="_target")
+    
+    # Missing in target
+    missing = joined.filter(pl.col(f"{uid_column}_target").is_null())
+    # Extra in target
+    extra = joined.filter(pl.col(uid_column).is_null())
+    # Mismatch
+    both = joined.filter(pl.col(uid_column).is_not_null() & pl.col(f"{uid_column}_target").is_not_null())
+    mismatch_filter = pl.lit(False)
+    for col in compare_columns:
+        mismatch_filter |= (pl.col(col) != pl.col(f"{col}_target")) | (pl.col(col).is_null() != pl.col(f"{col}_target").is_null())
+    mismatched = both.filter(mismatch_filter)
 
-    src_rows = 0
-    tgt_rows = 0
-    m.on_phase_start("ordered_parquet_merge", source=str(source_path), target=str(target_path))
-    try:
-        while True:
-            s_row = src_cursor.peek()
-            t_row = tgt_cursor.peek()
-            if s_row is None and t_row is None:
-                break
-            if s_row is None:
-                assert t_row is not None
-                tgt_rows += 1
-                collector.add_extra(uid=str(t_row[uid_column]), target_record=t_row)
-                tgt_cursor.pop()
-                continue
-            if t_row is None:
-                src_rows += 1
-                collector.add_missing(uid=str(s_row[uid_column]), source_record=s_row)
-                src_cursor.pop()
-                continue
+    src_rows = src_lf.select(pl.len()).collect().item()
+    tgt_rows = tgt_lf.select(pl.len()).collect().item()
 
-            s_uid = str(s_row[uid_column])
-            t_uid = str(t_row[uid_column])
-            if s_uid == t_uid:
-                src_rows += 1
-                tgt_rows += 1
-                compare_aligned_row_dicts(
-                    uid=s_uid,
-                    uid_column=uid_column,
-                    compare_columns=compare_columns,
-                    source_row=s_row,
-                    target_row=t_row,
-                    collector=collector,
-                )
-                src_cursor.pop()
-                tgt_cursor.pop()
-            elif s_uid < t_uid:
-                src_rows += 1
-                collector.add_missing(uid=s_uid, source_record=s_row)
-                src_cursor.pop()
-            else:
-                tgt_rows += 1
-                collector.add_extra(uid=t_uid, target_record=t_row)
-                tgt_cursor.pop()
-    except pl_exc.PolarsError as exc:
-        logger.exception("Ordered parquet merge failed")
-        raise ReconciliationError("Ordered parquet merge failed while scanning sorted outputs") from exc
+    # Stream results to collector
+    for rec in missing.collect(engine="streaming").to_dicts():
+        collector.add_missing(uid=str(rec[uid_column]), source_record=rec)
+    
+    for rec in extra.collect(engine="streaming").to_dicts():
+        uid = str(rec[f"{uid_column}_target"])
+        clean_rec = {k.replace("_target", ""): v for k, v in rec.items() if k != uid_column}
+        collector.add_extra(uid=uid, target_record=clean_rec)
+        
+    for rec in mismatched.collect(engine="streaming").to_dicts():
+        uid = str(rec[uid_column])
+        src_rec = {k: v for k, v in rec.items() if not k.endswith("_target")}
+        tgt_rec = {k.replace("_target", ""): v for k, v in rec.items() if k.endswith("_target") or k == uid_column}
+        collector.add_mismatch(uid=uid, source_record=src_rec, target_record=tgt_rec)
 
-    m.on_phase_end("ordered_parquet_merge", source_rows=src_rows, target_rows=tgt_rows)
+    m.on_phase_end("vectorized_parquet_merge", source_rows=src_rows, target_rows=tgt_rows)
     return src_rows, tgt_rows
 
 
