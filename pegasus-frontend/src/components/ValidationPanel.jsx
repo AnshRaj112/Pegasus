@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { MismatchSampleRows } from './MismatchSampleRows'
-import './ValidationPanel.css'
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
 const pollTimeoutRaw = Number(import.meta.env.VITE_VALIDATION_POLL_TIMEOUT_MS ?? 0)
@@ -60,7 +59,7 @@ async function pollValidationJob(
 /** Human-readable lines for the running panel (async job UX). */
 function jobRunningCopy(phase, jobId) {
   const idLine = jobId ? (
-    <span className="validation-job-id">
+    <span className="mt-2 block text-sm text-slate-600">
       Job id: <code>{jobId}</code>
     </span>
   ) : null
@@ -290,149 +289,163 @@ export function ValidationPanel() {
   }
 
   return (
-    <div className="validation-panel">
-      <form className="validation-form" onSubmit={handleSubmit}>
-        <label className="validation-field">
-          <span className="validation-label">Input mode</span>
-          <select
-            value={useLocalPaths ? 'local' : 'upload'}
-            disabled={running}
-            onChange={(ev) => setUseLocalPaths(ev.target.value === 'local')}
-          >
-            <option value="upload">Upload files from browser</option>
-            <option value="local">Use server local file paths (skip upload)</option>
-          </select>
-          <span className="validation-field-help">
-            For multi-GB files already on the API host, use local paths to avoid browser upload time.
-          </span>
-        </label>
+    <div className="space-y-8">
+      <section className="rounded-2xl border border-[#F1F1F1] border-l-4 border-l-[#EB4C4C] bg-white p-6 shadow-[0_12px_40px_rgba(235,76,76,0.10)] sm:p-8">
+        <p className="mb-5 text-center text-sm font-medium text-slate-600 sm:text-base">
+          Upload files or use server-local paths to run CSV comparison.
+        </p>
 
-        {useLocalPaths ? (
-          <>
-            <label className="validation-field">
-              <span className="validation-label">Source path on server</span>
-              <input
-                type="text"
-                value={sourcePath}
-                disabled={running}
-                onChange={(ev) => setSourcePath(ev.target.value)}
-                placeholder="/data/source.csv"
-              />
-            </label>
-
-            <label className="validation-field">
-              <span className="validation-label">Target path on server</span>
-              <input
-                type="text"
-                value={targetPath}
-                disabled={running}
-                onChange={(ev) => setTargetPath(ev.target.value)}
-                placeholder="/data/target.csv"
-              />
-            </label>
-          </>
-        ) : null}
-
-        <label className="validation-field">
-          <span className="validation-label">Source CSV (expected)</span>
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            disabled={running || useLocalPaths}
-            onChange={(ev) => setSourceFile(ev.target.files?.[0] ?? null)}
-          />
-          {sourceFile ? (
-            <span className="validation-file-name">{sourceFile.name}</span>
-          ) : null}
-        </label>
-
-        <label className="validation-field">
-          <span className="validation-label">Target CSV (actual)</span>
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            disabled={running || useLocalPaths}
-            onChange={(ev) => setTargetFile(ev.target.files?.[0] ?? null)}
-          />
-          {targetFile ? (
-            <span className="validation-file-name">{targetFile.name}</span>
-          ) : null}
-        </label>
-
-        <div className="validation-row">
-          <label className="validation-field validation-field-grow">
-            <span className="validation-label">UID column</span>
-            <input
-              type="text"
-              value={uidColumn}
+        <form className="space-y-5" onSubmit={handleSubmit}>
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-slate-700">Input mode</span>
+            <select
+              value={useLocalPaths ? 'local' : 'upload'}
               disabled={running}
-              onChange={(ev) => setUidColumn(ev.target.value)}
-              autoComplete="off"
-              placeholder="e.g. id"
-            />
-          </label>
-          <label className="validation-field validation-field-narrow">
-            <span className="validation-label">Delimiter</span>
-            <input
-              type="text"
-              value={delimiter}
-              disabled={running}
-              onChange={(ev) => setDelimiter(ev.target.value)}
-              className="validation-delimiter"
-              title="Use auto, tab, \\t, single-char (, ; |), or multi-char (||, ::)"
-              aria-label="CSV delimiter or auto"
-              placeholder="auto"
-            />
-            <span className="validation-field-help">
-              Recommended: <code>auto</code>. You can also use <code>tab</code>,{' '}
-              <code>\t</code>, <code>|</code>, <code>||</code>, <code>::</code>.
+              onChange={(ev) => setUseLocalPaths(ev.target.value === 'local')}
+              className="w-full rounded-lg border border-[#F1F1F1] bg-[#FFFDEF] px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <option value="upload">Upload files from browser</option>
+              <option value="local">Use server local file paths (skip upload)</option>
+            </select>
+            <span className="block text-xs text-slate-500">
+              For multi-GB files already on the API host, use local paths to avoid browser upload time.
             </span>
           </label>
-        </div>
 
-        <button
-          type="submit"
-          className="validation-submit"
-          disabled={
-            running ||
-            !uidColumn.trim() ||
-            (useLocalPaths
-              ? !sourcePath.trim() || !targetPath.trim()
-              : !sourceFile || !targetFile)
-          }
-        >
-          {running ? (
+          {useLocalPaths ? (
             <>
-              <span className="validation-spinner" aria-hidden />
-              Running…
-            </>
-          ) : (
-            'Run validation'
-          )}
-        </button>
-      </form>
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-slate-700">Source path on server</span>
+                <input
+                  type="text"
+                  value={sourcePath}
+                  disabled={running}
+                  onChange={(ev) => setSourcePath(ev.target.value)}
+                  placeholder="/data/source.csv"
+                  className="w-full rounded-lg border border-[#F1F1F1] bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </label>
 
-      <div className="validation-status" role="status" aria-live="polite">
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-slate-700">Target path on server</span>
+                <input
+                  type="text"
+                  value={targetPath}
+                  disabled={running}
+                  onChange={(ev) => setTargetPath(ev.target.value)}
+                  placeholder="/data/target.csv"
+                  className="w-full rounded-lg border border-[#F1F1F1] bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </label>
+            </>
+          ) : null}
+
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-slate-700">Source CSV (expected)</span>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              disabled={running || useLocalPaths}
+              onChange={(ev) => setSourceFile(ev.target.files?.[0] ?? null)}
+              className="w-full rounded-lg border border-[#F1F1F1] bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-[#EB4C4C] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-[#FFFDEF] hover:file:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60"
+            />
+            {sourceFile ? <span className="block text-xs text-slate-600">{sourceFile.name}</span> : null}
+          </label>
+
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-slate-700">Target CSV (actual)</span>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              disabled={running || useLocalPaths}
+              onChange={(ev) => setTargetFile(ev.target.files?.[0] ?? null)}
+              className="w-full rounded-lg border border-[#F1F1F1] bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-[#EB4C4C] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-[#FFFDEF] hover:file:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60"
+            />
+            {targetFile ? <span className="block text-xs text-slate-600">{targetFile.name}</span> : null}
+          </label>
+
+          <div className="grid gap-4 md:grid-cols-[1fr_240px]">
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-slate-700">UID column</span>
+              <input
+                type="text"
+                value={uidColumn}
+                disabled={running}
+                onChange={(ev) => setUidColumn(ev.target.value)}
+                autoComplete="off"
+                placeholder="e.g. id"
+                className="w-full rounded-lg border border-[#F1F1F1] bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-slate-700">Delimiter</span>
+              <input
+                type="text"
+                value={delimiter}
+                disabled={running}
+                onChange={(ev) => setDelimiter(ev.target.value)}
+                title="Use auto, tab, \\t, single-char (, ; |), or multi-char (||, ::)"
+                aria-label="CSV delimiter or auto"
+                placeholder="auto"
+                className="w-full rounded-lg border border-[#F1F1F1] bg-white px-3 py-2.5 font-mono text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <span className="block text-xs text-slate-500">
+                Recommended: <code>auto</code>. You can also use <code>tab</code>, <code>\t</code>, <code>|</code>, <code>||</code>, <code>::</code>.
+              </span>
+            </label>
+          </div>
+
+          <button
+            type="submit"
+            disabled={
+              running ||
+              !uidColumn.trim() ||
+              (useLocalPaths
+                ? !sourcePath.trim() || !targetPath.trim()
+                : !sourceFile || !targetFile)
+            }
+            className="inline-flex w-full items-center justify-center gap-3 rounded-xl bg-[#EB4C4C] px-5 py-4 text-base font-semibold text-[#FFFDEF] shadow-[0_12px_30px_rgba(235,76,76,0.28)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {running ? (
+              <>
+                <span
+                  className="h-5 w-5 animate-spin rounded-full border-2 border-[#FFFDEF]/40 border-t-[#FFFDEF]"
+                  aria-hidden
+                />
+                Running...
+              </>
+            ) : (
+              'Run validation'
+            )}
+          </button>
+        </form>
+      </section>
+
+      <div className="space-y-6" role="status" aria-live="polite">
         {running && jobUi ? (
-          <div className="validation-status-running">
-            <p className="validation-job-badge" aria-hidden="true">
-              Async job · 202 Accepted
+          <section className="rounded-2xl border border-[#F1F1F1] border-l-4 border-l-[#EB4C4C] bg-white p-6 shadow-[0_12px_40px_rgba(235,76,76,0.10)]">
+            <p
+              className="mb-2 inline-block rounded-md border border-sky-300 bg-sky-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-sky-700"
+              aria-hidden="true"
+            >
+              Async job - 202 Accepted
             </p>
-            <p className="validation-status-title">{jobUi.title}</p>
-            <p className="validation-status-detail">{jobUi.body}</p>
-            {jobProgress.message ? <p className="validation-status-extra">{jobProgress.message}</p> : null}
+            <p className="mb-1 text-lg font-bold text-[#EB4C4C]">{jobUi.title}</p>
+            <p className="text-sm text-slate-600">{jobUi.body}</p>
+            {jobProgress.message ? <p className="mt-2 text-sm text-slate-600">{jobProgress.message}</p> : null}
             {jobProgress.progress?.percent != null ? (
-              <p className="validation-status-extra">
+              <p className="mt-2 text-sm text-slate-600">
                 Progress: <strong>{formatPercent(jobProgress.progress.percent)}</strong>
               </p>
             ) : null}
             {jobProgress.progress?.total_mismatch_records != null ? (
-              <p className="validation-status-extra">
+              <p className="mt-2 text-sm text-slate-600">
                 Mismatches emitted so far: <strong>{Number(jobProgress.progress.total_mismatch_records)}</strong>
               </p>
             ) : null}
             {jobProgress.progress?.value_mismatch_done != null ? (
-              <p className="validation-status-extra">
+              <p className="mt-2 text-sm text-slate-600">
                 Value mismatch rows emitted: <strong>{Number(jobProgress.progress.value_mismatch_done)}</strong>
                 {jobProgress.progress?.value_mismatch_total_estimate != null ? (
                   <>
@@ -444,96 +457,80 @@ export function ValidationPanel() {
               </p>
             ) : null}
             {jobProgress.phase === 'uploading' ? (
-              <p className="validation-status-extra">
+              <p className="mt-2 text-sm text-slate-600">
                 Uploaded source: {formatBytes(Number(jobProgress.progress?.source_uploaded_bytes || 0))} | target:{' '}
                 {formatBytes(Number(jobProgress.progress?.target_uploaded_bytes || 0))}
               </p>
             ) : null}
-            {jobUi.extra ? <p className="validation-status-extra">{jobUi.extra}</p> : null}
-            <p className="validation-status-elapsed">
+            {jobUi.extra ? <p className="mt-2 text-sm text-slate-600">{jobUi.extra}</p> : null}
+            <p className="mt-3 text-sm font-medium text-slate-700">
               <strong>{(elapsedMs / 1000).toFixed(1)}s</strong> elapsed
             </p>
-          </div>
+          </section>
         ) : null}
 
-        {/* {phase === 'idle' ? (
-          <p className="validation-status-hint">
-            Start the API on port <code>8000</code> and use{' '}
-            <code>npm run dev</code> so requests proxy to <code>/api</code>. For
-            very large files already on server disk, switch to{' '}
-            <strong>Use server local file paths</strong> to skip uploads.
-          </p>
-        ) : null} */}     
-
-
-
         {phase === 'success' && result ? (
-          <div className="validation-result validation-result-success">
-            <p className="validation-status-title">Finished</p>
-            <div className="validation-summary-grid">
-              <div>
-                <span className="validation-metric-label">Match</span>
-                <span className="validation-metric-value">
+          <section className="rounded-2xl border border-emerald-300 border-l-4 border-l-emerald-500 bg-emerald-50 p-6">
+            <p className="mb-4 text-lg font-bold text-emerald-900">Finished</p>
+
+            <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl bg-white p-4 shadow-sm">
+                <span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Match</span>
+                <span className="mt-1 block font-mono text-2xl font-black text-slate-900">
                   {result.summary?.is_match ? 'Yes' : 'No'}
                 </span>
               </div>
-              <div>
-                <span className="validation-metric-label">Source rows</span>
-                <span className="validation-metric-value">
-                  {result.summary?.source_row_count ?? '—'}
+              <div className="rounded-xl bg-white p-4 shadow-sm">
+                <span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Source rows</span>
+                <span className="mt-1 block font-mono text-2xl font-black text-slate-900">
+                  {result.summary?.source_row_count ?? '-'}
                 </span>
               </div>
-              <div>
-                <span className="validation-metric-label">Target rows</span>
-                <span className="validation-metric-value">
-                  {result.summary?.target_row_count ?? '—'}
+              <div className="rounded-xl bg-white p-4 shadow-sm">
+                <span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Target rows</span>
+                <span className="mt-1 block font-mono text-2xl font-black text-slate-900">
+                  {result.summary?.target_row_count ?? '-'}
                 </span>
               </div>
-              <div>
-                <span className="validation-metric-label">Mismatch records</span>
-                <span className="validation-metric-value">
-                  {result.summary?.total_mismatch_records ?? '—'}
+              <div className="rounded-xl bg-white p-4 shadow-sm">
+                <span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Mismatch records</span>
+                <span className="mt-1 block font-mono text-2xl font-black text-slate-900">
+                  {result.summary?.total_mismatch_records ?? '-'}
                 </span>
               </div>
             </div>
-            <p className="validation-counts-title">Mismatch counts</p>
-            <ul className="validation-counts">
+
+            <p className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-700">Mismatch counts</p>
+            <ul className="space-y-1 text-sm text-slate-700">
               <li>
-                Missing in target:{' '}
-                <strong>{result.mismatch_counts?.missing_in_target ?? 0}</strong>
+                Missing in target: <strong>{result.mismatch_counts?.missing_in_target ?? 0}</strong>
               </li>
               <li>
-                Extra in target:{' '}
-                <strong>{result.mismatch_counts?.extra_in_target ?? 0}</strong>
+                Extra in target: <strong>{result.mismatch_counts?.extra_in_target ?? 0}</strong>
               </li>
               <li>
-                Value mismatch:{' '}
-                <strong>{result.mismatch_counts?.value_mismatch ?? 0}</strong>
+                Value mismatch: <strong>{result.mismatch_counts?.value_mismatch ?? 0}</strong>
               </li>
             </ul>
+
             {result.run_id ? (
-              <p className="validation-run-id">
+              <p className="mt-4 text-sm text-slate-700">
                 Run id: <code>{result.run_id}</code>
               </p>
             ) : null}
+
             {result.mismatch_samples?.length ? (
               <>
-                <p className="validation-samples-title">Sample mismatches</p>
-                <div className="validation-table-wrap">
-                  <table className="validation-table">
+                <p className="mt-6 mb-2 text-sm font-semibold uppercase tracking-wider text-slate-700">Sample mismatches</p>
+                <div className="overflow-x-auto rounded-xl border border-[#F1F1F1] bg-white">
+                  <table className="min-w-full border-collapse text-left text-sm">
                     <thead>
-                      <tr>
-                        <th>UID</th>
-                        <th>Type</th>
-                        <th>Column</th>
-                        <th>
-                          Expected
-                          <span className="validation-th-hint"> (source)</span>
-                        </th>
-                        <th>
-                          Actual
-                          <span className="validation-th-hint"> (target)</span>
-                        </th>
+                      <tr className="bg-[#FFFDEF] text-xs uppercase tracking-wide text-slate-600">
+                        <th className="px-3 py-2 font-semibold">UID</th>
+                        <th className="px-3 py-2 font-semibold">Type</th>
+                        <th className="px-3 py-2 font-semibold">Column</th>
+                        <th className="px-3 py-2 font-semibold">Expected (source)</th>
+                        <th className="px-3 py-2 font-semibold">Actual (target)</th>
                       </tr>
                     </thead>
                     <MismatchSampleRows samples={result.mismatch_samples} />
@@ -541,14 +538,14 @@ export function ValidationPanel() {
                 </div>
               </>
             ) : null}
-          </div>
+          </section>
         ) : null}
 
         {phase === 'error' ? (
-          <div className="validation-result validation-result-error">
-            <p className="validation-status-title">Something went wrong</p>
-            <p className="validation-error-detail">{errorMessage}</p>
-          </div>
+          <section className="rounded-2xl border border-rose-300 border-l-4 border-l-rose-500 bg-rose-50 p-6">
+            <p className="mb-2 text-lg font-bold text-rose-900">Something went wrong</p>
+            <p className="whitespace-pre-wrap break-words text-sm text-rose-800">{errorMessage}</p>
+          </section>
         ) : null}
       </div>
     </div>
