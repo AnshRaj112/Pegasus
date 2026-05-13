@@ -96,6 +96,19 @@ class PartitionManager:
             side=side,
             sub_partition_buckets=self._sub_buckets,
         )
+        if len(delimiter) > 1:
+            return spill_multichar_csv_via_polars(
+                csv_path,
+                workspace=self._workspace,
+                side=side,
+                uid_column=uid_column,
+                delimiter=delimiter,
+                buckets=self._buckets,
+                chunk_rows=chunk_rows,
+                metrics=self._metrics,
+                sub_partition_buckets=self._sub_buckets,
+            )
+
         read_opts: dict[str, object] = {
             "separator": delimiter,
             "encoding": "utf-8",
@@ -139,7 +152,7 @@ class PartitionManager:
 HashPartitionSpiller = PartitionManager
 
 
-def spill_multichar_csv_via_pandas(
+def spill_multichar_csv_via_polars(
     csv_path: Path,
     *,
     workspace: Path,
@@ -151,14 +164,7 @@ def spill_multichar_csv_via_pandas(
     metrics: ReconciliationMetrics | None = None,
     sub_partition_buckets: int = 1,
 ) -> int:
-    """Stream a multi-separator UTF-8 CSV with pandas chunks and spill hash partitions to Parquet."""
-    if buckets < 1:
-        raise ValueError("buckets must be >= 1")
-    if sub_partition_buckets < 1:
-        raise ValueError("sub_partition_buckets must be >= 1")
-    if len(delimiter) < 2:
-        raise ValueError("spill_multichar_csv_via_pandas expects a multi-character delimiter")
-
+    """Stream and partition a multi-character delimiter CSV using 100% vectorized Polars logic."""
     m = metrics or NoOpReconciliationMetrics()
     root = workspace / "partitions" / side
     if root.exists():
@@ -166,27 +172,63 @@ def spill_multichar_csv_via_pandas(
     root.mkdir(parents=True, exist_ok=True)
 
     writer = PartitionWriter(workspace=workspace, side=side, sub_partition_buckets=sub_partition_buckets)
-    sep = re.escape(delimiter)
     total_rows = 0
-    chunk = max(1024, chunk_rows)
-
-    m.on_phase_start("multichar_partition_spill", side=side, path=str(csv_path), chunk_rows=chunk)
+    
+    # Escape delimiter for regex
+    import re
+    escaped_delim = re.escape(delimiter)
+    # Regex to match delimiter ONLY when outside of quotes
+    # It checks that there is an even number of quotes following the delimiter
+    split_pattern = f"{escaped_delim}(?=(?:(?:[^\"]*\"){{2}})*[^\"]*$)"
+    
+    m.on_phase_start("vectorized_multichar_spill", side=side, path=str(csv_path))
+    
     try:
-        reader = pd.read_csv(
-            csv_path,
-            sep=sep,
-            engine="python",
-            encoding="utf-8",
-            chunksize=chunk,
-        )
-        for pdf in reader:
-            batch = pl.from_pandas(pdf, include_index=False)
-            if uid_column not in batch.columns:
-                raise ReconciliationError(f"uid_column {uid_column!r} not in batch columns: {batch.columns}")
+        # Read file with a "dummy" separator that doesn't exist in the data 
+        # to get one row per line in a single column
+        dummy_sep = "\x1f" 
+        
+        # 1. Get header to know column names
+        header_df = pl.read_csv(csv_path, n_rows=0, separator=dummy_sep, has_header=False)
+        raw_header = header_df.columns[0]
+        # Split header manually
+        columns = re.split(split_pattern, raw_header)
+        columns = [c.strip().strip('"') for c in columns]
+        
+        # 2. Iterate batches
+        # We skip the first row (header) and read raw lines
+        reader = PolarsCSVReader(default_batch_size=chunk_rows)
+        read_opts = {"separator": dummy_sep, "has_header": False, "skip_rows": 1}
+        
+        for batch in reader.iter_batches(csv_path, batch_size=chunk_rows, read_options=read_opts):
+            # batch has 1 column containing the whole line
+            line_col = batch.columns[0]
+            
+            # Vectorized split using regex
+            # First, replace multi-char with our dummy single-char sep (respecting quotes)
+            # Then split by that single char
+            split_df = (
+                batch.select([
+                    pl.col(line_col)
+                    .str.replace_all(split_pattern, dummy_sep)
+                    .str.split_exact(dummy_sep, len(columns) - 1)
+                    .alias("fields")
+                ])
+                .unnest("fields")
+            )
+            
+            # Rename columns to match header
+            split_df.columns = columns
+            
+            # Now proceed with normal partitioning
+            if uid_column not in split_df.columns:
+                raise ReconciliationError(f"uid_column {uid_column!r} not in columns: {split_df.columns}")
+                
             if sub_partition_buckets <= 1:
-                parted = add_sha256_partition_column(batch, uid_column, buckets)
+                parted = add_sha256_partition_column(split_df, uid_column, buckets)
             else:
-                parted = add_sha256_two_level_partition_columns(batch, uid_column, buckets, sub_partition_buckets)
+                parted = add_sha256_two_level_partition_columns(split_df, uid_column, buckets, sub_partition_buckets)
+                
             total_rows += _write_partitioned_batch(
                 parted,
                 writer=writer,
@@ -194,11 +236,13 @@ def spill_multichar_csv_via_pandas(
                 side=side,
                 metrics=m,
             )
-    except ReconciliationError:
-        raise
+            
     except Exception as exc:
-        logger.exception("Multichar partition spill failed for %s", csv_path)
-        raise ReconciliationError(f"Multichar partition spill failed for {csv_path}") from exc
+        logger.exception("Vectorized multichar partition spill failed for %s", csv_path)
+        raise ReconciliationError(f"Vectorized multichar partition spill failed: {exc}") from exc
+
+    m.on_phase_end("vectorized_multichar_spill", side=side, rows=total_rows)
+    return total_rows
 
     m.on_phase_end("multichar_partition_spill", side=side, rows=total_rows)
     logger.info(
