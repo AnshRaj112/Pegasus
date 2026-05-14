@@ -707,14 +707,21 @@ async def update_validation_queue_settings(
     settings: AppSettings,
     body: Annotated[UpdateQueueSettingsRequest, Body()],
 ) -> QueueStatusResponse:
-    """Dynamically change how many validation jobs run in parallel.
+    """Dynamically change queue settings.
 
-    The server reports ``cpu_cores_available`` so you can pick an appropriate
-    ``max_concurrency`` value.  Running jobs are **never** killed — the new
-    limit only affects when queued jobs are promoted to running.
+    - ``max_concurrency``: how many jobs run in parallel (user's upper cap).
+    - ``auto_tune_enabled``: when true, the system further reduces effective
+      concurrency if RAM / disk / swap pressure is too high.
+
+    The server reports ``cpu_cores_available`` and ``resource_advisor`` so you
+    can make an informed decision.  Running jobs are **never** killed — changes
+    only affect when queued jobs are promoted to running.
     """
     queue = get_validation_queue(settings)
-    queue.set_max_concurrency(body.max_concurrency)
+    if body.max_concurrency is not None:
+        queue.set_max_concurrency(body.max_concurrency)
+    if body.auto_tune_enabled is not None:
+        queue.set_auto_tune(body.auto_tune_enabled)
     stats = queue.stats
     return QueueStatusResponse(
         **stats,

@@ -176,13 +176,22 @@ def build_mismatch_counts(summary_dict: dict[str, int]) -> MismatchCounts:
 class UpdateQueueSettingsRequest(BaseModel):
     """JSON body for PATCH /validate/queue — lets users tune concurrency at runtime."""
 
-    max_concurrency: int = Field(
+    max_concurrency: int | None = Field(
+        default=None,
         ge=1,
         le=32,
         description=(
             "Maximum number of validation jobs to run in parallel. "
             "Choose based on your available CPU cores (returned by GET /validate/queue). "
             "Running jobs are never killed; the new limit affects when queued jobs start."
+        ),
+    )
+    auto_tune_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "When true, the system dynamically caps effective concurrency below "
+            "max_concurrency if RAM, disk, or swap pressure is too high. "
+            "When false, only the user-set max_concurrency is used."
         ),
     )
 
@@ -192,9 +201,18 @@ class QueueStatusResponse(BaseModel):
 
     max_concurrency: int = Field(description="Current maximum parallel validation workers")
     cpu_cores_available: int = Field(description="Logical CPU cores detected on the server")
+    auto_tune_enabled: bool = Field(description="Whether resource-based auto-tuning is active")
     pending: int = Field(description="Jobs waiting in the queue")
     running: int = Field(description="Jobs currently executing")
     finished: int = Field(description="Completed/failed jobs still tracked in memory")
     total_tracked: int = Field(description="Total jobs tracked in memory")
+    resource_advisor: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Live resource snapshot: system RAM/disk/swap stats, per-job estimates, "
+            "safe limits (max_safe_by_ram, max_safe_by_disk, max_safe_by_cpu), "
+            "and the system-recommended max_concurrency."
+        ),
+    )
     jobs: list[dict[str, Any]] = Field(default_factory=list, description="Recent job snapshots")
 

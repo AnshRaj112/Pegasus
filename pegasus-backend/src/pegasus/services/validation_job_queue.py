@@ -29,6 +29,10 @@ from pegasus.services.background_validation_runner import (
     BackgroundValidationRunner,
     ValidationJobHandle,
 )
+from pegasus.services.resource_advisor import (
+    ResourceSnapshot,
+    compute_resource_recommendation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +81,7 @@ class ValidationJobQueue:
         self._max_concurrency: int = max(1, mc)
         self._settings = settings
         self._runner = BackgroundValidationRunner(settings)
+        self._auto_tune_enabled: bool = True  # auto-cap based on resources
 
         # Ordered queue of pending jobs (FIFO)
         self._pending: deque[QueuedJob] = deque()
@@ -86,6 +91,8 @@ class ValidationJobQueue:
         self._finished: dict[uuid.UUID, QueuedJob] = {}
         # All jobs index for fast lookup
         self._all_jobs: dict[uuid.UUID, QueuedJob] = {}
+        # Last resource snapshot (cached for stats endpoint)
+        self._last_resource_snapshot: ResourceSnapshot | None = None
 
         self._lock = threading.Lock()
         self._drain_event = asyncio.Event()
@@ -93,8 +100,9 @@ class ValidationJobQueue:
         self._stopped = False
 
         logger.info(
-            "ValidationJobQueue created max_concurrency=%d",
+            "ValidationJobQueue created max_concurrency=%d auto_tune=%s",
             self._max_concurrency,
+            self._auto_tune_enabled,
         )
 
     @property
@@ -133,18 +141,48 @@ class ValidationJobQueue:
         self._drain_event.set()
         return clamped
 
+    def set_auto_tune(self, enabled: bool) -> None:
+        """Enable or disable automatic resource-based concurrency adjustment."""
+        self._auto_tune_enabled = enabled
+        logger.info("auto_tune_enabled set to %s", enabled)
+
+    def resource_recommendation(self) -> ResourceSnapshot:
+        """Compute a fresh resource snapshot and recommendation."""
+        workspace = None
+        temp_dir = self._settings.validation_reconciliation_temp_dir
+        if temp_dir:
+            workspace = Path(temp_dir)
+
+        with self._lock:
+            running = dict(self._running)
+            pending = list(self._pending)
+
+        snapshot = compute_resource_recommendation(
+            running_jobs=running,
+            pending_jobs=pending,
+            disk_headroom_multiplier=self._settings.validation_reconciliation_disk_headroom_multiplier,
+            workspace_path=workspace,
+        )
+        self._last_resource_snapshot = snapshot
+        return snapshot
+
     @property
     def stats(self) -> dict[str, Any]:
         """Snapshot of queue statistics."""
         with self._lock:
-            return {
+            result = {
                 "max_concurrency": self._max_concurrency,
                 "cpu_cores_available": self.cpu_cores_available(),
+                "auto_tune_enabled": self._auto_tune_enabled,
                 "pending": len(self._pending),
                 "running": len(self._running),
                 "finished": len(self._finished),
                 "total_tracked": len(self._all_jobs),
             }
+        # Compute fresh resource recommendation
+        snapshot = self.resource_recommendation()
+        result["resource_advisor"] = snapshot.to_dict()
+        return result
 
     def enqueue(self, job_id: uuid.UUID, job_dir: Path) -> QueuedJob:
         """Add a job to the queue.  Returns the :class:`QueuedJob` immediately."""
@@ -223,9 +261,35 @@ class ValidationJobQueue:
                 pass
 
     def _try_start_pending(self) -> None:
-        """Start as many pending jobs as concurrency slots allow."""
+        """Start as many pending jobs as concurrency slots allow.
+
+        When ``auto_tune_enabled`` is True, the effective concurrency cap
+        is the **minimum** of the user-set ``max_concurrency`` and the
+        resource advisor's recommendation.  This prevents starting more
+        jobs than the system can safely handle.
+        """
+        # Compute effective max concurrency (auto-tune + user cap)
+        effective_max = self._max_concurrency
+        if self._auto_tune_enabled:
+            try:
+                snapshot = self.resource_recommendation()
+                resource_max = snapshot.recommended_max_concurrency
+                effective_max = min(self._max_concurrency, resource_max)
+                if effective_max < self._max_concurrency:
+                    logger.info(
+                        "Auto-tune: capping concurrency from %d to %d "
+                        "(ram_safe=%d disk_safe=%d cpu_safe=%d)",
+                        self._max_concurrency,
+                        effective_max,
+                        snapshot.max_safe_by_ram,
+                        snapshot.max_safe_by_disk,
+                        snapshot.max_safe_by_cpu,
+                    )
+            except Exception:
+                logger.warning("Resource advisor failed, using user-set max_concurrency", exc_info=True)
+
         with self._lock:
-            while self._pending and len(self._running) < self._max_concurrency:
+            while self._pending and len(self._running) < effective_max:
                 job = self._pending.popleft()
                 self._update_queue_positions()
                 try:

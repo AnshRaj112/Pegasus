@@ -188,14 +188,17 @@ export function ValidationPanel() {
     fetchQueue()
   }, [])
 
-  async function handleConcurrencyUpdate(newValue) {
+  async function handleConcurrencyUpdate(newValue, autoTuneEnabled) {
     setConcurrencyUpdating(true)
     setConcurrencyError('')
     try {
+      const body = {}
+      if (newValue != null) body.max_concurrency = newValue
+      if (autoTuneEnabled != null) body.auto_tune_enabled = autoTuneEnabled
       const res = await fetch(absoluteApiUrl('/api/v1/validate/queue'), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ max_concurrency: newValue }),
+        body: JSON.stringify(body),
       })
       if (res.ok) {
         const data = await res.json()
@@ -317,6 +320,7 @@ export function ValidationPanel() {
   }
 
   const cpuCores = queueInfo?.cpu_cores_available ?? null
+  const ra = queueInfo?.resource_advisor ?? null
 
   return (
     <div className="space-y-8">
@@ -336,6 +340,9 @@ export function ValidationPanel() {
                   ? `${queueInfo?.max_concurrency ?? '?'} of ${cpuCores} cores allocated`
                   : 'Loading server info…'}
                 {queueInfo ? ` · ${queueInfo.running} running · ${queueInfo.pending} queued` : ''}
+                {ra?.recommended_max_concurrency != null
+                  ? ` · recommended: ${ra.recommended_max_concurrency}`
+                  : ''}
               </p>
             </div>
           </div>
@@ -345,15 +352,74 @@ export function ValidationPanel() {
         </button>
 
         {showQueueSettings && cpuCores ? (
-          <div className="mt-4 space-y-4 border-t border-[#F1F1F1] pt-4">
+          <div className="mt-4 space-y-5 border-t border-[#F1F1F1] pt-4">
+
+            {/* Resource status bar */}
+            {ra ? (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border border-[#F1F1F1] bg-[#FAFAFA] p-3">
+                  <span className="block text-xs font-semibold uppercase tracking-widest text-slate-400">RAM</span>
+                  <span className="mt-1 block font-mono text-lg font-bold text-slate-800">
+                    {ra.system?.available_ram_gib ?? '?'} <span className="text-sm font-normal text-slate-500">/ {ra.system?.total_ram_gib ?? '?'} GiB free</span>
+                  </span>
+                  <span className="mt-0.5 block text-xs text-slate-400">
+                    ~{ra.per_job_estimate?.ram_mib ?? '?'} MiB per job
+                  </span>
+                </div>
+                <div className="rounded-lg border border-[#F1F1F1] bg-[#FAFAFA] p-3">
+                  <span className="block text-xs font-semibold uppercase tracking-widest text-slate-400">Disk</span>
+                  <span className="mt-1 block font-mono text-lg font-bold text-slate-800">
+                    {ra.system?.available_disk_gib ?? '?'} <span className="text-sm font-normal text-slate-500">/ {ra.system?.total_disk_gib ?? '?'} GiB free</span>
+                  </span>
+                  <span className="mt-0.5 block text-xs text-slate-400">
+                    ~{ra.per_job_estimate?.disk_mib ?? '?'} MiB per job
+                  </span>
+                </div>
+                <div className="rounded-lg border border-[#F1F1F1] bg-[#FAFAFA] p-3">
+                  <span className="block text-xs font-semibold uppercase tracking-widest text-slate-400">Safe limits</span>
+                  <div className="mt-1 flex flex-wrap gap-2 text-xs">
+                    <span className="rounded bg-blue-100 px-1.5 py-0.5 font-semibold text-blue-700">RAM: {ra.limits?.max_safe_by_ram ?? '?'}</span>
+                    <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-700">Disk: {ra.limits?.max_safe_by_disk ?? '?'}</span>
+                    <span className="rounded bg-purple-100 px-1.5 py-0.5 font-semibold text-purple-700">CPU: {ra.limits?.max_safe_by_cpu ?? '?'}</span>
+                  </div>
+                  <span className="mt-1 block text-xs font-semibold text-[#EB4C4C]">
+                    Recommended: {ra.recommended_max_concurrency ?? '?'}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+
+            {/* Warnings */}
+            {ra?.warnings?.length ? (
+              <div className="space-y-2">
+                {ra.warnings.map((w, i) => (
+                  <div key={i} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    ⚠️ {w}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {/* Slider */}
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <label className="text-sm font-semibold text-slate-700" htmlFor="concurrency-slider">
                   Max parallel jobs
                 </label>
-                <span className="rounded-md bg-[#FFFDEF] px-2.5 py-1 font-mono text-sm font-bold text-[#EB4C4C]">
-                  {concurrencySlider}
-                </span>
+                <div className="flex items-center gap-2">
+                  {ra?.recommended_max_concurrency != null && concurrencySlider !== ra.recommended_max_concurrency ? (
+                    <button
+                      type="button"
+                      onClick={() => setConcurrencySlider(ra.recommended_max_concurrency)}
+                      className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 hover:bg-blue-200 transition"
+                    >
+                      Use recommended ({ra.recommended_max_concurrency})
+                    </button>
+                  ) : null}
+                  <span className="rounded-md bg-[#FFFDEF] px-2.5 py-1 font-mono text-sm font-bold text-[#EB4C4C]">
+                    {concurrencySlider}
+                  </span>
+                </div>
               </div>
 
               <input
@@ -374,6 +440,27 @@ export function ValidationPanel() {
               </div>
             </div>
 
+            {/* Auto-tune toggle */}
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={queueInfo?.auto_tune_enabled ?? true}
+                disabled={concurrencyUpdating}
+                onChange={(ev) => {
+                  const enabled = ev.target.checked
+                  handleConcurrencyUpdate(concurrencySlider, enabled)
+                }}
+                className="h-4 w-4 rounded border-slate-300 text-[#EB4C4C] accent-[#EB4C4C] focus:ring-[#EB4C4C]"
+              />
+              <div>
+                <span className="text-sm font-semibold text-slate-700">Auto-tune</span>
+                <span className="ml-2 text-xs text-slate-500">
+                  Dynamically cap concurrency based on available RAM, disk &amp; swap pressure
+                </span>
+              </div>
+            </label>
+
+            {/* Apply button */}
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -392,9 +479,14 @@ export function ValidationPanel() {
             </div>
 
             <p className="text-xs text-slate-500 leading-relaxed">
-              Your server has <strong>{cpuCores} CPU cores</strong>.
-              More parallel jobs = faster throughput but higher memory/CPU load.
-              Running jobs are never interrupted — changes affect queued jobs only.
+              Your server has <strong>{cpuCores} CPU cores</strong>,{' '}
+              <strong>{ra?.system?.total_ram_gib ?? '?'} GiB RAM</strong>, and{' '}
+              <strong>{ra?.system?.available_disk_gib ?? '?'} GiB disk free</strong>.
+              The system recommends <strong>{ra?.recommended_max_concurrency ?? '?'}</strong> parallel jobs
+              based on current resource availability.
+              {queueInfo?.auto_tune_enabled
+                ? ' Auto-tune is ON — effective concurrency may be lower than your setting if resources are tight.'
+                : ' Auto-tune is OFF — only your manual setting is used.'}
             </p>
           </div>
         ) : null}

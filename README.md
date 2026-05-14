@@ -54,8 +54,9 @@ Notes:
 
 - The backend exposes REST endpoints (FastAPI) to start and inspect validation runs.
 - All validation jobs go through a **concurrency-limited job queue** — the queue decides when to start each job based on `max_concurrency` (how many validations can run in parallel).
+- A **resource advisor** dynamically monitors available RAM, disk, and swap pressure and automatically caps concurrency to prevent the server from running out of resources.
 - The core validation engine reads CSVs into Polars DataFrames, chooses a reconciliation strategy (auto, ordered_stream, sliding_window, hash_partition, external_sort), and streams mismatch results as NDJSON or stores them in the DB for later inspection.
-- The frontend provides an interactive UI to submit validation jobs, monitor progress, configure parallel concurrency, and inspect mismatch samples.
+- The frontend provides an interactive UI to submit validation jobs, monitor progress, view live resource stats, configure parallel concurrency, and inspect mismatch samples.
 
 You can find the Mermaid sources for the architecture and dataflow diagrams here:
 
@@ -102,13 +103,14 @@ It's a single number: **the maximum number of validation workers that can execut
 
 ### How does the user set it?
 
-There is **no complex formula** — the user chooses it themselves:
+Two layers work together — **manual control** and **automatic safety**:
 
 1. The frontend calls `GET /api/v1/validate/queue` on page load.
-2. The server responds with `cpu_cores_available` (e.g., 8) and the current `max_concurrency` (e.g., 2).
-3. The user sees a **slider** in the UI: "Your server has 8 CPU cores. Max parallel jobs: [slider 1–8]".
+2. The server responds with `cpu_cores_available`, current `max_concurrency`, and a **`resource_advisor`** object showing live RAM/disk/swap stats and a system-recommended concurrency value.
+3. The user sees a **slider** in the UI showing their CPU cores, a "Use recommended (N)" shortcut button, and live resource cards (RAM available, Disk free, per-job estimates).
 4. The user picks a value and clicks **Apply** → sends `PATCH /api/v1/validate/queue`.
 5. The queue immediately uses the new limit. No server restart needed.
+6. If **Auto-tune** is ON (default), the drain loop further caps the effective concurrency below the user's setting if the system detects low RAM, low disk, or high swap pressure. This prevents the server from running out of resources even if the user set it too high.
 
 The env variable `PEGASUS_VALIDATION_MAX_CONCURRENCY` (default: 2) is only the **startup default** — users override it at runtime via the UI.
 
@@ -128,7 +130,16 @@ POST /api/v1/validate  →  upload CSVs  →  queue.enqueue(job)
 
 ```python
 # Runs every 2 seconds as a background task
-while pending_jobs AND running_count < max_concurrency:
+
+# Step A: compute effective cap (auto-tune)
+if auto_tune_enabled:
+    snapshot = probe_system_resources()   # RAM, disk, swap
+    effective_max = min(user_max_concurrency, snapshot.recommended)
+else:
+    effective_max = user_max_concurrency
+
+# Step B: start jobs up to the effective cap
+while pending_jobs AND running_count < effective_max:
     job = pending.pop_first()      # take the first waiting job
     start_worker(job)              # NOW spawn the subprocess
     move job to running dict
@@ -244,34 +255,161 @@ sequenceDiagram
     API-->>UI: {cpu_cores_available: 8, max_concurrency: 4, running: 4, pending: 1}
 ```
 
+### Resource-Aware Auto-Tuning
+
+The system doesn't just rely on the user picking a good number — it also **probes the machine in real time** and automatically prevents overload.
+
+#### What gets measured
+
+| Resource | How it's probed | Platform support |
+|---|---|---|
+| **Available RAM** | `/proc/meminfo` (MemAvailable) or Win32 `GlobalMemoryStatusEx` | Linux, Windows |
+| **Total RAM** | `os.sysconf(SC_PHYS_PAGES)` or Win32 | Linux, Windows |
+| **Disk free** | `shutil.disk_usage()` on the temp/spill directory | All |
+| **Swap pressure** | `/proc/meminfo` (SwapTotal / SwapFree) | Linux only |
+
+#### Per-job cost estimation
+
+Each validation job's resource footprint is estimated from the actual CSV file sizes:
+
+```
+Per-job RAM  = 4 × (source.csv + target.csv bytes)
+               Polars reads full file into memory, hash maps for
+               partitioning, comparison DataFrames, mismatch buffers
+
+Per-job Disk = 1.5 × (source.csv + target.csv bytes)
+               Spill workspace writes NDJSON partitions during
+               hash-partition or external-sort reconciliation
+```
+
+> If no jobs are queued yet, the system assumes a default of 200 MiB combined CSV size.
+> For running jobs, it reads the actual `source.csv` / `target.csv` file sizes from the job directory.
+
+#### The recommendation formula
+
+```
+usable_ram   = available_ram - 1 GiB reserve (for OS + Python runtime)
+usable_disk  = available_disk - 500 MiB reserve
+
+max_safe_by_ram  = currently_running + (usable_ram / per_job_ram)
+max_safe_by_disk = currently_running + (usable_disk / per_job_disk)
+max_safe_by_cpu  = logical_cpu_core_count
+
+recommended = min(max_safe_by_ram, max_safe_by_disk, max_safe_by_cpu, 32)
+```
+
+When **auto-tune** is enabled (default), the drain loop computes:
+
+```
+effective_max = min(user_set_max_concurrency, recommended)
+```
+
+This means:
+- If the user sets 8 but only 5 is safe → effective is 5 (jobs are held in queue)
+- If the user sets 4 and 7 is safe → effective is 4 (user preference is respected)
+- Running jobs are **never killed** — the cap only affects when queued jobs start
+
+#### Auto-tune decision flow
+
+```mermaid
+flowchart TD
+    A["⏱️ Drain loop tick"] --> B{"Auto-tune\nenabled?"}
+    B -- YES --> C["🔍 Probe system resources\nRAM, disk, swap"]
+    C --> D["📐 Estimate per-job cost\nfrom CSV file sizes"]
+    D --> E["🧮 Compute safe limits\nRAM ÷ per-job, Disk ÷ per-job, CPU cores"]
+    E --> F["effective_max = min\nuser_setting, recommended"]
+    B -- NO --> G["effective_max =\nuser_setting"]
+    F --> H{"running < effective_max\nAND pending > 0?"}
+    G --> H
+    H -- YES --> I["🚀 Start next job"]
+    H -- NO --> J["⏳ Wait 2s"]
+    J --> A
+    I --> A
+
+    style C fill:#E8F4FD,stroke:#2196F3
+    style E fill:#FFF3CD,stroke:#FFC107
+    style F fill:#D4EDDA,stroke:#28A745
+```
+
+#### Warnings
+
+The resource advisor generates warnings surfaced in both the API response and the frontend UI:
+
+| Condition | Warning message |
+|---|---|
+| Swap > 15% used | "Swap is X% in use — running more jobs may cause severe slowdown" |
+| RAM > 80% used | "RAM is X% used (Y MiB free). Consider reducing max_concurrency" |
+| Disk > 85% full | "Disk is X% full (Y GiB free). Large validations may fail during spill" |
+| Single job > 50% RAM | "A single job may need ~X MiB but only Y MiB available" |
+
+#### Frontend resource dashboard
+
+The "⚡ Parallel Validation" panel in the UI shows:
+
+- **3 resource cards**: RAM (available/total + per-job estimate), Disk (same), Safe limits (color-coded badges for RAM/Disk/CPU)
+- **Warning banners**: Amber alerts for each active warning
+- **"Use recommended (N)" button**: One-click to set the slider to the system's recommendation
+- **Auto-tune checkbox**: Toggle resource-based dynamic capping ON/OFF
+- **Summary text**: "Your server has N CPU cores, X GiB RAM, Y GiB disk free. The system recommends Z parallel jobs."
+
 ### Key files
 
 | File | Purpose |
 |---|---|
-| `services/validation_job_queue.py` | The queue itself — pending deque, running dict, drain loop, `set_max_concurrency()` |
+| `services/resource_advisor.py` | Probes RAM/disk/swap, estimates per-job cost, computes `recommended_max_concurrency` |
+| `services/validation_job_queue.py` | The queue — pending deque, running dict, drain loop with auto-tune integration |
 | `services/background_validation_runner.py` | Spawns the actual worker subprocess (`python -m pegasus.validation.job_worker`) |
 | `api/v1/validation.py` | `GET/PATCH /validate/queue` endpoints, `POST /validate` calls `queue.enqueue()` |
 | `core/config.py` | `PEGASUS_VALIDATION_MAX_CONCURRENCY` (startup default, overrideable at runtime) |
 | `main.py` | Starts the drain loop on app startup, shuts it down on exit |
-| `ValidationPanel.jsx` | Frontend concurrency slider — fetches CPU info, sends PATCH to update |
+| `ValidationPanel.jsx` | Frontend: resource cards, concurrency slider, auto-tune toggle, warnings |
 
 ### API endpoints for queue control
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/v1/validate/queue` | Returns `cpu_cores_available`, `max_concurrency`, `pending`, `running`, and job list |
-| `PATCH` | `/api/v1/validate/queue` | Body: `{"max_concurrency": 4}` — updates the concurrency limit at runtime |
+| `GET` | `/api/v1/validate/queue` | Returns system resources, `resource_advisor` recommendation, job list |
+| `PATCH` | `/api/v1/validate/queue` | Body: `{"max_concurrency": 4, "auto_tune_enabled": true}` — update settings at runtime |
 
 Example response from `GET /api/v1/validate/queue`:
 
 ```json
 {
-  "max_concurrency": 2,
+  "max_concurrency": 4,
   "cpu_cores_available": 8,
-  "pending": 3,
-  "running": 2,
+  "auto_tune_enabled": true,
+  "pending": 2,
+  "running": 3,
   "finished": 15,
   "total_tracked": 20,
+  "resource_advisor": {
+    "system": {
+      "total_ram_bytes": 16793714688,
+      "available_ram_bytes": 6786662400,
+      "total_ram_gib": 15.64,
+      "available_ram_gib": 6.32,
+      "total_disk_bytes": 255048544256,
+      "available_disk_bytes": 95789342720,
+      "total_disk_gib": 237.5,
+      "available_disk_gib": 89.2,
+      "cpu_cores": 8,
+      "swap_pressure": 0.05
+    },
+    "per_job_estimate": {
+      "ram_bytes": 838860800,
+      "ram_mib": 800.0,
+      "disk_bytes": 314572800,
+      "disk_mib": 300.0
+    },
+    "running_jobs_estimated_ram_bytes": 2516582400,
+    "limits": {
+      "max_safe_by_ram": 7,
+      "max_safe_by_disk": 12,
+      "max_safe_by_cpu": 8
+    },
+    "recommended_max_concurrency": 7,
+    "warnings": []
+  },
   "jobs": [
     {"job_id": "abc-123", "state": "running", "started_at": 1715700000},
     {"job_id": "def-456", "state": "queued", "position": 0}
@@ -286,7 +424,8 @@ Example response from `GET /api/v1/validate/queue`:
 - `src/pegasus/main.py` — FastAPI app entrypoint, router registration, and job queue lifecycle.
 - `src/pegasus/api/` — API route definitions and dependency wiring.
 - `src/pegasus/core/` — configuration, DB connection, helpers.
-- `src/pegasus/services/validation_job_queue.py` — concurrency-limited validation job queue.
+- `src/pegasus/services/validation_job_queue.py` — concurrency-limited validation job queue with auto-tune.
+- `src/pegasus/services/resource_advisor.py` — dynamic RAM/disk/swap probing and per-job cost estimation.
 - `src/pegasus/services/background_validation_runner.py` — worker process spawner.
 - `src/pegasus/validation/engine.py` — reconciliation engine core (strategy dispatcher).
 - `src/pegasus/services/validation_service.py` — high-level orchestration of validation runs.
