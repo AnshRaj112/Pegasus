@@ -1,403 +1,152 @@
 # Pegasus
 
-Pegasus is a comprehensive data validation platform that compares CSV files and generates detailed mismatch reports. It consists of a React-based frontend for user interaction and a FastAPI-based backend for validation processing.
+Pegasus is a data validation and reconciliation platform that compares CSV datasets (source vs target), detects row-level mismatches, and provides structured reports for debugging and downstream automation. This repository contains the backend API (FastAPI), a React + Vite frontend UI, migration scripts, sample test data, and utilities to run validations locally or in CI.
 
-## Project Structure
+## What I changed
+
+- Expanded documentation to cover architecture, deployment, and developer workflows.
+- Added Mermaid source diagrams under [docs/diagrams](docs/diagrams) so you can generate images locally.
+
+## Project layout
 
 ```
 Pegasus/
-├── pegasus-backend/        # FastAPI backend service
-├── pegasus-frontend/       # React + Vite frontend application
-├── pegasus-infra/          # Infrastructure and deployment configs
-├── benchmarks/             # Performance benchmarks
-├── docs/                   # Project documentation
-├── test-data/              # Sample test data files
-└── scripts/                # Utility scripts
+├── pegasus-backend/        # FastAPI backend service (Python)
+├── pegasus-frontend/       # React + Vite frontend (JS/React)
+├── docs/                   # Documentation and diagrams
+│   └── diagrams/           # Mermaid source files for diagrams
+├── test-data/              # Sample CSVs and generated datasets
+└── scripts/                # Utility scripts (data generation, helpers)
 ```
 
-## Quick Start
+## Quick start (dev)
 
-### Prerequisites
+Backend
 
-- **Node.js**: v18.0.0 or higher
-- **Python**: 3.12 or higher
-- **npm**: v9.0.0 or higher
-- **PostgreSQL** or **SQLite**: For database (SQLite for development)
-
-### Backend Setup
-
-1. Navigate to the backend directory:
 ```bash
 cd pegasus-backend
-```
-
-2. Create and activate virtual environment:
-```bash
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
+source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env            # create .env based on example
+# set DATABASE_URL in .env (sqlite recommended for quick dev)
+alembic -c alembic.ini upgrade head
+uvicorn src.pegasus.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-4. Create `.env` file with database configuration:
-```bash
-DATABASE_URL=sqlite:///./pegasus.db
-```
+Notes:
+- API root: http://localhost:8000
+- Swagger: http://localhost:8000/docs
 
-5. Run database migrations:
-```bash
-alembic upgrade head
-```
+Frontend
 
-6. Start the backend server:
-```bash
-uvicorn pegasus.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Backend API will be available at: `http://localhost:8000`
-- **Swagger Documentation**: http://localhost:8000/docs
-- **ReDoc Documentation**: http://localhost:8000/redoc
-
-### Frontend Setup
-
-1. Navigate to the frontend directory (in a new terminal):
 ```bash
 cd pegasus-frontend
-```
-
-2. Install dependencies:
-```bash
 npm install
-```
-
-3. Start the development server:
-```bash
 npm run dev
 ```
 
-Frontend will be available at: `http://localhost:5173`
+Notes:
+- Frontend dev server default: http://localhost:5173
+- Configure the frontend to point to the backend base URL via environment variables in `pegasus-frontend` if needed.
 
-## Validation Workflow & Architecture
+## Architecture (high level)
 
-### Overview
+- The backend exposes REST endpoints (FastAPI) to start and inspect validation runs.
+- Validation runs can be executed synchronously or scheduled to background workers.
+- The core validation engine reads CSVs into Polars DataFrames, chooses a reconciliation strategy (auto, ordered_stream, sliding_window, hash_partition, external_sort), and streams mismatch results as NDJSON or stores them in the DB for later inspection.
+- The frontend provides an interactive UI to submit validation jobs, monitor progress, and inspect mismatch samples.
 
-Pegasus compares two CSV files (source and target) by matching rows using a shared **UID (Unique Identifier) column** and reports three types of mismatches:
+You can find the Mermaid sources for the architecture and dataflow diagrams here:
 
-1. **Missing in Target**: Rows that exist in the source but not in target
-2. **Extra in Target**: Rows that exist in the target but not in source  
-3. **Value Mismatch**: Rows with matching UIDs but differing column values
+- System architecture: [docs/diagrams/system_architecture.mmd](docs/diagrams/system_architecture.mmd)
+- Validation dataflow: [docs/diagrams/data_flow.mmd](docs/diagrams/data_flow.mmd)
 
-### End-to-End Validation Pipeline
-
-```
-CSV Files (Source & Target)
-    ↓
-[Step 1: CSV Reading & Parsing]
-    - Read CSV files with auto-detected or specified delimiters
-    - Parse data into Polars DataFrames
-    ↓
-[Step 2: Data Normalization]
-    - Convert data types and handle null values
-    - Standardize formatting
-    ↓
-[Step 3: UID-Based Reconciliation]
-    - Use shared UID column as join key
-    - Select reconciliation strategy based on file size
-    ↓
-[Step 4: Comparison & Mismatch Detection]
-    - Anti-join to find missing/extra rows
-    - Semi-join to identify value mismatches
-    - Store detailed mismatch records
-    ↓
-[Step 5: Report Generation]
-    - Create structured mismatch report
-    - Summary statistics (count of each type)
-    - Detailed row-level information for root-cause analysis
-    ↓
-Mismatch Report (NDJSON + Metrics)
-```
-
-### How Mismatches Are Detected
-
-#### 1. Missing in Target (Anti-Join)
-- **Logic**: Rows in source but no matching UID in target
-- **Detection Method**: Anti-join from source to target on UID column
-- **Example**:
-  ```
-  Source UID=123, Name="Alice"  →  Target has no UID=123  →  MISSING_IN_TARGET
-  ```
-
-#### 2. Extra in Target (Anti-Join)
-- **Logic**: Rows in target but no matching UID in source
-- **Detection Method**: Anti-join from target to source on UID column
-- **Example**:
-  ```
-  Target UID=456, Name="Bob"  →  Source has no UID=456  →  EXTRA_IN_TARGET
-  ```
-
-#### 3. Value Mismatch (Semi-Join with Column Comparison)
-- **Logic**: Same UID in both but column values differ
-- **Detection Method**: 
-  - Inner-join on UID to get matching rows
-  - Compare each selected column (IS DISTINCT FROM null-aware comparison)
-  - Report each mismatched column separately
-- **Example**:
-  ```
-  UID=789 | Source: Age=30, Status="Active"
-  UID=789 | Target: Age=31, Status="Active"  →  VALUE_MISMATCH on "Age" column
-  ```
-
-### Reconciliation Strategies
-
-Pegasus uses different strategies based on data size and characteristics:
-
-#### 1. **AUTO (Default)**
-- Automatically selects best strategy based on:
-  - Combined file size vs. memory threshold (default: 25MB)
-  - `assume_sorted` configuration
-- Recommendation: Use for most cases
-
-#### 2. **ORDERED_STREAM**
-- **Prerequisite**: Both CSV files must be globally sorted by UID
-- **Method**: Two-pointer merge (like merging sorted linked lists)
-- **Memory**: O(batch_size) - very efficient
-- **Best For**: Pre-sorted datasets, minimal memory constraints
-
-#### 3. **SLIDING_WINDOW**
-- **Prerequisite**: Data mostly sorted by UID (minor skew tolerated)
-- **Method**: Like ORDERED_STREAM but maintains sliding window look-ahead
-- **Window Size**: Configurable (default: 0 = disabled)
-- **Best For**: Nearly-sorted data with occasional out-of-order rows
-
-#### 4. **HASH_PARTITION**
-- **Method**: 
-  1. Hash each row: `bucket_id = hash(uid) % N` (N = partition_buckets)
-  2. Spill rows to disk partitions
-  3. Compare each bucket independently
-- **Storage**: Temporary disk space for spilled partitions
-- **Memory**: Bounded by chunk size and partition count
-- **Best For**: Large unsorted datasets, external memory scenarios
-
-#### 5. **EXTERNAL_SORT**
-- **Method**:
-  1. Sort source and target independently using external merge-sort
-  2. Run ORDERED_STREAM on sorted outputs
-- **Storage**: Temporary disk space for sorted chunks
-- **Best For**: Very large unsorted datasets with stable working directory
-
-### Reconciliation backends (large files)
-
-By default Pegasus uses the **Polars** spill / hash-partition pipeline for external-memory joins (no DuckDB required). Optionally set ``PEGASUS_VALIDATION_RECONCILIATION_BACKEND=duckdb`` to use **DuckDB** for the same style of partitioned joins.
-
-**Typical process (hash partition)**:
-1. **Spill**: Stream CSVs and assign rows to ``hash(uid) % N`` partition buckets (Parquet shards on disk).
-2. **Per-partition compare**: Sort-merge (or DuckDB SQL when that backend is selected) within each bucket.
-3. **Streaming collection**: Mismatches can stream to NDJSON so RAM stays bounded.
-
-**Advantages**:
-- Handles very large files with bounded RAM when external reconciliation is enabled
-- Disk-backed joins and configurable chunk / partition sizing
-- Memory-conscious streaming of mismatch output
-
-### Configuration Parameters
-
-**Key Environment Variables** (in `.env`):
+If you prefer images, install Mermaid CLI and generate SVGs from these sources:
 
 ```bash
-# Reconciliation strategy
-VALIDATION_RECONCILIATION_STRATEGY=auto  # auto|ordered_stream|sliding_window|hash_partition|external_sort
+npm i -g @mermaid-js/mermaid-cli
+mmdc -i docs/diagrams/system_architecture.mmd -o docs/diagrams/system_architecture.svg
+mmdc -i docs/diagrams/data_flow.mmd -o docs/diagrams/data_flow.svg
+```
 
-# Memory & Chunk Settings
-VALIDATION_RECONCILIATION_CHUNK_ROWS=500000
-VALIDATION_EXTERNAL_MEMORY_THRESHOLD_BYTES=26214400  # 25MB
+## Backend: key components
 
-# Partitioning
+- `src/pegasus/main.py` — FastAPI app entrypoint and router registration.
+- `src/pegasus/api/` — API route definitions and dependency wiring.
+- `src/pegasus/core/` — configuration, DB connection, helpers.
+- `src/pegasus/validation/engine.py` — reconciliation engine core (strategy dispatcher).
+- `src/pegasus/services/validation_service.py` — high-level orchestration of validation runs.
+- `src/pegasus/models/` — SQLAlchemy models for `ValidationRun`, mismatch reports, and audit tables.
+- `alembic/` — migration scripts; use `alembic -c alembic.ini upgrade head` to apply.
+
+Environment variables of interest (set in `.env`):
+
+```bash
+# Database
+DATABASE_URL=sqlite:///./pegasus.db
+
+# Reconciliation strategy (auto|ordered_stream|sliding_window|hash_partition|external_sort)
+VALIDATION_RECONCILIATION_STRATEGY=auto
+
+# Memory & partition tuning
+VALIDATION_EXTERNAL_MEMORY_THRESHOLD_BYTES=26214400
 VALIDATION_RECONCILIATION_PARTITION_BUCKETS=64
-VALIDATION_RECONCILIATION_SUB_PARTITION_BUCKETS=1
-
-# Sorting Hints
-VALIDATION_RECONCILIATION_ASSUME_SORTED=false
-VALIDATION_RECONCILIATION_SLIDING_WINDOW=0
-
-# Reconciliation backend (PEGASUS_ prefix in real .env)
-PEGASUS_VALIDATION_RECONCILIATION_BACKEND=polars
-# Optional DuckDB: PEGASUS_VALIDATION_RECONCILIATION_BACKEND=duckdb
-PEGASUS_VALIDATION_DUCKDB_MEMORY_LIMIT_RATIO=0.8
-PEGASUS_VALIDATION_DUCKDB_INGEST_CSV_TO_PARQUET=true
-PEGASUS_VALIDATION_DUCKDB_RECONCILIATION_PARTITIONS=32
-
-# Temp Storage
-VALIDATION_RECONCILIATION_TEMP_DIR=/tmp/pegasus
-
-# Report Options
-VALIDATION_STREAM_MISMATCHES_TO_DISK=false  # Stream instead of materializing
-VALIDATION_RECONCILIATION_MISMATCH_NDJSON_MIRROR=false
+VALIDATION_RECONCILIATION_CHUNK_ROWS=500000
 ```
 
-### Mismatch Report Structure
+## Frontend: key components
 
-**Output Format**: NDJSON (one JSON object per line) or in-memory DataFrame
+- `pegasus-frontend/src/App.jsx` — app shell and routes.
+- `pegasus-frontend/src/components/ValidationPanel.jsx` — UI to run and monitor validation jobs.
+- `pegasus-frontend/src/components/ValidationMismatchSections.jsx` — mismatch list and details.
 
-**Each Mismatch Record**:
-```json
-{
-  "uid": "12345",
-  "mismatch_type": "value_mismatch",
-  "column_name": "status",
-  "source_value": "ACTIVE",
-  "target_value": "INACTIVE",
-  "row_detail": "{\"source_record\": {...}, \"target_record\": {...}}"
-}
-```
+Run and develop with HMR using `npm run dev`.
 
-**Report Summary**:
-```python
-{
-  "missing_in_target": 145,
-  "extra_in_target": 23,
-  "value_mismatch": 1087
-}
-```
+## APIs (common)
 
-### API Endpoint
+- `POST /api/v1/validation/runs` — start a validation job. Payload includes `source_path`, `target_path`, `uid_column`, `delimiter`, `strategy`.
+- `GET /api/v1/validation/runs/{id}` — get run metadata and progress.
+- `GET /api/v1/validation/runs/{id}/mismatches` — stream or paginate mismatch records.
 
-**POST** `/api/v1/validate`
+Refer to the backend code comments for the exact request/response shapes or open the interactive Swagger UI at `/docs`.
 
-Request:
-```json
-{
-  "source_path": "/data/source.csv",
-  "target_path": "/data/target.csv",
-  "uid_column": "customer_id",
-  "delimiter": ",",
-  "strategy": "auto"
-}
-```
+## Diagrams included (source)
 
-Response:
-```json
-{
-  "validation_run_id": "uuid-123",
-  "source_row_count": 1000000,
-  "target_row_count": 998500,
-  "compared_columns": ["name", "email", "status"],
-  "mismatch_summary": {
-    "missing_in_target": 2500,
-    "extra_in_target": 0,
-    "value_mismatch": 1200
-  }
-}
-```
+- [docs/diagrams/system_architecture.mmd](docs/diagrams/system_architecture.mmd) — system components and interactions
+- [docs/diagrams/data_flow.mmd](docs/diagrams/data_flow.mmd) — CSV ingestion → reconciliation strategies → mismatch generation
 
-### Performance Considerations
+## Running tests
 
-| Scenario | Recommended Strategy | Memory Need |
-|----------|----------------------|------------|
-| Small files (<100MB), unsorted | HASH_PARTITION | Low |
-| Small files, pre-sorted | ORDERED_STREAM | Very Low |
-| Large files (1GB+), unsorted | HASH_PARTITION + Polars (default) or DuckDB | Moderate |
-| Very large files (100GB+) | EXTERNAL_SORT + Polars (default) or DuckDB | Low |
-| Streaming ingestion | HASH_PARTITION with mismatch streaming | Low |
-
-### Running Tests
-
-### Backend Tests
+Backend
 
 ```bash
 cd pegasus-backend
-pytest tests/
+pytest -q
 ```
 
-Run with coverage:
-```bash
-pytest --cov=pegasus tests/
-```
-
-### Frontend Tests (if configured)
+Frontend (if configured)
 
 ```bash
 cd pegasus-frontend
 npm test
 ```
 
-## Building for Production
+## Troubleshooting & tips
 
-### Backend
+- If migrations fail, ensure `DATABASE_URL` points to a writable DB file and run `alembic -c alembic.ini upgrade head`.
+- For very large datasets, increase `VALIDATION_RECONCILIATION_PARTITION_BUCKETS` and ensure `VALIDATION_RECONCILIATION_TEMP_DIR` has enough disk space.
+- Use the `test-data/` folder to try small and large generated files before running production workloads.
 
-```bash
-cd pegasus-backend
-# Run with production settings
-uvicorn pegasus.main:app --host 0.0.0.0 --port 8000 --workers 4
-```
+## Next steps I can take for you
 
-### Frontend
+- Generate SVG/PNG images from the Mermaid sources and commit them under `docs/diagrams` (I can do that if you want).
+- Add API examples and curl snippets for each endpoint.
+- Add CI steps to run backend tests and build frontend on push.
 
-```bash
-cd pegasus-frontend
-npm run build
-```
+---
 
-Built files will be in `dist/` directory.
-
-## Key Features
-
-### Backend
-- ✅ FastAPI REST API for validation operations
-- ✅ PostgreSQL/SQLite database support
-- ✅ CSV file comparison and validation
-- ✅ SHA256-based composite UID generation
-- ✅ Detailed mismatch reporting with row-level details
-- ✅ Database migrations with Alembic
-- ✅ Asynchronous operations for performance
-- ✅ Health check endpoints
-- ✅ Comprehensive error handling
-
-### Frontend
-- ✅ React + Vite modern tech stack
-- ✅ Responsive validation panel interface
-- ✅ Detailed mismatch record viewing
-- ✅ Real-time API communication
-- ✅ ESLint code quality checks
-- ✅ Hot Module Replacement during development
-
-## API Documentation
-
-### Health Check
-```
-GET /health
-```
-
-### Validation Endpoints
-```
-GET    /api/v1/validation/runs              # List all validation runs
-POST   /api/v1/validation/runs              # Create and run new validation
-GET    /api/v1/validation/runs/{run_id}     # Get validation run details
-GET    /api/v1/validation/runs/{run_id}/mismatches  # Get mismatch records
-```
-
-Refer to the [Backend README](./pegasus-backend/README.md) for detailed API documentation.
-
-## Development Workflow
-
-### Making Changes
-
-1. Create a feature branch:
-```bash
-git checkout -b feature/your-feature-name
-```
-
-2. Make changes and test thoroughly
-
-3. Commit with descriptive messages:
-```bash
-git add .
-git commit -m "Add feature description"
-```
-
-4. Push and create a pull request:
+If you want me to also generate and commit the rendered diagram SVGs, say "Generate diagrams" and I'll create them and update this README with inline images.
 ```bash
 git push origin feature/your-feature-name
 ```

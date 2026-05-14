@@ -398,6 +398,96 @@ MismatchReport(
 {"uid":"USR001","mismatch_type":"missing_in_target","column_name":null,"source_value":null,"target_value":null,"row_detail":"{\"source_record\":{...},\"target_record\":null}"}
 {"uid":"ORD002","mismatch_type":"extra_in_target","column_name":null,"source_value":null,"target_value":null,"row_detail":"{\"source_record\":null,\"target_record\":{...}}"}
 {"uid":"INV003","mismatch_type":"value_mismatch","column_name":"amount","source_value":"100.50","target_value":"100.75","row_detail":"{\"source_record\":{...},\"target_record\":{...}}"}
+
+## How validation currently works (backend internals)
+
+This section explains the concrete runtime flow implemented in the backend, how jobs are started, monitored, and how results are persisted.
+
+### Job submission paths
+
+- `POST /api/v1/validation/runs` (via uploads) — the API accepts two uploaded CSVs, spools them to a job workspace and starts a worker process.
+- `POST /api/v1/validation/local` — the API accepts two local paths (only when enabled) and starts a worker that reads the files in-place.
+
+Both endpoints create a per-job directory under the configured `validation_jobs_directory` (or system temp) and write a `meta.json` and `status.json` file before launching the worker.
+
+### Job workspace layout
+
+Each job runs inside a single directory (`<jobs_root>/<job_id>/`) containing these files:
+
+- `meta.json` — job metadata (uid column, delimiter, run_id, optional source/target paths, upload duration)
+- `status.json` — worker progress and human-readable status (updated frequently by the worker)
+- `source.csv`, `target.csv` — promoted uploads or pointers to local inputs
+- `mismatches.ndjson` — optional mismatch artifact (written when streaming to disk)
+- `result.json` — final run summary (counts, artifact filename, durations)
+- `worker.log` — combined stdout/stderr and worker logs
+
+The API polls `status.json` to report progress to clients; on completion the API reads `result.json` and builds the API response.
+
+### Worker model and isolation
+
+- The API does not run the heavy reconciliation work in-process. It uses `BackgroundValidationRunner` to either
+   - spawn `python -m pegasus.validation.job_worker <job_dir>` as a subprocess, or
+   - submit the same entrypoint to a process pool when `validation_worker_pool_size` is configured.
+- The worker process creates a `ValidationService` and calls the synchronous validation entrypoint (this avoids asyncio/Polars interop issues inside the web server).
+- The worker updates `status.json` periodically via a progress callback; it writes `result.json` and (optionally) `mismatches.ndjson` on success.
+
+### ValidationService behaviour (summary)
+
+- Public entrypoint: `ValidationService.validate_csv_pair()` — runs blocking Polars work on a background thread via `asyncio.to_thread` when invoked from other async code.
+- Worker entrypoint uses `ValidationService._validate_csv_pair_sync()` directly for simpler process-local execution.
+- Steps performed:
+   1. Resolve delimiter (supports `auto`, single-char for Polars, or multi-char via pandas fallback).
+   2. Validate that the UID column exists in both inputs.
+   3. Build a `ReconciliationRuntimeConfig` (from environment-backed `Settings`) and apply host tuning (CPUs, RAM, DuckDB thread caps).
+   4. Select a reconciliation path:
+       - Multichar streaming hash-partition path (when delimiter is multi-char).
+       - External-memory reconciliation (Polars partition spill or DuckDB backend) when files exceed the external-memory threshold or strategy forces external.
+       - In-memory comparator (Polars DataFrames + `UIDBasedComparator`) for small files.
+   5. Execute the selected engine (`ReconciliationCoordinator`, `UIDBasedComparator`, or DuckDB engine). Progress events are emitted when available.
+   6. Produce a `MismatchReport` and optional `mismatches.ndjson` artifact. Return `ValidationRunResult` with counts and artifact path.
+
+### Job worker lifecycle
+
+- The job worker (`pegasus.validation.job_worker`) does:
+   1. Load `meta.json` and initialize logging and optional `MemoryMonitor`.
+   2. Instantiate `ValidationService` and call the synchronous validation entrypoint with an internal progress callback.
+   3. Write `result.json` containing counts, compared columns, and the relative artifact filename (if any).
+   4. Update `status.json` to `completed` or `failed` so the API can pick up final state.
+
+### Persistence and database updates
+
+- If `enable_validation_persistence` is set, the API records run lifecycle into the database:
+   - On job enqueue the API calls `ValidationRunRepository.create_running()` which inserts a `ValidationRun` with `status=RUNNING` and returns the `run_id`.
+   - After the worker completes, when a client polls the job endpoint the API reads `result.json` and calls `_maybe_persist_completed_job()`.
+   - `_maybe_persist_completed_job()` verifies the `ValidationRun` is still `RUNNING` and then invokes `ValidationRunRepository.complete_success()` to update aggregates and insert mismatch rows.
+
+- `ValidationRunRepository.complete_success()` behavior:
+   - Marks the `ValidationRun` as `COMPLETED` and writes summary counts (`missing_in_target_count`, `extra_in_target_count`, `value_mismatch_count`, `total_mismatch_records`, `is_match`, `completed_at`, etc.).
+   - If a `mismatches.ndjson` artifact exists it is streamed and parsed in batches (default batch size 2,000) and persisted into `mismatch_report` rows.
+   - If mismatches are present only in-memory (Polars frame) they are converted to dicts and inserted in batches to avoid OOM.
+   - `mark_failed()` is used to mark runs that error while the API or worker is handling them.
+
+### Progress reporting
+
+- The worker emits periodic progress events to `status.json` (percent, phase, counters). The API exposes these via `GET /validate/jobs/{job_id}`.
+- The worker throttles writes so small frequent updates do not thrash disk (the internal callback rate is limited).
+
+### Notes, caveats and current limitations
+
+- Multi-character delimiters use a pandas fallback and then convert to Polars. This is slower but required for non-standard separators.
+- Duplicate UID detection can cause the run to be rejected with `422 Unprocessable` — this is surfaced by `UIDComparisonError`.
+- For very large runs the backend may spill to disk; ensure `validation_reconciliation_temp_dir` has sufficient space and that the process has write permissions.
+- The DB persistence path may take significant time for very large mismatch artifacts since every mismatch row is inserted into the database in batches.
+
+## Where to look in the code
+
+- Worker runner: `src/pegasus/validation/job_worker.py`
+- Background starter: `src/pegasus/services/background_validation_runner.py`
+- Validation orchestration: `src/pegasus/services/validation_service.py`
+- Persistence helpers: `src/pegasus/repositories/validation_repository.py`
+- Reconciliation coordinator and engines: `src/pegasus/validation/reconciliation/` (coordinator, partition_comparator, duckdb integration)
+
+If you'd like, I can also add a small diagram that shows the job workspace lifecycle and the DB persistence path, or generate example `curl` snippets for the validation endpoints.
 ```
 
 ### Error Handling
