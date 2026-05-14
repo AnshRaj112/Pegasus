@@ -31,7 +31,7 @@ from .partition_comparator import PartitionComparator
 from .partition_manager import (
     PartitionManager,
     multichar_csv_header_frame,
-    spill_multichar_csv_via_pandas,
+    spill_multichar_csv_via_polars,
 )
 from .streaming_mismatch_collector import StreamingMismatchCollector
 from .temp_workspace import temp_reconciliation_workspace
@@ -328,7 +328,7 @@ class ReconciliationCoordinator:
                 label="multichar hash-partition spill/sort",
             )
             collector = _make_collector(cfg, workspace, ReconciliationStrategy.HASH_PARTITION)
-            src_rows = spill_multichar_csv_via_pandas(
+            src_rows = spill_multichar_csv_via_polars(
                 source_path,
                 workspace=workspace,
                 side="source",
@@ -339,7 +339,7 @@ class ReconciliationCoordinator:
                 metrics=self._metrics,
                 sub_partition_buckets=cfg.sub_partition_buckets,
             )
-            tgt_rows = spill_multichar_csv_via_pandas(
+            tgt_rows = spill_multichar_csv_via_polars(
                 target_path,
                 workspace=workspace,
                 side="target",

@@ -188,10 +188,11 @@ def spill_multichar_csv_via_polars(
         # to get one row per line in a single column
         dummy_sep = "\x1f" 
         
-        # 1. Get header to know column names
-        header_df = pl.read_csv(csv_path, n_rows=0, separator=dummy_sep, has_header=False)
-        raw_header = header_df.columns[0]
-        # Split header manually
+        # 1. Get header to know column names by reading the first line
+        with open(csv_path, "r", encoding="utf-8") as f:
+            raw_header = f.readline().rstrip("\n\r")
+        
+        # Split header using Python's regex (which supports lookahead)
         columns = re.split(split_pattern, raw_header)
         columns = [c.strip().strip('"') for c in columns]
         
@@ -204,21 +205,28 @@ def spill_multichar_csv_via_polars(
             # batch has 1 column containing the whole line
             line_col = batch.columns[0]
             
-            # Vectorized split using regex
-            # First, replace multi-char with our dummy single-char sep (respecting quotes)
-            # Then split by that single char
-            split_df = (
-                batch.select([
-                    pl.col(line_col)
-                    .str.replace_all(split_pattern, dummy_sep)
-                    .str.split_exact(dummy_sep, len(columns) - 1)
-                    .alias("fields")
-                ])
-                .unnest("fields")
-            )
+            # Use Python's re module (via map_elements) to handle lookahead regex
+            # which Polars' regex engine doesn't support
+            def split_line(line: str) -> dict:
+                """Split a CSV line using Python's regex with lookahead support."""
+                fields = re.split(split_pattern, line)
+                # Pad or trim to expected number of columns
+                fields = fields + [""] * (len(columns) - len(fields))
+                fields = fields[:len(columns)]
+                return {col: field for col, field in zip(columns, fields)}
             
-            # Rename columns to match header
-            split_df.columns = columns
+            # Apply the split function to each row
+            split_dicts = batch.select([pl.col(line_col)]).to_series().map_elements(
+                split_line, return_dtype=pl.Object
+            ).to_list()
+            
+            # Convert list of dicts to DataFrame
+            split_df = pl.DataFrame(split_dicts)
+            
+            # Ensure all columns are string type
+            split_df = split_df.with_columns([
+                pl.col(col).cast(pl.String) for col in split_df.columns
+            ])
             
             # Now proceed with normal partitioning
             if uid_column not in split_df.columns:
