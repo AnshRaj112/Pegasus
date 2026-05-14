@@ -147,9 +147,6 @@ npm test
 ---
 
 If you want me to also generate and commit the rendered diagram SVGs, say "Generate diagrams" and I'll create them and update this README with inline images.
-```bash
-git push origin feature/your-feature-name
-```
 
 ### Code Quality
 

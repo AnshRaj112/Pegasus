@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { MismatchSampleRows } from './MismatchSampleRows'
+import { useNavigate } from 'react-router-dom';
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
 const pollTimeoutRaw = Number(import.meta.env.VITE_VALIDATION_POLL_TIMEOUT_MS ?? 0)
 const pollTimeoutMs = Number.isFinite(pollTimeoutRaw) ? pollTimeoutRaw : 0
+
 
 function absoluteApiUrl(pathOrUrl) {
   if (!pathOrUrl) return pathOrUrl
@@ -169,6 +171,7 @@ function formatDetail(detail) {
 }
 
 export function ValidationPanel() {
+  const navigate = useNavigate();
   const [sourceFile, setSourceFile] = useState(null)
   const [targetFile, setTargetFile] = useState(null)
   const [useLocalPaths, setUseLocalPaths] = useState(false)
@@ -473,9 +476,11 @@ export function ValidationPanel() {
           <section className="rounded-2xl border border-emerald-300 border-l-4 border-l-emerald-500 bg-emerald-50 p-6">
             <p className="mb-4 text-lg font-bold text-emerald-900">Finished</p>
 
+            <p className="mb-2 pt-4 text-sm font-semibold uppercase tracking-wider text-slate-700">Summary of the search</p>
+
             <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-xl bg-white p-4 shadow-sm">
-                <span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Match</span>
+                <span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Fully Match</span>
                 <span className="mt-1 block font-mono text-2xl font-black text-slate-900">
                   {result.summary?.is_match ? 'Yes' : 'No'}
                 </span>
@@ -501,15 +506,30 @@ export function ValidationPanel() {
             </div>
 
             <p className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-700">Mismatch counts</p>
-            <ul className="space-y-1 text-sm text-slate-700">
+            <ul className="text-sm text-slate-700 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               <li>
-                Missing in target: <strong>{result.mismatch_counts?.missing_in_target ?? 0}</strong>
+                <div className="rounded-xl bg-white p-4 shadow-sm">
+                  <span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Missing in Target</span>
+                  <span className="mt-1 block font-mono text-2xl font-black text-slate-900">
+                    {result.mismatch_counts?.missing_in_target ?? 0}
+                  </span>
+                </div>
               </li>
               <li>
-                Extra in target: <strong>{result.mismatch_counts?.extra_in_target ?? 0}</strong>
+                <div className="rounded-xl bg-white p-4 shadow-sm">
+                  <span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Extra in Target</span>
+                  <span className="mt-1 block font-mono text-2xl font-black text-slate-900">
+                    {result.mismatch_counts?.extra_in_target ?? 0}
+                  </span>
+                </div>
               </li>
               <li>
-                Value mismatch: <strong>{result.mismatch_counts?.value_mismatch ?? 0}</strong>
+                <div className="rounded-xl bg-white p-4 shadow-sm">
+                  <span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Value Mismatched</span>
+                  <span className="mt-1 block font-mono text-2xl font-black text-slate-900">
+                    {result.mismatch_counts?.value_mismatch ?? 0}
+                  </span>
+                </div>
               </li>
             </ul>
 
@@ -521,7 +541,7 @@ export function ValidationPanel() {
 
             {result.mismatch_samples?.length ? (
               <>
-                <p className="mt-6 mb-2 text-sm font-semibold uppercase tracking-wider text-slate-700">Sample mismatches</p>
+                {/* <p className="mt-6 mb-2 text-sm font-semibold uppercase tracking-wider text-slate-700">Sample mismatches</p>
                 <div className="overflow-x-auto rounded-xl border border-[#F1F1F1] bg-white">
                   <table className="min-w-full border-collapse text-left text-sm">
                     <thead>
@@ -535,7 +555,16 @@ export function ValidationPanel() {
                     </thead>
                     <MismatchSampleRows samples={result.mismatch_samples} />
                   </table>
-                </div>
+                </div> */}
+                <button
+                  type="button"
+                  onClick={() => navigate('/report', { state: { result } })}
+                  className="inline-flex w-full items-center justify-center gap-3 rounded-xl bg-emerald-400 px-5 py-4 text-base font-semibold text-[#FFFDEF] shadow-[0_12px_30px_rgba(235,76,76,0.28)] transition duration-200 hover:-translate-y-0.5 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 mb-4 mt-10"
+                >
+
+                  View Detailed Report
+
+                </button>
               </>
             ) : null}
           </section>
