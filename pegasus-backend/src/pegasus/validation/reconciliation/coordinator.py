@@ -339,7 +339,7 @@ class ReconciliationCoordinator:
                         spill_multichar_csv_via_polars,
                         source_path,
                         workspace=workspace,
-                        side="source",
+                            side="source",
                         uid_column=uid_column,
                         delimiter=delimiter,
                         buckets=cfg.partition_buckets,

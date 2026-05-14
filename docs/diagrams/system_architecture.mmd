@@ -1,0 +1,24 @@
+flowchart LR
+  subgraph Frontend
+    A[Browser / React UI]
+  end
+  subgraph Backend
+    B[FastAPI API Server]
+    C[Validation Service]
+    D[Background Worker Pool]
+    E[Validation Engine]
+    F[Database / Migrations (Alembic)]
+    G[Temp storage / spill dir]
+  end
+  A -->|API calls| B
+  B --> C
+  C --> D
+  C --> E
+  E --> G
+  E --> F
+  D --> E
+  B --> F
+  style A fill:#f9f,stroke:#333,stroke-width:1px
+  style B fill:#bbf,stroke:#333
+  style E fill:#bfb,stroke:#333
+  style F fill:#ffd,stroke:#333

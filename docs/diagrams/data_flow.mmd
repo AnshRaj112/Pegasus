@@ -1,0 +1,28 @@
+flowchart TD
+  S[Source CSV]
+  T[Target CSV]
+  subgraph Ingest
+    R[CSV Reader / Parser]
+    N[Normalizer]
+  end
+  subgraph Reconciliation
+    SD[Strategy Dispatcher]
+    OS[Ordered Stream]
+    HW[Sliding Window]
+    HP[Hash Partition]
+    ES[External Sort]
+  end
+  O[Mismatch Reporter (NDJSON / DB)]
+
+  S --> R
+  T --> R
+  R --> N
+  N --> SD
+  SD --> OS
+  SD --> HW
+  SD --> HP
+  SD --> ES
+  OS --> O
+  HW --> O
+  HP --> O
+  ES --> O
