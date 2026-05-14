@@ -8,20 +8,11 @@ from pathlib import Path
 
 import duckdb
 
+from pegasus.core.resource_tuning import physical_ram_bytes
+
 from .config import ReconciliationRuntimeConfig
 
 logger = logging.getLogger(__name__)
-
-
-def _total_ram_bytes() -> int | None:
-    try:
-        pages = os.sysconf("SC_PHYS_PAGES")
-        page_size = os.sysconf("SC_PAGE_SIZE")
-        if isinstance(pages, int) and isinstance(page_size, int) and pages > 0 and page_size > 0:
-            return pages * page_size
-    except (ValueError, OSError, AttributeError):
-        pass
-    return None
 
 
 def _network_fs_types() -> set[str]:
@@ -56,6 +47,21 @@ def _path_on_network_fs(path: Path) -> bool:
     return best_type in _network_fs_types()
 
 
+def duckdb_effective_thread_count(
+    cfg: ReconciliationRuntimeConfig,
+    *,
+    source_path: Path,
+    target_path: Path,
+) -> int:
+    """Threads DuckDB will use for this job (network cap vs local cap), never above ``os.cpu_count()``."""
+    cpu = max(1, int(os.cpu_count() or 1))
+    if _path_on_network_fs(source_path) or _path_on_network_fs(target_path):
+        return max(1, min(int(cfg.duckdb_network_threads), cpu))
+    if cfg.duckdb_local_threads > 0:
+        return max(1, min(int(cfg.duckdb_local_threads), cpu))
+    return cpu
+
+
 def configure_duckdb_connection(
     con: duckdb.DuckDBPyConnection,
     workspace: Path,
@@ -65,7 +71,7 @@ def configure_duckdb_connection(
     target_path: Path,
 ) -> None:
     con.execute("SET temp_directory = ?", [str(workspace)])
-    total_ram = _total_ram_bytes()
+    total_ram = physical_ram_bytes()
     if total_ram is not None:
         reserve = max(0, int(cfg.duckdb_memory_os_reserve_bytes))
         usable = max(256 * 1024 * 1024, total_ram - reserve)
@@ -80,13 +86,12 @@ def configure_duckdb_connection(
         )
 
     network_io = _path_on_network_fs(source_path) or _path_on_network_fs(target_path)
+    threads = duckdb_effective_thread_count(cfg, source_path=source_path, target_path=target_path)
+    con.execute("SET threads = ?", [threads])
     if network_io:
-        threads = max(1, min(cfg.duckdb_network_threads, int(os.cpu_count() or 1)))
-        con.execute("SET threads = ?", [threads])
         logger.info("DuckDB using network-I/O mode threads=%d", threads)
     else:
-        threads = cfg.duckdb_local_threads if cfg.duckdb_local_threads > 0 else max(1, int(os.cpu_count() or 1))
-        con.execute("SET threads = ?", [threads])
+        logger.info("DuckDB local disk threads=%d", threads)
         if cfg.duckdb_enable_object_cache:
             con.execute("SET enable_object_cache = true")
 

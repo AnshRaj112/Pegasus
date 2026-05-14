@@ -558,7 +558,7 @@ export function ValidationPanel() {
                   className="inline-flex w-full items-center justify-center gap-3 rounded-xl bg-emerald-400 px-5 py-4 text-base font-semibold text-[#FFFDEF] shadow-[0_12px_30px_rgba(235,76,76,0.28)] transition duration-200 hover:-translate-y-0.5 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 mb-4 mt-10"
                 >
 
-                  'View Detailed Report'
+                  View Detailed Report
 
                 </button>
               </>

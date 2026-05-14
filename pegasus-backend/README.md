@@ -189,7 +189,7 @@ pegasus-backend/
 - `POST /api/v1/validation/runs` - Create and run a new validation
 - `GET /api/v1/validation/runs/{run_id}` - Get specific validation run details
 - `GET /api/v1/validation/runs/{run_id}/mismatches` - Get mismatch records for a validation run
-
+   
 ## Validation Engine Architecture
 
 ### Core Components
@@ -221,9 +221,10 @@ pegasus-backend/
   - Available disk space
 - **Manages** temporary workspace and cleanup
 
-#### 4. **DuckDB Reconciliation Engine** (`validation/reconciliation/duckdb_reconciliation_engine.py`)
-- **External Memory Joins**: Handles datasets larger than RAM
-- **Process**:
+#### 4. **DuckDB Reconciliation Engine** (`validation/reconciliation/duckdb_reconciliation_engine.py`) — optional
+- **When**: ``PEGASUS_VALIDATION_RECONCILIATION_BACKEND=duckdb`` and strategy is hash partition
+- **External Memory Joins**: Same logical steps as Polars hash-partition, executed inside DuckDB
+- **Process** (DuckDB backend):
   1. Ingest CSVs → optionally convert to Parquet
   2. Partition by `hash(uid) % N`
   3. Run comparison queries per partition
@@ -299,8 +300,8 @@ WHERE source.column_name IS DISTINCT FROM target.column_name
    ├─ Call UIDBasedComparator.compare_dataframes()
    └─ Return MismatchReport
 
-4. For Large Files (Disk-Backed):
-   ├─ DuckDBReconciliationEngine.run()
+4. For Large Files (Disk-Backed, default ``polars`` backend):
+   ├─ Polars hash-partition spill + PartitionComparator (or DuckDBReconciliationEngine if backend=duckdb)
    ├─ Hash-partition or sort files
    ├─ Process partitions sequentially
    ├─ Stream mismatches to NDJSON

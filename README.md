@@ -188,25 +188,19 @@ Pegasus uses different strategies based on data size and characteristics:
 - **Storage**: Temporary disk space for sorted chunks
 - **Best For**: Very large unsorted datasets with stable working directory
 
-### DuckDB Reconciliation Engine
+### Reconciliation backends (large files)
 
-For very large files, Pegasus uses **DuckDB** for efficient external-memory joins:
+By default Pegasus uses the **Polars** spill / hash-partition pipeline for external-memory joins (no DuckDB required). Optionally set ``PEGASUS_VALIDATION_RECONCILIATION_BACKEND=duckdb`` to use **DuckDB** for the same style of partitioned joins.
 
-**Process**:
-1. **CSV Ingestion**: Load CSVs into DuckDB (optionally converting to Parquet for speed)
-2. **Partitioning**: Partition by UID hash into chunks that fit in memory
-3. **Partition Comparison**:
-   - For each partition pair (source & target):
-     - **Anti-join (Missing)**: `source LEFT ANTI JOIN target ON uid`
-     - **Anti-join (Extra)**: `target LEFT ANTI JOIN source ON uid`
-     - **Semi-join (Mismatch)**: `source INNER JOIN target ON uid`, then compare columns
-4. **Streaming Collection**: Stream mismatches to NDJSON format (avoids full RAM materialization)
+**Typical process (hash partition)**:
+1. **Spill**: Stream CSVs and assign rows to ``hash(uid) % N`` partition buckets (Parquet shards on disk).
+2. **Per-partition compare**: Sort-merge (or DuckDB SQL when that backend is selected) within each bucket.
+3. **Streaming collection**: Mismatches can stream to NDJSON so RAM stays bounded.
 
 **Advantages**:
-- Handles 100GB+ files with moderate RAM
-- Efficient SQL query optimization
-- Disk-backed external joins
-- Memory-conscious streaming
+- Handles very large files with bounded RAM when external reconciliation is enabled
+- Disk-backed joins and configurable chunk / partition sizing
+- Memory-conscious streaming of mismatch output
 
 ### Configuration Parameters
 
@@ -228,11 +222,12 @@ VALIDATION_RECONCILIATION_SUB_PARTITION_BUCKETS=1
 VALIDATION_RECONCILIATION_ASSUME_SORTED=false
 VALIDATION_RECONCILIATION_SLIDING_WINDOW=0
 
-# DuckDB Backend
-VALIDATION_RECONCILIATION_BACKEND=duckdb
-VALIDATION_DUCKDB_MEMORY_LIMIT_RATIO=0.8
-VALIDATION_DUCKDB_INGEST_CSV_TO_PARQUET=true
-VALIDATION_DUCKDB_RECONCILIATION_PARTITIONS=32
+# Reconciliation backend (PEGASUS_ prefix in real .env)
+PEGASUS_VALIDATION_RECONCILIATION_BACKEND=polars
+# Optional DuckDB: PEGASUS_VALIDATION_RECONCILIATION_BACKEND=duckdb
+PEGASUS_VALIDATION_DUCKDB_MEMORY_LIMIT_RATIO=0.8
+PEGASUS_VALIDATION_DUCKDB_INGEST_CSV_TO_PARQUET=true
+PEGASUS_VALIDATION_DUCKDB_RECONCILIATION_PARTITIONS=32
 
 # Temp Storage
 VALIDATION_RECONCILIATION_TEMP_DIR=/tmp/pegasus
@@ -303,8 +298,8 @@ Response:
 |----------|----------------------|------------|
 | Small files (<100MB), unsorted | HASH_PARTITION | Low |
 | Small files, pre-sorted | ORDERED_STREAM | Very Low |
-| Large files (1GB+), unsorted | HASH_PARTITION + DuckDB | Moderate |
-| Very large files (100GB+) | EXTERNAL_SORT + DuckDB | Low |
+| Large files (1GB+), unsorted | HASH_PARTITION + Polars (default) or DuckDB | Moderate |
+| Very large files (100GB+) | EXTERNAL_SORT + Polars (default) or DuckDB | Low |
 | Streaming ingestion | HASH_PARTITION with mismatch streaming | Low |
 
 ### Running Tests

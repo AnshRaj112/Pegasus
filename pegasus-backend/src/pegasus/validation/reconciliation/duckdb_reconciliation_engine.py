@@ -169,19 +169,26 @@ def _export_partition_mismatches(
     con.execute(copy_sql)
 
 
-def _summary_from_ndjson(con: duckdb.DuckDBPyConnection, artifact: Path) -> dict[str, int]:
+def _accumulate_summary_from_ndjson_chunks(
+    con: duckdb.DuckDBPyConnection, chunks: list[Path]
+) -> dict[str, int]:
+    """Aggregate mismatch counts per chunk so DuckDB never scans one giant merged NDJSON."""
     summary = {
         MismatchType.MISSING_IN_TARGET.value: 0,
         MismatchType.EXTRA_IN_TARGET.value: 0,
         MismatchType.VALUE_MISMATCH.value: 0,
     }
-    lit = path_sql_literal(artifact)
-    rows = con.execute(
-        f"SELECT mismatch_type, count(*) FROM read_json_auto({lit}) GROUP BY mismatch_type"
-    ).fetchall()
-    for mt, cnt in rows:
-        if mt is not None:
-            summary[str(mt)] = int(cnt)
+    for chunk in chunks:
+        if not chunk.is_file() or chunk.stat().st_size == 0:
+            continue
+        lit = path_sql_literal(chunk)
+        rows = con.execute(
+            f"SELECT mismatch_type, count(*) FROM read_json_auto({lit}) GROUP BY mismatch_type"
+        ).fetchall()
+        for mt, cnt in rows:
+            if mt is not None:
+                key = str(mt)
+                summary[key] = summary.get(key, 0) + int(cnt)
     return summary
 
 
@@ -464,10 +471,9 @@ class DuckDBReconciliationEngine:
             self._metrics.on_phase_end("duckdb_partition_export")
 
             emit("duckdb_merge", "Merging mismatch chunks", 96.0)
+            summary = _accumulate_summary_from_ndjson_chunks(con, chunk_paths)
             merge_ndjson_chunk_files(artifact, chunk_paths)
             perf.checkpoint("duckdb_merge_chunks")
-
-            summary = _summary_from_ndjson(con, artifact)
             total_m = sum(summary.values())
             logger.info(
                 "DuckDB reconciliation complete source_rows=%d target_rows=%d mismatch_lines=%d partitions=%d",

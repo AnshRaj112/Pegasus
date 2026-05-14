@@ -95,8 +95,8 @@ class ReconciliationRuntimeConfig(BaseModel):
         description="When True, append every flushed mismatch chunk to mismatch_mirror.ndjson under the workspace.",
     )
     backend: ReconciliationBackend = Field(
-        default=ReconciliationBackend.DUCKDB,
-        description="DUCKDB uses DuckDB for hash-partition style joins; POLARS uses the legacy spill pipeline.",
+        default=ReconciliationBackend.POLARS,
+        description="POLARS uses the spill/hash-partition pipeline (default); DUCKDB uses DuckDB for the same joins.",
     )
     force_external: bool = Field(
         default=False,
