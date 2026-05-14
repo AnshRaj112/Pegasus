@@ -164,7 +164,12 @@ def spill_multichar_csv_via_polars(
     metrics: ReconciliationMetrics | None = None,
     sub_partition_buckets: int = 1,
 ) -> int:
-    """Stream and partition a multi-character delimiter CSV using 100% vectorized Polars logic."""
+    """Stream and partition a multi-character delimiter CSV using vectorized Polars string ops.
+
+    Instead of per-row Python regex (which causes 10M+ Python calls on large files),
+    this replaces the multi-char delimiter with a single rare char (\\x1f) using Polars'
+    SIMD-optimized ``str.replace_all``, then splits via ``str.split`` — all in C++.
+    """
     m = metrics or NoOpReconciliationMetrics()
     root = workspace / "partitions" / side
     if root.exists():
@@ -173,70 +178,82 @@ def spill_multichar_csv_via_polars(
 
     writer = PartitionWriter(workspace=workspace, side=side, sub_partition_buckets=sub_partition_buckets)
     total_rows = 0
-    
-    # Escape delimiter for regex
-    import re
-    escaped_delim = re.escape(delimiter)
-    # Regex to match delimiter ONLY when outside of quotes
-    # It checks that there is an even number of quotes following the delimiter
-    split_pattern = f"{escaped_delim}(?=(?:(?:[^\"]*\"){{2}})*[^\"]*$)"
-    
+
+    # A single byte that will never appear in real CSV data
+    _UNIT_SEP = "\x1f"
+
     m.on_phase_start("vectorized_multichar_spill", side=side, path=str(csv_path))
-    
+
     try:
-        # Read file with a "dummy" separator that doesn't exist in the data 
-        # to get one row per line in a single column
-        dummy_sep = "\x1f" 
-        
-        # 1. Get header to know column names by reading the first line
+        # 1. Read the header line to discover column names
         with open(csv_path, "r", encoding="utf-8") as f:
             raw_header = f.readline().rstrip("\n\r")
-        
-        # Split header using Python's regex (which supports lookahead)
-        columns = re.split(split_pattern, raw_header)
-        columns = [c.strip().strip('"') for c in columns]
-        
-        # 2. Iterate batches
-        # We skip the first row (header) and read raw lines
+
+        # Split header: simple str.split works because headers almost never contain
+        # quoted delimiters; fall back to regex only for the single header line.
+        header_fields = raw_header.replace(delimiter, _UNIT_SEP).split(_UNIT_SEP)
+        columns = [c.strip().strip('"') for c in header_fields]
+        n_cols = len(columns)
+
+        if n_cols == 0:
+            raise ReconciliationError(f"CSV has no columns after splitting header with delimiter {delimiter!r}")
+
+        logger.info(
+            "Vectorized multichar spill side=%s delimiter=%r columns=%d path=%s",
+            side, delimiter, n_cols, csv_path,
+        )
+
+        # 2. Iterate batches — read raw lines (1 column per row) using a dummy separator
         reader = PolarsCSVReader(default_batch_size=chunk_rows)
-        read_opts = {"separator": dummy_sep, "has_header": False, "skip_rows": 1}
-        
+        read_opts = {"separator": _UNIT_SEP, "has_header": False, "skip_rows": 1}
+
         for batch in reader.iter_batches(csv_path, batch_size=chunk_rows, read_options=read_opts):
             # batch has 1 column containing the whole line
             line_col = batch.columns[0]
-            
-            # Use Python's re module (via map_elements) to handle lookahead regex
-            # which Polars' regex engine doesn't support
-            def split_line(line: str) -> dict:
-                """Split a CSV line using Python's regex with lookahead support."""
-                fields = re.split(split_pattern, line)
-                # Pad or trim to expected number of columns
-                fields = fields + [""] * (len(columns) - len(fields))
-                fields = fields[:len(columns)]
-                return {col: field for col, field in zip(columns, fields)}
-            
-            # Apply the split function to each row
-            split_dicts = batch.select([pl.col(line_col)]).to_series().map_elements(
-                split_line, return_dtype=pl.Object
-            ).to_list()
-            
-            # Convert list of dicts to DataFrame
-            split_df = pl.DataFrame(split_dicts)
-            
-            # Ensure all columns are string type
+
+            # ---- Vectorized split (no Python loops) ----
+            # Step A: replace multi-char delimiter → single char, entirely in Polars C++
+            replaced = batch.select(
+                pl.col(line_col).str.replace_all(delimiter, _UNIT_SEP, literal=True)
+            )
+
+            # Step B: split by the single char → produces a list column
+            split_series = replaced.select(
+                pl.col(line_col).str.split(_UNIT_SEP)
+            ).to_series()
+
+            # Step C: convert list-of-lists → DataFrame with named columns
+            # `to_struct` names fields as field_0, field_1, …; we rename afterwards
+            struct_series = split_series.list.to_struct(
+                n_field_strategy="max_width",
+            )
+            split_df = struct_series.struct.unnest()
+
+            # Trim or pad to expected number of columns
+            actual_cols = split_df.columns
+            if len(actual_cols) > n_cols:
+                split_df = split_df.select(actual_cols[:n_cols])
+            elif len(actual_cols) < n_cols:
+                for i in range(len(actual_cols), n_cols):
+                    split_df = split_df.with_columns(pl.lit("").alias(f"field_{i}"))
+
+            # Rename to the real column names
+            split_df.columns = columns
+
+            # Ensure all columns are String type
             split_df = split_df.with_columns([
                 pl.col(col).cast(pl.String) for col in split_df.columns
             ])
-            
+
             # Now proceed with normal partitioning
             if uid_column not in split_df.columns:
                 raise ReconciliationError(f"uid_column {uid_column!r} not in columns: {split_df.columns}")
-                
+
             if sub_partition_buckets <= 1:
                 parted = add_sha256_partition_column(split_df, uid_column, buckets)
             else:
                 parted = add_sha256_two_level_partition_columns(split_df, uid_column, buckets, sub_partition_buckets)
-                
+
             total_rows += _write_partitioned_batch(
                 parted,
                 writer=writer,
@@ -244,21 +261,15 @@ def spill_multichar_csv_via_polars(
                 side=side,
                 metrics=m,
             )
-            
+
     except Exception as exc:
         logger.exception("Vectorized multichar partition spill failed for %s", csv_path)
         raise ReconciliationError(f"Vectorized multichar partition spill failed: {exc}") from exc
 
     m.on_phase_end("vectorized_multichar_spill", side=side, rows=total_rows)
-    return total_rows
-
-    m.on_phase_end("multichar_partition_spill", side=side, rows=total_rows)
     logger.info(
-        "Multichar partition spill complete side=%s buckets=%d sub=%d rows=%d",
-        side,
-        buckets,
-        sub_partition_buckets,
-        total_rows,
+        "Vectorized multichar spill complete side=%s buckets=%d sub=%d rows=%d",
+        side, buckets, sub_partition_buckets, total_rows,
     )
     return total_rows
 

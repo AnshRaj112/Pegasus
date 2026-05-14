@@ -12,5 +12,3 @@
 2026-05-14 02:22:37,399 INFO pegasus.services.validation_service Validation finished (multichar streaming) source_rows=10000000 target_rows=10400000 mismatch_report_rows=800000
 2026-05-14 02:22:37,399 INFO __main__ Validation complete job_dir=240ce147-424e-4826-9c9d-1da48f2cc5eb upload=0.00s validation=222.83s total=222.83s
 
-
-These are the logs from the backend now without changing anything in the codebase right now tell me is it first reading all the rows from the target and source then validating, if so why?? why cannot we do without reading won't it be faster?

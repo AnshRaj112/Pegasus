@@ -304,20 +304,23 @@ class ReconciliationCoordinator:
         compare_columns: list[str],
         cfg: ReconciliationRuntimeConfig,
     ) -> tuple[MismatchReport, int, int, ReconciliationStrategy]:
-        """Hash-partition validation for multi-character separators using chunked pandas reads.
+        """Hash-partition validation for multi-character separators using chunked reads.
 
-        Avoids loading entire CSVs into RAM (which otherwise causes OOM kills on large ``||``-style files).
+        Spills source and target CSV files in parallel (two threads) when
+        ``cfg.parallel_spill_sides`` is True (default), cutting the I/O-bound
+        read+partition phase nearly in half.
         """
         if len(delimiter) < 2:
             raise ReconciliationStrategyError(
                 "run_multichar_hash_partition_csv_pair requires a multi-character delimiter"
             )
         logger.info(
-            "Starting multichar hash-partition reconciliation delimiter=%r buckets=%d sub=%d chunk_rows=%d",
+            "Starting multichar hash-partition reconciliation delimiter=%r buckets=%d sub=%d chunk_rows=%d parallel_spill=%s",
             delimiter,
             cfg.partition_buckets,
             cfg.sub_partition_buckets,
             cfg.chunk_rows,
+            cfg.parallel_spill_sides,
         )
 
         with temp_reconciliation_workspace(cfg.temp_dir) as workspace:
@@ -328,28 +331,60 @@ class ReconciliationCoordinator:
                 label="multichar hash-partition spill/sort",
             )
             collector = _make_collector(cfg, workspace, ReconciliationStrategy.HASH_PARTITION)
-            src_rows = spill_multichar_csv_via_polars(
-                source_path,
-                workspace=workspace,
-                side="source",
-                uid_column=uid_column,
-                delimiter=delimiter,
-                buckets=cfg.partition_buckets,
-                chunk_rows=cfg.chunk_rows,
-                metrics=self._metrics,
-                sub_partition_buckets=cfg.sub_partition_buckets,
-            )
-            tgt_rows = spill_multichar_csv_via_polars(
-                target_path,
-                workspace=workspace,
-                side="target",
-                uid_column=uid_column,
-                delimiter=delimiter,
-                buckets=cfg.partition_buckets,
-                chunk_rows=cfg.chunk_rows,
-                metrics=self._metrics,
-                sub_partition_buckets=cfg.sub_partition_buckets,
-            )
+
+            # --- Parallel or sequential spill of source + target ---
+            if cfg.parallel_spill_sides:
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    fut_src = pool.submit(
+                        spill_multichar_csv_via_polars,
+                        source_path,
+                        workspace=workspace,
+                        side="source",
+                        uid_column=uid_column,
+                        delimiter=delimiter,
+                        buckets=cfg.partition_buckets,
+                        chunk_rows=cfg.chunk_rows,
+                        metrics=self._metrics,
+                        sub_partition_buckets=cfg.sub_partition_buckets,
+                    )
+                    fut_tgt = pool.submit(
+                        spill_multichar_csv_via_polars,
+                        target_path,
+                        workspace=workspace,
+                        side="target",
+                        uid_column=uid_column,
+                        delimiter=delimiter,
+                        buckets=cfg.partition_buckets,
+                        chunk_rows=cfg.chunk_rows,
+                        metrics=self._metrics,
+                        sub_partition_buckets=cfg.sub_partition_buckets,
+                    )
+                    src_rows = fut_src.result()
+                    tgt_rows = fut_tgt.result()
+            else:
+                src_rows = spill_multichar_csv_via_polars(
+                    source_path,
+                    workspace=workspace,
+                    side="source",
+                    uid_column=uid_column,
+                    delimiter=delimiter,
+                    buckets=cfg.partition_buckets,
+                    chunk_rows=cfg.chunk_rows,
+                    metrics=self._metrics,
+                    sub_partition_buckets=cfg.sub_partition_buckets,
+                )
+                tgt_rows = spill_multichar_csv_via_polars(
+                    target_path,
+                    workspace=workspace,
+                    side="target",
+                    uid_column=uid_column,
+                    delimiter=delimiter,
+                    buckets=cfg.partition_buckets,
+                    chunk_rows=cfg.chunk_rows,
+                    metrics=self._metrics,
+                    sub_partition_buckets=cfg.sub_partition_buckets,
+                )
+
             _compare_spilled_hash_partitions(
                 workspace=workspace,
                 cfg=cfg,
