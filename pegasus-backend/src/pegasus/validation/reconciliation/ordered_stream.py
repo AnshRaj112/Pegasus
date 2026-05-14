@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
 import polars as pl
 import polars.exceptions as pl_exc
+
+from more_itertools import peekable
 
 from pegasus.validation.readers.polars_csv_reader import PolarsCSVReader
 
@@ -20,7 +22,39 @@ from .mismatch_collector import MismatchSink, compare_aligned_row_dicts
 logger = logging.getLogger(__name__)
 
 
-from more_itertools import peekable
+def _is_internal_join_col(name: str) -> bool:
+    return name == "pegasus_part" or name.startswith("pegasus_")
+
+
+def _joined_presence_row_detail_exprs(
+    joined_cols: Sequence[str],
+    *,
+    omit_row_detail: bool,
+) -> tuple[pl.Expr, pl.Expr]:
+    """Build ``row_detail`` JSON for missing (source row) and extra (target row) from an outer-join schema."""
+    empty = pl.lit("{}", dtype=pl.String)
+    if omit_row_detail:
+        return empty, empty
+    src_cols = [c for c in joined_cols if not c.endswith("_target") and not _is_internal_join_col(c)]
+    tgt_aliases = [
+        pl.col(c).alias(c[: -len("_target")])
+        for c in joined_cols
+        if c.endswith("_target") and not _is_internal_join_col(c[: -len("_target")])
+    ]
+    miss_inner = pl.struct([pl.col(c) for c in src_cols]).struct.json_encode()
+    missing_rd = pl.concat_str(
+        [pl.lit('{"source_record":'), miss_inner, pl.lit(',"target_record":null}')]
+    )
+    ext_inner = (
+        pl.struct(tgt_aliases).struct.json_encode()
+        if tgt_aliases
+        else pl.lit("null", dtype=pl.String)
+    )
+    extra_rd = pl.concat_str(
+        [pl.lit('{"source_record":null,"target_record":'), ext_inner, pl.lit("}")]
+    )
+    return missing_rd, extra_rd
+
 
 def _batch_to_dict_iter(batch_iter: Iterator[pl.DataFrame]) -> Iterator[dict[str, Any]]:
     for batch in batch_iter:
@@ -38,6 +72,7 @@ def merge_sorted_csv_streams(
     collector: MismatchSink,
     batch_rows: int,
     metrics: ReconciliationMetrics | None = None,
+    omit_row_detail: bool = False,
 ) -> tuple[int, int]:
     """Two-pointer merge for **globally sorted** UTF-8 CSV inputs (``window=0`` semantics)."""
     m = metrics or NoOpReconciliationMetrics()
@@ -55,7 +90,9 @@ def merge_sorted_csv_streams(
     
     # Join
     joined = src_lf.join(tgt_lf, on=uid_column, how="outer", suffix="_target")
-    
+    jcols = joined.collect_schema().names()
+    miss_rd, ext_rd = _joined_presence_row_detail_exprs(jcols, omit_row_detail=omit_row_detail)
+
     # 1. Missing
     missing = joined.filter(pl.col(f"{uid_column}_target").is_null()).select([
         pl.col(uid_column).cast(pl.String).alias("uid"),
@@ -63,9 +100,9 @@ def merge_sorted_csv_streams(
         pl.lit(None, dtype=pl.String).alias("column_name"),
         pl.lit(None, dtype=pl.String).alias("source_value"),
         pl.lit(None, dtype=pl.String).alias("target_value"),
-        pl.lit("{}", dtype=pl.String).alias("row_detail")
+        miss_rd.alias("row_detail"),
     ])
-    
+
     # 2. Extra
     extra = joined.filter(pl.col(uid_column).is_null()).select([
         pl.col(f"{uid_column}_target").cast(pl.String).alias("uid"),
@@ -73,7 +110,7 @@ def merge_sorted_csv_streams(
         pl.lit(None, dtype=pl.String).alias("column_name"),
         pl.lit(None, dtype=pl.String).alias("source_value"),
         pl.lit(None, dtype=pl.String).alias("target_value"),
-        pl.lit("{}", dtype=pl.String).alias("row_detail")
+        ext_rd.alias("row_detail"),
     ])
     
     # 3. Value Mismatch
@@ -131,6 +168,7 @@ def merge_sorted_parquet_streams(
     batch_rows: int,
     window: int,
     metrics: ReconciliationMetrics | None = None,
+    omit_row_detail: bool = False,
 ) -> tuple[int, int]:
     """Merge-join two **globally sorted** Parquet files produced by external sort.
 
@@ -145,6 +183,7 @@ def merge_sorted_parquet_streams(
             collector=collector,
             batch_rows=batch_rows,
             metrics=metrics,
+            omit_row_detail=omit_row_detail,
         )
     return _merge_parquet_sliding(
         source_path=source_path,
@@ -167,6 +206,7 @@ def _merge_parquet_two_pointer(
     collector: MismatchSink,
     batch_rows: int,
     metrics: ReconciliationMetrics | None,
+    omit_row_detail: bool = False,
 ) -> tuple[int, int]:
     m = metrics or NoOpReconciliationMetrics()
     m.on_phase_start("vectorized_parquet_merge", source=str(source_path), target=str(target_path))
@@ -176,7 +216,9 @@ def _merge_parquet_two_pointer(
     
     # Outer join to find all differences
     joined = src_lf.join(tgt_lf, on=uid_column, how="outer", suffix="_target")
-    
+    jcols = joined.collect_schema().names()
+    miss_rd, ext_rd = _joined_presence_row_detail_exprs(jcols, omit_row_detail=omit_row_detail)
+
     # 1. Missing in Target (Missing)
     missing = joined.filter(pl.col(f"{uid_column}_target").is_null()).select([
         pl.col(uid_column).cast(pl.String).alias("uid"),
@@ -184,9 +226,9 @@ def _merge_parquet_two_pointer(
         pl.lit(None, dtype=pl.String).alias("column_name"),
         pl.lit(None, dtype=pl.String).alias("source_value"),
         pl.lit(None, dtype=pl.String).alias("target_value"),
-        pl.lit("{}", dtype=pl.String).alias("row_detail")
+        miss_rd.alias("row_detail"),
     ])
-    
+
     # 2. Extra in Target (Extra)
     extra = joined.filter(pl.col(uid_column).is_null()).select([
         pl.col(f"{uid_column}_target").cast(pl.String).alias("uid"),
@@ -194,7 +236,7 @@ def _merge_parquet_two_pointer(
         pl.lit(None, dtype=pl.String).alias("column_name"),
         pl.lit(None, dtype=pl.String).alias("source_value"),
         pl.lit(None, dtype=pl.String).alias("target_value"),
-        pl.lit("{}", dtype=pl.String).alias("row_detail")
+        ext_rd.alias("row_detail"),
     ])
     
     # 3. Value Mismatch

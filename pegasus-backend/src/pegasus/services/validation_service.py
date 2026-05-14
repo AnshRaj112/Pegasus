@@ -20,7 +20,6 @@ from pegasus.core.resource_tuning import (
     max_reconciliation_partition_buckets,
     physical_cpu_count,
     physical_ram_bytes,
-    recommend_parallel_duckdb_csv_ingest,
 )
 from pegasus.services.exceptions import (
     ValidationBadRequestError,
@@ -37,7 +36,6 @@ from pegasus.validation.readers.exceptions import (
 from pegasus.validation.readers.delimiter_detection import resolve_shared_auto_delimiter
 from pegasus.validation.readers.polars_csv_reader import PolarsCSVReader
 from pegasus.validation.reconciliation.config import (
-    ReconciliationBackend,
     ReconciliationRuntimeConfig,
     ReconciliationStrategy,
 )
@@ -45,7 +43,6 @@ from pegasus.validation.reconciliation.coordinator import (
     ReconciliationCoordinator,
     auto_external_enabled,
 )
-from pegasus.validation.reconciliation.duckdb_session import duckdb_effective_thread_count
 from pegasus.validation.reconciliation.exceptions import ReconciliationError, ReconciliationStrategyError
 from pegasus.validation.reconciliation.partition_manager import multichar_csv_header_frame
 
@@ -80,11 +77,6 @@ class ValidationService:
             strategy = ReconciliationStrategy(raw)
         except ValueError:
             strategy = ReconciliationStrategy.AUTO
-        raw_backend = (self._settings.validation_reconciliation_backend or "").strip().lower()
-        try:
-            backend = ReconciliationBackend(raw_backend)
-        except ValueError:
-            backend = ReconciliationBackend.POLARS
         temp = self._settings.validation_reconciliation_temp_dir
         artifact_export = None
         if artifact_export_parent is not None:
@@ -104,19 +96,8 @@ class ValidationService:
             parallel_spill_sides=self._settings.validation_reconciliation_parallel_spill,
             disk_headroom_multiplier=self._settings.validation_reconciliation_disk_headroom_multiplier,
             mismatch_ndjson_mirror=self._settings.validation_reconciliation_mismatch_ndjson_mirror,
-            backend=backend,
             force_external=self._settings.validation_force_external_reconciliation,
             stream_mismatches=self._settings.validation_stream_mismatches_to_disk,
-            duckdb_memory_limit_ratio=self._settings.validation_duckdb_memory_limit_ratio,
-            duckdb_memory_os_reserve_bytes=self._settings.validation_duckdb_memory_os_reserve_bytes,
-            duckdb_network_threads=self._settings.validation_duckdb_network_threads,
-            duckdb_local_threads=self._settings.validation_duckdb_local_threads,
-            duckdb_enable_object_cache=self._settings.validation_duckdb_enable_object_cache,
-            duckdb_explain_analyze=self._settings.validation_duckdb_explain_analyze,
-            duckdb_ingest_csv_to_parquet=self._settings.validation_duckdb_ingest_csv_to_parquet,
-            duckdb_parquet_row_group_size=self._settings.validation_duckdb_parquet_row_group_size,
-            duckdb_reconciliation_partitions=self._settings.validation_duckdb_reconciliation_partitions,
-            duckdb_parallel_csv_ingest=self._settings.validation_duckdb_parallel_csv_ingest,
             artifact_export_path=artifact_export,
         )
 
@@ -127,39 +108,23 @@ class ValidationService:
         source_path: Path,
         target_path: Path,
     ) -> ReconciliationRuntimeConfig:
-        """Clamp partition counts and align with DuckDB thread caps; soften settings under swap pressure."""
+        """Clamp partition counts using host CPU and RAM hints."""
         ncpu = physical_cpu_count()
         ram = physical_ram_bytes()
-        threads = duckdb_effective_thread_count(rcfg, source_path=source_path, target_path=target_path)
-        max_b = max_reconciliation_partition_buckets(ncpu=ncpu, ram_bytes=ram)
 
         orig_pb = rcfg.partition_buckets
         pb = cap_partition_buckets(orig_pb, ncpu=ncpu, ram_bytes=ram)
-        pb = align_partition_buckets_to_threads(pb, threads)
+        pb = align_partition_buckets_to_threads(pb, ncpu)
 
         updates: dict[str, object] = {}
         if pb != orig_pb:
             updates["partition_buckets"] = pb
 
-        dpp = rcfg.duckdb_reconciliation_partitions
-        if dpp > 0:
-            dpp_new = align_partition_buckets_to_threads(
-                cap_partition_buckets(dpp, ncpu=ncpu, ram_bytes=ram),
-                threads,
-            )
-            if dpp_new != dpp:
-                updates["duckdb_reconciliation_partitions"] = dpp_new
-
-        if rcfg.backend == ReconciliationBackend.DUCKDB and not recommend_parallel_duckdb_csv_ingest():
-            if rcfg.duckdb_parallel_csv_ingest:
-                updates["duckdb_parallel_csv_ingest"] = False
-
         if updates:
             logger.info(
-                "Host-tuned reconciliation (cpus=%d max_partition_cap=%d duckdb_threads=%d): %s",
+                "Host-tuned reconciliation (cpus=%d max_partition_cap=%d): %s",
                 ncpu,
-                max_b,
-                threads,
+                max_reconciliation_partition_buckets(ncpu=ncpu, ram_bytes=ram),
                 ", ".join(f"{k}={v}" for k, v in updates.items()),
             )
             return rcfg.model_copy(update=updates)
@@ -221,22 +186,6 @@ class ValidationService:
         use_multichar_streaming = len(delim) > 1
 
         rcfg = self._apply_host_reconciliation_tuning(rcfg, source_path=source_path, target_path=target_path)
-
-        if not use_multichar_streaming and rcfg.backend == ReconciliationBackend.DUCKDB:
-            base_rg = rcfg.duckdb_parquet_row_group_size
-            if combined_bytes >= 20 * 1024 * 1024 * 1024:
-                tuned_rg = min(10_000_000, max(base_rg, 2_097_152))
-            elif combined_bytes >= 512 * 1024 * 1024:
-                tuned_rg = min(4_000_000, max(base_rg, 1_572_864))
-            else:
-                tuned_rg = base_rg
-            if tuned_rg != base_rg:
-                rcfg = rcfg.model_copy(update={"duckdb_parquet_row_group_size": int(tuned_rg)})
-                logger.info(
-                    "Tuned DuckDB parquet row_group_size to %d for combined_bytes=%d",
-                    tuned_rg,
-                    combined_bytes,
-                )
 
         if use_multichar_streaming:
             try:

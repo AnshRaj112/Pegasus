@@ -39,6 +39,8 @@ from pegasus.validation.comparators.models import MismatchReport, MismatchType, 
 from .mismatch_sample import (
     build_grouped_mismatch_samples,
     load_mismatch_polars_for_api,
+    load_value_mismatch_sample_from_ndjson,
+    stream_presence_mismatch_rows_from_ndjson,
     value_mismatch_counts_by_column,
     value_mismatch_counts_by_column_ndjson,
 )
@@ -142,48 +144,63 @@ def _build_validate_response(
     )
 
     artifact = run_result.mismatch_artifact_path or run_result.report.mismatch_artifact_path
-    raw_sample_limit = settings.validation_mismatch_sample_limit
-    n_rows_cap: int | None = None
-    if artifact is not None and artifact.is_file() and total_records > 0:
-        eff = raw_sample_limit if raw_sample_limit > 0 else min(10_000, total_records)
-        if raw_sample_limit > 0:
-            eff = min(eff, raw_sample_limit)
-        n_rows_cap = min(2_000_000, max(eff * 200, 200_000))
+    presence_cap = settings.validation_presence_mismatch_response_max_rows
 
-    mismatches = load_mismatch_polars_for_api(
-        mismatches=run_result.report.mismatches,
-        mismatch_artifact_path=artifact,
-        n_rows=n_rows_cap,
-    )
+    raw_sample_limit = settings.validation_mismatch_sample_limit
     sample_limit = raw_sample_limit
     if total_records > 0:
         if sample_limit <= 0:
             sample_limit = min(10_000, total_records)
             logger.info(
-                "validation_mismatch_sample_limit was %s; using effective sample_limit=%s for this run",
+                "validation_mismatch_sample_limit was %s; using effective sample_limit=%s for value_mismatch samples",
                 raw_sample_limit,
                 sample_limit,
             )
         if raw_sample_limit > 0:
             sample_limit = min(sample_limit, raw_sample_limit)
-        category_counts = (
-            counts_model.missing_in_target,
-            counts_model.extra_in_target,
-            counts_model.value_mismatch,
+    category_counts = (
+        counts_model.missing_in_target,
+        counts_model.extra_in_target,
+        counts_model.value_mismatch,
+    )
+
+    mismatch_stats_frame = run_result.report.mismatches
+    if artifact is not None and artifact.is_file() and total_records > 0:
+        miss_rows, ext_rows = stream_presence_mismatch_rows_from_ndjson(
+            artifact,
+            n_miss=counts_model.missing_in_target,
+            n_ext=counts_model.extra_in_target,
+            presence_max_rows=presence_cap,
+        )
+        val_df = load_value_mismatch_sample_from_ndjson(
+            artifact,
+            n_val=counts_model.value_mismatch,
+            value_sample_limit=sample_limit,
+        )
+        sample_groups = MismatchSampleGroups(
+            missing_in_target=[MismatchSampleRow.model_validate(r) for r in miss_rows],
+            extra_in_target=[MismatchSampleRow.model_validate(r) for r in ext_rows],
+            value_mismatch=[MismatchSampleRow.model_validate(r) for r in val_df.to_dicts()],
+        )
+    elif total_records > 0:
+        mismatch_stats_frame = load_mismatch_polars_for_api(
+            mismatches=run_result.report.mismatches,
+            mismatch_artifact_path=None,
+            n_rows=None,
         )
         miss_df, ext_df, val_df = build_grouped_mismatch_samples(
-            mismatches,
+            mismatch_stats_frame,
             sample_limit,
             category_counts=category_counts,
+            presence_max_rows=presence_cap,
+        )
+        sample_groups = MismatchSampleGroups(
+            missing_in_target=[MismatchSampleRow.model_validate(r) for r in miss_df.to_dicts()],
+            extra_in_target=[MismatchSampleRow.model_validate(r) for r in ext_df.to_dicts()],
+            value_mismatch=[MismatchSampleRow.model_validate(r) for r in val_df.to_dicts()],
         )
     else:
-        miss_df = ext_df = val_df = mismatches.slice(0, 0)
-
-    sample_groups = MismatchSampleGroups(
-        missing_in_target=[MismatchSampleRow.model_validate(r) for r in miss_df.to_dicts()],
-        extra_in_target=[MismatchSampleRow.model_validate(r) for r in ext_df.to_dicts()],
-        value_mismatch=[MismatchSampleRow.model_validate(r) for r in val_df.to_dicts()],
-    )
+        sample_groups = MismatchSampleGroups()
 
     cap = settings.validation_value_mismatch_column_stats_max_rows
     val_n = counts_model.value_mismatch
@@ -191,13 +208,13 @@ def _build_validate_response(
         if artifact is not None and artifact.is_file():
             value_by_col = value_mismatch_counts_by_column_ndjson(artifact, max_rows=None)
         else:
-            value_by_col = value_mismatch_counts_by_column(mismatches, max_rows=None)
+            value_by_col = value_mismatch_counts_by_column(mismatch_stats_frame, max_rows=None)
         vm_omitted = False
     else:
         if artifact is not None and artifact.is_file():
             value_by_col = value_mismatch_counts_by_column_ndjson(artifact, max_rows=cap)
         else:
-            value_by_col = value_mismatch_counts_by_column(mismatches, max_rows=cap)
+            value_by_col = value_mismatch_counts_by_column(mismatch_stats_frame, max_rows=cap)
         vm_omitted = value_by_col == {} and val_n > cap
 
     run_result.report.mismatches = empty_mismatch_frame()

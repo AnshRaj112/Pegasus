@@ -9,16 +9,6 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class ReconciliationBackend(StrEnum):
-    """Which engine performs disk-backed joins and CSV ingestion."""
-
-    DUCKDB = "duckdb"
-    """DuckDB external-memory joins (recommended for large unsorted CSV pairs)."""
-
-    POLARS = "polars"
-    """Polars spill / hash-partition / external sort pipeline."""
-
-
 class ReconciliationStrategy(StrEnum):
     """Comparison strategy selection for the coordinator."""
 
@@ -101,10 +91,6 @@ class ReconciliationRuntimeConfig(BaseModel):
         default=False,
         description="When True, append every flushed mismatch chunk to mismatch_mirror.ndjson under the workspace.",
     )
-    backend: ReconciliationBackend = Field(
-        default=ReconciliationBackend.POLARS,
-        description="POLARS uses the spill/hash-partition pipeline (default); DUCKDB uses DuckDB for the same joins.",
-    )
     force_external: bool = Field(
         default=False,
         description="When True, AUTO strategy still selects external paths for small combined file sizes.",
@@ -112,70 +98,6 @@ class ReconciliationRuntimeConfig(BaseModel):
     stream_mismatches: bool = Field(
         default=True,
         description="When True, mismatch rows are appended to NDJSON on disk instead of a giant in-memory frame.",
-    )
-    duckdb_memory_limit_ratio: float = Field(
-        default=1.00,
-        ge=0.10,
-        le=1.00,
-        description="Fraction of (physical RAM minus duckdb_memory_os_reserve_bytes) for DuckDB memory_limit.",
-    )
-    duckdb_memory_os_reserve_bytes: int = Field(
-        default=512 * 1024 * 1024,
-        ge=0,
-        le=32 * 1024 * 1024 * 1024,
-        description="RAM reserved for OS / Python when computing DuckDB memory_limit.",
-    )
-    duckdb_network_threads: int = Field(
-        default=2,
-        ge=1,
-        le=64,
-        description="DuckDB threads when source/target live on network filesystems (reduce I/O saturation).",
-    )
-    duckdb_local_threads: int = Field(
-        default=0,
-        ge=0,
-        le=256,
-        description="DuckDB threads on local storage (0 => auto os.cpu_count()).",
-    )
-    duckdb_enable_object_cache: bool = Field(
-        default=True,
-        description="Enable DuckDB object cache for local files.",
-    )
-    duckdb_explain_analyze: bool = Field(
-        default=False,
-        description=(
-            "When True, run EXPLAIN ANALYZE for key DuckDB stages and log operator-level profiles "
-            "(diagnostic mode; adds overhead)."
-        ),
-    )
-    duckdb_ingest_csv_to_parquet: bool = Field(
-        default=True,
-        description=(
-            "When True, DuckDB streams each CSV into a ZSTD-compressed Parquet working file "
-            "with a precomputed pegasus_part column before reconciliation."
-        ),
-    )
-    duckdb_parquet_row_group_size: int = Field(
-        default=1_048_576,
-        ge=1024,
-        le=10_000_000,
-        description="Target Parquet row group size for DuckDB COPY ... FORMAT PARQUET during CSV ingest.",
-    )
-    duckdb_reconciliation_partitions: int = Field(
-        default=0,
-        ge=0,
-        le=4096,
-        description=(
-            "Partition count for DuckDB hash(uid)%%N reconciliation (0 = use partition_buckets). "
-            "Smaller joins per round reduce peak memory vs one global join."
-        ),
-    )
-    duckdb_parallel_csv_ingest: bool = Field(
-        default=True,
-        description=(
-            "When True, DuckDB CSV→Parquet ingest runs source and target in parallel threads "
-            "(each with its own DuckDB connection; memory_limit is halved per connection)."
-        ),
     )
     artifact_export_path: Path | None = Field(
         default=None,

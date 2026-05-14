@@ -1,9 +1,7 @@
 """External-memory CSV reconciliation (Polars streaming, spill, partition, external sort)."""
 
 from pegasus.validation.reconciliation.checkpoint import ReconciliationCheckpoint
-from pegasus.validation.reconciliation.checkpoint import ReconciliationCheckpoint
 from pegasus.validation.reconciliation.config import (
-    ReconciliationBackend,
     ReconciliationRuntimeConfig,
     ReconciliationStrategy,
 )
@@ -22,7 +20,6 @@ from pegasus.validation.reconciliation.temp_workspace import temp_reconciliation
 from pegasus.validation.reconciliation.uid_generator import SHA256CompositeUIDGenerator, attach_composite_uid_column
 
 __all__ = [
-    "ReconciliationBackend",
     "ReconciliationCheckpoint",
     "ReconciliationCoordinator",
     "ReconciliationError",

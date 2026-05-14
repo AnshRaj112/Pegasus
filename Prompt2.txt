@@ -1,75 +1,23 @@
-Pegasus DuckDB reconciliation engine is still too slow for 10M–100M row CSV files.
+Pegasus Polars-based reconciliation for 10M–100M row CSV files should stay fast and memory-bounded.
 
-Redesign the architecture for high-performance analytical reconciliation.
+Redesign or extend the architecture for high-performance analytical reconciliation.
 
-Critical Architecture Changes:
+Critical architecture ideas:
 
-1. CSV Should Only Be Ingestion Format
+1. CSV as ingestion format only — convert to Parquet where it helps spill/sort paths; keep streaming ingestion.
 
-- Convert CSV to Parquet immediately after ingestion
-- Use Parquet as internal working format
-- Add streaming CSV-to-Parquet conversion
-- Add configurable row group sizes
+2. Partitioned reconciliation — partition_id = hash(uid) % N; compare partitions independently; avoid giant global joins.
 
-2. Partitioned Reconciliation
+3. Vectorized execution — Polars lazy/streaming, hash-partition spill, partition comparator; avoid Python row-by-row loops.
 
-- Partition datasets using:
-  partition_id = hash(uid) % N
-- Compare partitions independently
-- Avoid giant global joins
+4. Streaming + external memory — lazy scans, spill-to-disk, bounded RAM.
 
-3. DuckDB Optimization
+5. UID hashing — fast deterministic hashing (current SHA-based paths); optional faster hashes if profiled.
 
-- Enable parallel execution:
-  PRAGMA threads=<cpu_cores>
-- Use vectorized SQL operations
-- Avoid Python row-by-row loops entirely
-- Avoid full outer joins on gigantic datasets
+6. Mismatch handling — incremental NDJSON / chunked frames; API returns samples + counts.
 
-4. Streaming + External Memory
+7. Query / scan optimization — early filters, column pruning, compare only required columns, partition stats where useful.
 
-- Use lazy scanning
-- Avoid materializing full datasets
-- Use spill-to-disk execution
-- Keep memory bounded
+Relevant modules (names may evolve): PartitionManager, PartitionComparator, ReconciliationCoordinator, streaming collectors, performance monitoring.
 
-5. UID Optimization
-
-- Replace SHA256 with faster deterministic hashing
-- Consider xxhash or murmurhash
-- Avoid repeated hash generation
-
-6. Mismatch Handling
-
-- Write mismatches incrementally
-- Avoid collecting mismatch arrays in memory
-- Return only summary metadata to API
-
-7. Query Optimization
-
-- Push filters early
-- Use column pruning
-- Compare only required columns
-- Add partition-level statistics
-
-Required Modules:
-
-- CSVIngestionPipeline
-- ParquetConverter
-- PartitionManager
-- DuckDBReconciliationEngine
-- MergeStreamComparator
-- IncrementalMismatchWriter
-- PerformanceMonitor
-
-Technical Constraints:
-
-- Avoid Python loops for reconciliation
-- Use SQL/vectorized execution
-- Use generators/iterators
-- Add configurable chunk sizes
-- Add temp-file cleanup
-- Add memory + timing metrics
-
-Focus ONLY on making 10M–100M row reconciliation fast and stable.
-Do not add distributed Spark execution yet.
+Constraints: bounded memory, temp-file cleanup, metrics. No distributed Spark in this prompt.

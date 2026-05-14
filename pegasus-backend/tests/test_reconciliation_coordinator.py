@@ -9,11 +9,7 @@ import polars as pl
 
 from pegasus.validation.comparators.models import MismatchType
 from pegasus.validation.readers.polars_csv_reader import PolarsCSVReader
-from pegasus.validation.reconciliation.config import (
-    ReconciliationBackend,
-    ReconciliationRuntimeConfig,
-    ReconciliationStrategy,
-)
+from pegasus.validation.reconciliation.config import ReconciliationRuntimeConfig, ReconciliationStrategy
 from pegasus.validation.reconciliation.coordinator import ReconciliationCoordinator
 
 
@@ -49,7 +45,7 @@ def test_hash_partition_finds_missing_extra_and_value(tmp_path: Path) -> None:
         chunk_rows=1024,
         partition_buckets=4,
         external_memory_threshold_bytes=0,
-    ).with_overrides(backend=ReconciliationBackend.POLARS, stream_mismatches=False)
+    ).with_overrides(stream_mismatches=False)
     coord = ReconciliationCoordinator(reader=reader)
     report, src_rows, tgt_rows, strat = coord.run_csv_pair(
         source_path=src,
@@ -95,7 +91,7 @@ def test_ordered_stream_sorted_csv(tmp_path: Path) -> None:
         assume_sorted=True,
         chunk_rows=10_000,
         external_memory_threshold_bytes=0,
-    ).with_overrides(backend=ReconciliationBackend.POLARS, stream_mismatches=False)
+    ).with_overrides(stream_mismatches=False)
     coord = ReconciliationCoordinator(reader=reader)
     report, src_rows, tgt_rows, strat = coord.run_csv_pair(
         source_path=src,
@@ -140,7 +136,7 @@ def test_external_sort_merge(tmp_path: Path) -> None:
         chunk_rows=1024,
         partition_buckets=8,
         external_memory_threshold_bytes=0,
-    ).with_overrides(backend=ReconciliationBackend.POLARS, stream_mismatches=False)
+    ).with_overrides(stream_mismatches=False)
     coord = ReconciliationCoordinator(reader=reader)
     report, src_rows, tgt_rows, strat = coord.run_csv_pair(
         source_path=src,
@@ -168,7 +164,7 @@ def test_multichar_hash_partition_streaming(tmp_path: Path) -> None:
         chunk_rows=1024,
         partition_buckets=4,
         external_memory_threshold_bytes=0,
-    ).with_overrides(backend=ReconciliationBackend.POLARS, stream_mismatches=False)
+    ).with_overrides(stream_mismatches=False)
     coord = ReconciliationCoordinator(reader=reader)
     report, sr, tr, strat = coord.run_multichar_hash_partition_csv_pair(
         source_path=src,
@@ -212,7 +208,7 @@ def test_hash_partition_sub_buckets_and_ndjson_mirror(tmp_path: Path) -> None:
         mismatch_ndjson_mirror=True,
         disk_headroom_multiplier=1.0,
         external_memory_threshold_bytes=0,
-    ).with_overrides(backend=ReconciliationBackend.POLARS, stream_mismatches=False)
+    ).with_overrides(stream_mismatches=False)
     coord = ReconciliationCoordinator(reader=reader)
     report, src_rows, tgt_rows, strat = coord.run_csv_pair(
         source_path=src,

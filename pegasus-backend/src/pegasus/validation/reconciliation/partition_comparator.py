@@ -13,7 +13,7 @@ from pegasus.validation.comparators.exceptions import UIDComparisonError
 from .exceptions import ReconciliationError
 from .metrics import NoOpReconciliationMetrics, ReconciliationMetrics
 from .mismatch_collector import MismatchSink
-from .ordered_stream import merge_sorted_parquet_streams
+from .ordered_stream import _joined_presence_row_detail_exprs, merge_sorted_parquet_streams
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +133,7 @@ class PartitionComparator:
         compare_columns: list[str],
         collector: MismatchSink,
         batch_rows: int,
+        omit_row_detail: bool = False,
     ) -> None:
         """Sort-merge one (primary, sub) partition bucket; removes temp sorted Parquet files when done."""
         if not source_shards and not target_shards:
@@ -182,7 +183,9 @@ class PartitionComparator:
             
             # Perform outer join to find missing, extra, and mismatched rows
             joined = src_lf.join(tgt_lf, on=uid_column, how="outer", suffix="_target")
-            
+            jcols = joined.collect_schema().names()
+            miss_rd, ext_rd = _joined_presence_row_detail_exprs(jcols, omit_row_detail=omit_row_detail)
+
             # 1. Missing in Target (Missing)
             missing = joined.filter(pl.col(f"{uid_column}_target").is_null()).select([
                 pl.col(uid_column).cast(pl.String).alias("uid"),
@@ -190,9 +193,9 @@ class PartitionComparator:
                 pl.lit(None, dtype=pl.String).alias("column_name"),
                 pl.lit(None, dtype=pl.String).alias("source_value"),
                 pl.lit(None, dtype=pl.String).alias("target_value"),
-                pl.lit("{}", dtype=pl.String).alias("row_detail")
+                miss_rd.alias("row_detail"),
             ])
-            
+
             # 2. Extra in Target (Extra)
             extra = joined.filter(pl.col(uid_column).is_null()).select([
                 pl.col(f"{uid_column}_target").cast(pl.String).alias("uid"),
@@ -200,7 +203,7 @@ class PartitionComparator:
                 pl.lit(None, dtype=pl.String).alias("column_name"),
                 pl.lit(None, dtype=pl.String).alias("source_value"),
                 pl.lit(None, dtype=pl.String).alias("target_value"),
-                pl.lit("{}", dtype=pl.String).alias("row_detail")
+                ext_rd.alias("row_detail"),
             ])
             
             # 3. Value Mismatch

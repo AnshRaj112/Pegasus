@@ -79,8 +79,19 @@ class Settings(BaseSettings):
         ge=0,
         le=10_000,
         description=(
-            "Max mismatch sample rows returned across mismatch_sample_groups (split by category). "
-            "If set to 0, the API uses an automatic cap (up to 10_000) so the UI still receives samples."
+            "Max value_mismatch sample rows returned in mismatch_sample_groups.value_mismatch "
+            "(stratified across compared columns). Missing/extra lists include all rows up to "
+            "validation_presence_mismatch_response_max_rows per side. If set to 0, the API uses an "
+            "automatic cap (up to 10_000) for value samples."
+        ),
+    )
+    validation_presence_mismatch_response_max_rows: int = Field(
+        default=2_000_000,
+        ge=0,
+        le=50_000_000,
+        description=(
+            "Max rows returned per side for missing_in_target and extra_in_target in the validation API. "
+            "0 means unlimited (full scan of mismatch NDJSON). Value mismatches are not affected."
         ),
     )
     enable_validation_persistence: bool = Field(
@@ -92,17 +103,13 @@ class Settings(BaseSettings):
         default="auto",
         description="Reconciliation engine: auto | hash_partition | ordered_stream | sliding_window | external_sort",
     )
-    validation_reconciliation_backend: str = Field(
-        default="polars",
-        description="polars spill/hash pipeline (default) or duckdb for single-character CSV reconciliation",
-    )
     validation_force_external_reconciliation: bool = Field(
         default=True,
-        description="When True, never load full single-char CSV pair into RAM for reconciliation (uses spill/DuckDB).",
+        description="When True, never load full single-char CSV pair into RAM for reconciliation (uses Polars spill).",
     )
     validation_stream_mismatches_to_disk: bool = Field(
         default=True,
-        description="Stream mismatch rows to NDJSON during spill/DuckDB runs instead of one giant Polars frame.",
+        description="Stream mismatch rows to NDJSON during spill runs instead of one giant Polars frame.",
     )
     validation_reconciliation_chunk_rows: int = Field(
         default=500_000,
@@ -117,7 +124,7 @@ class Settings(BaseSettings):
         description=(
             "Hash buckets for HASH_PARTITION and AUTO-unsorted spill mode. "
             "Default is host-sized (typically 16-64 on 4-core / <= 16 GiB RAM). "
-            "Values above the host cap are clamped at runtime to limit DuckDB round-trips and memory pressure."
+            "Values above the host cap are clamped at runtime to limit memory pressure."
         ),
     )
     validation_reconciliation_sliding_window: int = Field(
@@ -168,54 +175,6 @@ class Settings(BaseSettings):
         default=False,
         description="Append mismatch rows to mismatch_mirror.ndjson under the temp workspace (hash runs)",
     )
-    validation_duckdb_memory_limit_ratio: float = Field(
-        default=1.00,
-        ge=0.10,
-        le=1.00,
-        description="Fraction of (physical RAM minus validation_duckdb_memory_os_reserve_bytes) for DuckDB memory_limit.",
-    )
-    validation_duckdb_memory_os_reserve_bytes: int = Field(
-        default=512 * 1024 * 1024,
-        ge=128 * 1024 * 1024,
-        le=32 * 1024 * 1024 * 1024,
-        description="Bytes reserved for OS / Python when sizing DuckDB memory_limit (avoids OOM thrash at ratio=1).",
-    )
-    validation_duckdb_network_threads: int = Field(
-        default=2,
-        ge=1,
-        le=64,
-        description="DuckDB thread cap when CSVs are on network filesystems (avoid I/O saturation).",
-    )
-    validation_duckdb_local_threads: int = Field(
-        default=0,
-        ge=0,
-        le=256,
-        description="DuckDB thread cap for local disks (0 => min(requested, os.cpu_count()); never exceeds CPU count).",
-    )
-    validation_duckdb_enable_object_cache: bool = Field(
-        default=True,
-        description="Enable DuckDB object cache for local-file validation jobs.",
-    )
-    validation_duckdb_explain_analyze: bool = Field(
-        default=False,
-        description="Enable EXPLAIN ANALYZE logging for DuckDB reconciliation stages (diagnostic; slower).",
-    )
-    validation_duckdb_ingest_csv_to_parquet: bool = Field(
-        default=True,
-        description="Stream CSV into ZSTD Parquet working files before DuckDB reconciliation.",
-    )
-    validation_duckdb_parquet_row_group_size: int = Field(
-        default=1_048_576,
-        ge=1024,
-        le=10_000_000,
-        description="Parquet row_group_size for DuckDB CSV ingest (larger groups improve throughput on huge files).",
-    )
-    validation_duckdb_reconciliation_partitions: int = Field(
-        default=0,
-        ge=0,
-        le=4096,
-        description="DuckDB hash(uid)%N partition count (0 = use validation_reconciliation_partition_buckets).",
-    )
     validation_allow_local_paths: bool = Field(
         default=False,
         description="When True, POST /validate/local may read CSVs from server paths (see local_path_roots)",
@@ -250,13 +209,6 @@ class Settings(BaseSettings):
         description=(
             "When >0, reuse a ProcessPoolExecutor of that size for validation jobs (warmer imports). "
             "When 0 (default), spawn a fresh subprocess per job."
-        ),
-    )
-    validation_duckdb_parallel_csv_ingest: bool = Field(
-        default=True,
-        description=(
-            "When True and using the DuckDB backend, ingest source+target CSV→Parquet in parallel "
-            "(each connection uses half the configured DuckDB memory ratio)."
         ),
     )
 

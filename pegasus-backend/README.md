@@ -221,24 +221,12 @@ pegasus-backend/
   - Available disk space
 - **Manages** temporary workspace and cleanup
 
-#### 4. **DuckDB Reconciliation Engine** (`validation/reconciliation/duckdb_reconciliation_engine.py`) — optional
-- **When**: ``PEGASUS_VALIDATION_RECONCILIATION_BACKEND=duckdb`` and strategy is hash partition
-- **External Memory Joins**: Same logical steps as Polars hash-partition, executed inside DuckDB
-- **Process** (DuckDB backend):
-  1. Ingest CSVs → optionally convert to Parquet
-  2. Partition by `hash(uid) % N`
-  3. Run comparison queries per partition
-  4. Stream results to NDJSON
-- **Key Methods**:
-  - `_partition_dup_probe()`: Detect duplicate UIDs
-  - `_export_partition_mismatches()`: Generate mismatch records
-
-#### 5. **Partition Comparator** (`validation/reconciliation/partition_comparator.py`)
+#### 4. **Partition Comparator** (`validation/reconciliation/partition_comparator.py`)
 - **Handles** comparison of individual partitions
 - **Sub-partitioning**: Optional secondary bucketing for skewed data
 - **Sort-Merge**: Compares shards within each partition
 
-#### 6. **External Merge Sort** (`validation/reconciliation/external_merge_sort.py`)
+#### 5. **External Merge Sort** (`validation/reconciliation/external_merge_sort.py`)
 - **For**: Very large unsorted datasets
 - **Process**:
   1. Read CSV in chunks
@@ -250,7 +238,7 @@ pegasus-backend/
 
 #### Finding Missing Rows (ANTI-JOIN)
 ```sql
--- DuckDB equivalent
+-- Illustrative relational SQL
 SELECT source.uid
 FROM source
 ANTI JOIN target ON source.uid = target.uid
@@ -260,7 +248,7 @@ ANTI JOIN target ON source.uid = target.uid
 
 #### Finding Extra Rows (ANTI-JOIN)
 ```sql
--- DuckDB equivalent
+-- Illustrative relational SQL
 SELECT target.uid
 FROM target
 ANTI JOIN source ON target.uid = source.uid
@@ -270,7 +258,7 @@ ANTI JOIN source ON target.uid = source.uid
 
 #### Finding Value Mismatches (COLUMN COMPARISON)
 ```sql
--- DuckDB equivalent
+-- Illustrative relational SQL
 SELECT source.uid, 'column_name' AS column_name, 
        source.column_name, target.column_name
 FROM source
@@ -301,7 +289,7 @@ WHERE source.column_name IS DISTINCT FROM target.column_name
    └─ Return MismatchReport
 
 4. For Large Files (Disk-Backed, default ``polars`` backend):
-   ├─ Polars hash-partition spill + PartitionComparator (or DuckDBReconciliationEngine if backend=duckdb)
+   ├─ Polars hash-partition spill + PartitionComparator
    ├─ Hash-partition or sort files
    ├─ Process partitions sequentially
    ├─ Stream mismatches to NDJSON
@@ -343,10 +331,7 @@ VALIDATION_RECONCILIATION_CHUNK_ROWS=500000
 # Trigger external memory strategies at this threshold
 VALIDATION_EXTERNAL_MEMORY_THRESHOLD_BYTES=26214400  # 25MB
 
-# DuckDB memory limit (ratio of available system memory)
-VALIDATION_DUCKDB_MEMORY_LIMIT_RATIO=0.8
-
-# Chunk size for reading/spilling
+# Chunk size for reading/spilling (Polars)
 VALIDATION_RECONCILIATION_CHUNK_ROWS=500000
 
 # Partition count for hash partitioning
@@ -367,15 +352,6 @@ VALIDATION_RECONCILIATION_ASSUME_SORTED=false
 
 # Enable streaming mismatches to disk (reduce peak memory)
 VALIDATION_STREAM_MISMATCHES_TO_DISK=false
-
-# DuckDB-specific optimizations
-VALIDATION_DUCKDB_INGEST_CSV_TO_PARQUET=true
-VALIDATION_DUCKDB_PARALLEL_CSV_INGEST=true
-VALIDATION_DUCKDB_LOCAL_THREADS=4
-VALIDATION_DUCKDB_NETWORK_THREADS=1
-
-# Row group size for Parquet conversion
-VALIDATION_DUCKDB_PARQUET_ROW_GROUP_SIZE=65536
 ```
 
 ### Mismatch Report Output
@@ -398,6 +374,7 @@ MismatchReport(
 {"uid":"USR001","mismatch_type":"missing_in_target","column_name":null,"source_value":null,"target_value":null,"row_detail":"{\"source_record\":{...},\"target_record\":null}"}
 {"uid":"ORD002","mismatch_type":"extra_in_target","column_name":null,"source_value":null,"target_value":null,"row_detail":"{\"source_record\":null,\"target_record\":{...}}"}
 {"uid":"INV003","mismatch_type":"value_mismatch","column_name":"amount","source_value":"100.50","target_value":"100.75","row_detail":"{\"source_record\":{...},\"target_record\":{...}}"}
+```
 
 ## How validation currently works (backend internals)
 
@@ -438,12 +415,12 @@ The API polls `status.json` to report progress to clients; on completion the API
 - Steps performed:
    1. Resolve delimiter (supports `auto`, single-char for Polars, or multi-char via pandas fallback).
    2. Validate that the UID column exists in both inputs.
-   3. Build a `ReconciliationRuntimeConfig` (from environment-backed `Settings`) and apply host tuning (CPUs, RAM, DuckDB thread caps).
+   3. Build a `ReconciliationRuntimeConfig` (from environment-backed `Settings`) and apply host tuning (CPUs, RAM).
    4. Select a reconciliation path:
        - Multichar streaming hash-partition path (when delimiter is multi-char).
-       - External-memory reconciliation (Polars partition spill or DuckDB backend) when files exceed the external-memory threshold or strategy forces external.
+       - External-memory reconciliation (Polars partition spill) when files exceed the external-memory threshold or strategy forces external.
        - In-memory comparator (Polars DataFrames + `UIDBasedComparator`) for small files.
-   5. Execute the selected engine (`ReconciliationCoordinator`, `UIDBasedComparator`, or DuckDB engine). Progress events are emitted when available.
+   5. Execute the selected engine (`ReconciliationCoordinator` or `UIDBasedComparator`). Progress events are emitted when available.
    6. Produce a `MismatchReport` and optional `mismatches.ndjson` artifact. Return `ValidationRunResult` with counts and artifact path.
 
 ### Job worker lifecycle
@@ -485,7 +462,7 @@ The API polls `status.json` to report progress to clients; on completion the API
 - Background starter: `src/pegasus/services/background_validation_runner.py`
 - Validation orchestration: `src/pegasus/services/validation_service.py`
 - Persistence helpers: `src/pegasus/repositories/validation_repository.py`
-- Reconciliation coordinator and engines: `src/pegasus/validation/reconciliation/` (coordinator, partition_comparator, duckdb integration)
+- Reconciliation coordinator and spill pipeline: `src/pegasus/validation/reconciliation/` (coordinator, partition_comparator, partition_manager, …)
 
 If you'd like, I can also add a small diagram that shows the job workspace lifecycle and the DB persistence path, or generate example `curl` snippets for the validation endpoints.
 ```

@@ -42,8 +42,9 @@ function UidRowList({ samples, totalCount, emptyLabel }) {
       {!sampleCoversAll && totalCount > uids.length ? (
         <Typography.Paragraph type="secondary" style={{ marginTop: 10, marginBottom: 0 }}>
           Total in full report: <Typography.Text strong>{totalCount}</Typography.Text> — showing{' '}
-          <Typography.Text strong>{uids.length}</Typography.Text> distinct UID(s) from this response. Increase{' '}
-          <Typography.Text code>PEGASUS_VALIDATION_MISMATCH_SAMPLE_LIMIT</Typography.Text> to load more.
+          <Typography.Text strong>{uids.length}</Typography.Text> distinct UID(s) from this response. Raise{' '}
+          <Typography.Text code>PEGASUS_VALIDATION_PRESENCE_MISMATCH_RESPONSE_MAX_ROWS</Typography.Text> (missing/extra)
+          or <Typography.Text code>PEGASUS_VALIDATION_MISMATCH_SAMPLE_LIMIT</Typography.Text> (value mismatches only).
         </Typography.Paragraph>
       ) : null}
     </div>
@@ -210,8 +211,8 @@ export function ValidationMismatchSections({ result }) {
                       message="No rows in this sample for this column"
                       description={
                         valueCountsPartial
-                          ? `No sample rows for "${col}" in this response. Try raising PEGASUS_VALIDATION_MISMATCH_SAMPLE_LIMIT (up to 10000) so the server returns more rows.`
-                          : `There are ${colCount} value mismatch(es) on "${col}" in the full report, but they were not included in the current sample budget. Raise the sample limit or run again after adjusting data.`
+                          ? `No sample rows for "${col}" in this response. Try raising PEGASUS_VALIDATION_MISMATCH_SAMPLE_LIMIT (value mismatches only; max 10000).`
+                          : `There are ${colCount} value mismatch(es) on "${col}" in the full report, but they were not included in the value sample. Raise PEGASUS_VALIDATION_MISMATCH_SAMPLE_LIMIT (up to 10000).`
                       }
                     />
                   )}
@@ -253,7 +254,7 @@ export function ValidationMismatchSections({ result }) {
                   type="info"
                   showIcon
                   message="No sample rows in this category"
-                  description={`There are ${nMiss} missing row(s), but none were included in this response. Set PEGASUS_VALIDATION_MISMATCH_SAMPLE_LIMIT to a positive value (max 10000), or upgrade Pegasus so a limit of 0 is replaced automatically.`}
+                  description={`There are ${nMiss} missing row(s), but none were included in this response. Set PEGASUS_VALIDATION_PRESENCE_MISMATCH_RESPONSE_MAX_ROWS > 0 (default 2_000_000), or upgrade Pegasus.`}
                 />
               )}
             </div>
@@ -284,7 +285,7 @@ export function ValidationMismatchSections({ result }) {
                   type="info"
                   showIcon
                   message="No sample rows in this category"
-                  description={`There are ${nExt} extra row(s), but none were included in this response. Set PEGASUS_VALIDATION_MISMATCH_SAMPLE_LIMIT to a positive value (max 10000), or upgrade Pegasus so a limit of 0 is replaced automatically.`}
+                  description={`There are ${nExt} extra row(s), but none were included in this response. Set PEGASUS_VALIDATION_PRESENCE_MISMATCH_RESPONSE_MAX_ROWS > 0 (default 2_000_000), or upgrade Pegasus.`}
                 />
               )}
             </div>

@@ -76,7 +76,7 @@ class MismatchCounts(BaseModel):
 
 
 class MismatchSampleGroups(BaseModel):
-    """Sample mismatch rows split by category (each list obeys the global sample budget)."""
+    """Mismatch rows split by category (missing/extra are complete up to the presence cap)."""
 
     missing_in_target: list[MismatchSampleRow] = Field(default_factory=list)
     extra_in_target: list[MismatchSampleRow] = Field(default_factory=list)
@@ -102,7 +102,11 @@ class ValidateResponse(BaseModel):
     mismatch_counts: MismatchCounts
     mismatch_sample_groups: MismatchSampleGroups = Field(
         default_factory=MismatchSampleGroups,
-        description="Sample rows per mismatch category (see validation_mismatch_sample_limit)",
+        description=(
+            "Missing/extra rows (with source_record / target_record in row_detail when available) up to "
+            "PEGASUS_VALIDATION_PRESENCE_MISMATCH_RESPONSE_MAX_ROWS per side; value_mismatch obeys "
+            "PEGASUS_VALIDATION_MISMATCH_SAMPLE_LIMIT."
+        ),
     )
     value_mismatch_by_column: dict[str, int] = Field(
         default_factory=dict,

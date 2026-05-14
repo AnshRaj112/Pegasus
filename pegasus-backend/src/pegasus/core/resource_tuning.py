@@ -1,4 +1,4 @@
-"""Host-aware defaults for validation / DuckDB reconciliation (partitions, threads, swap hints)."""
+"""Host-aware defaults for validation / reconciliation (partitions, threads, swap hints)."""
 
 from __future__ import annotations
 
@@ -74,20 +74,12 @@ def log_swap_pressure_warning(log: logging.Logger = logger) -> None:
     )
 
 
-def recommend_parallel_duckdb_csv_ingest() -> bool:
-    """Prefer sequential CSV→Parquet when swap is already under pressure (two DuckDB heaps otherwise)."""
-    frac = swap_use_fraction()
-    if frac is None:
-        return True
-    return frac < 0.25
-
-
 def max_reconciliation_partition_buckets(
     *,
     ncpu: int | None = None,
     ram_bytes: int | None = None,
 ) -> int:
-    """Upper bound for hash / DuckDB partition count: fewer buckets on low-RAM / few-core hosts."""
+    """Upper bound for hash partition count: fewer buckets on low-RAM / few-core hosts."""
     cores = physical_cpu_count() if ncpu is None else max(1, ncpu)
     ram = physical_ram_bytes() if ram_bytes is None else ram_bytes
     if ram is None:
@@ -122,17 +114,17 @@ def cap_partition_buckets(
     return max(1, min(int(requested), mx))
 
 
-def effective_duckdb_local_threads(cfg_local_threads: int, *, ncpu: int | None = None) -> int:
-    """Resolve ``duckdb_local_threads`` (0 => full machine) capped to logical CPU count."""
+def effective_local_thread_cap(requested_threads: int, *, ncpu: int | None = None) -> int:
+    """Resolve a requested thread count (0 => full machine) capped to logical CPU count."""
     cores = physical_cpu_count() if ncpu is None else max(1, ncpu)
-    t = cfg_local_threads if cfg_local_threads > 0 else cores
+    t = requested_threads if requested_threads > 0 else cores
     return max(1, min(int(t), cores))
 
 
-def align_partition_buckets_to_threads(buckets: int, duckdb_threads: int) -> int:
-    """Avoid hundreds of partition rounds on small machines (``~threads * 16`` soft ceiling)."""
+def align_partition_buckets_to_threads(buckets: int, parallel_workers: int) -> int:
+    """Avoid hundreds of partition rounds on small machines (``~workers * 16`` soft ceiling)."""
     if buckets < 1:
         return 1
-    dt = max(1, duckdb_threads)
+    dt = max(1, parallel_workers)
     soft_cap = max(16, dt * 16)
     return max(1, min(int(buckets), soft_cap))

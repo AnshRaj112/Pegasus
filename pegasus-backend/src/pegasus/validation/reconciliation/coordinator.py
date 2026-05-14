@@ -19,9 +19,8 @@ from pegasus.validation.comparators.exceptions import UIDComparisonError
 from pegasus.validation.comparators.models import MISMATCH_REPORT_SCHEMA, MismatchReport
 from pegasus.validation.readers.polars_csv_reader import PolarsCSVReader
 
-from .config import ReconciliationBackend, ReconciliationRuntimeConfig, ReconciliationStrategy
+from .config import ReconciliationRuntimeConfig, ReconciliationStrategy
 from .disk_guard import ensure_disk_headroom
-from .duckdb_reconciliation_engine import DuckDBReconciliationEngine
 from .exceptions import ReconciliationError, ReconciliationStrategyError
 from .external_merge_sort import ExternalMergeSortEngine
 from .metrics import NoOpReconciliationMetrics, ReconciliationMetrics
@@ -62,7 +61,10 @@ def _make_collector(
     strategy: ReconciliationStrategy,
 ) -> MismatchCollector | StreamingMismatchCollector:
     mirror = (workspace / "mismatch_mirror.ndjson") if cfg.mismatch_ndjson_mirror else None
-    omit = strategy == ReconciliationStrategy.HASH_PARTITION
+    # Always emit row_detail (source/target snapshots) so API/UI can show full rows for
+    # missing/extra; vectorized join paths encode JSON in Polars without materializing
+    # giant Python dicts per row.
+    omit = False
     mirror_path = mirror if strategy == ReconciliationStrategy.HASH_PARTITION else None
     if cfg.stream_mismatches:
         return StreamingMismatchCollector(
@@ -138,7 +140,8 @@ def _compare_spilled_hash_partitions(
                 uid_column=uid_column,
                 compare_columns=compare_columns,
                 chunk_rows=cfg.chunk_rows,
-                out_path=worker_dir / f"mismatch_{pid}_{sid}.ndjson"
+                out_path=worker_dir / f"mismatch_{pid}_{sid}.ndjson",
+                omit_row_detail=getattr(collector, "omit_row_detail", False),
             )
             for pid, sid, src_files, tgt_files in tasks
         )
@@ -154,10 +157,8 @@ def _compare_spilled_hash_partitions(
                         with open(collector._path, "ab") as f_out:
                             shutil.copyfileobj(f_in, f_out)
                 else:
-                    import json
-                    with open(worker_path, "r", encoding="utf-8") as f:
-                        for line in f:
-                            collector._apply_raw_mismatch(json.loads(line))
+                    worker_df = pl.read_ndjson(worker_path, schema=MISMATCH_REPORT_SCHEMA)
+                    collector.extend_from_mismatches_frame(worker_df)
             
             metrics.on_partition_done(p_id, sub_partitions=sub if sub > 1 else 0)
     else:
@@ -173,6 +174,7 @@ def _compare_spilled_hash_partitions(
                 compare_columns=compare_columns,
                 collector=collector,
                 batch_rows=cfg.chunk_rows,
+                omit_row_detail=getattr(collector, "omit_row_detail", False),
             )
             metrics.on_partition_done(pid, sub_partitions=sub if sub > 1 else 0)
 
@@ -188,6 +190,7 @@ def _run_partition_worker(
     compare_columns: list[str],
     chunk_rows: int,
     out_path: Path,
+    omit_row_detail: bool = False,
 ) -> tuple[int, int, int, Path]:
     """Independent worker function for ProcessPoolExecutor."""
     # Crucial for Linux: prevent nested parallelism from thrashing the 4 CPU cores
@@ -195,8 +198,11 @@ def _run_partition_worker(
     
     # Create a transient collector for this worker
     from .streaming_mismatch_collector import StreamingMismatchCollector
-    worker_collector = StreamingMismatchCollector(out_path)
-    
+    worker_collector = StreamingMismatchCollector(
+        out_path,
+        omit_row_detail=omit_row_detail,
+    )
+
     part_cmp = PartitionComparator()
     part_cmp.compare_partition_shards(
         workspace=workspace,
@@ -208,6 +214,7 @@ def _run_partition_worker(
         compare_columns=compare_columns,
         collector=worker_collector,
         batch_rows=chunk_rows,
+        omit_row_detail=omit_row_detail,
     )
     report = worker_collector.finish()
     mismatch_count = sum(report.summary.values())
@@ -444,27 +451,6 @@ class ReconciliationCoordinator:
     ) -> tuple[MismatchReport, int, int, ReconciliationStrategy]:
         base_temp = cfg.temp_dir
         with temp_reconciliation_workspace(base_temp) as workspace:
-            if cfg.backend == ReconciliationBackend.DUCKDB and strategy == ReconciliationStrategy.HASH_PARTITION:
-                eng = DuckDBReconciliationEngine(metrics=self._metrics)
-                report, src_rows, tgt_rows, strat = eng.run_csv_pair(
-                    workspace=workspace,
-                    source_path=source_path,
-                    target_path=target_path,
-                    uid_column=uid_column,
-                    delimiter=delimiter,
-                    compare_columns=compare_columns,
-                    cfg=cfg,
-                    progress_callback=progress_callback,
-                )
-                report = _persist_mismatch_artifact_outside_workspace(workspace, cfg, report)
-                logger.info(
-                    "DuckDB reconciliation finished source_rows=%d target_rows=%d artifact=%s",
-                    src_rows,
-                    tgt_rows,
-                    report.mismatch_artifact_path,
-                )
-                return report, src_rows, tgt_rows, strat
-
             collector = _make_collector(cfg, workspace, strategy)
             if strategy == ReconciliationStrategy.HASH_PARTITION:
                 src_rows, tgt_rows = self._run_hash_partition(
@@ -520,6 +506,7 @@ class ReconciliationCoordinator:
                     collector=collector,
                     batch_rows=cfg.chunk_rows,
                     metrics=self._metrics,
+                    omit_row_detail=getattr(collector, "omit_row_detail", False),
                 )
                 report = collector.finish()
                 report = _persist_mismatch_artifact_outside_workspace(workspace, cfg, report)
@@ -579,6 +566,7 @@ class ReconciliationCoordinator:
             batch_rows=cfg.chunk_rows,
             window=merge_window,
             metrics=self._metrics,
+            omit_row_detail=getattr(collector, "omit_row_detail", False),
         )
         resolved = ReconciliationStrategy.SLIDING_WINDOW if merge_window > 0 else ReconciliationStrategy.EXTERNAL_SORT
         return src_rows, tgt_rows, resolved
@@ -701,6 +689,7 @@ class ReconciliationCoordinator:
                 collector=collector,
                 batch_rows=cfg.chunk_rows,
                 metrics=self._metrics,
+                omit_row_detail=getattr(collector, "omit_row_detail", False),
             )
             self._metrics.on_phase_end("gnu_comm_mismatches")
             

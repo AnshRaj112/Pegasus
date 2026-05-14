@@ -22,5 +22,5 @@ def test_cap_partition_buckets() -> None:
 
 
 def test_effective_local_threads_never_exceeds_ncpu() -> None:
-    assert rt.effective_duckdb_local_threads(256, ncpu=4) == 4
-    assert rt.effective_duckdb_local_threads(0, ncpu=8) == 8
+    assert rt.effective_local_thread_cap(256, ncpu=4) == 4
+    assert rt.effective_local_thread_cap(0, ncpu=8) == 8

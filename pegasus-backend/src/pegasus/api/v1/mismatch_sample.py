@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
-from pegasus.validation.comparators.models import MismatchType
+from pegasus.validation.comparators.models import MismatchType, empty_mismatch_frame
 
 
 def load_mismatch_polars_for_api(
@@ -165,13 +166,70 @@ def _empty_sample_frame(mismatches: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame(schema=mismatches.schema)
 
 
+def load_value_mismatch_sample_from_ndjson(
+    path: Path,
+    *,
+    n_val: int,
+    value_sample_limit: int,
+) -> pl.DataFrame:
+    """Read up to a bounded prefix of *value_mismatch* lines, then stratify across columns."""
+    lv = min(n_val, value_sample_limit) if value_sample_limit > 0 else 0
+    if lv <= 0:
+        return empty_mismatch_frame()
+    vm_cap = min(n_val, max(value_sample_limit * 64, 2048))
+    vm_partial = (
+        pl.scan_ndjson(str(path))
+        .filter(pl.col("mismatch_type") == pl.lit(MismatchType.VALUE_MISMATCH.value))
+        .head(vm_cap)
+        .collect()
+    )
+    return stratified_value_mismatch_sample(vm_partial, lv)
+
+
+def stream_presence_mismatch_rows_from_ndjson(
+    path: Path,
+    *,
+    n_miss: int,
+    n_ext: int,
+    presence_max_rows: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Scan the full NDJSON artifact and collect every missing / extra row (capped when *presence_max_rows* > 0)."""
+    miss_out: list[dict[str, Any]] = []
+    ext_out: list[dict[str, Any]] = []
+    miss_cap = n_miss if presence_max_rows <= 0 else min(n_miss, presence_max_rows)
+    ext_cap = n_ext if presence_max_rows <= 0 else min(n_ext, presence_max_rows)
+    miss_lit = MismatchType.MISSING_IN_TARGET.value
+    ext_lit = MismatchType.EXTRA_IN_TARGET.value
+
+    with path.open(encoding="utf-8") as fp:
+        for line in fp:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj: dict[str, Any] = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            mt = obj.get("mismatch_type")
+            if mt == miss_lit and len(miss_out) < miss_cap:
+                miss_out.append(obj)
+            elif mt == ext_lit and len(ext_out) < ext_cap:
+                ext_out.append(obj)
+    return miss_out, ext_out
+
+
 def build_grouped_mismatch_samples(
     mismatches: pl.DataFrame,
     sample_limit: int,
     *,
     category_counts: tuple[int, int, int] | None = None,
+    presence_max_rows: int | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """Return sample frames for missing / extra / value mismatch categories.
+
+    *missing_in_target* and *extra_in_target* include **all** rows from *mismatches* (up to
+    *presence_max_rows* per side when that value is > 0). *sample_limit* applies only to
+    *value_mismatch* (stratified across ``column_name``).
 
     When *category_counts* ``(n_missing, n_extra, n_value)`` is provided (typically from
     the report summary), category sizes are taken without three full scans of *mismatches*,
@@ -185,18 +243,24 @@ def build_grouped_mismatch_samples(
     ext_lit = pl.lit(MismatchType.EXTRA_IN_TARGET.value)
     val_lit = pl.lit(MismatchType.VALUE_MISMATCH.value)
 
+    cap = presence_max_rows if presence_max_rows is not None else 0
+
     if category_counts is None:
         miss = mismatches.filter(pl.col("mismatch_type") == miss_lit)
         ext = mismatches.filter(pl.col("mismatch_type") == ext_lit)
         vm = mismatches.filter(pl.col("mismatch_type") == val_lit)
-        lm, le, lv = allocate_category_sample_limits(miss.height, ext.height, vm.height, sample_limit)
+        lm = miss.height if cap <= 0 else min(miss.height, cap)
+        le = ext.height if cap <= 0 else min(ext.height, cap)
+        lv = min(vm.height, sample_limit) if sample_limit > 0 else 0
         miss_s = miss.head(lm) if lm else empty
         ext_s = ext.head(le) if le else empty
         val_s = stratified_value_mismatch_sample(vm, lv) if lv else empty
         return miss_s, ext_s, val_s
 
     n_miss, n_ext, n_val = category_counts
-    lm, le, lv = allocate_category_sample_limits(n_miss, n_ext, n_val, sample_limit)
+    lm = n_miss if cap <= 0 else min(n_miss, cap)
+    le = n_ext if cap <= 0 else min(n_ext, cap)
+    lv = min(n_val, sample_limit) if sample_limit > 0 else 0
     lf = mismatches.lazy()
     miss_s = lf.filter(pl.col("mismatch_type") == miss_lit).head(lm).collect() if lm else empty
     ext_s = lf.filter(pl.col("mismatch_type") == ext_lit).head(le).collect() if le else empty

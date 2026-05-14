@@ -65,33 +65,6 @@ function jobRunningCopy(phase, jobId) {
       Job id: <code>{jobId}</code>
     </span>
   ) : null
-  if (typeof phase === 'string' && phase.startsWith('duckdb_')) {
-    const pretty = {
-      duckdb_init: 'Initializing DuckDB',
-      duckdb_load_source: 'Loading source CSV',
-      duckdb_load_target: 'Loading target CSV',
-      duckdb_loaded: 'CSV load complete',
-      duckdb_checks: 'Validating UID constraints',
-      duckdb_missing: 'Scanning rows missing in target',
-      duckdb_extra: 'Scanning extra rows in target',
-      duckdb_value_prepare: 'Preparing value mismatch join',
-      duckdb_value_extract: 'Extracting value mismatches',
-      duckdb_export: 'Writing mismatch artifact',
-      duckdb_finalize: 'Finalizing result',
-      duckdb_done: 'DuckDB reconciliation complete',
-    }
-    return {
-      title: pretty[phase] ?? 'DuckDB reconciliation',
-      body: (
-        <>
-          Processing server-side comparison with external-memory DuckDB pipeline.
-          {idLine ? <> {idLine}</> : null}
-        </>
-      ),
-      extra: null,
-    }
-  }
-
   switch (phase) {
     case 'upload':
     case 'uploading':
