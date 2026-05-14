@@ -567,15 +567,3 @@ docker run -p 8000:8000 -e DATABASE_URL=sqlite:///./pegasus.db pegasus-backend
 ### Import Errors
 - Activate virtual environment: `source .venv/bin/activate`
 - Reinstall dependencies: `pip install -r requirements.txt`
-
-## Contributing
-
-1. Write clean, readable code following Python conventions
-2. Add tests for new features
-3. Run tests before committing
-4. Keep the README updated
-5. Use descriptive commit messages
-
-## License
-
-Proprietary - Pegasus Project

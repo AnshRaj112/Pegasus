@@ -104,9 +104,3 @@ The frontend communicates with the backend API at `http://localhost:8000`. Ensur
 - ESLint rules are configured to catch common React issues
 - Use browser DevTools to debug React component state and props
 
-## Contributing
-
-1. Keep components modular and reusable
-2. Follow ESLint rules
-3. Test thoroughly before committing
-4. Update this README when adding new features

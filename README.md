@@ -138,16 +138,6 @@ npm test
 - For very large datasets, increase `VALIDATION_RECONCILIATION_PARTITION_BUCKETS` and ensure `VALIDATION_RECONCILIATION_TEMP_DIR` has enough disk space.
 - Use the `test-data/` folder to try small and large generated files before running production workloads.
 
-## Next steps I can take for you
-
-- Generate SVG/PNG images from the Mermaid sources and commit them under `docs/diagrams` (I can do that if you want).
-- Add API examples and curl snippets for each endpoint.
-- Add CI steps to run backend tests and build frontend on push.
-
----
-
-If you want me to also generate and commit the rendered diagram SVGs, say "Generate diagrams" and I'll create them and update this README with inline images.
-
 ### Code Quality
 
 - Backend: Follow PEP 8 style guide, write tests, use type hints
@@ -229,17 +219,3 @@ docker run -p 8000:8000 \
 - Vite ^8.0.10
 - ESLint ^10.2.1
 
-## Contributing
-
-1. Follow the code style guidelines
-2. Write tests for new features
-3. Keep documentation updated
-4. Use meaningful commit messages
-
-## License
-
-Proprietary - Pegasus Project
-
-## Support
-
-For issues, questions, or suggestions, please contact the development team.
