@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { MismatchSampleRows } from './MismatchSampleRows'
+import { useNavigate } from 'react-router-dom';
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
 const pollTimeoutRaw = Number(import.meta.env.VITE_VALIDATION_POLL_TIMEOUT_MS ?? 0)
 const pollTimeoutMs = Number.isFinite(pollTimeoutRaw) ? pollTimeoutRaw : 0
+
 
 function absoluteApiUrl(pathOrUrl) {
   if (!pathOrUrl) return pathOrUrl
@@ -169,6 +171,7 @@ function formatDetail(detail) {
 }
 
 export function ValidationPanel() {
+  const navigate = useNavigate();
   const [sourceFile, setSourceFile] = useState(null)
   const [targetFile, setTargetFile] = useState(null)
   const [useLocalPaths, setUseLocalPaths] = useState(false)
@@ -554,7 +557,8 @@ export function ValidationPanel() {
                   </table>
                 </div> */}
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => navigate('/report', { state: { result } })}
                   className="inline-flex w-full items-center justify-center gap-3 rounded-xl bg-emerald-400 px-5 py-4 text-base font-semibold text-[#FFFDEF] shadow-[0_12px_30px_rgba(235,76,76,0.28)] transition duration-200 hover:-translate-y-0.5 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 mb-4 mt-10"
                 >
 

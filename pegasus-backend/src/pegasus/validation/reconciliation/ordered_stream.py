@@ -20,49 +20,11 @@ from .mismatch_collector import MismatchSink, compare_aligned_row_dicts
 logger = logging.getLogger(__name__)
 
 
-class _RowCursor:
-    """Sequential row iterator over Polars ``collect_batches`` streams."""
+from more_itertools import peekable
 
-    __slots__ = ("_uid_column", "_it", "_batch", "_idx", "_rows_dicts")
-
-    def __init__(self, batch_iter: Iterator[pl.DataFrame], *, uid_column: str) -> None:
-        self._uid_column = uid_column
-        self._it = batch_iter
-        self._batch: pl.DataFrame | None = None
-        self._idx = 0
-        self._rows_dicts: list[dict[str, Any]] | None = None
-
-    def _load_next_batch(self) -> bool:
-        try:
-            self._batch = next(self._it)
-        except StopIteration:
-            self._batch = None
-            self._rows_dicts = None
-            self._idx = 0
-            return False
-        self._rows_dicts = self._batch.to_dicts()
-        self._idx = 0
-        return True
-
-    def _ensure(self) -> bool:
-        if self._batch is None and self._rows_dicts is None:
-            return self._load_next_batch()
-        if self._rows_dicts is not None and self._idx >= len(self._rows_dicts):
-            return self._load_next_batch()
-        return self._batch is not None and self._rows_dicts is not None
-
-    def peek(self) -> dict[str, Any] | None:
-        if not self._ensure():
-            return None
-        assert self._rows_dicts is not None
-        return self._rows_dicts[self._idx]
-
-    def pop(self) -> dict[str, Any] | None:
-        row = self.peek()
-        if row is None:
-            return None
-        self._idx += 1
-        return row
+def _batch_to_dict_iter(batch_iter: Iterator[pl.DataFrame]) -> Iterator[dict[str, Any]]:
+    for batch in batch_iter:
+        yield from batch.to_dicts()
 
 
 def merge_sorted_csv_streams(
@@ -79,69 +41,83 @@ def merge_sorted_csv_streams(
 ) -> tuple[int, int]:
     """Two-pointer merge for **globally sorted** UTF-8 CSV inputs (``window=0`` semantics)."""
     m = metrics or NoOpReconciliationMetrics()
+    m.on_phase_start("vectorized_csv_merge", source=str(source_path), target=str(target_path))
+    
+    # Use Polars to read both sorted CSVs and join them
     read_opts: dict[str, object] = {
         "separator": delimiter,
-        "encoding": "utf-8",
         "has_header": True,
+        "encoding": "utf8-lossy",
     }
+    
+    src_lf = pl.scan_csv(str(source_path), **read_opts)
+    tgt_lf = pl.scan_csv(str(target_path), **read_opts)
+    
+    # Join
+    joined = src_lf.join(tgt_lf, on=uid_column, how="outer", suffix="_target")
+    
+    # 1. Missing
+    missing = joined.filter(pl.col(f"{uid_column}_target").is_null()).select([
+        pl.col(uid_column).cast(pl.String).alias("uid"),
+        pl.lit("missing_in_target").alias("mismatch_type"),
+        pl.lit(None, dtype=pl.String).alias("column_name"),
+        pl.lit(None, dtype=pl.String).alias("source_value"),
+        pl.lit(None, dtype=pl.String).alias("target_value"),
+        pl.lit("{}", dtype=pl.String).alias("row_detail")
+    ])
+    
+    # 2. Extra
+    extra = joined.filter(pl.col(uid_column).is_null()).select([
+        pl.col(f"{uid_column}_target").cast(pl.String).alias("uid"),
+        pl.lit("extra_in_target").alias("mismatch_type"),
+        pl.lit(None, dtype=pl.String).alias("column_name"),
+        pl.lit(None, dtype=pl.String).alias("source_value"),
+        pl.lit(None, dtype=pl.String).alias("target_value"),
+        pl.lit("{}", dtype=pl.String).alias("row_detail")
+    ])
+    
+    # 3. Value Mismatch
+    both = joined.filter(pl.col(uid_column).is_not_null() & pl.col(f"{uid_column}_target").is_not_null())
+    mismatch_dfs = []
+    for col in compare_columns:
+        col_mismatch = both.filter(
+            (pl.col(col) != pl.col(f"{col}_target")) | (pl.col(col).is_null() != pl.col(f"{col}_target").is_null())
+        ).select([
+            pl.col(uid_column).cast(pl.String).alias("uid"),
+            pl.lit("value_mismatch").alias("mismatch_type"),
+            pl.lit(col).alias("column_name"),
+            pl.col(col).cast(pl.String).alias("source_value"),
+            pl.col(f"{col}_target").cast(pl.String).alias("target_value"),
+            pl.lit("{}", dtype=pl.String).alias("row_detail")
+        ])
+        mismatch_dfs.append(col_mismatch)
 
-    def _batches(path: Path) -> Iterator[pl.DataFrame]:
-        return iter(reader.iter_batches(path, batch_size=batch_rows, read_options=read_opts))
+    src_rows = src_lf.select(pl.len()).collect().item()
+    tgt_rows = tgt_lf.select(pl.len()).collect().item()
 
-    src_cursor = _RowCursor(_batches(source_path), uid_column=uid_column)
-    tgt_cursor = _RowCursor(_batches(target_path), uid_column=uid_column)
-
-    src_rows = 0
-    tgt_rows = 0
-    m.on_phase_start("ordered_stream_merge", source=str(source_path), target=str(target_path))
-    try:
-        while True:
-            s_row = src_cursor.peek()
-            t_row = tgt_cursor.peek()
-            if s_row is None and t_row is None:
-                break
-            if s_row is None:
-                assert t_row is not None
-                tgt_rows += 1
-                uid = str(t_row[uid_column])
-                collector.add_extra(uid=uid, target_record=t_row)
-                tgt_cursor.pop()
-                continue
-            if t_row is None:
-                src_rows += 1
-                uid = str(s_row[uid_column])
-                collector.add_missing(uid=uid, source_record=s_row)
-                src_cursor.pop()
-                continue
-
-            s_uid = str(s_row[uid_column])
-            t_uid = str(t_row[uid_column])
-            if s_uid == t_uid:
-                src_rows += 1
-                tgt_rows += 1
-                compare_aligned_row_dicts(
-                    uid=s_uid,
-                    uid_column=uid_column,
-                    compare_columns=compare_columns,
-                    source_row=s_row,
-                    target_row=t_row,
-                    collector=collector,
+    if hasattr(collector, "bulk_append_from_frame"):
+        collector.bulk_append_from_frame(missing.collect(engine="streaming"))
+        collector.bulk_append_from_frame(extra.collect(engine="streaming"))
+        for df in mismatch_dfs:
+            collector.bulk_append_from_frame(df.collect(engine="streaming"))
+    else:
+        # Fallback
+        for rec in missing.collect(engine="streaming").to_dicts():
+            collector.add_missing(uid=str(rec["uid"]), source_record=rec)
+        for rec in extra.collect(engine="streaming").to_dicts():
+            collector.add_extra(uid=str(rec["uid"]), target_record=rec)
+        for df in mismatch_dfs:
+            for rec in df.collect(engine="streaming").to_dicts():
+                collector.add_value_mismatch(
+                    uid=str(rec["uid"]),
+                    column_name=str(rec["column_name"]),
+                    source_value=rec["source_value"],
+                    target_value=rec["target_value"],
+                    source_record={},
+                    target_record={},
                 )
-                src_cursor.pop()
-                tgt_cursor.pop()
-            elif s_uid < t_uid:
-                src_rows += 1
-                collector.add_missing(uid=s_uid, source_record=s_row)
-                src_cursor.pop()
-            else:
-                tgt_rows += 1
-                collector.add_extra(uid=t_uid, target_record=t_row)
-                tgt_cursor.pop()
-    except pl_exc.PolarsError as exc:
-        logger.exception("Ordered stream merge failed")
-        raise ReconciliationError("Ordered stream merge failed while reading CSV batches") from exc
 
-    m.on_phase_end("ordered_stream_merge", source_rows=src_rows, target_rows=tgt_rows)
+    m.on_phase_end("vectorized_csv_merge", source_rows=src_rows, target_rows=tgt_rows)
     return src_rows, tgt_rows
 
 
@@ -193,60 +169,77 @@ def _merge_parquet_two_pointer(
     metrics: ReconciliationMetrics | None,
 ) -> tuple[int, int]:
     m = metrics or NoOpReconciliationMetrics()
-    src_it = pl.scan_parquet(source_path).collect_batches(chunk_size=batch_rows, engine="streaming")
-    tgt_it = pl.scan_parquet(target_path).collect_batches(chunk_size=batch_rows, engine="streaming")
-    src_cursor = _RowCursor(src_it, uid_column=uid_column)
-    tgt_cursor = _RowCursor(tgt_it, uid_column=uid_column)
+    m.on_phase_start("vectorized_parquet_merge", source=str(source_path), target=str(target_path))
+    
+    src_lf = pl.scan_parquet(source_path)
+    tgt_lf = pl.scan_parquet(target_path)
+    
+    # Outer join to find all differences
+    joined = src_lf.join(tgt_lf, on=uid_column, how="outer", suffix="_target")
+    
+    # 1. Missing in Target (Missing)
+    missing = joined.filter(pl.col(f"{uid_column}_target").is_null()).select([
+        pl.col(uid_column).cast(pl.String).alias("uid"),
+        pl.lit("missing_in_target").alias("mismatch_type"),
+        pl.lit(None, dtype=pl.String).alias("column_name"),
+        pl.lit(None, dtype=pl.String).alias("source_value"),
+        pl.lit(None, dtype=pl.String).alias("target_value"),
+        pl.lit("{}", dtype=pl.String).alias("row_detail")
+    ])
+    
+    # 2. Extra in Target (Extra)
+    extra = joined.filter(pl.col(uid_column).is_null()).select([
+        pl.col(f"{uid_column}_target").cast(pl.String).alias("uid"),
+        pl.lit("extra_in_target").alias("mismatch_type"),
+        pl.lit(None, dtype=pl.String).alias("column_name"),
+        pl.lit(None, dtype=pl.String).alias("source_value"),
+        pl.lit(None, dtype=pl.String).alias("target_value"),
+        pl.lit("{}", dtype=pl.String).alias("row_detail")
+    ])
+    
+    # 3. Value Mismatch
+    both = joined.filter(pl.col(uid_column).is_not_null() & pl.col(f"{uid_column}_target").is_not_null())
+    mismatch_dfs = []
+    for col in compare_columns:
+        col_mismatch = both.filter(
+            (pl.col(col) != pl.col(f"{col}_target")) | (pl.col(col).is_null() != pl.col(f"{col}_target").is_null())
+        ).select([
+            pl.col(uid_column).cast(pl.String).alias("uid"),
+            pl.lit("value_mismatch").alias("mismatch_type"),
+            pl.lit(col).alias("column_name"),
+            pl.col(col).cast(pl.String).alias("source_value"),
+            pl.col(f"{col}_target").cast(pl.String).alias("target_value"),
+            pl.lit("{}", dtype=pl.String).alias("row_detail")
+        ])
+        mismatch_dfs.append(col_mismatch)
 
-    src_rows = 0
-    tgt_rows = 0
-    m.on_phase_start("ordered_parquet_merge", source=str(source_path), target=str(target_path))
-    try:
-        while True:
-            s_row = src_cursor.peek()
-            t_row = tgt_cursor.peek()
-            if s_row is None and t_row is None:
-                break
-            if s_row is None:
-                assert t_row is not None
-                tgt_rows += 1
-                collector.add_extra(uid=str(t_row[uid_column]), target_record=t_row)
-                tgt_cursor.pop()
-                continue
-            if t_row is None:
-                src_rows += 1
-                collector.add_missing(uid=str(s_row[uid_column]), source_record=s_row)
-                src_cursor.pop()
-                continue
+    src_rows = src_lf.select(pl.len()).collect().item()
+    tgt_rows = tgt_lf.select(pl.len()).collect().item()
 
-            s_uid = str(s_row[uid_column])
-            t_uid = str(t_row[uid_column])
-            if s_uid == t_uid:
-                src_rows += 1
-                tgt_rows += 1
-                compare_aligned_row_dicts(
-                    uid=s_uid,
-                    uid_column=uid_column,
-                    compare_columns=compare_columns,
-                    source_row=s_row,
-                    target_row=t_row,
-                    collector=collector,
+    # Bulk append to collector
+    if hasattr(collector, "bulk_append_from_frame"):
+        collector.bulk_append_from_frame(missing.collect(engine="streaming"))
+        collector.bulk_append_from_frame(extra.collect(engine="streaming"))
+        for df in mismatch_dfs:
+            collector.bulk_append_from_frame(df.collect(engine="streaming"))
+    else:
+        # Fallback
+        for rec in missing.collect(engine="streaming").to_dicts():
+            collector.add_missing(uid=str(rec["uid"]), source_record=rec)
+        for rec in extra.collect(engine="streaming").to_dicts():
+            collector.add_extra(uid=str(rec["uid"]), target_record=rec)
+        for df in mismatch_dfs:
+            for rec in df.collect(engine="streaming").to_dicts():
+                collector.add_value_mismatch(
+                    uid=str(rec["uid"]),
+                    column_name=str(rec["column_name"]),
+                    source_value=rec["source_value"],
+                    target_value=rec["target_value"],
+                    source_record={},
+                    target_record={},
                 )
-                src_cursor.pop()
-                tgt_cursor.pop()
-            elif s_uid < t_uid:
-                src_rows += 1
-                collector.add_missing(uid=s_uid, source_record=s_row)
-                src_cursor.pop()
-            else:
-                tgt_rows += 1
-                collector.add_extra(uid=t_uid, target_record=t_row)
-                tgt_cursor.pop()
-    except pl_exc.PolarsError as exc:
-        logger.exception("Ordered parquet merge failed")
-        raise ReconciliationError("Ordered parquet merge failed while scanning sorted outputs") from exc
 
-    m.on_phase_end("ordered_parquet_merge", source_rows=src_rows, target_rows=tgt_rows)
+    m.on_phase_end("vectorized_parquet_merge", source_rows=src_rows, target_rows=tgt_rows)
     return src_rows, tgt_rows
 
 
@@ -265,19 +258,19 @@ def _merge_parquet_sliding(
     m = metrics or NoOpReconciliationMetrics()
     src_it = pl.scan_parquet(source_path).collect_batches(chunk_size=batch_rows, engine="streaming")
     tgt_it = pl.scan_parquet(target_path).collect_batches(chunk_size=batch_rows, engine="streaming")
-    src_cursor = _RowCursor(src_it, uid_column=uid_column)
-    tgt_cursor = _RowCursor(tgt_it, uid_column=uid_column)
+    src_cursor = peekable(_batch_to_dict_iter(src_it))
+    tgt_cursor = peekable(_batch_to_dict_iter(tgt_it))
 
     src_buf: deque[dict[str, Any]] = deque()
     tgt_buf: deque[dict[str, Any]] = deque()
 
-    def _fill_side(buf: deque[dict[str, Any]], cur: _RowCursor, *, max_total: int) -> None:
+    def _fill_side(buf: deque[dict[str, Any]], cur: peekable, *, max_total: int) -> None:
         while len(buf) < max_total:
-            row = cur.peek()
+            row = cur.peek(None)
             if row is None:
                 return
             buf.append(row)
-            cur.pop()
+            next(cur)
 
     src_rows = tgt_rows = 0
     m.on_phase_start("sliding_window_parquet_merge", window=window)

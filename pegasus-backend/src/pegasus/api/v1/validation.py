@@ -396,6 +396,7 @@ async def validate_csv_files(
                 },
             },
         )
+        upload_start = time.time()
         source_path = await _spool_upload_to_temp(
             source_file,
             max_bytes=max_bytes,
@@ -436,6 +437,8 @@ async def validate_csv_files(
                 },
             ),
         )
+        upload_duration = time.time() - upload_start
+        logger.info("Upload complete for job %s duration=%.2fs", job_id, upload_duration)
 
         if settings.enable_validation_persistence:
             try:
@@ -474,6 +477,7 @@ async def validate_csv_files(
             "delimiter": delimiter,
             "memory_log_interval_seconds": settings.validation_memory_log_interval_seconds,
             "run_id": str(run_id) if run_id else None,
+            "upload_duration_seconds": upload_duration,
         }
         (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
         _atomic_write_json(
