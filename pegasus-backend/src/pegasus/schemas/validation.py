@@ -135,6 +135,22 @@ class ValidationJobAcceptedResponse(BaseModel):
     job_id: UUID
     status: str = Field(default="queued", description="queued until the worker picks up the job directory")
     poll_url: str = Field(description="Relative URL to poll for status and the final ValidateResponse payload")
+    queue_position: int | None = Field(
+        default=None,
+        description="0-based position in the queue (0 = next to run); null when already running",
+    )
+    queue_pending: int | None = Field(
+        default=None,
+        description="Total number of jobs waiting in the queue (including this one)",
+    )
+    queue_running: int | None = Field(
+        default=None,
+        description="Number of validation jobs currently executing",
+    )
+    max_concurrency: int | None = Field(
+        default=None,
+        description="Configured maximum number of parallel validation workers",
+    )
 
 
 class ValidationJobDetailResponse(BaseModel):
@@ -155,3 +171,30 @@ def build_mismatch_counts(summary_dict: dict[str, int]) -> MismatchCounts:
         extra_in_target=int(summary_dict.get(MismatchType.EXTRA_IN_TARGET.value, 0)),
         value_mismatch=int(summary_dict.get(MismatchType.VALUE_MISMATCH.value, 0)),
     )
+
+
+class UpdateQueueSettingsRequest(BaseModel):
+    """JSON body for PATCH /validate/queue — lets users tune concurrency at runtime."""
+
+    max_concurrency: int = Field(
+        ge=1,
+        le=32,
+        description=(
+            "Maximum number of validation jobs to run in parallel. "
+            "Choose based on your available CPU cores (returned by GET /validate/queue). "
+            "Running jobs are never killed; the new limit affects when queued jobs start."
+        ),
+    )
+
+
+class QueueStatusResponse(BaseModel):
+    """Response for GET /validate/queue."""
+
+    max_concurrency: int = Field(description="Current maximum parallel validation workers")
+    cpu_cores_available: int = Field(description="Logical CPU cores detected on the server")
+    pending: int = Field(description="Jobs waiting in the queue")
+    running: int = Field(description="Jobs currently executing")
+    finished: int = Field(description="Completed/failed jobs still tracked in memory")
+    total_tracked: int = Field(description="Total jobs tracked in memory")
+    jobs: list[dict[str, Any]] = Field(default_factory=list, description="Recent job snapshots")
+

@@ -211,6 +211,17 @@ class Settings(BaseSettings):
             "When 0 (default), spawn a fresh subprocess per job."
         ),
     )
+    validation_max_concurrency: int = Field(
+        default=2,
+        ge=1,
+        le=32,
+        description=(
+            "Maximum number of validation jobs that run in parallel. "
+            "Additional submissions are held in a FIFO queue and start "
+            "automatically when a running job finishes. "
+            "Set to 1 to serialize all validations."
+        ),
+    )
 
     def cors_origin_list(self) -> list[str]:
         raw = self.cors_origins.strip()

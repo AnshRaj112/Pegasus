@@ -26,10 +26,18 @@ def _fmt_upload_limit(n: int) -> str:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from pegasus.services.validation_job_queue import get_validation_queue
+
+    # Start the concurrency-limited validation job queue drain loop
+    queue = get_validation_queue(get_settings())
+    queue.start_drain_loop()
+
     yield
+
     from pegasus.core.database import dispose_engine
     from pegasus.services.validation_worker_pool import shutdown_validation_worker_pool
 
+    await queue.shutdown(wait=True)
     shutdown_validation_worker_pool(wait=True)
     await dispose_engine()
 

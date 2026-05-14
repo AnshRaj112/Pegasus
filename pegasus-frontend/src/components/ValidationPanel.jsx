@@ -164,8 +164,55 @@ export function ValidationPanel() {
     progress: {},
   })
 
+  // ── Queue / concurrency state ──
+  const [queueInfo, setQueueInfo] = useState(null)
+  const [concurrencySlider, setConcurrencySlider] = useState(2)
+  const [concurrencyUpdating, setConcurrencyUpdating] = useState(false)
+  const [concurrencyError, setConcurrencyError] = useState('')
+  const [showQueueSettings, setShowQueueSettings] = useState(false)
+
   const running = phase === 'running'
 
+  // Fetch queue info on mount
+  useEffect(() => {
+    async function fetchQueue() {
+      try {
+        const res = await fetch(absoluteApiUrl('/api/v1/validate/queue'))
+        if (res.ok) {
+          const data = await res.json()
+          setQueueInfo(data)
+          setConcurrencySlider(data.max_concurrency ?? 2)
+        }
+      } catch { /* silent */ }
+    }
+    fetchQueue()
+  }, [])
+
+  async function handleConcurrencyUpdate(newValue) {
+    setConcurrencyUpdating(true)
+    setConcurrencyError('')
+    try {
+      const res = await fetch(absoluteApiUrl('/api/v1/validate/queue'), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ max_concurrency: newValue }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setQueueInfo(data)
+        setConcurrencySlider(data.max_concurrency)
+      } else {
+        const err = await res.json().catch(() => ({}))
+        setConcurrencyError(err.detail || `Failed (${res.status})`)
+      }
+    } catch (e) {
+      setConcurrencyError(e.message)
+    } finally {
+      setConcurrencyUpdating(false)
+    }
+  }
+
+  // Timer for elapsed time
   useEffect(() => {
     if (!running) return
     const t0 = performance.now()
@@ -258,14 +305,100 @@ export function ValidationPanel() {
 
       setResult(final)
       setPhase('success')
+      // Refresh queue info after completion
+      try {
+        const qres = await fetch(absoluteApiUrl('/api/v1/validate/queue'))
+        if (qres.ok) setQueueInfo(await qres.json())
+      } catch { /* silent */ }
     } catch (err) {
       setPhase('error')
       setErrorMessage(err instanceof Error ? err.message : String(err))
     }
   }
 
+  const cpuCores = queueInfo?.cpu_cores_available ?? null
+
   return (
     <div className="space-y-8">
+      {/* ── Concurrency Settings Panel ── */}
+      <section className="rounded-2xl border border-[#F1F1F1] bg-white p-5 shadow-[0_8px_30px_rgba(0,0,0,0.06)] sm:p-6">
+        <button
+          type="button"
+          onClick={() => setShowQueueSettings((v) => !v)}
+          className="flex w-full items-center justify-between text-left"
+        >
+          <div className="flex items-center gap-3">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#EB4C4C] to-[#FF7676] text-sm font-bold text-white shadow-sm">⚡</span>
+            <div>
+              <p className="text-sm font-semibold text-slate-800">Parallel Validation</p>
+              <p className="text-xs text-slate-500">
+                {cpuCores
+                  ? `${queueInfo?.max_concurrency ?? '?'} of ${cpuCores} cores allocated`
+                  : 'Loading server info…'}
+                {queueInfo ? ` · ${queueInfo.running} running · ${queueInfo.pending} queued` : ''}
+              </p>
+            </div>
+          </div>
+          <span className={`text-slate-400 transition-transform duration-200 ${showQueueSettings ? 'rotate-180' : ''}`}>
+            ▾
+          </span>
+        </button>
+
+        {showQueueSettings && cpuCores ? (
+          <div className="mt-4 space-y-4 border-t border-[#F1F1F1] pt-4">
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <label className="text-sm font-semibold text-slate-700" htmlFor="concurrency-slider">
+                  Max parallel jobs
+                </label>
+                <span className="rounded-md bg-[#FFFDEF] px-2.5 py-1 font-mono text-sm font-bold text-[#EB4C4C]">
+                  {concurrencySlider}
+                </span>
+              </div>
+
+              <input
+                id="concurrency-slider"
+                type="range"
+                min={1}
+                max={Math.min(cpuCores, 32)}
+                step={1}
+                value={concurrencySlider}
+                disabled={concurrencyUpdating}
+                onChange={(ev) => setConcurrencySlider(Number(ev.target.value))}
+                className="w-full cursor-pointer accent-[#EB4C4C] disabled:cursor-not-allowed disabled:opacity-50"
+              />
+
+              <div className="mt-1 flex justify-between text-xs text-slate-400">
+                <span>1 (serial)</span>
+                <span>{cpuCores} cores</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                disabled={concurrencyUpdating || concurrencySlider === queueInfo?.max_concurrency}
+                onClick={() => handleConcurrencyUpdate(concurrencySlider)}
+                className="rounded-lg bg-[#EB4C4C] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {concurrencyUpdating ? 'Applying…' : 'Apply'}
+              </button>
+              {concurrencySlider === queueInfo?.max_concurrency ? (
+                <span className="text-xs text-emerald-600 font-medium">✓ Current setting</span>
+              ) : null}
+              {concurrencyError ? (
+                <span className="text-xs text-rose-600">{concurrencyError}</span>
+              ) : null}
+            </div>
+
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Your server has <strong>{cpuCores} CPU cores</strong>.
+              More parallel jobs = faster throughput but higher memory/CPU load.
+              Running jobs are never interrupted — changes affect queued jobs only.
+            </p>
+          </div>
+        ) : null}
+      </section>
       <section className="rounded-2xl border border-[#F1F1F1] border-l-4 border-l-[#EB4C4C] bg-white p-6 shadow-[0_12px_40px_rgba(235,76,76,0.10)] sm:p-8">
         <p className="mb-5 text-center text-sm font-medium text-slate-600 sm:text-base">
           Upload files or use server-local paths to run CSV comparison.
@@ -437,6 +570,21 @@ export function ValidationPanel() {
                 Uploaded source: {formatBytes(Number(jobProgress.progress?.source_uploaded_bytes || 0))} | target:{' '}
                 {formatBytes(Number(jobProgress.progress?.target_uploaded_bytes || 0))}
               </p>
+            ) : null}
+            {jobProgress.phase === 'queued' && jobProgress.progress?.queue_position != null ? (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-sm font-semibold text-amber-800">
+                  Queue position: {Number(jobProgress.progress.queue_position) + 1}
+                  {jobProgress.progress?.max_concurrency ? (
+                    <span className="font-normal text-amber-600">
+                      {' '}· {jobProgress.progress.running_jobs ?? '?'}/{jobProgress.progress.max_concurrency} workers active
+                    </span>
+                  ) : null}
+                </p>
+                <p className="mt-1 text-xs text-amber-600">
+                  Your job will start when a running validation finishes.
+                </p>
+              </div>
             ) : null}
             {jobUi.extra ? <p className="mt-2 text-sm text-slate-600">{jobUi.extra}</p> : null}
             <p className="mt-3 text-sm font-medium text-slate-700">

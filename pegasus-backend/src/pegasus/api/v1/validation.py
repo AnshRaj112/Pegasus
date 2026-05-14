@@ -25,13 +25,15 @@ from pegasus.schemas.validation import (
     LocalPathValidateRequest,
     MismatchSampleGroups,
     MismatchSampleRow,
+    QueueStatusResponse,
+    UpdateQueueSettingsRequest,
     ValidateResponse,
     ValidationJobAcceptedResponse,
     ValidationJobDetailResponse,
     ValidationSummary,
     build_mismatch_counts,
 )
-from pegasus.services.background_validation_runner import BackgroundValidationRunner
+from pegasus.services.validation_job_queue import get_validation_queue
 from pegasus.services.exceptions import ValidationBadRequestError
 from pegasus.services.validation_service import ValidationRunResult
 from pegasus.validation.comparators.models import MismatchReport, MismatchType, empty_mismatch_frame
@@ -497,26 +499,10 @@ async def validate_csv_files(
             "upload_duration_seconds": upload_duration,
         }
         (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
-        _atomic_write_json(
-            status_path,
-            {
-                "status": "queued",
-                "phase": "queued",
-                "message": "Queued for worker execution",
-                "progress": {
-                    "source_uploaded_bytes": int(dest_s.stat().st_size),
-                    "target_uploaded_bytes": int(dest_t.stat().st_size),
-                },
-            },
-        )
 
-        proc = BackgroundValidationRunner(settings).start_job(job_dir)
-        if proc.poll() is not None:
-            err = proc.failure_detail()
-            raise HTTPException(
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Validation worker failed to start: {err}",
-            )
+        # Enqueue into the concurrency-limited job queue
+        queue = get_validation_queue(settings)
+        queued_job = queue.enqueue(job_id, job_dir)
     except HTTPException:
         raise
     except Exception as exc:
@@ -537,7 +523,16 @@ async def validate_csv_files(
                     logger.warning("Failed to remove temp upload %s: %s", p, exc)
 
     poll = f"{settings.api_v1_prefix.rstrip('/')}/validate/jobs/{job_id}"
-    return ValidationJobAcceptedResponse(job_id=job_id, status="queued", poll_url=poll)
+    queue_stats = queue.stats
+    return ValidationJobAcceptedResponse(
+        job_id=job_id,
+        status="queued",
+        poll_url=poll,
+        queue_position=queued_job.position,
+        queue_pending=queue_stats["pending"],
+        queue_running=queue_stats["running"],
+        max_concurrency=queue_stats["max_concurrency"],
+    )
 
 
 @router.post(
@@ -593,26 +588,22 @@ async def validate_csv_local_paths(
         "target_path": str(target_path),
     }
     (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
-    _atomic_write_json(
-        job_dir / "status.json",
-        {
-            "status": "queued",
-            "phase": "queued",
-            "message": "Queued for worker execution",
-            "progress": {"mode": "local_paths", "created_at_epoch_s": time.time()},
-        },
-    )
 
-    proc = BackgroundValidationRunner(settings).start_job(job_dir)
-    if proc.poll() is not None:
-        err = proc.failure_detail()
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Validation worker failed to start: {err}",
-        )
+    # Enqueue into the concurrency-limited job queue
+    queue = get_validation_queue(settings)
+    queued_job = queue.enqueue(job_id, job_dir)
 
     poll = f"{settings.api_v1_prefix.rstrip('/')}/validate/jobs/{job_id}"
-    return ValidationJobAcceptedResponse(job_id=job_id, status="queued", poll_url=poll)
+    queue_stats = queue.stats
+    return ValidationJobAcceptedResponse(
+        job_id=job_id,
+        status="queued",
+        poll_url=poll,
+        queue_position=queued_job.position,
+        queue_pending=queue_stats["pending"],
+        queue_running=queue_stats["running"],
+        max_concurrency=queue_stats["max_concurrency"],
+    )
 
 
 @router.get(
@@ -634,6 +625,16 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
     message = st.get("message")
     progress = st.get("progress") if isinstance(st.get("progress"), dict) else {}
     if status_val in {"queued", "running"}:
+        # Enrich with live queue position when the job is still waiting
+        if status_val == "queued":
+            queue = get_validation_queue(settings)
+            pos = queue.get_queue_position(job_id)
+            if pos is not None:
+                progress["queue_position"] = pos
+                progress["pending_ahead"] = pos
+                progress["running_jobs"] = queue.running_count
+                progress["max_concurrency"] = queue.max_concurrency
+                message = f"Waiting in queue (position {pos + 1} of {queue.pending_count})"
         return ValidationJobDetailResponse(status=status_val, phase=phase, message=message, progress=progress)
     if status_val == "failed":
         return ValidationJobDetailResponse(
@@ -678,3 +679,45 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
     )
     _completed_job_cache_put(job_id, detail)
     return detail
+
+
+@router.get(
+    "/validate/queue",
+    summary="Get validation job queue status, CPU info, and job list",
+    response_model=QueueStatusResponse,
+)
+async def get_validation_queue_status(settings: AppSettings) -> QueueStatusResponse:
+    """Return queue statistics including ``cpu_cores_available`` so users
+    can decide how much concurrency to allow via ``PATCH /validate/queue``.
+    """
+    queue = get_validation_queue(settings)
+    stats = queue.stats
+    return QueueStatusResponse(
+        **stats,
+        jobs=queue.list_jobs(limit=50),
+    )
+
+
+@router.patch(
+    "/validate/queue",
+    summary="Update queue settings (e.g. max parallel validations)",
+    response_model=QueueStatusResponse,
+)
+async def update_validation_queue_settings(
+    settings: AppSettings,
+    body: Annotated[UpdateQueueSettingsRequest, Body()],
+) -> QueueStatusResponse:
+    """Dynamically change how many validation jobs run in parallel.
+
+    The server reports ``cpu_cores_available`` so you can pick an appropriate
+    ``max_concurrency`` value.  Running jobs are **never** killed — the new
+    limit only affects when queued jobs are promoted to running.
+    """
+    queue = get_validation_queue(settings)
+    queue.set_max_concurrency(body.max_concurrency)
+    stats = queue.stats
+    return QueueStatusResponse(
+        **stats,
+        jobs=queue.list_jobs(limit=50),
+    )
+
