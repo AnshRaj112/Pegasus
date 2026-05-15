@@ -359,6 +359,11 @@ class PolarsCSVReader(CSVReader):
         ``read_options`` may include ``separator``, ``encoding``, ``has_header``,
         ``infer_schema_length``, ``try_parse_dates``, and other ``scan_csv`` keys.
 
+        Batch reads favor stability over typed inference: when no explicit
+        ``schema_overrides`` are supplied, every CSV column is treated as
+        :class:`polars.String` so later non-numeric values do not break streaming
+        collection after an early integer sample.
+
         Raises
         ------
         CSVValidationError
@@ -375,6 +380,18 @@ class PolarsCSVReader(CSVReader):
         infer_schema_length = ro.pop("infer_schema_length", self._default_infer_schema_length)
         try_parse_dates = bool(ro.pop("try_parse_dates", False))
         sov = schema_overrides if schema_overrides is not None else ro.pop("schema_overrides", None)
+
+        if sov is None and has_header:
+            try:
+                import csv as _csv
+
+                with resolved.open("r", encoding=encoding, newline="") as handle:
+                    reader = _csv.reader(handle, delimiter=delimiter)
+                    header_row = next(reader, None)
+                if header_row is not None:
+                    sov = {name: pl.String for name in header_row}
+            except OSError:
+                logger.debug("Could not probe CSV header for %s; using Polars inference", resolved, exc_info=True)
 
         if try_lazy_csv_encoding(encoding) is None:
             raise CSVValidationError(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import polars as pl
 
 from pegasus.validation.readers import (
     CSVFileNotFoundError,
@@ -77,3 +78,23 @@ def test_iter_batches_non_utf8_raises(tmp_path):
                 read_options={"separator": ";", "encoding": "latin-1"},
             )
         )
+
+
+def test_iter_batches_forces_string_schema_for_stability(tmp_path):
+    csv_path = tmp_path / "mixed.csv"
+    rows = ["".join(["c1", ",", "c2", ",", "c19"])]
+    rows.extend(f"{i},{i * 2},{i * 3}" for i in range(1, 3))
+    rows.append("3,6,K")
+    csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    reader = PolarsCSVReader(default_batch_size=2)
+    batches = list(
+        reader.iter_batches(
+            csv_path,
+            read_options={"separator": ",", "encoding": "utf-8", "infer_schema_length": 1},
+        )
+    )
+
+    assert sum(batch.height for batch in batches) == 3
+    assert batches[-1].schema["c19"] == pl.String
+    assert batches[-1].select("c19").to_series().to_list()[-1] == "K"

@@ -8,7 +8,11 @@ from typing import Any
 
 import polars as pl
 
-from pegasus.validation.comparators.models import MismatchType, empty_mismatch_frame
+from pegasus.validation.comparators.models import (
+    MISMATCH_REPORT_SCHEMA,
+    MismatchType,
+    empty_mismatch_frame,
+)
 
 
 def load_mismatch_polars_for_api(
@@ -19,7 +23,7 @@ def load_mismatch_polars_for_api(
 ) -> pl.DataFrame:
     """Prefer on-disk NDJSON when present; cap rows read so multi-GB mismatch files stay bounded."""
     if mismatch_artifact_path is not None and mismatch_artifact_path.is_file():
-        kwargs: dict[str, object] = {"infer_schema_length": 50_000}
+        kwargs: dict[str, object] = {"schema": MISMATCH_REPORT_SCHEMA}
         if n_rows is not None:
             kwargs["n_rows"] = n_rows
         return pl.read_ndjson(mismatch_artifact_path, **kwargs)
@@ -178,7 +182,7 @@ def load_value_mismatch_sample_from_ndjson(
         return empty_mismatch_frame()
     vm_cap = min(n_val, max(value_sample_limit * 64, 2048))
     vm_partial = (
-        pl.scan_ndjson(str(path))
+        pl.scan_ndjson(str(path), schema=MISMATCH_REPORT_SCHEMA)
         .filter(pl.col("mismatch_type") == pl.lit(MismatchType.VALUE_MISMATCH.value))
         .head(vm_cap)
         .collect()
