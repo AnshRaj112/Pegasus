@@ -103,6 +103,11 @@ class ReconciliationRuntimeConfig(BaseModel):
         default=None,
         description="When set, streaming mismatch NDJSON is copied here before the spill workspace is removed.",
     )
+    max_parallel_workers: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum number of parallel workers for partition comparison. If None, uses CPU count.",
+    )
 
     def with_overrides(self, **kwargs: Any) -> ReconciliationRuntimeConfig:
         """Return a copy with merged fields (convenience for tests)."""

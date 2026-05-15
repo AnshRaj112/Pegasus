@@ -122,8 +122,11 @@ def _compare_spilled_hash_partitions(
     if cfg.parallel_partition_comparison and len(tasks) > 1:
         from joblib import Parallel, delayed
         
-        # Limit workers to avoid thread thrashing on limited core systems
-        max_workers = max(1, (os.cpu_count() or 4) - 1)
+        # Determine max workers: use config value if set, otherwise use CPU count
+        # Cap at the number of available tasks to avoid idle workers
+        cpu_count = os.cpu_count() or 4
+        configured_max = cfg.max_parallel_workers if cfg.max_parallel_workers is not None else cpu_count
+        max_workers = min(len(tasks), configured_max)
         
         logger.info("Comparing %d partitions in parallel using Joblib (max_workers=%d)", len(tasks), max_workers)
         worker_dir = workspace / "workers"
