@@ -92,8 +92,8 @@ export default function LocalPathBrowser({ label, value, onChange, disabled }) {
   }
 
   return (
-    <div className="space-y-3 rounded-xl border border-[#F1F1F1] bg-[#FFFDEF]/40 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="rounded-xl border border-[#F1F1F1] bg-[#FFFDEF]/40 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <span className="text-sm font-semibold text-slate-700">{label}</span>
         {value ? (
           <code className="max-w-full truncate rounded bg-white px-2 py-1 text-[11px] text-slate-600" title={value}>
@@ -104,91 +104,97 @@ export default function LocalPathBrowser({ label, value, onChange, disabled }) {
         )}
       </div>
 
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-slate-500 mb-3">
         Enter a folder path on the server, open it, then click a file to select it. Use Up or open subfolders to
         navigate.
       </p>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <input
-          type="text"
-          value={folderInput}
-          disabled={disabled}
-          onChange={(ev) => setFolderInput(ev.target.value)}
-          onKeyDown={(ev) => {
-            if (ev.key === 'Enter') {
-              ev.preventDefault()
-              handleOpenFolder()
-            }
-          }}
-          placeholder="/home/ansh.raj/Pegasus/test-data"
-          className="min-w-0 flex-1 rounded-lg border border-[#F1F1F1] bg-white px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
-        />
-        <button
-          type="button"
-          disabled={disabled || loading}
-          onClick={handleOpenFolder}
-          className="shrink-0 rounded-lg bg-[#EB4C4C] px-4 py-2 text-sm font-semibold text-[#FFFDEF] hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {loading ? 'Loading…' : 'Open folder'}
-        </button>
-      </div>
-
-      {hasListed ? (
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-            <span className="font-medium">Contents of:</span>
-            <code className="max-w-full break-all rounded bg-white px-1.5 py-0.5 text-[11px]">
-              {listedDir ?? (loading ? '…' : '—')}
-            </code>
-            {parentPath ? (
-              <button
-                type="button"
-                disabled={disabled || loading}
-                onClick={handleGoUp}
-                className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-700 hover:border-[#EB4C4C] disabled:opacity-50"
-              >
-                Up
-              </button>
-            ) : null}
+      <div className="flex gap-4">
+        {/* Left Column: Input and Controls */}
+        <div className="flex flex-col gap-2 flex-shrink-0 w-full sm:w-auto">
+          <div className="flex flex-col gap-2">
+            <input
+              type="text"
+              value={folderInput}
+              disabled={disabled}
+              onChange={(ev) => setFolderInput(ev.target.value)}
+              onKeyDown={(ev) => {
+                if (ev.key === 'Enter') {
+                  ev.preventDefault()
+                  handleOpenFolder()
+                }
+              }}
+              placeholder="/home/ansh.raj/Pegasus/test-data"
+              className="rounded-lg border border-[#F1F1F1] bg-white px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60 w-full sm:w-64"
+            />
+            <button
+              type="button"
+              disabled={disabled || loading}
+              onClick={handleOpenFolder}
+              className="rounded-lg bg-[#EB4C4C] px-4 py-2 text-sm font-semibold text-[#FFFDEF] hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60 w-full"
+            >
+              {loading ? 'Loading…' : 'Open folder'}
+            </button>
           </div>
-          {truncated ? (
-            <p className="text-xs text-amber-700">Listing truncated — only the first 5000 entries are shown.</p>
-          ) : null}
-          <ul className="max-h-48 overflow-y-auto rounded-lg border border-[#F1F1F1] bg-white text-sm">
-            {loading && entries.length === 0 ? (
-              <li className="px-3 py-2 text-slate-500">Loading…</li>
-            ) : null}
-            {!loading && entries.length === 0 ? (
-              <li className="px-3 py-2 text-slate-500">Empty folder</li>
-            ) : null}
-            {entries.map((e) => {
-              const selected = !e.is_dir && e.path === value
-              return (
-                <li key={e.path}>
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => handleEntryClick(e)}
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-50 ${
-                      selected
-                        ? 'bg-[#EB4C4C]/10 text-slate-900'
-                        : 'text-slate-700 hover:bg-[#FFFDEF]'
-                    }`}
-                  >
-                    <span className="w-10 shrink-0 text-center text-[10px] font-semibold uppercase text-slate-400">
-                      {e.is_dir ? 'dir' : 'file'}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs">{e.name}</span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-      ) : null}
 
-      {error ? <p className="text-xs text-red-600">{error}</p> : null}
+          {error ? <p className="text-xs text-red-600">{error}</p> : null}
+        </div>
+
+        {/* Right Column: File Listing */}
+        {hasListed ? (
+          <div className="flex-1 min-w-0 flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+              <span className="font-medium">Contents of:</span>
+              <code className="break-all rounded bg-white px-1.5 py-0.5 text-[11px] truncate">
+                {listedDir ?? (loading ? '…' : '—')}
+              </code>
+              {parentPath ? (
+                <button
+                  type="button"
+                  disabled={disabled || loading}
+                  onClick={handleGoUp}
+                  className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-700 hover:border-[#EB4C4C] disabled:opacity-50"
+                >
+                  Up
+                </button>
+              ) : null}
+            </div>
+            {truncated ? (
+              <p className="text-xs text-amber-700">Listing truncated — only the first 5000 entries are shown.</p>
+            ) : null}
+            <ul className="max-h-96 overflow-y-auto rounded-lg border border-[#F1F1F1] bg-white text-sm flex-1">
+              {loading && entries.length === 0 ? (
+                <li className="px-3 py-2 text-slate-500">Loading…</li>
+              ) : null}
+              {!loading && entries.length === 0 ? (
+                <li className="px-3 py-2 text-slate-500">Empty folder</li>
+              ) : null}
+              {entries.map((e) => {
+                const selected = !e.is_dir && e.path === value
+                return (
+                  <li key={e.path}>
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => handleEntryClick(e)}
+                      className={`flex w-full items-center gap-2 px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-50 ${
+                        selected
+                          ? 'bg-[#EB4C4C]/10 text-slate-900'
+                          : 'text-slate-700 hover:bg-[#FFFDEF]'
+                      }`}
+                    >
+                      <span className="w-10 shrink-0 text-center text-[10px] font-semibold uppercase text-slate-400">
+                        {e.is_dir ? 'dir' : 'file'}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs">{e.name}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
