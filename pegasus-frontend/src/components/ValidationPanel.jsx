@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import LocalPathBrowser from './LocalPathBrowser'
 import { MismatchSampleRows } from './MismatchSampleRows'
 import { useNavigate } from 'react-router-dom';
 
@@ -115,18 +116,6 @@ function jobRunningCopy(phase, jobId) {
   }
 }
 
-function formatBytes(n) {
-  if (!Number.isFinite(n) || n <= 0) return '0 B'
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let i = 0
-  let v = n
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i += 1
-  }
-  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
-}
-
 function formatPercent(n) {
   if (!Number.isFinite(n)) return null
   return `${Math.max(0, Math.min(100, Number(n))).toFixed(1)}%`
@@ -145,9 +134,6 @@ function formatDetail(detail) {
 
 export function ValidationPanel() {
   const navigate = useNavigate();
-  const [sourceFile, setSourceFile] = useState(null)
-  const [targetFile, setTargetFile] = useState(null)
-  const [useLocalPaths, setUseLocalPaths] = useState(false)
   const [sourcePath, setSourcePath] = useState('')
   const [targetPath, setTargetPath] = useState('')
   const [uidColumn, setUidColumn] = useState('id')
@@ -158,7 +144,7 @@ export function ValidationPanel() {
   const [errorMessage, setErrorMessage] = useState('')
   /** Sub-state while phase === 'running': async job progress for clearer UX. */
   const [jobProgress, setJobProgress] = useState({
-    phase: 'upload',
+    phase: 'queued',
     jobId: null,
     message: '',
     progress: {},
@@ -229,44 +215,25 @@ export function ValidationPanel() {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (useLocalPaths) {
-      if (!sourcePath.trim() || !targetPath.trim()) return
-    } else if (!sourceFile || !targetFile) {
-      return
-    }
+    if (!sourcePath.trim() || !targetPath.trim()) return
 
     setPhase('running')
     setElapsedMs(0)
     setResult(null)
     setErrorMessage('')
-    setJobProgress({ phase: 'upload', jobId: null, message: '', progress: {} })
-
-    const postUrl = absoluteApiUrl(useLocalPaths ? '/api/v1/validate/local' : '/api/v1/validate')
+    setJobProgress({ phase: 'queued', jobId: null, message: '', progress: {} })
 
     try {
-      let res
-      if (useLocalPaths) {
-        res = await fetch(postUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            source_path: sourcePath.trim(),
-            target_path: targetPath.trim(),
-            uid_column: uidColumn.trim(),
-            delimiter: delimiter.trim() || 'auto',
-          }),
-        })
-      } else {
-        const body = new FormData()
-        body.append('source_file', sourceFile)
-        body.append('target_file', targetFile)
-        body.append('uid_column', uidColumn.trim())
-        body.append('delimiter', delimiter.trim() || 'auto')
-        res = await fetch(postUrl, {
-          method: 'POST',
-          body,
-        })
-      }
+      const res = await fetch(absoluteApiUrl('/api/v1/validate/local'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_path: sourcePath.trim(),
+          target_path: targetPath.trim(),
+          uid_column: uidColumn.trim(),
+          delimiter: delimiter.trim() || 'auto',
+        }),
+      })
 
       const raw = await res.text()
       let data = {}
@@ -493,77 +460,24 @@ export function ValidationPanel() {
       </section>
       <section className="rounded-2xl border border-[#F1F1F1] border-l-4 border-l-[#EB4C4C] bg-white p-6 shadow-[0_12px_40px_rgba(235,76,76,0.10)] sm:p-8">
         <p className="mb-5 text-center text-sm font-medium text-slate-600 sm:text-base">
-          Upload files or use server-local paths to run CSV comparison.
+          Select source and target CSVs on the server to run comparison.
         </p>
 
         <form className="space-y-5" onSubmit={handleSubmit}>
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-slate-700">Input mode</span>
-            <select
-              value={useLocalPaths ? 'local' : 'upload'}
-              disabled={running}
-              onChange={(ev) => setUseLocalPaths(ev.target.value === 'local')}
-              className="w-full rounded-lg border border-[#F1F1F1] bg-[#FFFDEF] px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <option value="upload">Upload files from browser</option>
-              <option value="local">Use server local file paths (skip upload)</option>
-            </select>
-            <span className="block text-xs text-slate-500">
-              For multi-GB files already on the API host, use local paths to avoid browser upload time.
-            </span>
-          </label>
-
-          {useLocalPaths ? (
-            <>
-              <label className="block space-y-2">
-                <span className="text-sm font-semibold text-slate-700">Source path on server</span>
-                <input
-                  type="text"
-                  value={sourcePath}
-                  disabled={running}
-                  onChange={(ev) => setSourcePath(ev.target.value)}
-                  placeholder="/data/source.csv"
-                  className="w-full rounded-lg border border-[#F1F1F1] bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-sm font-semibold text-slate-700">Target path on server</span>
-                <input
-                  type="text"
-                  value={targetPath}
-                  disabled={running}
-                  onChange={(ev) => setTargetPath(ev.target.value)}
-                  placeholder="/data/target.csv"
-                  className="w-full rounded-lg border border-[#F1F1F1] bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </label>
-            </>
-          ) : null}
-
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-slate-700">Source CSV (expected)</span>
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              disabled={running || useLocalPaths}
-              onChange={(ev) => setSourceFile(ev.target.files?.[0] ?? null)}
-              className="w-full rounded-lg border border-[#F1F1F1] bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-[#EB4C4C] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-[#FFFDEF] hover:file:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60"
-            />
-            {sourceFile ? <span className="block text-xs text-slate-600">{sourceFile.name}</span> : null}
-          </label>
-
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-slate-700">Target CSV (actual)</span>
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              disabled={running || useLocalPaths}
-              onChange={(ev) => setTargetFile(ev.target.files?.[0] ?? null)}
-              className="w-full rounded-lg border border-[#F1F1F1] bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-[#EB4C4C] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-[#FFFDEF] hover:file:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60"
-            />
-            {targetFile ? <span className="block text-xs text-slate-600">{targetFile.name}</span> : null}
-          </label>
+          <div className="space-y-4">
+              <LocalPathBrowser
+                label="Source CSV (expected)"
+                value={sourcePath}
+                onChange={setSourcePath}
+                disabled={running}
+              />
+              <LocalPathBrowser
+                label="Target CSV (actual)"
+                value={targetPath}
+                onChange={setTargetPath}
+                disabled={running}
+              />
+            </div>
 
           <div className="grid gap-4 md:grid-cols-[1fr_240px]">
             <label className="block space-y-2">
@@ -599,13 +513,7 @@ export function ValidationPanel() {
 
           <button
             type="submit"
-            disabled={
-              running ||
-              !uidColumn.trim() ||
-              (useLocalPaths
-                ? !sourcePath.trim() || !targetPath.trim()
-                : !sourceFile || !targetFile)
-            }
+            disabled={running || !uidColumn.trim() || !sourcePath.trim() || !targetPath.trim()}
             className="inline-flex w-full items-center justify-center gap-3 rounded-xl bg-[#EB4C4C] px-5 py-4 text-base font-semibold text-[#FFFDEF] shadow-[0_12px_30px_rgba(235,76,76,0.28)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {running ? (
@@ -655,12 +563,6 @@ export function ValidationPanel() {
                     <strong>{Number(jobProgress.progress.value_mismatch_total_estimate)}</strong>
                   </>
                 ) : null}
-              </p>
-            ) : null}
-            {jobProgress.phase === 'uploading' ? (
-              <p className="mt-2 text-sm text-slate-600">
-                Uploaded source: {formatBytes(Number(jobProgress.progress?.source_uploaded_bytes || 0))} | target:{' '}
-                {formatBytes(Number(jobProgress.progress?.target_uploaded_bytes || 0))}
               </p>
             ) : null}
             {jobProgress.phase === 'queued' && jobProgress.progress?.queue_position != null ? (

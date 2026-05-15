@@ -13,7 +13,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Body, File, Form, HTTPException, Query, UploadFile, status
 
 from pegasus.api.deps import AppSettings
 from pegasus.core.config import Settings
@@ -22,6 +22,8 @@ from pegasus.core.json_util import dumps_bytes, loads_str
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.schemas.validation import (
+    LocalBrowseEntry,
+    LocalBrowseResponse,
     LocalPathValidateRequest,
     MismatchSampleGroups,
     MismatchSampleRow,
@@ -93,19 +95,21 @@ def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     tmp.replace(path)
 
 
-def resolve_local_csv_path(raw: str, settings: Settings) -> Path:
-    """Resolve *raw* to an absolute file path that lies under an allowed root."""
+_LOCAL_BROWSE_MAX_ENTRIES = 5000
+_LOCAL_BROWSE_DEFAULT_DIR = Path("/")
+
+
+def _require_local_path_access(settings: Settings) -> None:
     if not settings.validation_allow_local_paths:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail="Local path validation is disabled (set PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS=true).",
         )
-    roots = settings.validation_local_path_root_list()
-    if not roots:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="PEGASUS_VALIDATION_LOCAL_PATH_ROOTS must list one or more allowed directory prefixes.",
-        )
+
+
+def resolve_local_csv_path(raw: str, settings: Settings) -> Path:
+    """Resolve *raw* to an absolute file path on the server (when local paths are enabled)."""
+    _require_local_path_access(settings)
     path = Path(raw.strip()).expanduser()
     try:
         resolved = path.resolve(strict=True)
@@ -113,22 +117,63 @@ def resolve_local_csv_path(raw: str, settings: Settings) -> Path:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Path not found: {raw!r}") from exc
     if not resolved.is_file():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Not a regular file: {resolved}")
-    for root in roots:
-        root_exp = root.expanduser()
-        try:
-            root_res = root_exp.resolve(strict=True)
-        except FileNotFoundError:
-            continue
-        if not root_res.exists():
-            continue
-        try:
-            resolved.relative_to(root_res)
-            return resolved
-        except ValueError:
-            continue
-    raise HTTPException(
-        status.HTTP_403_FORBIDDEN,
-        detail=f"Path is outside configured roots ({settings.validation_local_path_roots!r}): {resolved}",
+    return resolved
+
+
+def resolve_local_dir_for_browse(raw: str, settings: Settings) -> Path:
+    """Resolve *raw* to an absolute directory (for GET /validate/local/browse)."""
+    _require_local_path_access(settings)
+    path = Path(raw.strip()).expanduser()
+    try:
+        resolved = path.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Path not found: {raw!r}") from exc
+    if not resolved.is_dir():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Not a directory: {resolved}")
+    return resolved
+
+
+def _browse_parent_path(current: Path) -> Path | None:
+    parent = current.parent
+    if parent == current:
+        return None
+    return parent
+
+
+def build_local_browse_response(directory: Path) -> LocalBrowseResponse:
+    """List *directory* (already resolved)."""
+    parent = _browse_parent_path(directory)
+    rows: list[tuple[bool, str, Path, str]] = []
+    truncated = False
+    try:
+        with os.scandir(directory) as it:
+            for entry in it:
+                try:
+                    child = Path(entry.path).resolve(strict=False)
+                except OSError:
+                    continue
+                display_name = entry.name
+                is_dir = child.is_dir()
+                if not is_dir and not child.is_file():
+                    continue
+                rows.append((not is_dir, display_name.lower(), child, display_name))
+    except OSError as exc:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cannot read directory: {exc}",
+        ) from exc
+
+    rows.sort(key=lambda t: (t[0], t[1]))
+    if len(rows) > _LOCAL_BROWSE_MAX_ENTRIES:
+        truncated = True
+        rows = rows[:_LOCAL_BROWSE_MAX_ENTRIES]
+
+    entries = [LocalBrowseEntry(name=display_name, path=str(p), is_dir=p.is_dir()) for _, _, p, display_name in rows]
+    return LocalBrowseResponse(
+        path=str(directory),
+        parent_path=str(parent) if parent is not None else None,
+        entries=entries,
+        truncated=truncated,
     )
 
 
@@ -542,7 +587,7 @@ async def validate_csv_files(
     summary="Queue comparison of two on-disk CSVs by UID (no upload)",
     responses={
         400: {"description": "Invalid paths, delimiter, or missing uid column"},
-        403: {"description": "Local path validation disabled or path outside allowed roots"},
+        403: {"description": "Local path validation disabled"},
         422: {"description": "Comparison cannot run (e.g. duplicate UIDs)"},
     },
 )
@@ -550,7 +595,7 @@ async def validate_csv_local_paths(
     settings: AppSettings,
     body: Annotated[LocalPathValidateRequest, Body()],
 ) -> ValidationJobAcceptedResponse:
-    """Queue validation for paths under ``PEGASUS_VALIDATION_LOCAL_PATH_ROOTS`` (worker reads files in-place)."""
+    """Queue validation for server-local CSV paths (worker reads files in-place)."""
     source_path = resolve_local_csv_path(body.source_path, settings)
     target_path = resolve_local_csv_path(body.target_path, settings)
 
@@ -604,6 +649,29 @@ async def validate_csv_local_paths(
         queue_running=queue_stats["running"],
         max_concurrency=queue_stats["max_concurrency"],
     )
+
+
+@router.get(
+    "/validate/local/browse",
+    response_model=LocalBrowseResponse,
+    summary="List files and folders under a server directory (local-path picker)",
+    responses={
+        400: {"description": "Path not found or not a directory"},
+        403: {"description": "Local path validation disabled"},
+    },
+)
+async def browse_local_directory(
+    settings: AppSettings,
+    path: Annotated[
+        str | None,
+        Query(description="Absolute directory to list; defaults to / when omitted"),
+    ] = None,
+) -> LocalBrowseResponse:
+    """Directory listing for picking ``source_path`` / ``target_path`` via the UI file browser."""
+    _require_local_path_access(settings)
+    raw = (path or "").strip() or str(_LOCAL_BROWSE_DEFAULT_DIR)
+    directory = resolve_local_dir_for_browse(raw, settings)
+    return build_local_browse_response(directory)
 
 
 @router.get(

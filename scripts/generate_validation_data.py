@@ -34,7 +34,7 @@ from old docs such as ``/path/with/plenty/of/disk`` — that is not a real folde
 
   python scripts/generate_validation_data.py --source-rows 100000000 --missing 1000000 --extra 500000 --value-mismatch-uids 2000000 --out-dir ./test-data/generated-100m
 
-    python scripts/generate_validation_data.py --source-rows 1000000 --columns 8 --out-dir ./test-data/generated-1m-8cols
+  python scripts/generate_validation_data.py --source-rows 1000000 --columns 8 --out-dir ./test-data/generated-1m-8cols
 """
 
 from __future__ import annotations
@@ -296,12 +296,14 @@ def main() -> int:
     )
     p.add_argument(
         "--value-mismatch-uids",
+        "--values-mismatch-uids",
         type=int,
         default=0,
         help="Among overlap UIDs 1..(N-missing), how many leading UIDs get wrong cells in target",
     )
     p.add_argument(
         "--value-mismatch-columns",
+        "--mismatch-columns",
         type=int,
         default=1,
         help="How many compared columns differ per mismatched UID (1..columns-1)",
@@ -344,6 +346,8 @@ def main() -> int:
         p.error("--source-rows must be >= 1")
     if args.columns < 2:
         p.error("--columns must be >= 2")
+    if args.value_mismatch_columns < 1 or args.value_mismatch_columns > args.columns - 1:
+        p.error(f"--value-mismatch-columns must be between 1 and {args.columns - 1}")
 
     if args.missing + args.extra + args.value_mismatch_uids == 0:
         print("warning: all mismatch knobs are zero — files will be identical on overlap", file=sys.stderr)

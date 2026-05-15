@@ -95,6 +95,45 @@ class LocalPathValidateRequest(BaseModel):
     )
 
 
+class LocalBrowseEntry(BaseModel):
+    """One file or directory under GET /validate/local/browse."""
+
+    name: str
+    path: str
+    is_dir: bool
+
+
+class LocalBrowseResponse(BaseModel):
+    """Directory listing for the local-path file picker UI."""
+
+    path: str = Field(description="Absolute resolved directory that was listed")
+    parent_path: str | None = Field(
+        default=None,
+        description="Absolute parent directory if the UI may navigate up; null at an allowed root",
+    )
+    entries: list[LocalBrowseEntry] = Field(
+        default_factory=list,
+        description="Sorted entries (directories first, then files); symlinks outside allowed roots are omitted",
+    )
+    truncated: bool = Field(
+        default=False,
+        description="True when the directory had more children than the server returns (see cap in API docs)",
+    )
+
+
+class LocalBrowseRootInfo(BaseModel):
+    """One configured PEGASUS_VALIDATION_LOCAL_PATH_ROOTS entry."""
+
+    path: str = Field(description="Configured root path (after expanduser)")
+    exists: bool = Field(description="Whether the path currently exists on the server")
+
+
+class LocalBrowseRootsResponse(BaseModel):
+    """Configured browse roots (same allowlist as /validate/local); for UI shortcuts."""
+
+    roots: list[LocalBrowseRootInfo] = Field(default_factory=list)
+
+
 class ValidateResponse(BaseModel):
     """Response body for POST /validate."""
 

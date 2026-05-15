@@ -9,6 +9,17 @@ from fastapi.testclient import TestClient
 
 from pegasus.core.config import get_settings
 from pegasus.main import create_app
+from pegasus.services.validation_job_queue import reset_validation_queue
+
+
+@pytest.fixture(autouse=True)
+def _clear_settings_cache_each_test() -> None:
+    """Isolate env/monkeypatch changes from ``get_settings`` lru_cache across tests."""
+    get_settings.cache_clear()
+    reset_validation_queue()
+    yield
+    get_settings.cache_clear()
+    reset_validation_queue()
 
 
 def _poll_completed(client: TestClient, poll_url: str, *, timeout_sec: float = 30.0) -> dict:
@@ -37,46 +48,96 @@ def _poll_completed(client: TestClient, poll_url: str, *, timeout_sec: float = 3
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(create_app())
+    with TestClient(create_app()) as c:
+        yield c
 
 
-def test_validate_local_disabled_by_default(client: TestClient, tmp_path: Path) -> None:
-    src = tmp_path / "s.csv"
-    tgt = tmp_path / "t.csv"
-    src.write_text("id,x\n1,a\n", encoding="utf-8")
-    tgt.write_text("id,x\n1,a\n", encoding="utf-8")
-    r = client.post(
-        "/api/v1/validate/local",
-        json={
-            "source_path": str(src),
-            "target_path": str(tgt),
-            "uid_column": "id",
-            "delimiter": ",",
-        },
-    )
-    assert r.status_code == 403
+def test_validate_local_disabled_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "false")
+    monkeypatch.setenv("PEGASUS_VALIDATION_LOCAL_PATH_ROOTS", "")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_text("id,x\n1,a\n", encoding="utf-8")
+        tgt.write_text("id,x\n1,a\n", encoding="utf-8")
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": ",",
+            },
+        )
+        assert r.status_code == 403
 
 
 def test_validate_local_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
-    monkeypatch.setenv("PEGASUS_VALIDATION_LOCAL_PATH_ROOTS", str(tmp_path))
     get_settings.cache_clear()
-    client = TestClient(create_app())
-    src = tmp_path / "s.csv"
-    tgt = tmp_path / "t.csv"
-    src.write_text("id,name\n1,alice\n2,bob\n", encoding="utf-8")
-    tgt.write_text("id,name\n1,alice\n2,robert\n", encoding="utf-8")
-    r = client.post(
-        "/api/v1/validate/local",
-        json={
-            "source_path": str(src),
-            "target_path": str(tgt),
-            "uid_column": "id",
-            "delimiter": ",",
-        },
-    )
-    assert r.status_code == 202, r.text
-    body = _poll_completed(client, r.json()["poll_url"])
-    assert body["summary"]["source_row_count"] == 2
-    assert body["mismatch_counts"]["value_mismatch"] >= 1
-    assert body.get("value_mismatch_by_column_omitted") is False
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_text("id,name\n1,alice\n2,bob\n", encoding="utf-8")
+        tgt.write_text("id,name\n1,alice\n2,robert\n", encoding="utf-8")
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": ",",
+            },
+        )
+        assert r.status_code == 202, r.text
+        body = _poll_completed(client, r.json()["poll_url"])
+        assert body["summary"]["source_row_count"] == 2
+        assert body["mismatch_counts"]["value_mismatch"] >= 1
+        assert body.get("value_mismatch_by_column_omitted") is False
+
+
+def test_browse_local_forbidden_when_local_paths_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "false")
+    monkeypatch.setenv("PEGASUS_VALIDATION_LOCAL_PATH_ROOTS", "")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        r = client.get("/api/v1/validate/local/browse", params={"path": str(tmp_path)})
+        assert r.status_code == 403
+
+
+def test_browse_local_defaults_to_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        r = client.get("/api/v1/validate/local/browse")
+        assert r.status_code == 200, r.text
+        assert r.json()["path"] == "/"
+
+
+def test_browse_local_lists_entries(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        (tmp_path / "golden.csv").write_text("id\n1\n", encoding="utf-8")
+        (tmp_path / "nested").mkdir()
+        r = client.get("/api/v1/validate/local/browse", params={"path": str(tmp_path)})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        names = {e["name"] for e in body["entries"]}
+        assert "golden.csv" in names
+        assert "nested" in names
+        assert body["truncated"] is False
+
+
+def test_browse_local_parent_navigation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    with TestClient(create_app()) as client:
+        r = client.get("/api/v1/validate/local/browse", params={"path": str(nested)})
+        assert r.status_code == 200, r.text
+        assert r.json()["parent_path"] == str(tmp_path.resolve())

@@ -177,11 +177,11 @@ class Settings(BaseSettings):
     )
     validation_allow_local_paths: bool = Field(
         default=False,
-        description="When True, POST /validate/local may read CSVs from server paths (see local_path_roots)",
+        description="When True, POST /validate/local and GET /validate/local/browse may use any server path",
     )
     validation_local_path_roots: str = Field(
         default="",
-        description="Comma-separated absolute directory prefixes allowed for /validate/local (e.g. /data/csv,/bulk)",
+        description="Deprecated (ignored). Paths are chosen at runtime via the UI or API request body.",
     )
     validation_value_mismatch_column_stats_max_rows: int = Field(
         default=250_000,
@@ -235,7 +235,7 @@ class Settings(BaseSettings):
         return []
 
     def validation_local_path_root_list(self) -> list[Path]:
-        """Allowlist roots for :func:`pegasus.api.v1.validation.resolve_local_csv_path`."""
+        """Legacy helper; roots are no longer enforced for local path access."""
         raw = self.validation_local_path_roots.strip()
         if not raw:
             return []
