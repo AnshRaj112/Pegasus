@@ -320,77 +320,99 @@ class UIDBasedComparator:
         src_m = source.join(src_keys, on=uid_column, how="inner").unique(subset=[uid_column])
         tgt_m = target.join(src_keys, on=uid_column, how="inner").unique(subset=[uid_column])
 
-        prefixed = [pl.col(uid_column)]
-        right_exprs: list[pl.Expr] = []
-        for name in compare_columns:
-            prefixed.append(pl.col(name).alias(f"__src__{name}"))
-            right_exprs.append(pl.col(name).alias(f"__tgt__{name}"))
+        # Join source and target with suffix for comparison
+        joined = src_m.join(tgt_m, on=uid_column, how="inner", suffix="_target")
 
-        joined = src_m.select(prefixed).join(
-            tgt_m.select([pl.col(uid_column)] + right_exprs),
-            on=uid_column,
-            how="inner",
-        )
-
-        mismatch_chunks: list[pl.DataFrame] = []
-        for name in compare_columns:
-            left_c = f"__src__{name}"
-            right_c = f"__tgt__{name}"
-            diff = joined.filter(~pl.col(left_c).eq_missing(pl.col(right_c)))
-            if diff.is_empty():
-                continue
-            logger.debug("Value mismatches on column %r count=%d", name, diff.height)
-            uids: list[str] = []
-            src_cells: list[str | None] = []
-            tgt_cells: list[str | None] = []
-            details: list[str] = []
-            for row in diff.iter_rows(named=True):
-                uids.append(str(row[uid_column]))
-                src_cells.append(
-                    None
-                    if row[left_c] is None and not self._stringify_null_in_report
-                    else (
-                        "<null>"
-                        if self._stringify_null_in_report and row[left_c] is None
-                        else str(row[left_c])
-                    )
-                )
-                tgt_cells.append(
-                    None
-                    if row[right_c] is None and not self._stringify_null_in_report
-                    else (
-                        "<null>"
-                        if self._stringify_null_in_report and row[right_c] is None
-                        else str(row[right_c])
-                    )
-                )
-                rec_src = {uid_column: row[uid_column]}
-                rec_tgt = {uid_column: row[uid_column]}
-                for cn in compare_columns:
-                    rec_src[cn] = row[f"__src__{cn}"]
-                    rec_tgt[cn] = row[f"__tgt__{cn}"]
-                details.append("{}" if omit_row_detail else _encode_row_detail(rec_src, rec_tgt))
-
-            mismatch_chunks.append(
-                pl.DataFrame(
-                    {
-                        "uid": uids,
-                        "mismatch_type": [MismatchType.VALUE_MISMATCH.value] * len(uids),
-                        "column_name": [name] * len(uids),
-                        "source_value": src_cells,
-                        "target_value": tgt_cells,
-                        "row_detail": details,
-                    },
-                    schema={
-                        "uid": pl.String,
-                        "mismatch_type": pl.String,
-                        "column_name": pl.String,
-                        "source_value": pl.String,
-                        "target_value": pl.String,
-                        "row_detail": pl.String,
-                    },
-                )
+        # Build horizontal any-diff filter to skip fully-matching rows
+        _NULL = "__NULL__"
+        diff_exprs = [
+            (
+                pl.col(name).cast(pl.String).fill_null(_NULL)
+                != pl.col(f"{name}_target").cast(pl.String).fill_null(_NULL)
             )
+            for name in compare_columns
+        ]
+        any_diff = pl.any_horizontal(diff_exprs)
+        mismatched = joined.filter(any_diff)
+
+        if mismatched.is_empty():
+            return empty_mismatch_frame()
+
+        # For each column, extract mismatched rows — cheap in-memory filters (no re-join)
+        mismatch_chunks: list[pl.DataFrame] = []
+        _COLUMN_CHUNK = 64
+
+        for chunk_start in range(0, len(compare_columns), _COLUMN_CHUNK):
+            chunk_cols = list(compare_columns[chunk_start : chunk_start + _COLUMN_CHUNK])
+            for name in chunk_cols:
+                tgt_col = f"{name}_target"
+                if tgt_col not in mismatched.columns:
+                    continue
+
+                mask = (
+                    pl.col(name).cast(pl.String).fill_null(_NULL)
+                    != pl.col(tgt_col).cast(pl.String).fill_null(_NULL)
+                )
+                diff = mismatched.filter(mask)
+                if diff.is_empty():
+                    continue
+
+                logger.debug("Value mismatches on column %r count=%d", name, diff.height)
+
+                # Vectorized null handling for source/target values
+                if self._stringify_null_in_report:
+                    sv = pl.col(name).cast(pl.String).fill_null("<null>").alias("source_value")
+                    tv = pl.col(tgt_col).cast(pl.String).fill_null("<null>").alias("target_value")
+                else:
+                    sv = pl.col(name).cast(pl.String).alias("source_value")
+                    tv = pl.col(tgt_col).cast(pl.String).alias("target_value")
+
+                chunk_df = diff.select([
+                    pl.col(uid_column).cast(pl.String).alias("uid"),
+                    pl.lit(MismatchType.VALUE_MISMATCH.value).alias("mismatch_type"),
+                    pl.lit(name).alias("column_name"),
+                    sv,
+                    tv,
+                    pl.lit("{}").alias("row_detail"),
+                ])
+
+                # If row_detail is needed, build it vectorized via struct JSON encoding
+                if not omit_row_detail:
+                    src_cols = [pl.col(c).alias(c) for c in compare_columns if c in diff.columns]
+                    tgt_aliases = [
+                        pl.col(f"{c}_target").alias(c)
+                        for c in compare_columns
+                        if f"{c}_target" in diff.columns
+                    ]
+                    if src_cols and tgt_aliases:
+                        src_json = diff.select(
+                            pl.col(uid_column),
+                            pl.struct([pl.col(uid_column)] + src_cols).struct.json_encode().alias("_src_json"),
+                        )
+                        tgt_json = diff.select(
+                            pl.col(uid_column),
+                            pl.struct([pl.col(uid_column)] + tgt_aliases).struct.json_encode().alias("_tgt_json"),
+                        )
+                        detail_df = src_json.join(tgt_json, on=uid_column).select(
+                            pl.col(uid_column),
+                            pl.concat_str([
+                                pl.lit('{"source_record":'),
+                                pl.col("_src_json"),
+                                pl.lit(',"target_record":'),
+                                pl.col("_tgt_json"),
+                                pl.lit("}"),
+                            ]).alias("row_detail"),
+                        )
+                        chunk_df = chunk_df.drop("row_detail").join(
+                            detail_df.select(
+                                pl.col(uid_column).cast(pl.String).alias("uid"),
+                                pl.col("row_detail"),
+                            ),
+                            on="uid",
+                            how="left",
+                        )
+
+                mismatch_chunks.append(chunk_df)
 
         if not mismatch_chunks:
             return empty_mismatch_frame()

@@ -14,6 +14,7 @@ from .exceptions import ReconciliationError
 from .metrics import NoOpReconciliationMetrics, ReconciliationMetrics
 from .mismatch_collector import MismatchSink
 from .ordered_stream import _joined_presence_row_detail_exprs, merge_sorted_parquet_streams
+from .vectorized_compare import emit_value_mismatches_single_pass
 
 logger = logging.getLogger(__name__)
 
@@ -206,46 +207,26 @@ class PartitionComparator:
                 ext_rd.alias("row_detail"),
             ])
             
-            # 3. Value Mismatch
+            # 3. Value Mismatch — single-pass vectorized (O(1) join materialisations regardless of column count)
             both = joined.filter(pl.col(uid_column).is_not_null() & pl.col(f"{uid_column}_target").is_not_null())
-            
-            # For each column, find differences and melt them into rows
-            mismatch_dfs = []
-            for col in compare_columns:
-                col_mismatch = both.filter(
-                    (pl.col(col) != pl.col(f"{col}_target")) | (pl.col(col).is_null() != pl.col(f"{col}_target").is_null())
-                ).select([
-                    pl.col(uid_column).cast(pl.String).alias("uid"),
-                    pl.lit("value_mismatch").alias("mismatch_type"),
-                    pl.lit(col).alias("column_name"),
-                    pl.col(col).cast(pl.String).alias("source_value"),
-                    pl.col(f"{col}_target").cast(pl.String).alias("target_value"),
-                    pl.lit("{}", dtype=pl.String).alias("row_detail")
-                ])
-                mismatch_dfs.append(col_mismatch)
 
-            # Bulk append to collector
+            # Bulk append missing/extra to collector
             if hasattr(collector, "bulk_append_from_frame"):
                 collector.bulk_append_from_frame(missing.collect(engine="streaming"))
                 collector.bulk_append_from_frame(extra.collect(engine="streaming"))
-                for df in mismatch_dfs:
-                    collector.bulk_append_from_frame(df.collect(engine="streaming"))
             else:
-                # Fallback for collectors without bulk support
                 for rec in missing.collect(engine="streaming").to_dicts():
                     collector.add_missing(uid=str(rec["uid"]), source_record=rec)
                 for rec in extra.collect(engine="streaming").to_dicts():
                     collector.add_extra(uid=str(rec["uid"]), target_record=rec)
-                for df in mismatch_dfs:
-                    for rec in df.collect(engine="streaming").to_dicts():
-                        collector.add_value_mismatch(
-                            uid=str(rec["uid"]),
-                            column_name=str(rec["column_name"]),
-                            source_value=rec["source_value"],
-                            target_value=rec["target_value"],
-                            source_record={},
-                            target_record={},
-                        )
+
+            # Single-pass value mismatch detection (replaces per-column loop)
+            emit_value_mismatches_single_pass(
+                both,
+                uid_column=uid_column,
+                compare_columns=compare_columns,
+                collector=collector,
+            )
 
             self._metrics.on_phase_end(
                 "partition_vectorized_join",

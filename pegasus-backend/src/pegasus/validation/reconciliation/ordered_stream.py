@@ -18,6 +18,7 @@ from pegasus.validation.readers.polars_csv_reader import PolarsCSVReader
 from .exceptions import ReconciliationError
 from .metrics import NoOpReconciliationMetrics, ReconciliationMetrics
 from .mismatch_collector import MismatchSink, compare_aligned_row_dicts
+from .vectorized_compare import emit_value_mismatches_single_pass
 
 logger = logging.getLogger(__name__)
 
@@ -113,46 +114,29 @@ def merge_sorted_csv_streams(
         ext_rd.alias("row_detail"),
     ])
     
-    # 3. Value Mismatch
+    # 3. Value Mismatch — single-pass vectorized
     both = joined.filter(pl.col(uid_column).is_not_null() & pl.col(f"{uid_column}_target").is_not_null())
-    mismatch_dfs = []
-    for col in compare_columns:
-        col_mismatch = both.filter(
-            (pl.col(col) != pl.col(f"{col}_target")) | (pl.col(col).is_null() != pl.col(f"{col}_target").is_null())
-        ).select([
-            pl.col(uid_column).cast(pl.String).alias("uid"),
-            pl.lit("value_mismatch").alias("mismatch_type"),
-            pl.lit(col).alias("column_name"),
-            pl.col(col).cast(pl.String).alias("source_value"),
-            pl.col(f"{col}_target").cast(pl.String).alias("target_value"),
-            pl.lit("{}", dtype=pl.String).alias("row_detail")
-        ])
-        mismatch_dfs.append(col_mismatch)
 
     src_rows = src_lf.select(pl.len()).collect().item()
     tgt_rows = tgt_lf.select(pl.len()).collect().item()
 
+    # Emit missing/extra
     if hasattr(collector, "bulk_append_from_frame"):
         collector.bulk_append_from_frame(missing.collect(engine="streaming"))
         collector.bulk_append_from_frame(extra.collect(engine="streaming"))
-        for df in mismatch_dfs:
-            collector.bulk_append_from_frame(df.collect(engine="streaming"))
     else:
-        # Fallback
         for rec in missing.collect(engine="streaming").to_dicts():
             collector.add_missing(uid=str(rec["uid"]), source_record=rec)
         for rec in extra.collect(engine="streaming").to_dicts():
             collector.add_extra(uid=str(rec["uid"]), target_record=rec)
-        for df in mismatch_dfs:
-            for rec in df.collect(engine="streaming").to_dicts():
-                collector.add_value_mismatch(
-                    uid=str(rec["uid"]),
-                    column_name=str(rec["column_name"]),
-                    source_value=rec["source_value"],
-                    target_value=rec["target_value"],
-                    source_record={},
-                    target_record={},
-                )
+
+    # Single-pass value mismatch detection (replaces per-column loop)
+    emit_value_mismatches_single_pass(
+        both,
+        uid_column=uid_column,
+        compare_columns=compare_columns,
+        collector=collector,
+    )
 
     m.on_phase_end("vectorized_csv_merge", source_rows=src_rows, target_rows=tgt_rows)
     return src_rows, tgt_rows
@@ -239,47 +223,29 @@ def _merge_parquet_two_pointer(
         ext_rd.alias("row_detail"),
     ])
     
-    # 3. Value Mismatch
+    # 3. Value Mismatch — single-pass vectorized
     both = joined.filter(pl.col(uid_column).is_not_null() & pl.col(f"{uid_column}_target").is_not_null())
-    mismatch_dfs = []
-    for col in compare_columns:
-        col_mismatch = both.filter(
-            (pl.col(col) != pl.col(f"{col}_target")) | (pl.col(col).is_null() != pl.col(f"{col}_target").is_null())
-        ).select([
-            pl.col(uid_column).cast(pl.String).alias("uid"),
-            pl.lit("value_mismatch").alias("mismatch_type"),
-            pl.lit(col).alias("column_name"),
-            pl.col(col).cast(pl.String).alias("source_value"),
-            pl.col(f"{col}_target").cast(pl.String).alias("target_value"),
-            pl.lit("{}", dtype=pl.String).alias("row_detail")
-        ])
-        mismatch_dfs.append(col_mismatch)
 
     src_rows = src_lf.select(pl.len()).collect().item()
     tgt_rows = tgt_lf.select(pl.len()).collect().item()
 
-    # Bulk append to collector
+    # Emit missing/extra
     if hasattr(collector, "bulk_append_from_frame"):
         collector.bulk_append_from_frame(missing.collect(engine="streaming"))
         collector.bulk_append_from_frame(extra.collect(engine="streaming"))
-        for df in mismatch_dfs:
-            collector.bulk_append_from_frame(df.collect(engine="streaming"))
     else:
-        # Fallback
         for rec in missing.collect(engine="streaming").to_dicts():
             collector.add_missing(uid=str(rec["uid"]), source_record=rec)
         for rec in extra.collect(engine="streaming").to_dicts():
             collector.add_extra(uid=str(rec["uid"]), target_record=rec)
-        for df in mismatch_dfs:
-            for rec in df.collect(engine="streaming").to_dicts():
-                collector.add_value_mismatch(
-                    uid=str(rec["uid"]),
-                    column_name=str(rec["column_name"]),
-                    source_value=rec["source_value"],
-                    target_value=rec["target_value"],
-                    source_record={},
-                    target_record={},
-                )
+
+    # Single-pass value mismatch detection (replaces per-column loop)
+    emit_value_mismatches_single_pass(
+        both,
+        uid_column=uid_column,
+        compare_columns=compare_columns,
+        collector=collector,
+    )
 
     m.on_phase_end("vectorized_parquet_merge", source_rows=src_rows, target_rows=tgt_rows)
     return src_rows, tgt_rows
