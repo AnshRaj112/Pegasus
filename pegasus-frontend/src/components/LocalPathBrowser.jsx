@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { FolderOutlined, FileOutlined, ArrowUpOutlined, FolderOpenOutlined, LoadingOutlined } from '@ant-design/icons'
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
 
@@ -92,27 +93,35 @@ export default function LocalPathBrowser({ label, value, onChange, disabled }) {
   }
 
   return (
-    <div className="rounded-xl border border-[#F1F1F1] bg-[#FFFDEF]/40 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <span className="text-sm font-semibold text-slate-700">{label}</span>
+    <div className="rounded-2xl border border-[#E8E8E8] bg-gradient-to-br from-[#FFFDEF] via-white to-[#FFF7F7] p-6 shadow-sm transition-shadow duration-300 hover:shadow-md">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <FolderOpenOutlined className="text-xl text-[#EB4C4C]" />
+            <span className="text-base font-bold text-slate-800">{label}</span>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Browse folders in a tile view. Click folders to open them and files to select them.
+          </p>
+        </div>
         {value ? (
-          <code className="max-w-full truncate rounded bg-white px-2 py-1 text-[11px] text-slate-600" title={value}>
+          <code
+            className="max-w-full truncate rounded-lg border border-[#E8E8E8] bg-white px-3 py-1.5 font-mono text-xs text-slate-600 shadow-sm"
+            title={value}
+          >
             {value}
           </code>
         ) : (
-          <span className="text-xs text-slate-500">No file selected</span>
+          <span className="text-xs italic text-slate-400">No file selected</span>
         )}
       </div>
 
-      <p className="text-xs text-slate-500 mb-3">
-        Enter a folder path on the server, open it, then click a file to select it. Use Up or open subfolders to
-        navigate.
-      </p>
-
-      <div className="flex gap-4">
-        {/* Left Column: Input and Controls */}
-        <div className="flex flex-col gap-2 flex-shrink-0 w-full sm:w-auto">
-          <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
+        <div className="w-full xl:w-80 xl:flex-shrink-0">
+          <div className="rounded-2xl border border-[#E8E8E8] bg-white/90 p-4 shadow-sm">
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Folder path
+            </label>
             <input
               type="text"
               value={folderInput}
@@ -125,73 +134,133 @@ export default function LocalPathBrowser({ label, value, onChange, disabled }) {
                 }
               }}
               placeholder="/home/ansh.raj/Pegasus/test-data"
-              className="rounded-lg border border-[#F1F1F1] bg-white px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60 w-full sm:w-64"
+              className="w-full rounded-xl border-2 border-[#E8E8E8] bg-white px-4 py-3 font-mono text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-60"
             />
             <button
               type="button"
               disabled={disabled || loading}
               onClick={handleOpenFolder}
-              className="rounded-lg bg-[#EB4C4C] px-4 py-2 text-sm font-semibold text-[#FFFDEF] hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60 w-full"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#EB4C4C] to-[#d83e3e] px-5 py-3 text-sm font-semibold text-[#FFFDEF] transition-all duration-200 hover:from-[#d83e3e] hover:to-[#c23030] hover:shadow-lg active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
             >
-              {loading ? 'Loading…' : 'Open folder'}
+              {loading ? (
+                <>
+                  <LoadingOutlined className="animate-spin" />
+                  <span>Loading…</span>
+                </>
+              ) : (
+                <>
+                  <FolderOpenOutlined />
+                  <span>Open folder</span>
+                </>
+              )}
             </button>
-          </div>
 
-          {error ? <p className="text-xs text-red-600">{error}</p> : null}
+            {error ? (
+              <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                <p className="font-semibold">Error</p>
+                <p className="mt-1">{error}</p>
+              </div>
+            ) : null}
+          </div>
         </div>
 
-        {/* Right Column: File Listing */}
         {hasListed ? (
-          <div className="flex-1 min-w-0 flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-              <span className="font-medium">Contents of:</span>
-              <code className="break-all rounded bg-white px-1.5 py-0.5 text-[11px] truncate">
-                {listedDir ?? (loading ? '…' : '—')}
-              </code>
-              {parentPath ? (
-                <button
-                  type="button"
-                  disabled={disabled || loading}
-                  onClick={handleGoUp}
-                  className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-700 hover:border-[#EB4C4C] disabled:opacity-50"
-                >
-                  Up
-                </button>
+          <div className="min-w-0 flex-1">
+            <div className="rounded-2xl border border-[#E8E8E8] bg-white/90 p-4 shadow-sm">
+              <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <FolderOutlined className="flex-shrink-0 text-slate-400" />
+                <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-700">
+                  {listedDir ?? (loading ? 'Loading…' : '—')}
+                </code>
+                <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-500">
+                  {entries.length} items
+                </span>
+                {parentPath ? (
+                  <button
+                    type="button"
+                    disabled={disabled || loading}
+                    onClick={handleGoUp}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition-all hover:border-[#EB4C4C] hover:text-[#EB4C4C] disabled:opacity-50"
+                  >
+                    <ArrowUpOutlined className="text-xs" />
+                    <span>Up</span>
+                  </button>
+                ) : null}
+              </div>
+
+              {truncated ? (
+                <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  Listing truncated - only the first 5000 entries are shown.
+                </div>
               ) : null}
+
+              <div className="max-h-[34rem] overflow-y-auto rounded-2xl border border-[#E8E8E8] bg-[#FCFCFC] p-3">
+                {!loading && entries.length === 0 ? (
+                  <div className="flex min-h-52 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-center text-sm text-slate-400">
+                    Empty folder
+                  </div>
+                ) : null}
+
+                {loading && entries.length === 0 ? (
+                  <div className="flex min-h-52 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-sm text-slate-400">
+                    <span className="flex items-center gap-2">
+                      <LoadingOutlined className="animate-spin text-[#EB4C4C]" />
+                      Loading…
+                    </span>
+                  </div>
+                ) : null}
+
+                {entries.length > 0 ? (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+                    {entries.map((e) => {
+                      const selected = !e.is_dir && e.path === value
+                      return (
+                        <button
+                          key={e.path}
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => handleEntryClick(e)}
+                          className={`group flex min-h-36 flex-col items-center justify-center rounded-2xl border p-3 text-center transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
+                            selected
+                              ? 'border-[#EB4C4C] bg-[#EB4C4C]/10 shadow-md shadow-[#EB4C4C]/10'
+                              : 'border-[#E8E8E8] bg-white hover:-translate-y-0.5 hover:border-[#EB4C4C]/40 hover:shadow-md'
+                          }`}
+                        >
+                          <div
+                            className={`mb-3 flex h-16 w-16 items-center justify-center rounded-2xl border transition-all duration-200 ${
+                              e.is_dir
+                                ? 'border-blue-100 bg-blue-50 text-blue-500 group-hover:bg-blue-100 group-hover:text-blue-600'
+                                : 'border-slate-200 bg-slate-50 text-slate-500 group-hover:bg-slate-100 group-hover:text-slate-700'
+                            } ${selected ? 'scale-105' : ''}`}
+                          >
+                            {e.is_dir ? <FolderOutlined className="text-3xl" /> : <FileOutlined className="text-3xl" />}
+                          </div>
+
+                          <span
+                            className={`w-full truncate font-mono text-sm font-medium transition-colors ${
+                              selected ? 'text-slate-900' : 'text-slate-700 group-hover:text-slate-900'
+                            }`}
+                            title={e.name}
+                          >
+                            {e.name}
+                          </span>
+
+                          <span className="mt-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                            {e.is_dir ? 'Folder' : 'File'}
+                          </span>
+
+                          {selected ? (
+                            <span className="mt-2 rounded-full bg-[#EB4C4C] px-2 py-0.5 text-[10px] font-semibold text-[#FFFDEF]">
+                              Selected
+                            </span>
+                          ) : null}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </div>
             </div>
-            {truncated ? (
-              <p className="text-xs text-amber-700">Listing truncated — only the first 5000 entries are shown.</p>
-            ) : null}
-            <ul className="max-h-96 overflow-y-auto rounded-lg border border-[#F1F1F1] bg-white text-sm flex-1">
-              {loading && entries.length === 0 ? (
-                <li className="px-3 py-2 text-slate-500">Loading…</li>
-              ) : null}
-              {!loading && entries.length === 0 ? (
-                <li className="px-3 py-2 text-slate-500">Empty folder</li>
-              ) : null}
-              {entries.map((e) => {
-                const selected = !e.is_dir && e.path === value
-                return (
-                  <li key={e.path}>
-                    <button
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => handleEntryClick(e)}
-                      className={`flex w-full items-center gap-2 px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-50 ${
-                        selected
-                          ? 'bg-[#EB4C4C]/10 text-slate-900'
-                          : 'text-slate-700 hover:bg-[#FFFDEF]'
-                      }`}
-                    >
-                      <span className="w-10 shrink-0 text-center text-[10px] font-semibold uppercase text-slate-400">
-                        {e.is_dir ? 'dir' : 'file'}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate font-mono text-xs">{e.name}</span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
           </div>
         ) : null}
       </div>
