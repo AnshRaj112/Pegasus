@@ -211,7 +211,7 @@ export default function LocalPathBrowser({ label, value, onChange, disabled }) {
                 ) : null}
 
                 {entries.length > 0 ? (
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4">
                     {entries.map((e) => {
                       const selected = !e.is_dir && e.path === value
                       return (
@@ -220,24 +220,24 @@ export default function LocalPathBrowser({ label, value, onChange, disabled }) {
                           type="button"
                           disabled={disabled}
                           onClick={() => handleEntryClick(e)}
-                          className={`group flex min-h-36 flex-col items-center justify-center rounded-2xl border p-3 text-center transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
+                          className={`group flex min-h-48 flex-col items-center justify-start rounded-2xl border p-4 text-center transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
                             selected
                               ? 'border-[#EB4C4C] bg-[#EB4C4C]/10 shadow-md shadow-[#EB4C4C]/10'
                               : 'border-[#E8E8E8] bg-white hover:-translate-y-0.5 hover:border-[#EB4C4C]/40 hover:shadow-md'
                           }`}
                         >
                           <div
-                            className={`mb-3 flex h-16 w-16 items-center justify-center rounded-2xl border transition-all duration-200 ${
+                            className={`mb-3 flex h-24 w-24 items-center justify-center rounded-2xl border transition-all duration-200 ${
                               e.is_dir
                                 ? 'border-blue-100 bg-blue-50 text-blue-500 group-hover:bg-blue-100 group-hover:text-blue-600'
                                 : 'border-slate-200 bg-slate-50 text-slate-500 group-hover:bg-slate-100 group-hover:text-slate-700'
                             } ${selected ? 'scale-105' : ''}`}
                           >
-                            {e.is_dir ? <FolderOutlined className="text-3xl" /> : <FileOutlined className="text-3xl" />}
+                            {e.is_dir ? <FolderOutlined className="text-4xl" /> : <FileOutlined className="text-4xl" />}
                           </div>
 
                           <span
-                            className={`w-full truncate font-mono text-sm font-medium transition-colors ${
+                            className={`w-full whitespace-normal break-words px-2 font-mono text-sm font-medium leading-snug transition-colors ${
                               selected ? 'text-slate-900' : 'text-slate-700 group-hover:text-slate-900'
                             }`}
                             title={e.name}
