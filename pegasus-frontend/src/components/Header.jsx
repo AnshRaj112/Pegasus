@@ -13,7 +13,7 @@ export default function Header({ activeSection, onSectionChange }) {
             <img
               src="/Pegasus.png"
               alt="Pegasus logo"
-              className="h-12 w-12 rounded-lg object-cover object-[50%_20%] sm:h-14 sm:w-14"
+              className="h-12 w-12 rounded-lg object-contain sm:h-14 sm:w-14"
             />
           </div>
 
