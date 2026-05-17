@@ -1,18 +1,201 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
+/* ── Design Tokens ──────────────────────────────────────────────── */
+:root {
+  /* Surface */
+  --surface-0:   #0a0a0b;   /* page background */
+  --surface-1:   #111113;   /* card */
+  --surface-2:   #18181b;   /* card raised */
+  --surface-3:   #1c1c20;   /* card elevated / input bg */
+  --surface-4:   #27272a;   /* hover surface */
+
+  /* Borders */
+  --border-1:    #27272a;   /* subtle */
+  --border-2:    #3f3f46;   /* visible */
+  --border-3:    #52525b;   /* strong */
+
+  /* Text */
+  --text-1:  #fafafa;
+  --text-2:  #a1a1aa;
+  --text-3:  #71717a;
+  --text-4:  #3f3f46;
+
+  /* Accent — a contained warm amber/orange for CTAs */
+  --accent:        #f97316;
+  --accent-hover:  #fb923c;
+  --accent-muted:  rgba(249, 115, 22, 0.12);
+  --accent-border: rgba(249, 115, 22, 0.30);
+  --accent-glow:   rgba(249, 115, 22, 0.18);
+
+  /* Blue — for informational / secondary interactive elements */
+  --blue:          #3b82f6;
+  --blue-muted:    rgba(59, 130, 246, 0.10);
+  --blue-border:   rgba(59, 130, 246, 0.25);
+
+  /* Semantic */
+  --success:      #22c55e;
+  --success-muted: rgba(34, 197, 94, 0.10);
+  --warning:      #eab308;
+  --warning-muted: rgba(234, 179, 8, 0.10);
+  --danger:       #ef4444;
+  --danger-muted: rgba(239, 68, 68, 0.10);
+  --danger-border: rgba(239, 68, 68, 0.28);
+}
+
+/* ── Reset & Base ───────────────────────────────────────────────── */
 @layer base {
+  *, *::before, *::after { box-sizing: border-box; margin: 0; }
+
+  html { scroll-behavior: smooth; }
+
   body {
-    margin: 0;
+    background: var(--surface-0);
+    color: var(--text-1);
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  code {
-    border-radius: 0.25rem;
-    background: rgb(241 245 249);
-    padding: 0.125rem 0.375rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 0.85em;
-    color: rgb(30 41 59);
+  code, kbd, pre {
+    font-family: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.8125em;
   }
+
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-3); }
+
+  select {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+}
+
+/* ── Keyframes ──────────────────────────────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+@keyframes pulse-ring {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50%       { box-shadow: 0 0 0 5px transparent; }
+}
+
+/* ── Utility: Typography ────────────────────────────────────────── */
+.text-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* ── Utility: Card ──────────────────────────────────────────────── */
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: 12px;
+  transition: border-color 0.15s;
+}
+.card:hover { border-color: var(--border-2); }
+
+.card-inset {
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  border-radius: 10px;
+}
+
+/* ── Utility: Buttons ───────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 14px;
+  height: 34px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
+  white-space: nowrap;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.btn:disabled { opacity: 0.38; cursor: not-allowed; pointer-events: none; }
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+.btn-secondary {
+  background: var(--surface-3);
+  color: var(--text-2);
+  border: 1px solid var(--border-2);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-4);
+  color: var(--text-1);
+  border-color: var(--border-3);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--border-2);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.btn-lg {
+  height: 40px;
+  padding: 0 20px;
+  font-size: 14px;
+  border-radius: 9px;
+}
+
+/* ── Utility: Form controls ─────────────────────────────────────── */
+.input {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  color: var(--text-1);
+  font-size: 13px;
+  padding: 0 12px;
+  height: 34px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  font-family: inherit;
+}
+.input:focus {
+  border-color: var(--border-3);
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.04);
+}
+
+.input-mono {
+  font-family: 'Geist Mono', monospace;
+}
+
+/* ── Utility: Badge ─────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
