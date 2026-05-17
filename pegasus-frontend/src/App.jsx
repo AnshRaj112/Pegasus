@@ -1,23 +1,19 @@
 import { useState } from 'react'
-import Header from './components/Header'
-import { ValidationPanel } from './components/ValidationPanel'
-import History from './components/History'
+import Header         from './components/Header'
+import MappingWizard  from './components/mapping/MappingWizard'
+import History         from './components/History'
 
 function App() {
-  const [activeSection, setActiveSection] = useState('validation')
+  const [activeSection, setActiveSection] = useState('mapping')
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(135deg,#FFFDEF_0%,#F1F1F1_100%)] text-slate-800">
+    <div style={{ minHeight: '100vh', background: 'var(--surface-0)' }}>
       <Header activeSection={activeSection} onSectionChange={setActiveSection} />
-      
-      <div className="px-4 py-8 sm:px-6 lg:px-8 mt-6">
-        <div className="mx-auto max-w-7xl">
-          <main>
-            {activeSection === 'validation' && <ValidationPanel />}
-            {activeSection === 'history' && <History />}
-          </main>
-        </div>
-      </div>
+
+      <main style={{ maxWidth: 1080, margin: '0 auto', padding: '32px 24px 64px' }}>
+        {activeSection === 'mapping' && <MappingWizard />}
+        {activeSection === 'history' && <History />}
+      </main>
     </div>
   )
 }

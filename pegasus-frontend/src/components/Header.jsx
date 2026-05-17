@@ -1,56 +1,90 @@
-import { UserOutlined } from '@ant-design/icons'
+const NAV_ITEMS = [
+  { id: 'mapping',  label: 'Mapping'  },
+  { id: 'history',  label: 'History'  },
+]
 
 export default function Header({ activeSection, onSectionChange }) {
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-[#E8E8E8] bg-gradient-to-r from-white via-[#FFFDEF] to-white shadow-sm">
-      <div className="px-4 py-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between gap-4">
-          {/* Left: Pegasus Logo */}
-          <div className="flex items-center gap-3 flex-shrink-0">
-            <h1 className="text-2xl font-extrabold tracking-tight text-slate-800 hidden sm:inline sm:text-3xl">
-              Pegasus
-            </h1>
+    <header style={{
+      position: 'sticky',
+      top: 0,
+      zIndex: 50,
+      background: 'rgba(10, 10, 11, 0.85)',
+      backdropFilter: 'blur(16px)',
+      WebkitBackdropFilter: 'blur(16px)',
+      borderBottom: '1px solid var(--border-1)',
+    }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px' }}>
+        <div style={{ display: 'flex', height: 52, alignItems: 'center', gap: 32 }}>
+
+          {/* Wordmark */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
             <img
               src="/Pegasus.png"
-              alt="Pegasus logo"
-              className="h-12 w-12 rounded-lg object-contain sm:h-14 sm:w-14"
+              alt="Pegasus"
+              style={{ height: 26, width: 26, objectFit: 'contain', borderRadius: 6 }}
             />
+            <span style={{
+              fontSize: 15,
+              fontWeight: 700,
+              color: 'var(--text-1)',
+              letterSpacing: '-0.02em',
+            }}>
+              Pegasus
+            </span>
           </div>
 
-          {/* Center: Navigation Links */}
-          <nav className="flex gap-2 sm:gap-4 absolute left-1/2 transform -translate-x-1/2">
-            <button
-              onClick={() => onSectionChange('validation')}
-              className={`px-4 py-2 font-semibold text-sm rounded-lg transition-all duration-200 ${
-                activeSection === 'validation'
-                  ? 'bg-[#EB4C4C] text-white shadow-md'
-                  : 'text-slate-600 hover:text-[#EB4C4C] hover:bg-slate-50'
-              }`}
-            >
-              Validation
-            </button>
-            <button
-              onClick={() => onSectionChange('history')}
-              className={`px-4 py-2 font-semibold text-sm rounded-lg transition-all duration-200 ${
-                activeSection === 'history'
-                  ? 'bg-[#EB4C4C] text-white shadow-md'
-                  : 'text-slate-600 hover:text-[#EB4C4C] hover:bg-slate-50'
-              }`}
-            >
-              History
-            </button>
+          {/* Divider */}
+          <div style={{ width: 1, height: 18, background: 'var(--border-2)', flexShrink: 0 }} />
+
+          {/* Navigation tabs */}
+          <nav style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {NAV_ITEMS.map(({ id, label }) => {
+              const active = activeSection === id
+              return (
+                <button
+                  key={id}
+                  onClick={() => onSectionChange(id)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    height: 28,
+                    padding: '0 10px',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: active ? 500 : 400,
+                    color: active ? 'var(--text-1)' : 'var(--text-3)',
+                    background: active ? 'var(--surface-3)' : 'transparent',
+                    border: active ? '1px solid var(--border-2)' : '1px solid transparent',
+                    cursor: 'pointer',
+                    transition: 'all 0.12s',
+                    letterSpacing: '-0.01em',
+                  }}
+                  onMouseEnter={e => {
+                    if (!active) { e.currentTarget.style.color = 'var(--text-2)'; e.currentTarget.style.background = 'var(--surface-2)' }
+                  }}
+                  onMouseLeave={e => {
+                    if (!active) { e.currentTarget.style.color = 'var(--text-3)'; e.currentTarget.style.background = 'transparent' }
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
           </nav>
 
-          {/* Right: User Profile */}
-          <div className="flex items-center gap-3 flex-shrink-0 ml-auto">
-            <div className="text-right hidden sm:block">
-              <p className="text-sm font-semibold text-slate-800">User</p>
-              <p className="text-xs text-slate-500">Profile</p>
-            </div>
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#EB4C4C] bg-[#EB4C4C]/10 text-[#EB4C4C] sm:h-12 sm:w-12">
-              <UserOutlined className="text-lg sm:text-xl" />
-            </div>
+          {/* Spacer + right slot */}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{
+              fontSize: 11,
+              fontWeight: 500,
+              color: 'var(--text-4)',
+              letterSpacing: '0.04em',
+            }}>
+              v0.1.0-alpha
+            </span>
           </div>
+
         </div>
       </div>
     </header>

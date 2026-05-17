@@ -1,0 +1,359 @@
+import { useState } from 'react'
+import StepIndicator    from './StepIndicator'
+import Step1_DataSource from './Step1_DataSource'
+import Step2_FilePicker from './Step2_FilePicker'
+import Step3_Configure  from './Step3_Configure'
+import ActionBar        from './ActionBar'
+
+const apiBase = import.meta.env.VITE_API_BASE ?? ''
+const pollTimeoutRaw = Number(import.meta.env.VITE_VALIDATION_POLL_TIMEOUT_MS ?? 0)
+const pollTimeoutMs  = Number.isFinite(pollTimeoutRaw) ? pollTimeoutRaw : 0
+
+function absoluteApiUrl(pathOrUrl) {
+  if (!pathOrUrl) return pathOrUrl
+  if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) return pathOrUrl
+  const base = apiBase.replace(/\/$/, '')
+  const path = pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`
+  return base ? `${base}${path}` : path
+}
+
+function formatDetail(detail) {
+  if (detail == null) return 'Request failed'
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return detail.map(e => (typeof e === 'object' && e != null ? e.msg ?? e.message : null) ?? JSON.stringify(e)).join('; ')
+  return JSON.stringify(detail)
+}
+
+function normalizeResult(data) {
+  if (!data || data.mismatch_samples?.length || !data.mismatch_sample_groups) return data
+  const g = data.mismatch_sample_groups
+  return { ...data, mismatch_samples: [...(g.missing_in_target ?? []), ...(g.extra_in_target ?? []), ...(g.value_mismatch ?? [])] }
+}
+
+async function pollJob(pollPath, { timeoutMs = 0, intervalMs = 400, onPoll } = {}) {
+  const url = absoluteApiUrl(pollPath)
+  const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Number.POSITIVE_INFINITY
+  while (Date.now() < deadline) {
+    const res = await fetch(url, { method: 'GET' })
+    const raw = await res.text()
+    let payload = {}
+    if (raw) { try { payload = JSON.parse(raw) } catch { throw new Error(raw.trim().slice(0, 400)) } }
+    if (!res.ok) throw new Error(formatDetail(payload.detail) || `${res.status} ${res.statusText}`)
+    if (typeof onPoll === 'function') onPoll(payload)
+    if (payload.status === 'completed' && payload.result) return normalizeResult(payload.result)
+    if (payload.status === 'failed') throw new Error(payload.error || 'Validation job failed')
+    await new Promise(r => setTimeout(r, intervalMs))
+  }
+  throw new Error('Timed out waiting for validation job')
+}
+
+/* ── Stat card sub-component ────────────────────────────────── */
+function StatCard({ label, value, accent }) {
+  return (
+    <div style={{
+      padding: '10px 14px', borderRadius: 9,
+      background: 'var(--surface-2)', border: '1px solid var(--border-1)',
+    }}>
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 4 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'Geist Mono, monospace', color: accent ?? 'var(--text-1)', letterSpacing: '-0.02em' }}>
+        {String(value)}
+      </div>
+    </div>
+  )
+}
+
+export default function MappingWizard() {
+  const [step, setStep]         = useState(1)
+  const [subPhase, setSubPhase] = useState('type-select')
+
+  const [sourceStorageType, setSourceStorageType] = useState(null)
+  const [targetStorageType, setTargetStorageType] = useState(null)
+  const [sourcePath, setSourcePath] = useState('')
+  const [targetPath, setTargetPath] = useState('')
+
+  const [mappings, setMappings]   = useState([])
+  const [uidColumn, setUidColumn] = useState('id')
+  const [delimiter, setDelimiter] = useState('auto')
+
+  const [isRunning, setIsRunning]   = useState(false)
+  const [result, setResult]         = useState(null)
+  const [errorMsg, setErrorMsg]     = useState('')
+  const [phase, setPhase]           = useState('idle')
+  const [jobProgress, setJobProgress] = useState({ phase: 'queued', jobId: null })
+
+  function handleDataSourceNext(srcType, tgtType) {
+    setSourceStorageType(srcType); setTargetStorageType(tgtType); setSubPhase('pick-source')
+  }
+  function handleSourceSelected(path) { setSourcePath(path); setSubPhase('pick-target') }
+  function handleTargetSelected(path) { setTargetPath(path); setStep(2); setSubPhase('type-select') }
+
+  async function handleValidate() {
+    setIsRunning(true); setPhase('running'); setResult(null); setErrorMsg(''); setStep(3)
+    try {
+      const res = await fetch(absoluteApiUrl('/api/v1/validate/local'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_path: sourcePath.trim(), target_path: targetPath.trim(), uid_column: uidColumn.trim(), delimiter: delimiter.trim() || 'auto' }),
+      })
+      const raw = await res.text()
+      let data = {}
+      if (raw) { try { data = JSON.parse(raw) } catch { data = { detail: raw.trim().slice(0, 800) } } }
+      if (!res.ok) throw new Error(formatDetail(data.detail) || `${res.status} ${res.statusText}`)
+      let final = data
+      if (res.status === 202 && data.poll_url) {
+        const jid = data.job_id != null ? String(data.job_id) : null
+        setJobProgress({ phase: 'accepted', jobId: jid })
+        final = await pollJob(data.poll_url, {
+          timeoutMs: pollTimeoutMs,
+          onPoll: payload => {
+            const st = payload?.status
+            setJobProgress(prev => ({ ...prev, phase: payload?.phase || (st === 'running' ? 'running' : st) || 'running' }))
+          },
+        })
+      } else if (data.summary) {
+        final = normalizeResult(data)
+      } else {
+        throw new Error('Unexpected API response')
+      }
+      setResult(final); setPhase('success')
+    } catch (err) {
+      setPhase('error'); setErrorMsg(err instanceof Error ? err.message : String(err))
+    } finally { setIsRunning(false) }
+  }
+
+  function handleSaveAsDraft() { alert('Draft saved! (History section coming soon)') }
+
+  const showTypeSelect = step === 1 && subPhase === 'type-select'
+  const showPickSource = step === 1 && subPhase === 'pick-source'
+  const showPickTarget = step === 1 && subPhase === 'pick-target'
+  const showConfigure  = step === 2
+  const showReview     = step === 3
+  const isValidForRun  = !!sourcePath && !!targetPath && !!uidColumn.trim()
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+      {/* Step indicator */}
+      <div style={{
+        background: 'var(--surface-1)', border: '1px solid var(--border-1)',
+        borderRadius: 12, overflow: 'hidden',
+      }}>
+        <StepIndicator currentStep={step} />
+      </div>
+
+      {/* Step content */}
+      <div style={{
+        background: 'var(--surface-1)', border: '1px solid var(--border-1)',
+        borderRadius: 12, padding: '24px 28px',
+      }}>
+
+        {/* Step 1a */}
+        {showTypeSelect && <Step1_DataSource onNext={handleDataSourceNext} />}
+
+        {/* Step 1b */}
+        {showPickSource && (
+          <Step2_FilePicker
+            panelLabel="Source"
+            value={sourcePath}
+            onSelect={handleSourceSelected}
+            onBack={() => setSubPhase('type-select')}
+            disabled={false}
+          />
+        )}
+
+        {/* Step 1c */}
+        {showPickTarget && (
+          <Step2_FilePicker
+            panelLabel="Target"
+            value={targetPath}
+            onSelect={handleTargetSelected}
+            onBack={() => setSubPhase('pick-source')}
+            disabled={false}
+          />
+        )}
+
+        {/* Step 2: Configure */}
+        {showConfigure && (
+          <>
+            <Step3_Configure
+              sourcePath={sourcePath}
+              targetPath={targetPath}
+              mappings={mappings}
+              onMappingChange={setMappings}
+              uidColumn={uidColumn}
+              onUidColumnChange={setUidColumn}
+            />
+            <div style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={() => { setStep(1); setSubPhase('pick-target') }}
+                className="btn btn-ghost"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M9 6H3M5.5 3.5L3 6l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep(3)}
+                className="btn btn-primary"
+              >
+                Review & Save
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M3 6h6M6.5 3.5L9 6l-2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Step 3: Review */}
+        {showReview && (
+          <div style={{ animation: 'fade-in 0.2s ease' }}>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 6 }}>
+                Step 3 of 3
+              </div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1.2, marginBottom: 4 }}>
+                Review & Save
+              </h2>
+              <p style={{ fontSize: 13, color: 'var(--text-3)' }}>
+                Confirm your selections, then validate or save as a draft.
+              </p>
+            </div>
+
+            {/* File summary */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+              {[
+                { label: 'Source file', value: sourcePath, accent: 'var(--accent)' },
+                { label: 'Target file', value: targetPath, accent: 'var(--blue)' },
+              ].map(({ label, value, accent }) => (
+                <div key={label} style={{
+                  padding: '12px 14px', borderRadius: 9,
+                  background: 'var(--surface-2)', borderLeft: `3px solid ${accent}`,
+                  border: `1px solid var(--border-1)`,
+                }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 5 }}>
+                    {label}
+                  </div>
+                  <code style={{
+                    display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    fontSize: 12, color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace',
+                  }} title={value}>
+                    {value || '—'}
+                  </code>
+                </div>
+              ))}
+            </div>
+
+            {/* Config summary */}
+            <div style={{
+              display: 'flex', gap: 16, padding: '10px 14px', borderRadius: 9,
+              background: 'var(--surface-2)', border: '1px solid var(--border-1)',
+              fontSize: 12, color: 'var(--text-3)', marginBottom: 12, flexWrap: 'wrap',
+            }}>
+              <span>UID: <strong style={{ color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace' }}>{uidColumn || '—'}</strong></span>
+              <span>Delimiter: <strong style={{ color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace' }}>{delimiter}</strong></span>
+              <span>Columns mapped: <strong style={{ color: 'var(--text-1)' }}>{mappings.filter(m => m.targetCol).length} / {mappings.length || '—'}</strong></span>
+            </div>
+
+            {/* Delimiter field */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 5 }}>
+                  CSV Delimiter
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    value={delimiter}
+                    onChange={e => setDelimiter(e.target.value)}
+                    placeholder="auto"
+                    className="input input-mono"
+                    style={{ maxWidth: 160 }}
+                  />
+                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                    Supports <code style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11 }}>tab</code>, <code style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11 }}>|</code>, <code style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11 }}>::</code>
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {/* Running state */}
+            {phase === 'running' && (
+              <div style={{
+                marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10,
+                padding: '11px 14px', borderRadius: 9,
+                background: 'var(--accent-muted)', border: '1px solid var(--accent-border)',
+              }}>
+                <span style={{
+                  width: 14, height: 14, borderRadius: '50%',
+                  border: '2px solid var(--accent-border)', borderTopColor: 'var(--accent)',
+                  animation: 'spin 0.7s linear infinite', display: 'inline-block', flexShrink: 0,
+                }} />
+                <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--accent)' }}>
+                  Validating… ({jobProgress.phase})
+                </span>
+              </div>
+            )}
+
+            {/* Success */}
+            {phase === 'success' && result && (
+              <div style={{
+                marginBottom: 12, padding: '14px 16px', borderRadius: 9,
+                background: 'var(--success-muted)', border: '1px solid rgba(34,197,94,0.25)',
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--success)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                    <path d="M2 6.5l3 3 6-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  Validation complete
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                  <StatCard label="Match" value={result.summary?.is_match ? 'Yes' : 'No'} accent={result.summary?.is_match ? 'var(--success)' : 'var(--danger)'} />
+                  <StatCard label="Source rows" value={result.summary?.source_row_count ?? '—'} />
+                  <StatCard label="Target rows" value={result.summary?.target_row_count ?? '—'} />
+                  <StatCard label="Mismatches" value={result.summary?.total_mismatch_records ?? '—'} accent={result.summary?.total_mismatch_records > 0 ? 'var(--danger)' : undefined} />
+                </div>
+              </div>
+            )}
+
+            {/* Error */}
+            {phase === 'error' && (
+              <div style={{
+                marginBottom: 12, padding: '11px 14px', borderRadius: 9,
+                background: 'var(--danger-muted)', border: '1px solid var(--danger-border)',
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--danger)', marginBottom: 4 }}>Validation failed</div>
+                <p style={{ fontSize: 12, color: 'var(--text-2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{errorMsg}</p>
+              </div>
+            )}
+
+            {/* Back */}
+            <button
+              type="button"
+              onClick={() => { setStep(2); setPhase('idle') }}
+              className="btn btn-ghost"
+              style={{ marginBottom: 4 }}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M9 6H3M5.5 3.5L3 6l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Back to Configure
+            </button>
+
+            <ActionBar
+              onValidate={handleValidate}
+              onSaveAsDraft={handleSaveAsDraft}
+              isValid={isValidForRun}
+              isRunning={isRunning}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
