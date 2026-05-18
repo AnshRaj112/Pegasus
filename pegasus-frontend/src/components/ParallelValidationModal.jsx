@@ -181,7 +181,7 @@ export default function ParallelValidationModal({ open, onClose, onConfirm }) {
           onAutoTuneChange={setAutoTuneEnabled}
           onRefresh={refreshQueue}
           disabled={loading || queueLoading}
-          theme="dark"
+          theme="light"
         />
 
         {applyError ? <p style={{ fontSize: 12, color: 'var(--danger)', marginTop: 16 }}>{applyError}</p> : null}
