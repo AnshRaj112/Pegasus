@@ -13,34 +13,34 @@ export default function Header({ activeSection, onSectionChange }) {
       backdropFilter: 'blur(16px)',
       WebkitBackdropFilter: 'blur(16px)',
       borderBottom: '1px solid var(--border-1)',
-      paddingTop: 8,
-      paddingBottom: 8,
+      paddingTop: 0,
+      paddingBottom: 0,
     }}>
-      <div style={{ position: 'relative', width: '100%', padding: '0 24px' }}>
+      <div style={{ position: 'relative', width: '100%', padding: '0 16px' }}>
         {/* Left: large logo + name (absolute to place at extreme left) */}
-        <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <img
-            src="/Pegasus.png"
-            alt="Pegasus"
-            style={{ height: 44, width: 44, objectFit: 'contain', borderRadius: 8, transform: 'translateY(-6px)' }}
-          />
+        <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{
             fontSize: 18,
             fontWeight: 700,
             color: 'var(--text-1)',
             letterSpacing: '-0.02em',
-            marginLeft: 2,
+            margin: 0,
           }}>
             Pegasus
           </span>
+          <img
+            src="/Pegasus.png"
+            alt="Pegasus"
+            style={{ height: 44, width: 44, objectFit: 'contain', borderRadius: 8, transform: 'translateY(5px)', scale: '190%', marginLeft: 28 }}
+          />
         </div>
 
-        <div style={{ display: 'flex', height: 96, alignItems: 'center', gap: 32, paddingLeft: 160 }}>
+        <div style={{ display: 'flex', height: 78, alignItems: 'center', gap: 24, paddingLeft: 156 }}>
           {/* Divider */}
-          <div style={{ width: 1, height: 18, background: 'var(--border-2)', flexShrink: 0 }} />
+          <div style={{ width: 1, height: 18, background: 'var(--border-2)', flexShrink: 0, marginLeft: 55 }} />
 
           {/* Navigation tabs */}
-          <nav style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <nav style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 0 }}>
             {NAV_ITEMS.map(({ id, label }) => {
               const active = activeSection === id
               return (
@@ -80,13 +80,14 @@ export default function Header({ activeSection, onSectionChange }) {
         </div>
 
         {/* Right: profile area */}
-        <div style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <img src="/profile.png" alt="Profile" style={{ width: 48, height: 48, borderRadius: 9999, objectFit: 'cover', border: '1px solid var(--border-2)' }} />
+        <div style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginRight: 0 }}>
+            
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-              <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)' }}>Super User</span>
-              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Admin</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)', margin: 0 }}>Super User</span>
+              <span style={{ fontSize: 12, color: 'var(--text-3)', margin: 0 }}>Admin</span>
             </div>
+            <img src="./photo.jpg" alt="Profile" style={{ width: 48, height: 48, borderRadius: 9999, objectFit: 'cover', border: '1px solid var(--border-2)'}} />
           </div>
         </div>
 
