@@ -304,6 +304,7 @@ def compute_resource_recommendation(
     min_ram_per_job_bytes: int | None = None,
     min_disk_per_job_bytes: int | None = None,
     disk_reserve_bytes: int | None = None,
+    threads_per_job: int | None = None,
 ) -> ResourceSnapshot:
     """Compute a resource-aware concurrency recommendation.
 
@@ -417,8 +418,10 @@ def compute_resource_recommendation(
     new_slots_by_disk = max(0, usable_disk // max(1, estimated_disk_per_job))
     max_safe_by_disk = max(1, len(running_jobs) + new_slots_by_disk)
 
-    # CPU: just use the core count as a soft cap
-    max_safe_by_cpu = cpu_cores
+    # CPU: cap parallel jobs so threads_per_job × jobs does not exceed core count (roughly)
+    tpp = max(0, int(threads_per_job)) if threads_per_job is not None else 0
+    slots_per_core = tpp if tpp > 0 else 1
+    max_safe_by_cpu = max(1, cpu_cores // slots_per_core)
 
       # ── Final recommendation: minimum of all constraints ──────────
     recommended = max(1, min(max_safe_by_ram, max_safe_by_disk, max_safe_by_cpu))

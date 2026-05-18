@@ -29,6 +29,7 @@ from pegasus.services.background_validation_runner import (
     BackgroundValidationRunner,
     ValidationJobHandle,
 )
+from pegasus.services.queue_resource_policy import QueueResourcePolicy
 from pegasus.services.resource_advisor import (
     ResourceSnapshot,
     compute_resource_recommendation,
@@ -82,6 +83,7 @@ class ValidationJobQueue:
         self._settings = settings
         self._runner = BackgroundValidationRunner(settings)
         self._auto_tune_enabled: bool = settings.validation_auto_tune_enabled
+        self._resource_policy: QueueResourcePolicy = QueueResourcePolicy.from_settings(settings)
 
         # Ordered queue of pending jobs (FIFO)
         self._pending: deque[QueuedJob] = deque()
@@ -100,9 +102,11 @@ class ValidationJobQueue:
         self._stopped = False
 
         logger.info(
-            "ValidationJobQueue created max_concurrency=%d auto_tune=%s",
+            "ValidationJobQueue created max_concurrency=%d auto_tune=%s threads_per_job=%d disk_mult=%.2f",
             self._max_concurrency,
             self._auto_tune_enabled,
+            self._resource_policy.threads_per_job,
+            self._resource_policy.disk_headroom_multiplier,
         )
 
     @property
@@ -146,6 +150,39 @@ class ValidationJobQueue:
         self._auto_tune_enabled = enabled
         logger.info("auto_tune_enabled set to %s", enabled)
 
+    @property
+    def resource_policy(self) -> QueueResourcePolicy:
+        return self._resource_policy
+
+    def set_threads_per_job(self, value: int) -> int:
+        """Set worker thread cap per job (0 = auto). Returns clamped value."""
+        cores = self.cpu_cores_available()
+        clamped = max(0, min(int(value), cores))
+        policy = self._resource_policy.clamp(cpu_cores=cores)
+        self._resource_policy = QueueResourcePolicy(
+            threads_per_job=clamped,
+            disk_headroom_multiplier=policy.disk_headroom_multiplier,
+        )
+        logger.info("threads_per_job set to %d (effective=%d)", clamped, self.effective_threads_per_job())
+        self._drain_event.set()
+        return clamped
+
+    def set_disk_headroom_multiplier(self, value: float) -> float:
+        """Set per-job disk headroom multiplier. Returns clamped value."""
+        cores = self.cpu_cores_available()
+        clamped = max(1.0, min(10.0, float(value)))
+        policy = self._resource_policy.clamp(cpu_cores=cores)
+        self._resource_policy = QueueResourcePolicy(
+            threads_per_job=policy.threads_per_job,
+            disk_headroom_multiplier=clamped,
+        )
+        logger.info("disk_headroom_multiplier set to %.2f", clamped)
+        self._drain_event.set()
+        return clamped
+
+    def effective_threads_per_job(self) -> int:
+        return self._resource_policy.effective_threads(cpu_cores=self.cpu_cores_available())
+
     def resource_recommendation(self) -> ResourceSnapshot:
         """Compute a fresh resource snapshot and recommendation."""
         workspace = None
@@ -157,11 +194,14 @@ class ValidationJobQueue:
             running = dict(self._running)
             pending = list(self._pending)
 
+        policy = self._resource_policy
         snapshot = compute_resource_recommendation(
             running_jobs=running,
             pending_jobs=pending,
             settings=self._settings,
             workspace_path=workspace,
+            disk_headroom_multiplier=policy.disk_headroom_multiplier,
+            threads_per_job=policy.threads_per_job,
         )
         self._last_resource_snapshot = snapshot
         return snapshot
@@ -181,10 +221,14 @@ class ValidationJobQueue:
     def stats(self) -> dict[str, Any]:
         """Snapshot of queue statistics."""
         with self._lock:
+            policy = self._resource_policy
             result = {
                 "max_concurrency": self._max_concurrency,
                 "cpu_cores_available": self.cpu_cores_available(),
                 "auto_tune_enabled": self._auto_tune_enabled,
+                "threads_per_job": policy.threads_per_job,
+                "disk_headroom_multiplier": policy.disk_headroom_multiplier,
+                "effective_threads_per_job": self.effective_threads_per_job(),
                 "pending": len(self._pending),
                 "running": len(self._running),
                 "finished": len(self._finished),
@@ -298,6 +342,7 @@ class ValidationJobQueue:
                 job = self._pending.popleft()
                 self._update_queue_positions()
                 try:
+                    self._stamp_resource_policy(job)
                     handle = self._runner.start_job(job.job_dir)
                     # Quick sanity: did it die immediately?
                     if handle.poll() is not None:
@@ -383,6 +428,26 @@ class ValidationJobQueue:
         logger.info("Validation job queue shut down (wait=%s)", wait)
 
     # ── Status file helpers ───────────────────────────────────────
+
+    def _stamp_resource_policy(self, job: QueuedJob) -> None:
+        """Write current queue resource policy into job meta.json before the worker starts."""
+        meta_path = job.job_dir / "meta.json"
+        if not meta_path.is_file():
+            return
+        try:
+            meta = loads_str(meta_path.read_text(encoding="utf-8"))
+            if not isinstance(meta, dict):
+                return
+            policy = self._resource_policy.clamp(cpu_cores=self.cpu_cores_available())
+            meta["resource_policy"] = {
+                **policy.to_dict(),
+                "effective_threads_per_job": policy.effective_threads(
+                    cpu_cores=self.cpu_cores_available()
+                ),
+            }
+            meta_path.write_bytes(dumps_bytes(meta, indent=True))
+        except (OSError, ValueError, TypeError):
+            logger.warning("Could not stamp resource_policy for job %s", job.job_id, exc_info=True)
 
     def _write_queued_status(self, job: QueuedJob) -> None:
         status_path = job.job_dir / "status.json"

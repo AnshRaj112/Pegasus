@@ -154,6 +154,10 @@ def run_job_directory(job_dir: Path) -> int:
                 "progress": {"started_at_epoch_s": start},
             },
         )
+        resource_policy = meta.get("resource_policy")
+        if resource_policy is not None and not isinstance(resource_policy, dict):
+            resource_policy = None
+
         result = service._validate_csv_pair_sync(  # noqa: SLF001 — intentional worker entry
             src,
             tgt,
@@ -165,6 +169,7 @@ def run_job_directory(job_dir: Path) -> int:
             validate_header_formats=validate_header_formats,
             validate_footers=validate_footers,
             footer_trailing_rows=footer_trailing_rows,
+            resource_policy=resource_policy,
         )
         end = time.time()
         validation_duration = end - start

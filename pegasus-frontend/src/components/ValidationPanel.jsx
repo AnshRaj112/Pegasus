@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Modal } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import LocalPathBrowser from './LocalPathBrowser'
+import ParallelValidationResourceForm from './ParallelValidationResourceForm'
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
 const pollTimeoutRaw = Number(import.meta.env.VITE_VALIDATION_POLL_TIMEOUT_MS ?? 0)
@@ -132,47 +133,53 @@ export function ValidationPanel() {
   const [jobProgress, setJobProgress] = useState({ phase: 'queued', jobId: null, message: '', progress: {} })
   const [queueInfo, setQueueInfo] = useState(null)
   const [concurrencySlider, setConcurrencySlider] = useState(2)
+  const [threadsPerJob, setThreadsPerJob] = useState(0)
+  const [diskHeadroomMultiplier, setDiskHeadroomMultiplier] = useState(1.5)
   const [concurrencyUpdating, setConcurrencyUpdating] = useState(false)
   const [concurrencyError, setConcurrencyError] = useState('')
+  const [queueModalLoading, setQueueModalLoading] = useState(false)
+  const [queueModalError, setQueueModalError] = useState('')
 
   const running = phase === 'running'
-  const cpuCores = queueInfo?.cpu_cores_available ?? null
-  const ra = queueInfo?.resource_advisor ?? null
+  const autoTuneEnabled = queueInfo?.auto_tune_enabled ?? true
   const effectiveMax = queueInfo?.effective_max_concurrency ?? null
-  const sliderMax = Math.max(
-    1,
-    concurrencySlider,
-    cpuCores ?? 1,
-    ra?.recommended_max_concurrency ?? 1,
-    ra?.limits?.max_safe_by_ram ?? 1,
-    ra?.limits?.max_safe_by_disk ?? 1,
-    queueInfo?.max_concurrency ?? 1,
-  )
   const jobUi = running ? jobRunningCopy(jobProgress.phase, jobProgress.jobId) : null
 
-  useEffect(() => {
-    async function fetchQueue() {
-      try {
-        const res = await fetch(absoluteApiUrl('/api/v1/validate/queue'))
-        if (res.ok) {
-          const data = await res.json()
-          setQueueInfo(data)
-          setConcurrencySlider(data.max_concurrency ?? 2)
-        }
-      } catch {
-        // silent
+  async function refreshQueueInfo() {
+    setQueueModalLoading(true)
+    setQueueModalError('')
+    try {
+      const res = await fetch(absoluteApiUrl('/api/v1/validate/queue'))
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(formatDetail(err.detail) || `Queue status failed (${res.status})`)
       }
+      const data = await res.json()
+      setQueueInfo(data)
+      setConcurrencySlider(data.max_concurrency ?? 2)
+      setThreadsPerJob(data.threads_per_job ?? 0)
+      setDiskHeadroomMultiplier(data.disk_headroom_multiplier ?? 1.5)
+    } catch (e) {
+      setQueueModalError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setQueueModalLoading(false)
     }
-    fetchQueue()
+  }
+
+  useEffect(() => {
+    refreshQueueInfo()
   }, [])
 
-  async function handleConcurrencyUpdate(newValue, autoTuneEnabled) {
+  useEffect(() => {
+    if (!showParallelValidationModal) return
+    refreshQueueInfo()
+  }, [showParallelValidationModal])
+
+  async function patchQueueSettings(partial) {
     setConcurrencyUpdating(true)
     setConcurrencyError('')
     try {
-      const body = {}
-      if (newValue != null) body.max_concurrency = newValue
-      if (autoTuneEnabled != null) body.auto_tune_enabled = autoTuneEnabled
+      const body = { ...partial }
       const res = await fetch(absoluteApiUrl('/api/v1/validate/queue'), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -181,16 +188,27 @@ export function ValidationPanel() {
       if (res.ok) {
         const data = await res.json()
         setQueueInfo(data)
-        setConcurrencySlider(data.max_concurrency)
+        setConcurrencySlider(data.max_concurrency ?? concurrencySlider)
+        setThreadsPerJob(data.threads_per_job ?? 0)
+        setDiskHeadroomMultiplier(data.disk_headroom_multiplier ?? 1.5)
       } else {
         const err = await res.json().catch(() => ({}))
-        setConcurrencyError(err.detail || `Failed (${res.status})`)
+        setConcurrencyError(formatDetail(err.detail) || `Failed (${res.status})`)
       }
     } catch (e) {
-      setConcurrencyError(e.message)
+      setConcurrencyError(e instanceof Error ? e.message : String(e))
     } finally {
       setConcurrencyUpdating(false)
     }
+  }
+
+  function handleConcurrencyUpdate(newValue, autoTune) {
+    return patchQueueSettings({
+      max_concurrency: newValue ?? concurrencySlider,
+      auto_tune_enabled: autoTune ?? autoTuneEnabled,
+      threads_per_job: threadsPerJob,
+      disk_headroom_multiplier: diskHeadroomMultiplier,
+    })
   }
 
   useEffect(() => {
@@ -215,7 +233,9 @@ export function ValidationPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           max_concurrency: concurrencySlider,
-          auto_tune_enabled: queueInfo?.auto_tune_enabled ?? true,
+          auto_tune_enabled: autoTuneEnabled,
+          threads_per_job: threadsPerJob,
+          disk_headroom_multiplier: diskHeadroomMultiplier,
         }),
       })
       if (!res.ok) {
@@ -309,7 +329,7 @@ export function ValidationPanel() {
           Select source and target CSVs on the server to run comparison.
         </p>
 
-        <form className="space-y-5" onSubmit={handleOpenParallelValidation}>
+        <form className="space-y-6" onSubmit={handleOpenParallelValidation}>
           <div className="space-y-4">
             <LocalPathBrowser label="Source CSV (expected)" value={sourcePath} onChange={setSourcePath} disabled={running} />
             <LocalPathBrowser label="Target CSV (actual)" value={targetPath} onChange={setTargetPath} disabled={running} />
@@ -447,123 +467,65 @@ export function ValidationPanel() {
         onCancel={() => setShowParallelValidationModal(false)}
         footer={null}
         centered
-        width={920}
+        width={960}
         destroyOnClose
         closeIcon={<span className="text-2xl text-slate-500 hover:text-slate-800">×</span>}
-        bodyStyle={{ padding: '2rem' }}
+        bodyStyle={{ padding: '2rem', maxHeight: 'min(90vh, 900px)', overflowY: 'auto' }}
       >
-        <div className="space-y-5">
+        <div className="space-y-6">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#EB4C4C]">Parallel Validation</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#EB4C4C]">Parallel validation</p>
             <h2 className="mt-1 text-2xl font-bold text-slate-900">Review resources before running</h2>
-            <p className="mt-2 text-sm text-slate-600">Check the available RAM, disk, and CPU-based concurrency settings before the backend starts.</p>
+            <p className="mt-2 text-sm text-slate-600">Configure how many validations may run at once and see estimated RAM, disk, and CPU impact on this server.</p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-xl border border-[#F1F1F1] bg-[#FAFAFA] p-3">
-              <span className="block text-xs font-semibold uppercase tracking-widest text-slate-400">RAM</span>
-              <span className="mt-1 block font-mono text-lg font-bold text-slate-800">{ra?.system?.available_ram_gib ?? '?'} <span className="text-sm font-normal text-slate-500">/ {ra?.system?.total_ram_gib ?? '?'} GiB free</span></span>
-              <span className="mt-0.5 block text-xs text-slate-400">~{ra?.per_job_estimate?.ram_mib ?? '?'} MiB per job</span>
-            </div>
-            <div className="rounded-xl border border-[#F1F1F1] bg-[#FAFAFA] p-3">
-              <span className="block text-xs font-semibold uppercase tracking-widest text-slate-400">Disk</span>
-              <span className="mt-1 block font-mono text-lg font-bold text-slate-800">{ra?.system?.available_disk_gib ?? '?'} <span className="text-sm font-normal text-slate-500">/ {ra?.system?.total_disk_gib ?? '?'} GiB free</span></span>
-              <span className="mt-0.5 block text-xs text-slate-400">~{ra?.per_job_estimate?.disk_mib ?? '?'} MiB per job</span>
-            </div>
-            <div className="rounded-xl border border-[#F1F1F1] bg-[#FAFAFA] p-3">
-              <span className="block text-xs font-semibold uppercase tracking-widest text-slate-400">Safe limits</span>
-              <div className="mt-1 flex flex-wrap gap-2 text-xs">
-                <span className="rounded bg-blue-100 px-1.5 py-0.5 font-semibold text-blue-700">RAM: {ra?.limits?.max_safe_by_ram ?? '?'}</span>
-                <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-700">Disk: {ra?.limits?.max_safe_by_disk ?? '?'}</span>
-                <span className="rounded bg-purple-100 px-1.5 py-0.5 font-semibold text-purple-700">CPU: {ra?.limits?.max_safe_by_cpu ?? '?'}</span>
-              </div>
-              <span className="mt-1 block text-xs font-semibold text-[#EB4C4C]">Recommended: {ra?.recommended_max_concurrency ?? '?'}</span>
-            </div>
-          </div>
+          <ParallelValidationResourceForm
+            queueInfo={queueInfo}
+            queueLoading={queueModalLoading}
+            queueError={queueModalError}
+            concurrencySlider={concurrencySlider}
+            onConcurrencyChange={setConcurrencySlider}
+            threadsPerJob={threadsPerJob}
+            onThreadsPerJobChange={setThreadsPerJob}
+            diskHeadroomMultiplier={diskHeadroomMultiplier}
+            onDiskHeadroomMultiplierChange={setDiskHeadroomMultiplier}
+            autoTuneEnabled={autoTuneEnabled}
+            onAutoTuneChange={(enabled) =>
+              patchQueueSettings({
+                max_concurrency: concurrencySlider,
+                auto_tune_enabled: enabled,
+                threads_per_job: threadsPerJob,
+                disk_headroom_multiplier: diskHeadroomMultiplier,
+              })
+            }
+            onRefresh={refreshQueueInfo}
+            disabled={concurrencyUpdating}
+            theme="light"
+          />
 
-          {ra?.warnings?.length ? (
-            <div className="space-y-2">
-              {ra.warnings.map((w, i) => (
-                <div key={i} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">⚠️ {w}</div>
-              ))}
-            </div>
-          ) : null}
-
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <label className="text-sm font-semibold text-slate-700" htmlFor="concurrency-slider-modal">Max parallel jobs</label>
-              <div className="flex items-center gap-2">
-                {ra?.recommended_max_concurrency != null && concurrencySlider !== ra.recommended_max_concurrency ? (
-                  <button type="button" onClick={() => setConcurrencySlider(ra.recommended_max_concurrency)} className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 hover:bg-blue-200 transition">Use recommended ({ra.recommended_max_concurrency})</button>
-                ) : null}
-                <input
-                  type="number"
-                  min={1}
-                  value={concurrencySlider}
-                  disabled={concurrencyUpdating}
-                  onChange={(ev) => {
-                    const n = Number(ev.target.value)
-                    if (Number.isFinite(n) && n >= 1) setConcurrencySlider(Math.floor(n))
-                  }}
-                  className="w-20 rounded-md border border-[#F1F1F1] bg-white px-2 py-1 text-center font-mono text-sm font-bold text-[#EB4C4C]"
-                  aria-label="Max parallel jobs"
-                />
-              </div>
-            </div>
-
-            <input
-              id="concurrency-slider-modal"
-              type="range"
-              min={1}
-              max={sliderMax}
-              step={1}
-              value={Math.min(concurrencySlider, sliderMax)}
-              disabled={concurrencyUpdating}
-              onChange={(ev) => setConcurrencySlider(Number(ev.target.value))}
-              className="w-full cursor-pointer accent-[#EB4C4C] disabled:cursor-not-allowed disabled:opacity-50"
-            />
-            <div className="mt-1 flex justify-between text-xs text-slate-400">
-              <span>1 (serial)</span>
-              <span>up to {sliderMax} (RAM/disk/CPU guided)</span>
-            </div>
-            {effectiveMax != null && queueInfo?.auto_tune_enabled && effectiveMax < concurrencySlider ? (
-              <p className="mt-1 text-xs text-amber-700">
-                Effective cap right now: <strong>{effectiveMax}</strong> (auto-tune; your setting is {concurrencySlider})
-              </p>
-            ) : null}
-          </div>
-
-          <label className="flex cursor-pointer items-center gap-3">
-            <input
-              type="checkbox"
-              checked={queueInfo?.auto_tune_enabled ?? true}
-              disabled={concurrencyUpdating}
-              onChange={(ev) => handleConcurrencyUpdate(concurrencySlider, ev.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-[#EB4C4C] accent-[#EB4C4C] focus:ring-[#EB4C4C]"
-            />
-            <div>
-              <span className="text-sm font-semibold text-slate-700">Auto-tune</span>
-              <span className="ml-2 text-xs text-slate-500">Dynamically cap concurrency based on available RAM, disk &amp; swap pressure</span>
-            </div>
-          </label>
-
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3 border-t border-[#F1F1F1] pt-4">
+            <button
+              type="button"
+              disabled={concurrencyUpdating || queueModalLoading}
+              onClick={executeValidation}
+              className="rounded-lg bg-[#EB4C4C] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {concurrencyUpdating ? 'Starting…' : 'Run validation'}
+            </button>
             <button
               type="button"
               disabled={concurrencyUpdating}
-              onClick={executeValidation}
-              className="rounded-lg bg-[#EB4C4C] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setShowParallelValidationModal(false)}
+              className="rounded-lg border border-[#F1F1F1] bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
-              {concurrencyUpdating ? 'Applying…' : 'Run validation'}
+              Cancel
             </button>
-            {concurrencySlider === queueInfo?.max_concurrency ? <span className="text-xs font-medium text-emerald-600">✓ Current setting</span> : null}
+            {concurrencySlider === queueInfo?.max_concurrency ? (
+              <span className="text-xs font-medium text-emerald-600">✓ Matches saved queue setting</span>
+            ) : null}
             {concurrencyError ? <span className="text-xs text-rose-600">{concurrencyError}</span> : null}
           </div>
 
-          <p className="text-xs leading-relaxed text-slate-500">
-            Your server has <strong>{cpuCores ?? '?'} CPU cores</strong>, <strong>{ra?.system?.total_ram_gib ?? '?'} GiB RAM</strong>, and <strong>{ra?.system?.available_disk_gib ?? '?'} GiB disk free</strong>. The system recommends <strong>{ra?.recommended_max_concurrency ?? '?'}</strong> parallel jobs based on current resource availability.
-            {queueInfo?.auto_tune_enabled ? ' Auto-tune is ON — effective concurrency may be lower than your setting if resources are tight.' : ' Auto-tune is OFF — only your manual setting is used.'}
-          </p>
         </div>
       </Modal>
     </div>
