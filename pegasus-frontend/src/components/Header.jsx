@@ -13,27 +13,29 @@ export default function Header({ activeSection, onSectionChange }) {
       backdropFilter: 'blur(16px)',
       WebkitBackdropFilter: 'blur(16px)',
       borderBottom: '1px solid var(--border-1)',
+      paddingTop: 8,
+      paddingBottom: 8,
     }}>
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px' }}>
-        <div style={{ display: 'flex', height: 52, alignItems: 'center', gap: 32 }}>
+      <div style={{ position: 'relative', width: '100%', padding: '0 24px' }}>
+        {/* Left: large logo + name (absolute to place at extreme left) */}
+        <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <img
+            src="/Pegasus.png"
+            alt="Pegasus"
+            style={{ height: 44, width: 44, objectFit: 'contain', borderRadius: 8, transform: 'translateY(-6px)' }}
+          />
+          <span style={{
+            fontSize: 18,
+            fontWeight: 700,
+            color: 'var(--text-1)',
+            letterSpacing: '-0.02em',
+            marginLeft: 2,
+          }}>
+            Pegasus
+          </span>
+        </div>
 
-          {/* Wordmark */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
-            <img
-              src="/Pegasus.png"
-              alt="Pegasus"
-              style={{ height: 26, width: 26, objectFit: 'contain', borderRadius: 6 }}
-            />
-            <span style={{
-              fontSize: 15,
-              fontWeight: 700,
-              color: 'var(--text-1)',
-              letterSpacing: '-0.02em',
-            }}>
-              Pegasus
-            </span>
-          </div>
-
+        <div style={{ display: 'flex', height: 96, alignItems: 'center', gap: 32, paddingLeft: 160 }}>
           {/* Divider */}
           <div style={{ width: 1, height: 18, background: 'var(--border-2)', flexShrink: 0 }} />
 
@@ -45,13 +47,13 @@ export default function Header({ activeSection, onSectionChange }) {
                 <button
                   key={id}
                   onClick={() => onSectionChange(id)}
-                  style={{
+                    style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    height: 28,
-                    padding: '0 10px',
-                    borderRadius: 6,
-                    fontSize: 13,
+                    height: 36,
+                    padding: '0 14px',
+                    borderRadius: 8,
+                    fontSize: 15,
                     fontWeight: active ? 500 : 400,
                     color: active ? 'var(--text-1)' : 'var(--text-3)',
                     background: active ? 'var(--surface-3)' : 'transparent',
@@ -73,19 +75,21 @@ export default function Header({ activeSection, onSectionChange }) {
             })}
           </nav>
 
-          {/* Spacer + right slot */}
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{
-              fontSize: 11,
-              fontWeight: 500,
-              color: 'var(--text-4)',
-              letterSpacing: '0.04em',
-            }}>
-              v0.1.0-alpha
-            </span>
-          </div>
-
+          {/* Spacer (kept for layout) */}
+          <div style={{ marginLeft: 'auto' }} />
         </div>
+
+        {/* Right: profile area */}
+        <div style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <img src="/profile.png" alt="Profile" style={{ width: 48, height: 48, borderRadius: 9999, objectFit: 'cover', border: '1px solid var(--border-2)' }} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)' }}>Super User</span>
+              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Admin</span>
+            </div>
+          </div>
+        </div>
+
       </div>
     </header>
   )
