@@ -22,6 +22,10 @@ from pegasus.core.resource_tuning import (
     physical_cpu_count,
     physical_ram_bytes,
 )
+from pegasus.services.queue_resource_policy import (
+    QueueResourcePolicy,
+    apply_queue_policy_to_reconciliation_config,
+)
 from pegasus.services.exceptions import (
     ValidationBadRequestError,
     ValidationUnprocessableError,
@@ -111,9 +115,15 @@ class ValidationService:
         *,
         source_path: Path,
         target_path: Path,
+        resource_policy: QueueResourcePolicy | None = None,
     ) -> ReconciliationRuntimeConfig:
         """Clamp partition counts using host CPU and RAM hints."""
-        ncpu = physical_cpu_count()
+        cores = physical_cpu_count()
+        ncpu = (
+            resource_policy.effective_threads(cpu_cores=cores)
+            if resource_policy is not None
+            else cores
+        )
         ram = physical_ram_bytes()
 
         orig_pb = rcfg.partition_buckets
@@ -237,12 +247,23 @@ class ValidationService:
         validate_header_formats: bool = False,
         validate_footers: bool = False,
         footer_trailing_rows: int = 1,
+        resource_policy: dict[str, object] | None = None,
     ) -> ValidationRunResult:
         uid = uid_column.strip()
         if not uid:
             raise ValidationBadRequestError("uid_column must be a non-empty string")
 
+        queue_policy = QueueResourcePolicy.from_dict(
+            dict(resource_policy) if resource_policy else None,
+            settings=self._settings,
+        ).clamp(cpu_cores=physical_cpu_count())
+
         rcfg = self._reconciliation_runtime_config(artifact_export_parent=artifact_export_parent)
+        rcfg = apply_queue_policy_to_reconciliation_config(
+            rcfg,
+            queue_policy,
+            cpu_cores=physical_cpu_count(),
+        )
         delim = self._resolve_delimiter(
             source_path=source_path,
             target_path=target_path,
@@ -281,7 +302,12 @@ class ValidationService:
         combined_bytes = source_path.stat().st_size + target_path.stat().st_size
         use_multichar_streaming = len(delim) > 1
 
-        rcfg = self._apply_host_reconciliation_tuning(rcfg, source_path=source_path, target_path=target_path)
+        rcfg = self._apply_host_reconciliation_tuning(
+            rcfg,
+            source_path=source_path,
+            target_path=target_path,
+            resource_policy=queue_policy,
+        )
 
         if use_multichar_streaming:
             try:

@@ -338,6 +338,23 @@ class UpdateQueueSettingsRequest(BaseModel):
             "When false, only the user-set max_concurrency is used."
         ),
     )
+    threads_per_job: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Threads/processes for partition comparison inside each validation worker. "
+            "0 = auto (all logical CPUs for that worker)."
+        ),
+    )
+    disk_headroom_multiplier: float | None = Field(
+        default=None,
+        ge=1.0,
+        le=10.0,
+        description=(
+            "Disk safety factor per job: required free bytes >= multiplier × (source + target CSV size) "
+            "before spill/sort."
+        ),
+    )
 
 
 class QueueStatusResponse(BaseModel):
@@ -352,6 +369,15 @@ class QueueStatusResponse(BaseModel):
     )
     cpu_cores_available: int = Field(description="Logical CPU cores detected on the server")
     auto_tune_enabled: bool = Field(description="Whether resource-based auto-tuning is active")
+    threads_per_job: int = Field(
+        description="Configured worker threads per validation job (0 = auto / all cores)"
+    )
+    disk_headroom_multiplier: float = Field(
+        description="Configured disk headroom multiplier per validation job"
+    )
+    effective_threads_per_job: int = Field(
+        description="Resolved thread cap used when a worker starts (after auto=host cores)"
+    )
     pending: int = Field(description="Jobs waiting in the queue")
     running: int = Field(description="Jobs currently executing")
     finished: int = Field(description="Completed/failed jobs still tracked in memory")

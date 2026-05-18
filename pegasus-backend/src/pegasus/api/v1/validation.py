@@ -879,6 +879,10 @@ async def update_validation_queue_settings(
         queue.set_max_concurrency(body.max_concurrency)
     if body.auto_tune_enabled is not None:
         queue.set_auto_tune(body.auto_tune_enabled)
+    if body.threads_per_job is not None:
+        queue.set_threads_per_job(body.threads_per_job)
+    if body.disk_headroom_multiplier is not None:
+        queue.set_disk_headroom_multiplier(body.disk_headroom_multiplier)
     stats = queue.stats
     return QueueStatusResponse(
         **stats,

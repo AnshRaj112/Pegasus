@@ -257,6 +257,24 @@ class Settings(BaseSettings):
         ge=0,
         description="Disk kept free beyond per-job spill estimates when computing safe parallel job slots.",
     )
+    validation_queue_threads_per_job: int = Field(
+        default=0,
+        ge=0,
+        le=128,
+        description=(
+            "Startup default for worker parallelism inside each validation job (partition compare). "
+            "0 = auto (use all logical CPUs). Users override at runtime via PATCH /api/v1/validate/queue."
+        ),
+    )
+    validation_queue_disk_headroom_multiplier: float | None = Field(
+        default=None,
+        ge=1.0,
+        le=10.0,
+        description=(
+            "Startup default disk headroom per job for queue/UI (multiplier × combined CSV bytes). "
+            "None uses validation_reconciliation_disk_headroom_multiplier."
+        ),
+    )
 
     def cors_origin_list(self) -> list[str]:
         raw = self.cors_origins.strip()
