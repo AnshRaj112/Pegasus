@@ -1,35 +1,71 @@
-export default function History() {
+import React, { useState } from 'react'
+
+function TabButton({ active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={active ? 'px-4 py-2 rounded-xl bg-slate-900 text-white' : 'px-4 py-2 rounded-xl bg-white border'}
+      style={{ border: '1px solid var(--border-1)', cursor: 'pointer' }}
+    >
+      {children}
+    </button>
+  )
+}
+
+function PlaceholderBox({ title, children }) {
   return (
     <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      minHeight: 320, padding: '48px 24px', textAlign: 'center',
-      background: 'var(--surface-1)', border: '1px solid var(--border-1)', borderRadius: 12,
+      marginTop: 12,
+      padding: 18,
+      borderRadius: 12,
+      background: 'var(--surface-1)',
+      border: '1px solid var(--border-1)'
     }}>
-      <div style={{
-        width: 44, height: 44, borderRadius: 10,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--surface-3)', color: 'var(--text-3)',
-        border: '1px solid var(--border-2)', marginBottom: 14,
-      }}>
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.4"/>
-          <path d="M10 6v4l2.5 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
+      <h4 style={{ margin: 0, marginBottom: 8, color: 'var(--text-1)', fontSize: 15 }}>{title}</h4>
+      <div style={{ color: 'var(--text-3)', fontSize: 13 }}>{children}</div>
+    </div>
+  )
+}
+
+export default function History() {
+  const [topTab, setTopTab] = useState('mapping')
+  const [validationTab, setValidationTab] = useState('incremental')
+
+  return (
+    <div style={{ padding: 12 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <TabButton active={topTab === 'mapping'} onClick={() => setTopTab('mapping')}>Mapping History</TabButton>
+        <TabButton active={topTab === 'validation'} onClick={() => setTopTab('validation')}>Validation History</TabButton>
       </div>
-      <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-1)', letterSpacing: '-0.02em', marginBottom: 4 }}>
-        History
-      </h2>
-      <p style={{ fontSize: 13, color: 'var(--text-3)', maxWidth: 300, lineHeight: 1.5, marginBottom: 4 }}>
-        Your validation runs and saved drafts will appear here.
-      </p>
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', gap: 5,
-        fontSize: 11, fontWeight: 500, color: 'var(--text-4)',
-        padding: '3px 9px', borderRadius: 4,
-        background: 'var(--surface-3)', border: '1px solid var(--border-1)',
-      }}>
-        Coming soon
-      </span>
+
+      {topTab === 'mapping' ? (
+        <div>
+          <PlaceholderBox title="Mapping History">
+            <p style={{ marginTop: 0 }}>Saved mappings, templates and mapping edits will appear here.</p>
+            <p style={{ marginBottom: 0, color: 'var(--text-4)' }}>No mapping history available yet.</p>
+          </PlaceholderBox>
+        </div>
+      ) : (
+        <div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <TabButton active={validationTab === 'incremental'} onClick={() => setValidationTab('incremental')}>Incremental</TabButton>
+            <TabButton active={validationTab === 'historical'} onClick={() => setValidationTab('historical')}>Historical</TabButton>
+          </div>
+
+          {validationTab === 'incremental' ? (
+            <PlaceholderBox title="Incremental Validation History">
+              <p style={{ marginTop: 0 }}>Recent incremental runs (fast, delta-only) will be listed here.</p>
+              <p style={{ marginBottom: 0, color: 'var(--text-4)' }}>No incremental validations recorded.</p>
+            </PlaceholderBox>
+          ) : (
+            <PlaceholderBox title="Historical Validation History">
+              <p style={{ marginTop: 0 }}>Full historical runs and archives will be listed here.</p>
+              <p style={{ marginBottom: 0, color: 'var(--text-4)' }}>No historical validations recorded.</p>
+            </PlaceholderBox>
+          )}
+        </div>
+      )}
     </div>
   )
 }
