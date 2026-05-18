@@ -324,10 +324,9 @@ class UpdateQueueSettingsRequest(BaseModel):
     max_concurrency: int | None = Field(
         default=None,
         ge=1,
-        le=32,
         description=(
-            "Maximum number of validation jobs to run in parallel. "
-            "Choose based on your available CPU cores (returned by GET /validate/queue). "
+            "Maximum number of validation jobs to run in parallel (user upper cap). "
+            "Use GET /validate/queue resource_advisor for RAM/disk/CPU-based guidance. "
             "Running jobs are never killed; the new limit affects when queued jobs start."
         ),
     )
@@ -344,7 +343,13 @@ class UpdateQueueSettingsRequest(BaseModel):
 class QueueStatusResponse(BaseModel):
     """Response for GET /validate/queue."""
 
-    max_concurrency: int = Field(description="Current maximum parallel validation workers")
+    max_concurrency: int = Field(description="User-set maximum parallel validation workers")
+    effective_max_concurrency: int = Field(
+        description=(
+            "Effective parallel cap used by the drain loop "
+            "(min of max_concurrency and resource advisor when auto-tune is on)"
+        ),
+    )
     cpu_cores_available: int = Field(description="Logical CPU cores detected on the server")
     auto_tune_enabled: bool = Field(description="Whether resource-based auto-tuning is active")
     pending: int = Field(description="Jobs waiting in the queue")

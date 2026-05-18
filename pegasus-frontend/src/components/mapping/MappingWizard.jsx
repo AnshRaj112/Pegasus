@@ -4,6 +4,7 @@ import Step1_DataSource from './Step1_DataSource'
 import Step2_FilePicker from './Step2_FilePicker'
 import Step3_Configure  from './Step3_Configure'
 import ActionBar        from './ActionBar'
+import ParallelValidationModal from '../ParallelValidationModal'
 import { buildMappingRows, toColumnMappingPayload } from './columnMapping'
 import { buildAnalyzePayload, formatCheckBySource } from './mappingAnalyze'
 
@@ -98,6 +99,7 @@ export default function MappingWizard() {
   const [analyzeLoading, setAnalyzeLoading] = useState(false)
   const [analyzeError, setAnalyzeError] = useState('')
 
+  const [parallelModalOpen, setParallelModalOpen] = useState(false)
   const [isRunning, setIsRunning]   = useState(false)
   const [result, setResult]         = useState(null)
   const [errorMsg, setErrorMsg]     = useState('')
@@ -542,7 +544,7 @@ export default function MappingWizard() {
             </button>
 
             <ActionBar
-              onValidate={handleValidate}
+              onValidate={() => setParallelModalOpen(true)}
               onSaveAsDraft={handleSaveAsDraft}
               isValid={isValidForRun}
               isRunning={isRunning}
@@ -550,6 +552,15 @@ export default function MappingWizard() {
           </div>
         )}
       </div>
+
+      <ParallelValidationModal
+        open={parallelModalOpen}
+        onClose={() => setParallelModalOpen(false)}
+        onConfirm={async () => {
+          await handleValidate()
+          return true
+        }}
+      />
     </div>
   )
 }
