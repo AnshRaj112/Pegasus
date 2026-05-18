@@ -423,15 +423,13 @@ export function ValidationPanel() {
 
             {result.run_id ? <p className="mt-4 text-sm text-slate-700">Run id: <code>{result.run_id}</code></p> : null}
 
-            {result.mismatch_samples?.length ? (
-              <button
-                type="button"
-                onClick={() => navigate('/report', { state: { result } })}
-                className="mt-6 inline-flex w-full items-center justify-center gap-3 rounded-xl bg-emerald-400 px-5 py-4 text-base font-semibold text-[#FFFDEF] shadow-[0_12px_30px_rgba(235,76,76,0.28)] transition duration-200 hover:-translate-y-0.5 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                View Detailed Report
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={() => navigate('/report', { state: { result } })}
+              className="mt-6 inline-flex w-full items-center justify-center gap-3 rounded-xl bg-[#EB4C4C] px-5 py-4 text-base font-semibold text-white shadow-[0_12px_30px_rgba(235,76,76,0.28)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              📊 View Detailed Report
+            </button>
           </section>
         ) : null}
 

@@ -4,22 +4,22 @@
 /* ── Design Tokens ──────────────────────────────────────────────── */
 :root {
   /* Surface */
-  --surface-0:   #0a0a0b;   /* page background */
-  --surface-1:   #111113;   /* card */
-  --surface-2:   #18181b;   /* card raised */
-  --surface-3:   #1c1c20;   /* card elevated / input bg */
-  --surface-4:   #27272a;   /* hover surface */
+  --surface-0:   #ffffff;   /* page background */
+  --surface-1:   #f9fafb;   /* card */
+  --surface-2:   #f3f4f6;   /* card raised */
+  --surface-3:   #ffffff;   /* card elevated / input bg */
+  --surface-4:   #e5e7eb;   /* hover surface */
 
   /* Borders */
-  --border-1:    #27272a;   /* subtle */
-  --border-2:    #3f3f46;   /* visible */
-  --border-3:    #52525b;   /* strong */
+  --border-1:    #e5e7eb;   /* subtle */
+  --border-2:    #d1d5db;   /* visible */
+  --border-3:    #9ca3af;   /* strong */
 
   /* Text */
-  --text-1:  #fafafa;
-  --text-2:  #a1a1aa;
-  --text-3:  #71717a;
-  --text-4:  #3f3f46;
+  --text-1:  #111827;
+  --text-2:  #6b7280;
+  --text-3:  #9ca3af;
+  --text-4:  #d1d5db;
 
   /* Accent — a contained warm amber/orange for CTAs */
   --accent:        #f97316;
