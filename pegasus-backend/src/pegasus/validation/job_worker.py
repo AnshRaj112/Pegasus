@@ -12,6 +12,7 @@ from typing import Any
 
 from pegasus.core.config import get_settings
 from pegasus.core.json_util import dumps_bytes, loads_str
+from pegasus.schemas.validation import ColumnMapping
 from pegasus.services.validation_service import ValidationService
 from pegasus.validation.reconciliation.memory_monitor import MemoryMonitor
 
@@ -77,6 +78,7 @@ def run_job_directory(job_dir: Path) -> int:
     meta = _load_json(meta_path)
     uid_column = str(meta.get("uid_column") or "")
     delimiter = str(meta.get("delimiter") or "auto")
+    column_mappings = [ColumnMapping.model_validate(m) for m in list(meta.get("column_mappings") or [])]
     mem_iv = int(meta.get("memory_log_interval_seconds") or 0)
     sp = meta.get("source_path")
     tp = meta.get("target_path")
@@ -154,6 +156,7 @@ def run_job_directory(job_dir: Path) -> int:
             tgt,
             uid_column,
             delimiter,
+            column_mappings,
             artifact_export_parent=job_dir,
             progress_callback=_progress_cb,
         )

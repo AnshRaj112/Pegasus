@@ -89,10 +89,24 @@ class LocalPathValidateRequest(BaseModel):
     source_path: str = Field(description="Absolute or user-home path to the expected / golden CSV on the server")
     target_path: str = Field(description="Absolute or user-home path to the actual / candidate CSV on the server")
     uid_column: str = Field(description="Column name to join on (must exist in both files)")
+    column_mappings: list["ColumnMapping"] = Field(
+        default_factory=list,
+        description=(
+            "Optional source->target column mappings used when header names differ. "
+            "Each mapped target column is renamed to the source column name before comparison."
+        ),
+    )
     delimiter: str = Field(
         default="auto",
         description="Field separator: auto, tab, or explicit delimiter (same rules as multipart /validate)",
     )
+
+
+class ColumnMapping(BaseModel):
+    """Pair one source column name with the corresponding target column name."""
+
+    source_column: str = Field(description="Source column name to validate")
+    target_column: str = Field(description="Target column name to compare against the source column")
 
 
 class LocalBrowseEntry(BaseModel):
@@ -119,6 +133,30 @@ class LocalBrowseResponse(BaseModel):
         default=False,
         description="True when the directory had more children than the server returns (see cap in API docs)",
     )
+
+
+class LocalColumnPreviewResponse(BaseModel):
+    """Header preview for the local-path mapping UI."""
+
+    source_columns: list[str] = Field(default_factory=list, description="All source columns, including the UID column")
+    target_columns: list[str] = Field(default_factory=list, description="All target columns, including the UID column")
+    compare_columns: list[str] = Field(
+        default_factory=list,
+        description="Source columns available for value comparison after removing the selected UID column",
+    )
+    auto_mappings: list[ColumnMapping] = Field(
+        default_factory=list,
+        description="Exact name matches discovered automatically from source and target headers",
+    )
+    unmatched_source_columns: list[str] = Field(
+        default_factory=list,
+        description="Source columns with no automatic target match",
+    )
+    unmatched_target_columns: list[str] = Field(
+        default_factory=list,
+        description="Target columns with no automatic source match",
+    )
+    delimiter: str = Field(description="Resolved delimiter used to read the headers")
 
 
 class LocalBrowseRootInfo(BaseModel):

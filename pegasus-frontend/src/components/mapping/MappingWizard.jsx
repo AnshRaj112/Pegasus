@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import StepIndicator    from './StepIndicator'
 import Step1_DataSource from './Step1_DataSource'
 import Step2_FilePicker from './Step2_FilePicker'
 import Step3_Configure  from './Step3_Configure'
 import ActionBar        from './ActionBar'
+import { buildMappingRows, toColumnMappingPayload } from './columnMapping'
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
 const pollTimeoutRaw = Number(import.meta.env.VITE_VALIDATION_POLL_TIMEOUT_MS ?? 0)
@@ -76,6 +77,17 @@ export default function MappingWizard() {
   const [mappings, setMappings]   = useState([])
   const [uidColumn, setUidColumn] = useState('id')
   const [delimiter, setDelimiter] = useState('auto')
+  const [columnPreview, setColumnPreview] = useState({
+    sourceColumns: [],
+    targetColumns: [],
+    compareColumns: [],
+    autoMappings: [],
+    unmatchedSourceColumns: [],
+    unmatchedTargetColumns: [],
+    delimiter: 'auto',
+  })
+  const [columnPreviewLoading, setColumnPreviewLoading] = useState(false)
+  const [columnPreviewError, setColumnPreviewError] = useState('')
 
   const [isRunning, setIsRunning]   = useState(false)
   const [result, setResult]         = useState(null)
@@ -89,13 +101,82 @@ export default function MappingWizard() {
   function handleSourceSelected(path) { setSourcePath(path); setSubPhase('pick-target') }
   function handleTargetSelected(path) { setTargetPath(path); setStep(2); setSubPhase('type-select') }
 
+  useEffect(() => {
+    if (step !== 2 || !sourcePath || !targetPath) return
+
+    const controller = new AbortController()
+
+    async function loadColumnPreview() {
+      setColumnPreviewLoading(true)
+      setColumnPreviewError('')
+      try {
+        const params = new URLSearchParams({
+          source_path: sourcePath.trim(),
+          target_path: targetPath.trim(),
+          uid_column: uidColumn.trim(),
+          delimiter: delimiter.trim() || 'auto',
+        })
+        const res = await fetch(absoluteApiUrl(`/api/v1/validate/local/columns?${params}`), {
+          method: 'GET',
+          signal: controller.signal,
+        })
+        const raw = await res.text()
+        let data = {}
+        if (raw) {
+          try { data = JSON.parse(raw) } catch { throw new Error(raw.trim().slice(0, 500)) }
+        }
+        if (!res.ok) throw new Error(formatDetail(data.detail) || `${res.status} ${res.statusText}`)
+
+        const sourceColumns = Array.isArray(data.source_columns) ? data.source_columns : []
+        const targetColumns = Array.isArray(data.target_columns) ? data.target_columns : []
+        const compareColumns = Array.isArray(data.compare_columns) ? data.compare_columns : sourceColumns.filter(col => col !== uidColumn.trim())
+        const autoMappings = Array.isArray(data.auto_mappings) ? data.auto_mappings : []
+        setColumnPreview({
+          sourceColumns,
+          targetColumns,
+          compareColumns,
+          autoMappings,
+          unmatchedSourceColumns: Array.isArray(data.unmatched_source_columns) ? data.unmatched_source_columns : [],
+          unmatchedTargetColumns: Array.isArray(data.unmatched_target_columns) ? data.unmatched_target_columns : [],
+          delimiter: data.delimiter || delimiter,
+        })
+        setMappings(prev => buildMappingRows(compareColumns, targetColumns.filter(col => col !== uidColumn.trim()), prev, autoMappings))
+      } catch (err) {
+        if (err?.name !== 'AbortError') {
+          setColumnPreviewError(err instanceof Error ? err.message : String(err))
+          setColumnPreview({
+            sourceColumns: [],
+            targetColumns: [],
+            compareColumns: [],
+            autoMappings: [],
+            unmatchedSourceColumns: [],
+            unmatchedTargetColumns: [],
+            delimiter,
+          })
+          setMappings([])
+        }
+      } finally {
+        if (!controller.signal.aborted) setColumnPreviewLoading(false)
+      }
+    }
+
+    loadColumnPreview()
+    return () => controller.abort()
+  }, [step, sourcePath, targetPath, uidColumn, delimiter])
+
   async function handleValidate() {
     setIsRunning(true); setPhase('running'); setResult(null); setErrorMsg(''); setStep(3)
     try {
       const res = await fetch(absoluteApiUrl('/api/v1/validate/local'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_path: sourcePath.trim(), target_path: targetPath.trim(), uid_column: uidColumn.trim(), delimiter: delimiter.trim() || 'auto' }),
+        body: JSON.stringify({
+          source_path: sourcePath.trim(),
+          target_path: targetPath.trim(),
+          uid_column: uidColumn.trim(),
+          delimiter: delimiter.trim() || 'auto',
+          column_mappings: toColumnMappingPayload(mappings),
+        }),
       })
       const raw = await res.text()
       let data = {}
@@ -180,6 +261,13 @@ export default function MappingWizard() {
             <Step3_Configure
               sourcePath={sourcePath}
               targetPath={targetPath}
+              sourceColumns={columnPreview.sourceColumns}
+              targetColumns={columnPreview.targetColumns.filter(col => col !== uidColumn.trim())}
+              compareColumns={columnPreview.compareColumns}
+              previewLoading={columnPreviewLoading}
+              previewError={columnPreviewError}
+              unmatchedSourceColumns={columnPreview.unmatchedSourceColumns}
+              unmatchedTargetColumns={columnPreview.unmatchedTargetColumns}
               mappings={mappings}
               onMappingChange={setMappings}
               uidColumn={uidColumn}

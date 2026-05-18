@@ -1,43 +1,30 @@
-const MOCK_COLUMNS = {
-  source: ['id', 'customer_name', 'email', 'phone', 'address', 'city', 'country', 'zip_code', 'created_at', 'status'],
-  target: ['record_id', 'full_name', 'email_address', 'contact_number', 'street', 'city', 'country', 'postal_code', 'signup_date', 'account_status'],
-}
-
-const ROW_COLORS = [
-  '#f97316','#3b82f6','#22c55e','#a855f7','#ec4899',
-  '#14b8a6','#eab308','#ef4444','#6366f1','#84cc16',
-]
-
-export default function Step3_Configure({ sourcePath, targetPath, mappings, onMappingChange, uidColumn, onUidColumnChange }) {
-  const srcCols = MOCK_COLUMNS.source
-  const tgtCols = MOCK_COLUMNS.target
-
-  const activeMappings = mappings.length > 0 ? mappings : srcCols.map((col, i) => ({
-    id: i, sourceCol: col, targetCol: tgtCols[i] ?? '', color: ROW_COLORS[i % ROW_COLORS.length],
-  }))
+export default function Step3_Configure({
+  sourcePath,
+  targetPath,
+  sourceColumns = [],
+  targetColumns = [],
+  compareColumns = [],
+  previewLoading = false,
+  previewError = '',
+  unmatchedSourceColumns = [],
+  unmatchedTargetColumns = [],
+  mappings = [],
+  onMappingChange,
+  uidColumn,
+  onUidColumnChange,
+}) {
+  const activeMappings = mappings
+  const mapped = activeMappings.filter(m => m.targetCol).length
+  const unmapped = Math.max(compareColumns.length - mapped, 0)
+  const usedTargets = new Set(activeMappings.filter(m => m.targetCol).map(m => m.targetCol))
+  const uidRow = uidColumn ? { id: '__uid__', sourceCol: uidColumn, targetCol: uidColumn } : null
 
   function handleTargetChange(id, val) {
-    onMappingChange(activeMappings.map(m => m.id === id ? { ...m, targetCol: val } : m))
+    onMappingChange(activeMappings.map(m => (m.id === id ? { ...m, targetCol: val } : m)))
   }
-  function addMapping() {
-    const used = new Set(activeMappings.map(m => m.sourceCol))
-    const next = srcCols.find(c => !used.has(c)) ?? ''
-    onMappingChange([...activeMappings, {
-      id: Date.now(), sourceCol: next, targetCol: '',
-      color: ROW_COLORS[activeMappings.length % ROW_COLORS.length],
-    }])
-  }
-  function removeMapping(id) {
-    onMappingChange(activeMappings.filter(m => m.id !== id))
-  }
-
-  const mapped   = activeMappings.filter(m => m.targetCol).length
-  const unmapped = activeMappings.length - mapped
 
   return (
     <div style={{ animation: 'fade-in 0.2s ease' }}>
-
-      {/* Header */}
       <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 6 }}>
           Step 2 of 3
@@ -45,12 +32,38 @@ export default function Step3_Configure({ sourcePath, targetPath, mappings, onMa
         <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1.2, marginBottom: 6 }}>
           Configure column mapping
         </h2>
-        <p style={{ fontSize: 13, color: 'var(--text-3)' }}>
-          Map each source column to its corresponding target column. Unmapped columns are skipped.
+        <p style={{ fontSize: 13, color: 'var(--text-3)', maxWidth: 760 }}>
+          Source columns are matched to target columns by exact header name first, even when the files are unsorted.
+          Any source column that still has no target match stays visible here so you can map it manually.
         </p>
       </div>
 
-      {/* File summary row */}
+      {previewLoading && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
+          padding: '11px 14px', borderRadius: 10,
+          background: 'var(--accent-muted)', border: '1px solid var(--accent-border)',
+          color: 'var(--accent)', fontSize: 13,
+        }}>
+          <span style={{
+            width: 14, height: 14, borderRadius: '50%',
+            border: '2px solid var(--accent-border)', borderTopColor: 'var(--accent)',
+            animation: 'spin 0.7s linear infinite', display: 'inline-block', flexShrink: 0,
+          }} />
+          Reading source and target headers...
+        </div>
+      )}
+
+      {previewError && (
+        <div style={{
+          marginBottom: 12, padding: '10px 14px', borderRadius: 10,
+          background: 'var(--danger-muted)', border: '1px solid var(--danger-border)',
+          color: 'var(--danger)', fontSize: 12,
+        }}>
+          {previewError}
+        </div>
+      )}
+
       <div style={{
         display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16,
         padding: '12px 14px', borderRadius: 10,
@@ -72,7 +85,6 @@ export default function Step3_Configure({ sourcePath, targetPath, mappings, onMa
         ))}
       </div>
 
-      {/* UID column + stats */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12,
         padding: '10px 14px', borderRadius: 10,
@@ -94,20 +106,31 @@ export default function Step3_Configure({ sourcePath, targetPath, mappings, onMa
             }}
           >
             <option value="">— select —</option>
-            {srcCols.map(c => <option key={c} value={c}>{c}</option>)}
+            {sourceColumns.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </label>
 
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 14, fontSize: 12, color: 'var(--text-3)' }}>
           <span><strong style={{ color: 'var(--text-1)', fontWeight: 600 }}>{mapped}</strong> mapped</span>
           {unmapped > 0 && <span><strong style={{ color: 'var(--danger)', fontWeight: 600 }}>{unmapped}</strong> unmapped</span>}
+          {unmatchedTargetColumns.length > 0 && <span><strong style={{ color: 'var(--text-2)', fontWeight: 600 }}>{unmatchedTargetColumns.length}</strong> target-only</span>}
           <span><strong style={{ color: 'var(--text-2)', fontWeight: 600 }}>{activeMappings.length}</strong> total</span>
         </div>
       </div>
 
-      {/* Mapping table */}
+      {(unmatchedSourceColumns.length > 0 || unmatchedTargetColumns.length > 0) && (
+        <div style={{
+          display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12,
+          padding: '10px 14px', borderRadius: 10,
+          background: 'var(--surface-2)', border: '1px solid var(--border-1)',
+          fontSize: 12, color: 'var(--text-3)',
+        }}>
+          {unmatchedSourceColumns.length > 0 && <span>{unmatchedSourceColumns.length} source column(s) still need a target mapping.</span>}
+          {unmatchedTargetColumns.length > 0 && <span>{unmatchedTargetColumns.length} target column(s) are not matched yet.</span>}
+        </div>
+      )}
+
       <div style={{ border: '1px solid var(--border-1)', borderRadius: 10, overflow: 'hidden' }}>
-        {/* Table header */}
         <div style={{
           display: 'grid', gridTemplateColumns: '1fr 28px 1fr 28px',
           padding: '8px 14px',
@@ -121,110 +144,150 @@ export default function Step3_Configure({ sourcePath, targetPath, mappings, onMa
           <div />
         </div>
 
-        {/* Rows */}
         <div>
-          {activeMappings.map((m, idx) => (
+          {uidRow && (
             <div
-              key={m.id}
               className="mapping-row"
               style={{
                 display: 'grid', gridTemplateColumns: '1fr 28px 1fr 28px',
                 padding: '6px 14px', gap: 8, alignItems: 'center',
-                background: 'var(--surface-1)',
-                borderBottom: idx < activeMappings.length - 1 ? '1px solid var(--border-1)' : 'none',
+                background: 'var(--surface-2)',
+                borderBottom: activeMappings.length > 0 ? '1px solid var(--border-1)' : 'none',
               }}
             >
-              {/* Source */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: m.color, flexShrink: 0 }} />
-                <select
-                  value={m.sourceCol}
-                  onChange={e => {
-                    onMappingChange(activeMappings.map(x => x.id === m.id ? { ...x, sourceCol: e.target.value } : x))
-                  }}
-                  className="input input-mono"
-                  style={{ height: 28, fontSize: 12, padding: '0 24px 0 8px',
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%2371717a' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
-                    backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center',
-                  }}
-                >
-                  {srcCols.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--text-4)', flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={uidRow.sourceCol}>
+                    {uidRow.sourceCol}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-4)' }}>
+                    UID / join key
+                  </div>
+                </div>
               </div>
 
-              {/* Arrow */}
               <div style={{ display: 'flex', justifyContent: 'center' }}>
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ color: 'var(--text-4)' }}>
                   <path d="M3 7h8M8 4.5L10.5 7 8 9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </div>
 
-              {/* Target */}
-              <select
-                value={m.targetCol}
-                onChange={e => handleTargetChange(m.id, e.target.value)}
-                className="input input-mono"
-                style={{
-                  height: 28, fontSize: 12, padding: '0 24px 0 8px',
-                  borderColor: m.targetCol ? 'var(--border-2)' : 'var(--danger-border)',
-                  color: m.targetCol ? 'var(--text-1)' : 'var(--danger)',
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%2371717a' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center',
-                }}
-              >
-                <option value="">— unmapped —</option>
-                {tgtCols.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <div>
+                <div style={{
+                  height: 28, padding: '0 8px', borderRadius: 8,
+                  display: 'flex', alignItems: 'center',
+                  background: 'var(--surface-1)', border: '1px solid var(--border-1)',
+                  color: 'var(--text-2)', fontSize: 12, fontFamily: 'Geist Mono, monospace',
+                }}>
+                  {uidRow.targetCol}
+                </div>
+                <div style={{ marginTop: 5, fontSize: 11, color: 'var(--text-4)' }}>
+                  This row is pinned and used as the comparison key.
+                </div>
+              </div>
 
-              {/* Remove */}
-              <button
-                type="button"
-                onClick={() => removeMapping(m.id)}
-                className="remove-btn"
-                style={{
-                  width: 24, height: 24, borderRadius: 5,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'transparent', border: 'none', cursor: 'pointer',
-                  color: 'var(--text-4)',
-                  opacity: 0, transition: 'opacity 0.12s, color 0.12s',
-                }}
-                title="Remove"
-                onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
-                onMouseLeave={e => e.currentTarget.style.color = 'var(--text-4)'}
-              >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                </svg>
-              </button>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <span
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 24, height: 24, borderRadius: 6,
+                    color: 'var(--text-2)',
+                    background: 'var(--surface-1)',
+                    fontSize: 10, fontWeight: 700,
+                    letterSpacing: '0.04em',
+                  }}
+                  title="Pinned join key"
+                >
+                  UID
+                </span>
+              </div>
             </div>
-          ))}
+          )}
+          {activeMappings.length > 0 ? activeMappings.map((m, idx) => {
+            const isMapped = !!m.targetCol
+            return (
+              <div
+                key={m.id}
+                className="mapping-row"
+                style={{
+                  display: 'grid', gridTemplateColumns: '1fr 28px 1fr 28px',
+                  padding: '6px 14px', gap: 8, alignItems: 'center',
+                  background: 'var(--surface-1)',
+                  borderBottom: idx < activeMappings.length - 1 ? '1px solid var(--border-1)' : 'none',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.sourceCol}>
+                      {m.sourceCol}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-4)' }}>
+                      Source column
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ color: 'var(--text-4)' }}>
+                    <path d="M3 7h8M8 4.5L10.5 7 8 9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+
+                <div>
+                  <select
+                    value={m.targetCol}
+                    onChange={e => handleTargetChange(m.id, e.target.value)}
+                    disabled={previewLoading || targetColumns.length === 0}
+                    className="input input-mono"
+                    style={{
+                      height: 28, fontSize: 12, padding: '0 24px 0 8px', width: '100%',
+                      borderColor: isMapped ? 'var(--border-2)' : 'var(--danger-border)',
+                      color: isMapped ? 'var(--text-1)' : 'var(--danger)',
+                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%2371717a' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
+                      backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center',
+                      backgroundColor: isMapped ? 'var(--surface-1)' : 'rgba(239, 68, 68, 0.06)',
+                    }}
+                  >
+                    <option value="">— not mapped —</option>
+                    {targetColumns.map(c => (
+                      <option key={c} value={c} disabled={usedTargets.has(c) && c !== m.targetCol}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                  {!isMapped && (
+                    <div style={{ marginTop: 5, fontSize: 11, color: 'var(--danger)' }}>
+                      Source column not mapped yet. Pick a target header to compare this field.
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <span
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 24, height: 24, borderRadius: 6,
+                      color: isMapped ? 'var(--success)' : 'var(--danger)',
+                      background: isMapped ? 'var(--success-muted)' : 'var(--danger-muted)',
+                      fontSize: 10, fontWeight: 700,
+                      letterSpacing: '0.04em',
+                    }}
+                    title={isMapped ? `Mapped to ${m.targetCol}` : 'Needs mapping'}
+                  >
+                    {isMapped ? 'OK' : '!'}
+                  </span>
+                </div>
+              </div>
+            )
+          }) : (
+            <div style={{ padding: '18px 14px', color: 'var(--text-4)', fontSize: 12 }}>
+              No source columns found yet. Finish loading the header preview to begin mapping.
+            </div>
+          )}
         </div>
-
-        {/* Add row */}
-        <button
-          type="button"
-          onClick={addMapping}
-          style={{
-            width: '100%', display: 'flex', alignItems: 'center', gap: 6,
-            padding: '9px 14px', borderTop: '1px solid var(--border-1)',
-            background: 'var(--surface-2)', border: 'none', borderTop: '1px solid var(--border-1)',
-            color: 'var(--text-3)', fontSize: 12, fontWeight: 500,
-            cursor: 'pointer', transition: 'all 0.12s', fontFamily: 'inherit',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-1)'; e.currentTarget.style.background = 'var(--surface-3)' }}
-          onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-3)'; e.currentTarget.style.background = 'var(--surface-2)' }}
-        >
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-            <path d="M6.5 2v9M2 6.5h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-          Add mapping row
-        </button>
       </div>
-
-      {/* Hover helper for remove buttons */}
-      <style>{`
-        .mapping-row:hover .remove-btn { opacity: 1 !important; }
-      `}</style>
     </div>
   )
 }

@@ -7,12 +7,13 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 import pandas as pd
 import polars as pl
 
 from pegasus.core.config import Settings
+from pegasus.schemas.validation import ColumnMapping
 from pegasus.core.resource_tuning import (
     align_partition_buckets_to_threads,
     cap_partition_buckets,
@@ -137,6 +138,7 @@ class ValidationService:
         target_path: Path,
         uid_column: str,
         delimiter: str,
+        column_mappings: Sequence[ColumnMapping] | None = None,
         artifact_export_parent: Path | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> ValidationRunResult:
@@ -147,9 +149,42 @@ class ValidationService:
             target_path,
             uid_column,
             delimiter,
+            list(column_mappings or []),
             artifact_export_parent,
             progress_callback,
         )
+
+    def preview_local_column_headers(
+        self,
+        *,
+        source_path: Path,
+        target_path: Path,
+        uid_column: str,
+        delimiter: str,
+    ) -> dict[str, Any]:
+        """Return source/target headers and exact-name mapping suggestions for the UI."""
+        uid = uid_column.strip()
+        delim = self._resolve_delimiter(
+            source_path=source_path,
+            target_path=target_path,
+            delimiter=delimiter,
+        )
+        source_columns = self._read_column_names(source_path, delim)
+        target_columns = self._read_column_names(target_path, delim)
+        compare_columns = [c for c in source_columns if c != uid]
+        compare_targets = [c for c in target_columns if c != uid]
+        auto_mappings = self._auto_map_columns(compare_columns, compare_targets)
+        matched_sources = {m["source_column"] for m in auto_mappings}
+        matched_targets = {m["target_column"] for m in auto_mappings}
+        return {
+            "source_columns": source_columns,
+            "target_columns": target_columns,
+            "compare_columns": compare_columns,
+            "auto_mappings": auto_mappings,
+            "unmatched_source_columns": [c for c in source_columns if c not in matched_sources],
+            "unmatched_target_columns": [c for c in target_columns if c not in matched_targets],
+            "delimiter": delim,
+        }
 
     def _validate_csv_pair_sync(
         self,
@@ -157,6 +192,7 @@ class ValidationService:
         target_path: Path,
         uid_column: str,
         delimiter: str,
+        column_mappings: list[ColumnMapping] | None = None,
         artifact_export_parent: Path | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> ValidationRunResult:
@@ -252,7 +288,7 @@ class ValidationService:
                 mismatch_artifact_path=report.mismatch_artifact_path,
             )
 
-        want_external = len(delim) == 1 and (
+        want_external = not column_mappings and len(delim) == 1 and (
             self._settings.validation_force_external_reconciliation
             or rcfg.strategy != ReconciliationStrategy.AUTO
             or auto_external_enabled(source_path=source_path, target_path=target_path, cfg=rcfg)
@@ -356,6 +392,15 @@ class ValidationService:
                 f"uid_column {uid!r} not found in target file columns: {list(target_df.columns)}"
             )
 
+        target_rename_map = self._resolve_target_rename_map(
+            source_columns=list(source_df.columns),
+            target_columns=list(target_df.columns),
+            uid_column=uid,
+            column_mappings=column_mappings or [],
+        )
+        if target_rename_map:
+            target_df = target_df.rename(target_rename_map)
+
         src_cols = set(source_df.columns)
         tgt_cols = set(target_df.columns)
         shared = src_cols & tgt_cols
@@ -388,6 +433,71 @@ class ValidationService:
             compared_columns=compared_columns,
             mismatch_artifact_path=report.mismatch_artifact_path,
         )
+
+    def _read_column_names(self, path: Path, delimiter: str) -> list[str]:
+        reader = PolarsCSVReader(default_batch_size=512)
+        if len(delimiter) > 1:
+            frame = multichar_csv_header_frame(path, delimiter=delimiter)
+            return list(frame.columns)
+        schema = reader.detect_schema(path, delimiter=delimiter, encoding="utf-8")
+        return list(schema.keys())
+
+    def _auto_map_columns(self, source_columns: list[str], target_columns: list[str]) -> list[dict[str, str]]:
+        target_by_norm = {self._normalize_column_name(c): c for c in target_columns}
+        auto: list[dict[str, str]] = []
+        seen_targets: set[str] = set()
+        for source in source_columns:
+            target = target_by_norm.get(self._normalize_column_name(source))
+            if target is None or target in seen_targets:
+                continue
+            auto.append({"source_column": source, "target_column": target})
+            seen_targets.add(target)
+        return auto
+
+    def _resolve_target_rename_map(
+        self,
+        *,
+        source_columns: list[str],
+        target_columns: list[str],
+        uid_column: str,
+        column_mappings: list[ColumnMapping],
+    ) -> dict[str, str]:
+        source_set = set(source_columns)
+        target_set = set(target_columns)
+        rename_map: dict[str, str] = {}
+        used_sources: set[str] = set()
+        used_targets: set[str] = set()
+
+        for mapping in column_mappings:
+            source = mapping.source_column.strip()
+            target = mapping.target_column.strip()
+            if not source or not target:
+                continue
+            if source == uid_column or target == uid_column:
+                raise ValidationBadRequestError("column_mappings cannot include the uid_column")
+            if source not in source_set:
+                raise ValidationBadRequestError(f"source column {source!r} not found in source file columns")
+            if target not in target_set:
+                raise ValidationBadRequestError(f"target column {target!r} not found in target file columns")
+            if source in used_sources:
+                raise ValidationBadRequestError(f"source column {source!r} is mapped more than once")
+            if target in used_targets:
+                raise ValidationBadRequestError(f"target column {target!r} is mapped more than once")
+            rename_map[target] = source
+            used_sources.add(source)
+            used_targets.add(target)
+
+        if not rename_map:
+            return {}
+
+        renamed_target_columns = [rename_map.get(column, column) for column in target_columns]
+        if len(set(renamed_target_columns)) != len(renamed_target_columns):
+            raise ValidationBadRequestError("column_mappings would create duplicate target column names")
+        return rename_map
+
+    @staticmethod
+    def _normalize_column_name(name: str) -> str:
+        return re.sub(r"\s+", "", name.strip().casefold())
 
     def _resolve_delimiter(
         self,

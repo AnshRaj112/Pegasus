@@ -97,6 +97,57 @@ def test_validate_local_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
         assert body.get("value_mismatch_by_column_omitted") is False
 
 
+def test_preview_local_columns_auto_matches_unsorted_headers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_text("id,name,city\n1,alice,paris\n", encoding="utf-8")
+        tgt.write_text("city,id,full_name\nparis,1,alice\n", encoding="utf-8")
+        r = client.get(
+            "/api/v1/validate/local/columns",
+            params={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": ",",
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["source_columns"] == ["name", "city"]
+        assert body["target_columns"] == ["city", "full_name"]
+        assert body["auto_mappings"] == [{"source_column": "city", "target_column": "city"}]
+        assert body["unmatched_source_columns"] == ["name"]
+
+
+def test_validate_local_with_explicit_column_mapping(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_text("id,name,city\n1,alice,paris\n2,bob,rome\n", encoding="utf-8")
+        tgt.write_text("city,id,full_name\nparis,1,alice\nrome,2,bob\n", encoding="utf-8")
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": ",",
+                "column_mappings": [{"source_column": "name", "target_column": "full_name"}],
+            },
+        )
+        assert r.status_code == 202, r.text
+        body = _poll_completed(client, r.json()["poll_url"])
+        assert body["summary"]["is_match"] is True
+        assert set(body["compared_columns"]) == {"city", "name"}
+
+
 def test_browse_local_forbidden_when_local_paths_disabled(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

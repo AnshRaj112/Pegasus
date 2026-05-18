@@ -15,7 +15,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, File, Form, HTTPException, Query, UploadFile, status
 
-from pegasus.api.deps import AppSettings
+from pegasus.api.deps import AppSettings, ValidationServiceDep
 from pegasus.core.config import Settings
 from pegasus.core.database import AsyncSessionLocal
 from pegasus.core.json_util import dumps_bytes, loads_str
@@ -24,6 +24,7 @@ from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.schemas.validation import (
     LocalBrowseEntry,
     LocalBrowseResponse,
+    LocalColumnPreviewResponse,
     LocalPathValidateRequest,
     MismatchSampleGroups,
     MismatchSampleRow,
@@ -627,6 +628,7 @@ async def validate_csv_local_paths(
     meta = {
         "uid_column": body.uid_column.strip(),
         "delimiter": body.delimiter,
+        "column_mappings": [m.model_dump() for m in body.column_mappings],
         "memory_log_interval_seconds": settings.validation_memory_log_interval_seconds,
         "run_id": str(run_id) if run_id else None,
         "source_path": str(source_path),
@@ -650,6 +652,32 @@ async def validate_csv_local_paths(
         max_concurrency=queue_stats["max_concurrency"],
     )
 
+@router.get(
+    "/validate/local/columns",
+    response_model=LocalColumnPreviewResponse,
+    summary="Preview source and target CSV headers for mapping",
+    responses={
+        400: {"description": "Invalid paths or delimiter"},
+        403: {"description": "Local path validation disabled"},
+    },
+)
+async def preview_local_csv_columns(
+    service: ValidationServiceDep,
+    settings: AppSettings,
+    source_path: Annotated[str, Query(description="Absolute source CSV path")],
+    target_path: Annotated[str, Query(description="Absolute target CSV path")],
+    uid_column: Annotated[str, Query(description="Join key column to exclude from compare mapping")] = "id",
+    delimiter: Annotated[str, Query(description="Field separator or auto")] = "auto",
+) -> LocalColumnPreviewResponse:
+    source = resolve_local_csv_path(source_path, settings)
+    target = resolve_local_csv_path(target_path, settings)
+    preview = service.preview_local_column_headers(
+        source_path=source,
+        target_path=target,
+        uid_column=uid_column,
+        delimiter=delimiter,
+    )
+    return LocalColumnPreviewResponse(**preview)
 
 @router.get(
     "/validate/local/browse",
