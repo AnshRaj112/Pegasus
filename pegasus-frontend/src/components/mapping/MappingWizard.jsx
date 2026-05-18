@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import StepIndicator    from './StepIndicator'
 import Step1_DataSource from './Step1_DataSource'
 import Step2_FilePicker from './Step2_FilePicker'
@@ -68,6 +69,7 @@ function StatCard({ label, value, accent }) {
 }
 
 export default function MappingWizard() {
+  const navigate = useNavigate()
   const [step, setStep]         = useState(1)
   const [subPhase, setSubPhase] = useState('type-select')
 
@@ -516,6 +518,24 @@ export default function MappingWizard() {
                   <StatCard label="Target rows" value={result.summary?.target_row_count ?? '—'} />
                   <StatCard label="Mismatches" value={result.summary?.total_mismatch_records ?? '—'} accent={result.summary?.total_mismatch_records > 0 ? 'var(--danger)' : undefined} />
                 </div>
+                <button
+                  type="button"
+                  onClick={() => navigate('/report', { state: { result } })}
+                  style={{
+                    marginTop: 12,
+                    width: '100%',
+                    height: 38,
+                    borderRadius: 8,
+                    border: '1px solid var(--border-1)',
+                    background: 'var(--surface-1)',
+                    color: 'var(--text-1)',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  View Detailed Report
+                </button>
               </div>
             )}
 
