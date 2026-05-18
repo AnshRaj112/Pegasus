@@ -8,7 +8,7 @@ from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -18,7 +18,11 @@ _SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from pegasus.core.config import get_settings  # noqa: E402
+from pegasus.core.database_url import (  # noqa: E402
+    postgres_search_path,
+    resolve_database_schema,
+    resolve_database_url,
+)
 from pegasus.models import Base  # noqa: E402
 from pegasus.models import mismatch_report as _mismatch_report  # noqa: E402, F401
 from pegasus.models import validation_run as _validation_run  # noqa: E402, F401
@@ -27,17 +31,27 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+_schema = resolve_database_schema()
+if _schema:
+    Base.metadata.schema = _schema
+
 target_metadata = Base.metadata
 
 
 def get_database_url() -> str:
-    return get_settings().database_url
+    return resolve_database_url()
+
+
+def _configure_context(**kwargs: object) -> None:
+    if _schema:
+        kwargs.setdefault("version_table_schema", _schema)
+    context.configure(**kwargs)
 
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode (emit SQL only)."""
     url = get_database_url()
-    context.configure(
+    _configure_context(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
@@ -49,7 +63,9 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    if _schema:
+        connection.execute(text(f"SET search_path TO {postgres_search_path(_schema)}"))
+    _configure_context(connection=connection, target_metadata=target_metadata)
 
     with context.begin_transaction():
         context.run_migrations()
