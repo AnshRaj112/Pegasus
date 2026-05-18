@@ -100,6 +100,20 @@ class LocalPathValidateRequest(BaseModel):
         default="auto",
         description="Field separator: auto, tab, or explicit delimiter (same rules as multipart /validate)",
     )
+    validate_header_formats: bool = Field(
+        default=False,
+        description="When true, infer formats on mapped columns and attach compatibility checks to the result.",
+    )
+    validate_footers: bool = Field(
+        default=False,
+        description="When true, compare trailing rows between source and target files.",
+    )
+    footer_trailing_rows: int = Field(
+        default=1,
+        ge=0,
+        le=10,
+        description="Number of trailing physical rows to treat as footer when validate_footers is true.",
+    )
 
 
 class ColumnMapping(BaseModel):
@@ -133,6 +147,52 @@ class LocalBrowseResponse(BaseModel):
         default=False,
         description="True when the directory had more children than the server returns (see cap in API docs)",
     )
+
+
+class ColumnMappingFormatCheck(BaseModel):
+    """Format compatibility for one source→target column mapping."""
+
+    source_column: str
+    target_column: str
+    source_format: str
+    target_format: str
+    source_confidence: float = Field(ge=0, le=1)
+    target_confidence: float = Field(ge=0, le=1)
+    compatible: bool
+    message: str | None = None
+    source_example: str | None = None
+    target_example: str | None = None
+
+
+class FooterValidationResult(BaseModel):
+    """Outcome of comparing trailing rows between source and target files."""
+
+    enabled: bool = True
+    match: bool
+    source_trailing_rows: list[list[str]] = Field(default_factory=list)
+    target_trailing_rows: list[list[str]] = Field(default_factory=list)
+    message: str | None = None
+
+
+class MappingAnalyzeRequest(BaseModel):
+    """JSON body for POST /validate/local/analyze (mapping wizard pre-checks)."""
+
+    source_path: str
+    target_path: str
+    uid_column: str
+    delimiter: str = "auto"
+    column_mappings: list[ColumnMapping] = Field(default_factory=list)
+    validate_header_formats: bool = False
+    validate_footers: bool = False
+    footer_trailing_rows: int = Field(default=1, ge=0, le=10)
+
+
+class MappingAnalyzeResponse(BaseModel):
+    """Optional header/footer checks for the mapping UI."""
+
+    format_checks: list[ColumnMappingFormatCheck] = Field(default_factory=list)
+    footer_validation: FooterValidationResult | None = None
+    delimiter: str = "auto"
 
 
 class LocalColumnPreviewResponse(BaseModel):
@@ -203,6 +263,14 @@ class ValidateResponse(BaseModel):
             "True when per-column value_mismatch_by_column was skipped because value_mismatch "
             "row count exceeded validation_value_mismatch_column_stats_max_rows (saves memory)."
         ),
+    )
+    mapping_format_checks: list[ColumnMappingFormatCheck] = Field(
+        default_factory=list,
+        description="Present when validate_header_formats was true on the request.",
+    )
+    footer_validation: FooterValidationResult | None = Field(
+        default=None,
+        description="Present when validate_footers was true on the request.",
     )
 
 

@@ -22,10 +22,14 @@ from pegasus.core.json_util import dumps_bytes, loads_str
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.schemas.validation import (
+    ColumnMappingFormatCheck,
+    FooterValidationResult,
     LocalBrowseEntry,
     LocalBrowseResponse,
     LocalColumnPreviewResponse,
     LocalPathValidateRequest,
+    MappingAnalyzeRequest,
+    MappingAnalyzeResponse,
     MismatchSampleGroups,
     MismatchSampleRow,
     QueueStatusResponse,
@@ -276,6 +280,16 @@ def _build_validate_response(
         is_match=total_records == 0,
     )
 
+    format_checks = [
+        ColumnMappingFormatCheck.model_validate(c)
+        for c in (run_result.mapping_format_checks or [])
+    ]
+    footer_val = (
+        FooterValidationResult.model_validate(run_result.footer_validation)
+        if run_result.footer_validation
+        else None
+    )
+
     return ValidateResponse(
         summary=summary,
         mismatch_counts=counts_model,
@@ -284,6 +298,8 @@ def _build_validate_response(
         compared_columns=run_result.compared_columns,
         run_id=run_id,
         value_mismatch_by_column_omitted=vm_omitted,
+        mapping_format_checks=format_checks,
+        footer_validation=footer_val,
     )
 
 
@@ -380,6 +396,8 @@ def _run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.U
     rel = res.get("mismatch_artifact_rel")
     apath = (job_dir / str(rel)) if rel else None
     report = MismatchReport(mismatches=empty_mismatch_frame(), summary=summary, mismatch_artifact_path=apath)
+    format_checks_raw = res.get("mapping_format_checks")
+    footer_raw = res.get("footer_validation")
     vr = ValidationRunResult(
         report=report,
         source_row_count=int(res["source_row_count"]),
@@ -387,6 +405,8 @@ def _run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.U
         compared_column_count=int(res["compared_column_count"]),
         compared_columns=list(res.get("compared_columns") or []),
         mismatch_artifact_path=apath,
+        mapping_format_checks=list(format_checks_raw) if format_checks_raw else None,
+        footer_validation=dict(footer_raw) if isinstance(footer_raw, dict) else None,
     )
     return vr, run_uuid
 
@@ -629,6 +649,9 @@ async def validate_csv_local_paths(
         "uid_column": body.uid_column.strip(),
         "delimiter": body.delimiter,
         "column_mappings": [m.model_dump() for m in body.column_mappings],
+        "validate_header_formats": body.validate_header_formats,
+        "validate_footers": body.validate_footers,
+        "footer_trailing_rows": body.footer_trailing_rows,
         "memory_log_interval_seconds": settings.validation_memory_log_interval_seconds,
         "run_id": str(run_id) if run_id else None,
         "source_path": str(source_path),
@@ -651,6 +674,44 @@ async def validate_csv_local_paths(
         queue_running=queue_stats["running"],
         max_concurrency=queue_stats["max_concurrency"],
     )
+
+
+@router.post(
+    "/validate/local/analyze",
+    response_model=MappingAnalyzeResponse,
+    summary="Optional header-format and footer checks for the mapping wizard",
+    responses={
+        400: {"description": "Invalid paths or delimiter"},
+        403: {"description": "Local path validation disabled"},
+    },
+)
+async def analyze_local_mappings(
+    service: ValidationServiceDep,
+    settings: AppSettings,
+    body: Annotated[MappingAnalyzeRequest, Body()],
+) -> MappingAnalyzeResponse:
+    source = resolve_local_csv_path(body.source_path, settings)
+    target = resolve_local_csv_path(body.target_path, settings)
+    analysis = service.analyze_local_mappings(
+        source_path=source,
+        target_path=target,
+        uid_column=body.uid_column.strip(),
+        delimiter=body.delimiter,
+        column_mappings=body.column_mappings,
+        validate_header_formats=body.validate_header_formats,
+        validate_footers=body.validate_footers,
+        footer_trailing_rows=body.footer_trailing_rows,
+    )
+    return MappingAnalyzeResponse(
+        format_checks=[ColumnMappingFormatCheck.model_validate(c) for c in analysis.get("format_checks", [])],
+        footer_validation=(
+            FooterValidationResult.model_validate(analysis["footer_validation"])
+            if analysis.get("footer_validation")
+            else None
+        ),
+        delimiter=str(analysis.get("delimiter") or body.delimiter),
+    )
+
 
 @router.get(
     "/validate/local/columns",
