@@ -5,13 +5,31 @@ from collections.abc import AsyncIterator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from pegasus.core.config import get_settings
+from pegasus.core.database_url import (
+    postgres_search_path,
+    resolve_database_schema,
+    resolve_database_url,
+)
+from pegasus.models.base import Base
 
 _settings = get_settings()
+_database_url = resolve_database_url()
+_database_schema = resolve_database_schema()
+
+if _database_schema:
+    Base.metadata.schema = _database_schema
+
+_connect_args: dict[str, object] = {}
+if _database_schema:
+    _connect_args["server_settings"] = {
+        "search_path": postgres_search_path(_database_schema),
+    }
 
 engine = create_async_engine(
-    _settings.database_url,
+    _database_url,
     echo=_settings.debug,
     pool_pre_ping=True,
+    connect_args=_connect_args,
 )
 
 AsyncSessionLocal = async_sessionmaker(
