@@ -12,6 +12,16 @@ export default function Step3_Configure({
   onMappingChange,
   uidColumn,
   onUidColumnChange,
+  validateHeaderFormats = false,
+  onValidateHeaderFormatsChange,
+  validateFooters = false,
+  onValidateFootersChange,
+  footerTrailingRows = 1,
+  onFooterTrailingRowsChange,
+  formatCheckBySource = new Map(),
+  analyzeLoading = false,
+  analyzeError = '',
+  footerValidation = null,
 }) {
   const activeMappings = mappings
   const mapped = activeMappings.filter(m => m.targetCol).length
@@ -118,6 +128,75 @@ export default function Step3_Configure({
         </div>
       </div>
 
+      <div style={{
+        marginBottom: 12, padding: '12px 14px', borderRadius: 10,
+        background: 'var(--surface-2)', border: '1px solid var(--border-1)',
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 10 }}>
+          Optional checks
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: 'var(--text-2)', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={validateHeaderFormats}
+              onChange={e => onValidateHeaderFormatsChange?.(e.target.checked)}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              <strong style={{ color: 'var(--text-1)' }}>Validate column formats</strong>
+              <span style={{ display: 'block', fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+                Sample mapped columns and warn when source/target formats differ (dates, email, numbers, etc.).
+              </span>
+            </span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: 'var(--text-2)', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={validateFooters}
+              onChange={e => onValidateFootersChange?.(e.target.checked)}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              <strong style={{ color: 'var(--text-1)' }}>Validate file footers</strong>
+              <span style={{ display: 'block', fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+                Compare trailing rows between source and target.
+              </span>
+            </span>
+          </label>
+          {validateFooters && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 26, fontSize: 12, color: 'var(--text-3)' }}>
+              Trailing rows
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={footerTrailingRows}
+                onChange={e => onFooterTrailingRowsChange?.(Number(e.target.value) || 1)}
+                className="input input-mono"
+                style={{ width: 56, height: 28, fontSize: 12 }}
+              />
+            </label>
+          )}
+        </div>
+        {analyzeLoading && (
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--accent)' }}>Running format/footer checks…</div>
+        )}
+        {analyzeError && (
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--danger)' }}>{analyzeError}</div>
+        )}
+        {validateFooters && footerValidation && !analyzeLoading && (
+          <div style={{
+            marginTop: 10, fontSize: 12,
+            color: footerValidation.match ? 'var(--success)' : 'var(--danger)',
+          }}>
+            {footerValidation.match
+              ? 'Footer rows match between source and target.'
+              : (footerValidation.message || 'Footer rows do not match.')}
+          </div>
+        )}
+      </div>
+
       {(unmatchedSourceColumns.length > 0 || unmatchedTargetColumns.length > 0) && (
         <div style={{
           display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12,
@@ -206,6 +285,8 @@ export default function Step3_Configure({
           )}
           {activeMappings.length > 0 ? activeMappings.map((m, idx) => {
             const isMapped = !!m.targetCol
+            const formatCheck = validateHeaderFormats && isMapped ? formatCheckBySource.get(m.sourceCol) : null
+            const formatWarn = formatCheck && formatCheck.compatible === false
             return (
               <div
                 key={m.id}
@@ -262,6 +343,11 @@ export default function Step3_Configure({
                       Source column not mapped yet. Pick a target header to compare this field.
                     </div>
                   )}
+                  {formatWarn && (
+                    <div style={{ marginTop: 5, fontSize: 11, color: 'var(--danger)' }}>
+                      Format: {formatCheck.source_format} → {formatCheck.target_format}. {formatCheck.message}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'center' }}>
@@ -269,14 +355,14 @@ export default function Step3_Configure({
                     style={{
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       width: 24, height: 24, borderRadius: 6,
-                      color: isMapped ? 'var(--success)' : 'var(--danger)',
-                      background: isMapped ? 'var(--success-muted)' : 'var(--danger-muted)',
+                      color: formatWarn ? 'var(--danger)' : isMapped ? 'var(--success)' : 'var(--danger)',
+                      background: formatWarn ? 'var(--danger-muted)' : isMapped ? 'var(--success-muted)' : 'var(--danger-muted)',
                       fontSize: 10, fontWeight: 700,
                       letterSpacing: '0.04em',
                     }}
-                    title={isMapped ? `Mapped to ${m.targetCol}` : 'Needs mapping'}
+                    title={formatWarn ? formatCheck?.message : isMapped ? `Mapped to ${m.targetCol}` : 'Needs mapping'}
                   >
-                    {isMapped ? 'OK' : '!'}
+                    {formatWarn ? '!' : isMapped ? 'OK' : '!'}
                   </span>
                 </div>
               </div>

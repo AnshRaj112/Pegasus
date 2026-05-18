@@ -214,13 +214,48 @@ class Settings(BaseSettings):
     validation_max_concurrency: int = Field(
         default=2,
         ge=1,
-        le=32,
         description=(
-            "Maximum number of validation jobs that run in parallel. "
-            "Additional submissions are held in a FIFO queue and start "
-            "automatically when a running job finishes. "
+            "Startup default for maximum parallel validation jobs (FIFO queue). "
+            "Users can override at runtime via PATCH /api/v1/validate/queue. "
             "Set to 1 to serialize all validations."
         ),
+    )
+    validation_auto_tune_enabled: bool = Field(
+        default=True,
+        description=(
+            "When true, the job queue caps effective concurrency below "
+            "max_concurrency using live RAM, disk, and swap probes. "
+            "Disable to honor only the user-set max_concurrency."
+        ),
+    )
+    validation_queue_ram_multiplier: float = Field(
+        default=4.0,
+        ge=1.0,
+        le=32.0,
+        description=(
+            "Estimated RAM per job = multiplier × (source_bytes + target_bytes) "
+            "for queue auto-tune and resource recommendations."
+        ),
+    )
+    validation_queue_ram_reserve_bytes: int = Field(
+        default=1 * 1024**3,
+        ge=0,
+        description="RAM kept free for OS and other processes when computing safe parallel job slots.",
+    )
+    validation_queue_min_ram_per_job_bytes: int = Field(
+        default=100 * 1024**2,
+        ge=1 * 1024**2,
+        description="Floor for per-job RAM estimate used by the resource advisor.",
+    )
+    validation_queue_min_disk_per_job_bytes: int = Field(
+        default=50 * 1024**2,
+        ge=1 * 1024**2,
+        description="Floor for per-job disk estimate used by the resource advisor.",
+    )
+    validation_queue_disk_reserve_bytes: int = Field(
+        default=500 * 1024**2,
+        ge=0,
+        description="Disk kept free beyond per-job spill estimates when computing safe parallel job slots.",
     )
 
     def cors_origin_list(self) -> list[str]:

@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import StepIndicator    from './StepIndicator'
 import Step1_DataSource from './Step1_DataSource'
 import Step2_FilePicker from './Step2_FilePicker'
 import Step3_Configure  from './Step3_Configure'
 import ActionBar        from './ActionBar'
+import ParallelValidationModal from '../ParallelValidationModal'
 import { buildMappingRows, toColumnMappingPayload } from './columnMapping'
+import { buildAnalyzePayload, formatCheckBySource } from './mappingAnalyze'
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
 const pollTimeoutRaw = Number(import.meta.env.VITE_VALIDATION_POLL_TIMEOUT_MS ?? 0)
@@ -66,6 +69,7 @@ function StatCard({ label, value, accent }) {
 }
 
 export default function MappingWizard() {
+  const navigate = useNavigate()
   const [step, setStep]         = useState(1)
   const [subPhase, setSubPhase] = useState('type-select')
 
@@ -89,6 +93,15 @@ export default function MappingWizard() {
   const [columnPreviewLoading, setColumnPreviewLoading] = useState(false)
   const [columnPreviewError, setColumnPreviewError] = useState('')
 
+  const [validateHeaderFormats, setValidateHeaderFormats] = useState(false)
+  const [validateFooters, setValidateFooters] = useState(false)
+  const [footerTrailingRows, setFooterTrailingRows] = useState(1)
+  const [formatChecks, setFormatChecks] = useState([])
+  const [footerValidation, setFooterValidation] = useState(null)
+  const [analyzeLoading, setAnalyzeLoading] = useState(false)
+  const [analyzeError, setAnalyzeError] = useState('')
+
+  const [parallelModalOpen, setParallelModalOpen] = useState(false)
   const [isRunning, setIsRunning]   = useState(false)
   const [result, setResult]         = useState(null)
   const [errorMsg, setErrorMsg]     = useState('')
@@ -164,6 +177,70 @@ export default function MappingWizard() {
     return () => controller.abort()
   }, [step, sourcePath, targetPath, uidColumn, delimiter])
 
+  useEffect(() => {
+    if (step !== 2 || !sourcePath || !targetPath) return
+    if (!validateHeaderFormats && !validateFooters) {
+      setFormatChecks([])
+      setFooterValidation(null)
+      setAnalyzeError('')
+      return
+    }
+
+    const controller = new AbortController()
+    const timer = setTimeout(async () => {
+      setAnalyzeLoading(true)
+      setAnalyzeError('')
+      try {
+        const res = await fetch(absoluteApiUrl('/api/v1/validate/local/analyze'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify(buildAnalyzePayload({
+            sourcePath,
+            targetPath,
+            uidColumn,
+            delimiter,
+            mappings,
+            validateHeaderFormats,
+            validateFooters,
+            footerTrailingRows,
+          })),
+        })
+        const raw = await res.text()
+        let data = {}
+        if (raw) {
+          try { data = JSON.parse(raw) } catch { throw new Error(raw.trim().slice(0, 500)) }
+        }
+        if (!res.ok) throw new Error(formatDetail(data.detail) || `${res.status} ${res.statusText}`)
+        setFormatChecks(Array.isArray(data.format_checks) ? data.format_checks : [])
+        setFooterValidation(data.footer_validation ?? null)
+      } catch (err) {
+        if (err?.name !== 'AbortError') {
+          setAnalyzeError(err instanceof Error ? err.message : String(err))
+          setFormatChecks([])
+          setFooterValidation(null)
+        }
+      } finally {
+        if (!controller.signal.aborted) setAnalyzeLoading(false)
+      }
+    }, 400)
+
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [
+    step,
+    sourcePath,
+    targetPath,
+    uidColumn,
+    delimiter,
+    mappings,
+    validateHeaderFormats,
+    validateFooters,
+    footerTrailingRows,
+  ])
+
   async function handleValidate() {
     setIsRunning(true); setPhase('running'); setResult(null); setErrorMsg(''); setStep(3)
     try {
@@ -176,6 +253,9 @@ export default function MappingWizard() {
           uid_column: uidColumn.trim(),
           delimiter: delimiter.trim() || 'auto',
           column_mappings: toColumnMappingPayload(mappings),
+          validate_header_formats: validateHeaderFormats,
+          validate_footers: validateFooters,
+          footer_trailing_rows: footerTrailingRows,
         }),
       })
       const raw = await res.text()
@@ -272,6 +352,16 @@ export default function MappingWizard() {
               onMappingChange={setMappings}
               uidColumn={uidColumn}
               onUidColumnChange={setUidColumn}
+              validateHeaderFormats={validateHeaderFormats}
+              onValidateHeaderFormatsChange={setValidateHeaderFormats}
+              validateFooters={validateFooters}
+              onValidateFootersChange={setValidateFooters}
+              footerTrailingRows={footerTrailingRows}
+              onFooterTrailingRowsChange={setFooterTrailingRows}
+              formatCheckBySource={formatCheckBySource(formatChecks)}
+              analyzeLoading={analyzeLoading}
+              analyzeError={analyzeError}
+              footerValidation={footerValidation}
             />
             <div style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button
@@ -389,6 +479,28 @@ export default function MappingWizard() {
             )}
 
             {/* Success */}
+            {phase === 'success' && result && (result.mapping_format_checks?.length > 0 || result.footer_validation) && (
+              <div style={{
+                marginBottom: 12, padding: '12px 14px', borderRadius: 9,
+                background: 'var(--surface-2)', border: '1px solid var(--border-1)',
+                fontSize: 12, color: 'var(--text-2)',
+              }}>
+                {result.mapping_format_checks?.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <strong style={{ color: 'var(--text-1)' }}>Format checks:</strong>{' '}
+                    {result.mapping_format_checks.filter(c => !c.compatible).length > 0
+                      ? `${result.mapping_format_checks.filter(c => !c.compatible).length} warning(s)`
+                      : 'all mapped columns compatible'}
+                  </div>
+                )}
+                {result.footer_validation && (
+                  <div style={{ color: result.footer_validation.match ? 'var(--success)' : 'var(--danger)' }}>
+                    Footer: {result.footer_validation.match ? 'match' : (result.footer_validation.message || 'mismatch')}
+                  </div>
+                )}
+              </div>
+            )}
+
             {phase === 'success' && result && (
               <div style={{
                 marginBottom: 12, padding: '14px 16px', borderRadius: 9,
@@ -406,6 +518,24 @@ export default function MappingWizard() {
                   <StatCard label="Target rows" value={result.summary?.target_row_count ?? '—'} />
                   <StatCard label="Mismatches" value={result.summary?.total_mismatch_records ?? '—'} accent={result.summary?.total_mismatch_records > 0 ? 'var(--danger)' : undefined} />
                 </div>
+                <button
+                  type="button"
+                  onClick={() => navigate('/report', { state: { result } })}
+                  style={{
+                    marginTop: 12,
+                    width: '100%',
+                    height: 38,
+                    borderRadius: 8,
+                    border: '1px solid var(--border-1)',
+                    background: 'var(--surface-1)',
+                    color: 'var(--text-1)',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  View Detailed Report
+                </button>
               </div>
             )}
 
@@ -434,7 +564,7 @@ export default function MappingWizard() {
             </button>
 
             <ActionBar
-              onValidate={handleValidate}
+              onValidate={() => setParallelModalOpen(true)}
               onSaveAsDraft={handleSaveAsDraft}
               isValid={isValidForRun}
               isRunning={isRunning}
@@ -442,6 +572,15 @@ export default function MappingWizard() {
           </div>
         )}
       </div>
+
+      <ParallelValidationModal
+        open={parallelModalOpen}
+        onClose={() => setParallelModalOpen(false)}
+        onConfirm={async () => {
+          await handleValidate()
+          return true
+        }}
+      />
     </div>
   )
 }
