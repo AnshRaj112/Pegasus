@@ -75,8 +75,17 @@ export default function Header({ activeSection, onSectionChange }) {
             })}
           </nav>
 
-          {/* Spacer (kept for layout) */}
-          <div style={{ marginLeft: 'auto' }} />
+          {/* Spacer + right slot */}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{
+              fontSize: 11,
+              fontWeight: 500,
+              color: 'var(--text-4)',
+              letterSpacing: '0.04em',
+            }}>
+              {/* v0.1.0-alpha */}
+            </span>
+          </div>
         </div>
 
         {/* Right: profile area */}

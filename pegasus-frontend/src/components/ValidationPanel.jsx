@@ -133,15 +133,13 @@ export function ValidationPanel() {
   const [jobProgress, setJobProgress] = useState({ phase: 'queued', jobId: null, message: '', progress: {} })
   const [queueInfo, setQueueInfo] = useState(null)
   const [concurrencySlider, setConcurrencySlider] = useState(2)
-  const [threadsPerJob, setThreadsPerJob] = useState(0)
-  const [diskHeadroomMultiplier, setDiskHeadroomMultiplier] = useState(1.5)
+  const [autoTuneLocal, setAutoTuneLocal] = useState(true)
   const [concurrencyUpdating, setConcurrencyUpdating] = useState(false)
   const [concurrencyError, setConcurrencyError] = useState('')
   const [queueModalLoading, setQueueModalLoading] = useState(false)
   const [queueModalError, setQueueModalError] = useState('')
 
   const running = phase === 'running'
-  const autoTuneEnabled = queueInfo?.auto_tune_enabled ?? true
   const effectiveMax = queueInfo?.effective_max_concurrency ?? null
   const jobUi = running ? jobRunningCopy(jobProgress.phase, jobProgress.jobId) : null
 
@@ -157,8 +155,7 @@ export function ValidationPanel() {
       const data = await res.json()
       setQueueInfo(data)
       setConcurrencySlider(data.max_concurrency ?? 2)
-      setThreadsPerJob(data.threads_per_job ?? 0)
-      setDiskHeadroomMultiplier(data.disk_headroom_multiplier ?? 1.5)
+      setAutoTuneLocal(data.auto_tune_enabled ?? true)
     } catch (e) {
       setQueueModalError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -174,42 +171,6 @@ export function ValidationPanel() {
     if (!showParallelValidationModal) return
     refreshQueueInfo()
   }, [showParallelValidationModal])
-
-  async function patchQueueSettings(partial) {
-    setConcurrencyUpdating(true)
-    setConcurrencyError('')
-    try {
-      const body = { ...partial }
-      const res = await fetch(absoluteApiUrl('/api/v1/validate/queue'), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setQueueInfo(data)
-        setConcurrencySlider(data.max_concurrency ?? concurrencySlider)
-        setThreadsPerJob(data.threads_per_job ?? 0)
-        setDiskHeadroomMultiplier(data.disk_headroom_multiplier ?? 1.5)
-      } else {
-        const err = await res.json().catch(() => ({}))
-        setConcurrencyError(formatDetail(err.detail) || `Failed (${res.status})`)
-      }
-    } catch (e) {
-      setConcurrencyError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setConcurrencyUpdating(false)
-    }
-  }
-
-  function handleConcurrencyUpdate(newValue, autoTune) {
-    return patchQueueSettings({
-      max_concurrency: newValue ?? concurrencySlider,
-      auto_tune_enabled: autoTune ?? autoTuneEnabled,
-      threads_per_job: threadsPerJob,
-      disk_headroom_multiplier: diskHeadroomMultiplier,
-    })
-  }
 
   useEffect(() => {
     if (!running) return
@@ -233,9 +194,7 @@ export function ValidationPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           max_concurrency: concurrencySlider,
-          auto_tune_enabled: autoTuneEnabled,
-          threads_per_job: threadsPerJob,
-          disk_headroom_multiplier: diskHeadroomMultiplier,
+          auto_tune_enabled: autoTuneLocal,
         }),
       })
       if (!res.ok) {
@@ -476,7 +435,10 @@ export function ValidationPanel() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#EB4C4C]">Parallel validation</p>
             <h2 className="mt-1 text-2xl font-bold text-slate-900">Review resources before running</h2>
-            <p className="mt-2 text-sm text-slate-600">Configure how many validations may run at once and see estimated RAM, disk, and CPU impact on this server.</p>
+            <p className="mt-2 text-sm text-slate-600">
+              Choose how many validations may run in parallel. Turn auto-tune on to let the server reduce load when
+              resources are tight.
+            </p>
           </div>
 
           <ParallelValidationResourceForm
@@ -485,19 +447,8 @@ export function ValidationPanel() {
             queueError={queueModalError}
             concurrencySlider={concurrencySlider}
             onConcurrencyChange={setConcurrencySlider}
-            threadsPerJob={threadsPerJob}
-            onThreadsPerJobChange={setThreadsPerJob}
-            diskHeadroomMultiplier={diskHeadroomMultiplier}
-            onDiskHeadroomMultiplierChange={setDiskHeadroomMultiplier}
-            autoTuneEnabled={autoTuneEnabled}
-            onAutoTuneChange={(enabled) =>
-              patchQueueSettings({
-                max_concurrency: concurrencySlider,
-                auto_tune_enabled: enabled,
-                threads_per_job: threadsPerJob,
-                disk_headroom_multiplier: diskHeadroomMultiplier,
-              })
-            }
+            autoTuneEnabled={autoTuneLocal}
+            onAutoTuneChange={setAutoTuneLocal}
             onRefresh={refreshQueueInfo}
             disabled={concurrencyUpdating}
             theme="light"

@@ -26,8 +26,6 @@ function formatDetail(detail) {
 export default function ParallelValidationModal({ open, onClose, onConfirm }) {
   const [queueInfo, setQueueInfo] = useState(null)
   const [concurrencySlider, setConcurrencySlider] = useState(2)
-  const [threadsPerJob, setThreadsPerJob] = useState(0)
-  const [diskHeadroomMultiplier, setDiskHeadroomMultiplier] = useState(1.5)
   const [autoTuneEnabled, setAutoTuneEnabled] = useState(true)
   const [loading, setLoading] = useState(false)
   const [queueLoading, setQueueLoading] = useState(false)
@@ -46,8 +44,6 @@ export default function ParallelValidationModal({ open, onClose, onConfirm }) {
       const data = await res.json()
       setQueueInfo(data)
       setConcurrencySlider(data.max_concurrency ?? 2)
-      setThreadsPerJob(data.threads_per_job ?? 0)
-      setDiskHeadroomMultiplier(data.disk_headroom_multiplier ?? 1.5)
       setAutoTuneEnabled(data.auto_tune_enabled ?? true)
     } catch (e) {
       setQueueError(e instanceof Error ? e.message : String(e))
@@ -72,8 +68,6 @@ export default function ParallelValidationModal({ open, onClose, onConfirm }) {
         body: JSON.stringify({
           max_concurrency: concurrencySlider,
           auto_tune_enabled: autoTuneEnabled,
-          threads_per_job: threadsPerJob,
-          disk_headroom_multiplier: diskHeadroomMultiplier,
         }),
       })
       if (!res.ok) {
@@ -164,7 +158,7 @@ export default function ParallelValidationModal({ open, onClose, onConfirm }) {
           Review resources before running
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 20, maxWidth: 720 }}>
-          Configure parallel jobs and review estimated RAM, disk, and CPU impact before starting validation.
+          Set max parallel jobs and auto-tune before starting validation.
         </p>
 
         <ParallelValidationResourceForm
@@ -173,10 +167,6 @@ export default function ParallelValidationModal({ open, onClose, onConfirm }) {
           queueError={queueError}
           concurrencySlider={concurrencySlider}
           onConcurrencyChange={setConcurrencySlider}
-          threadsPerJob={threadsPerJob}
-          onThreadsPerJobChange={setThreadsPerJob}
-          diskHeadroomMultiplier={diskHeadroomMultiplier}
-          onDiskHeadroomMultiplierChange={setDiskHeadroomMultiplier}
           autoTuneEnabled={autoTuneEnabled}
           onAutoTuneChange={setAutoTuneEnabled}
           onRefresh={refreshQueue}
