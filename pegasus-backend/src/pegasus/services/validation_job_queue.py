@@ -81,7 +81,7 @@ class ValidationJobQueue:
         self._max_concurrency: int = max(1, mc)
         self._settings = settings
         self._runner = BackgroundValidationRunner(settings)
-        self._auto_tune_enabled: bool = True  # auto-cap based on resources
+        self._auto_tune_enabled: bool = settings.validation_auto_tune_enabled
 
         # Ordered queue of pending jobs (FIFO)
         self._pending: deque[QueuedJob] = deque()
@@ -132,7 +132,7 @@ class ValidationJobQueue:
         promoted immediately.  If it is smaller, no running jobs are killed —
         the queue simply waits for slots to free up naturally.
         """
-        clamped = max(1, min(value, 32))
+        clamped = max(1, value)
         with self._lock:
             old = self._max_concurrency
             self._max_concurrency = clamped
@@ -160,11 +160,22 @@ class ValidationJobQueue:
         snapshot = compute_resource_recommendation(
             running_jobs=running,
             pending_jobs=pending,
-            disk_headroom_multiplier=self._settings.validation_reconciliation_disk_headroom_multiplier,
+            settings=self._settings,
             workspace_path=workspace,
         )
         self._last_resource_snapshot = snapshot
         return snapshot
+
+    def effective_max_concurrency(self) -> int:
+        """User cap after optional auto-tune (what the drain loop uses)."""
+        effective = self._max_concurrency
+        if self._auto_tune_enabled:
+            try:
+                snapshot = self.resource_recommendation()
+                effective = min(self._max_concurrency, snapshot.recommended_max_concurrency)
+            except Exception:
+                logger.warning("Resource advisor failed, using user-set max_concurrency", exc_info=True)
+        return max(1, effective)
 
     @property
     def stats(self) -> dict[str, Any]:
@@ -179,8 +190,8 @@ class ValidationJobQueue:
                 "finished": len(self._finished),
                 "total_tracked": len(self._all_jobs),
             }
-        # Compute fresh resource recommendation
         snapshot = self.resource_recommendation()
+        result["effective_max_concurrency"] = self.effective_max_concurrency()
         result["resource_advisor"] = snapshot.to_dict()
         return result
 
@@ -268,25 +279,19 @@ class ValidationJobQueue:
         resource advisor's recommendation.  This prevents starting more
         jobs than the system can safely handle.
         """
-        # Compute effective max concurrency (auto-tune + user cap)
-        effective_max = self._max_concurrency
-        if self._auto_tune_enabled:
-            try:
-                snapshot = self.resource_recommendation()
-                resource_max = snapshot.recommended_max_concurrency
-                effective_max = min(self._max_concurrency, resource_max)
-                if effective_max < self._max_concurrency:
-                    logger.info(
-                        "Auto-tune: capping concurrency from %d to %d "
-                        "(ram_safe=%d disk_safe=%d cpu_safe=%d)",
-                        self._max_concurrency,
-                        effective_max,
-                        snapshot.max_safe_by_ram,
-                        snapshot.max_safe_by_disk,
-                        snapshot.max_safe_by_cpu,
-                    )
-            except Exception:
-                logger.warning("Resource advisor failed, using user-set max_concurrency", exc_info=True)
+        effective_max = self.effective_max_concurrency()
+        if self._auto_tune_enabled and effective_max < self._max_concurrency:
+            snapshot = self._last_resource_snapshot
+            if snapshot is not None:
+                logger.info(
+                    "Auto-tune: capping concurrency from %d to %d "
+                    "(ram_safe=%d disk_safe=%d cpu_safe=%d)",
+                    self._max_concurrency,
+                    effective_max,
+                    snapshot.max_safe_by_ram,
+                    snapshot.max_safe_by_disk,
+                    snapshot.max_safe_by_cpu,
+                )
 
         with self._lock:
             while self._pending and len(self._running) < effective_max:

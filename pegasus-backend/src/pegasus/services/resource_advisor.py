@@ -25,7 +25,10 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pegasus.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +204,7 @@ def _estimate_job_csv_bytes(job_dir: Path) -> int:
         if meta_path.is_file():
             try:
                 from pegasus.core.json_util import loads_str
+
                 meta = loads_str(meta_path.read_text(encoding="utf-8"))
                 ext_path = meta.get("source_path" if name == "source.csv" else "target_path")
                 if ext_path:
@@ -210,12 +214,17 @@ def _estimate_job_csv_bytes(job_dir: Path) -> int:
     return total
 
 
-def _running_jobs_estimated_ram(running_jobs: dict) -> int:
+def _running_jobs_estimated_ram(
+    running_jobs: dict,
+    *,
+    ram_multiplier: float,
+    min_ram_per_job_bytes: int,
+) -> int:
     """Estimate total RAM consumed by currently running jobs."""
     total = 0
     for job in running_jobs.values():
         csv_bytes = _estimate_job_csv_bytes(job.job_dir)
-        total += max(MIN_RAM_PER_JOB_BYTES, int(csv_bytes * RAM_MULTIPLIER))
+        total += max(min_ram_per_job_bytes, int(csv_bytes * ram_multiplier))
     return total
 
 
@@ -287,8 +296,14 @@ def compute_resource_recommendation(
     *,
     running_jobs: dict | None = None,
     pending_jobs: list | None = None,
-    disk_headroom_multiplier: float = DEFAULT_DISK_HEADROOM_MULTIPLIER,
+    settings: "Settings | None" = None,
+    disk_headroom_multiplier: float | None = None,
     workspace_path: Path | None = None,
+    ram_multiplier: float | None = None,
+    ram_reserve_bytes: int | None = None,
+    min_ram_per_job_bytes: int | None = None,
+    min_disk_per_job_bytes: int | None = None,
+    disk_reserve_bytes: int | None = None,
 ) -> ResourceSnapshot:
     """Compute a resource-aware concurrency recommendation.
 
@@ -313,6 +328,51 @@ def compute_resource_recommendation(
     pending_jobs = pending_jobs or []
     warnings: list[str] = []
 
+    if settings is not None:
+        ram_multiplier = (
+            ram_multiplier if ram_multiplier is not None else settings.validation_queue_ram_multiplier
+        )
+        ram_reserve_bytes = (
+            ram_reserve_bytes
+            if ram_reserve_bytes is not None
+            else settings.validation_queue_ram_reserve_bytes
+        )
+        min_ram_per_job_bytes = (
+            min_ram_per_job_bytes
+            if min_ram_per_job_bytes is not None
+            else settings.validation_queue_min_ram_per_job_bytes
+        )
+        min_disk_per_job_bytes = (
+            min_disk_per_job_bytes
+            if min_disk_per_job_bytes is not None
+            else settings.validation_queue_min_disk_per_job_bytes
+        )
+        disk_reserve_bytes = (
+            disk_reserve_bytes
+            if disk_reserve_bytes is not None
+            else settings.validation_queue_disk_reserve_bytes
+        )
+        disk_headroom_multiplier = (
+            disk_headroom_multiplier
+            if disk_headroom_multiplier is not None
+            else settings.validation_reconciliation_disk_headroom_multiplier
+        )
+
+    ram_multiplier = ram_multiplier if ram_multiplier is not None else RAM_MULTIPLIER
+    ram_reserve_bytes = ram_reserve_bytes if ram_reserve_bytes is not None else RAM_RESERVE_BYTES
+    min_ram_per_job_bytes = (
+        min_ram_per_job_bytes if min_ram_per_job_bytes is not None else MIN_RAM_PER_JOB_BYTES
+    )
+    min_disk_per_job_bytes = (
+        min_disk_per_job_bytes if min_disk_per_job_bytes is not None else MIN_DISK_PER_JOB_BYTES
+    )
+    disk_reserve_bytes = disk_reserve_bytes if disk_reserve_bytes is not None else DISK_RESERVE_BYTES
+    disk_headroom_multiplier = (
+        disk_headroom_multiplier
+        if disk_headroom_multiplier is not None
+        else DEFAULT_DISK_HEADROOM_MULTIPLIER
+    )
+
     # ── Probe system resources ────────────────────────────────────
     cpu_cores = max(1, os.cpu_count() or 1)
     total_ram = _total_ram_bytes()
@@ -334,30 +394,34 @@ def compute_resource_recommendation(
         # Default estimate: 200 MiB combined CSV
         sample_csv_bytes = 200 * 1024**2
 
-    estimated_ram_per_job = max(MIN_RAM_PER_JOB_BYTES, int(sample_csv_bytes * RAM_MULTIPLIER))
-    estimated_disk_per_job = max(MIN_DISK_PER_JOB_BYTES, int(sample_csv_bytes * disk_headroom_multiplier))
+    estimated_ram_per_job = max(min_ram_per_job_bytes, int(sample_csv_bytes * ram_multiplier))
+    estimated_disk_per_job = max(min_disk_per_job_bytes, int(sample_csv_bytes * disk_headroom_multiplier))
 
     # ── What running jobs already consume ─────────────────────────
-    running_estimated_ram = _running_jobs_estimated_ram(running_jobs)
+    running_estimated_ram = _running_jobs_estimated_ram(
+        running_jobs,
+        ram_multiplier=ram_multiplier,
+        min_ram_per_job_bytes=min_ram_per_job_bytes,
+    )
 
     # ── Compute safe limits ───────────────────────────────────────
     # RAM: (available_ram - reserve - running_ram) / per_job_ram + len(running)
     # We include currently running jobs since they already have RAM allocated.
-    usable_ram = max(0, available_ram - RAM_RESERVE_BYTES)
+    usable_ram = max(0, available_ram - ram_reserve_bytes)
     # How many NEW jobs can we add given current available RAM?
     new_slots_by_ram = max(0, usable_ram // max(1, estimated_ram_per_job))
     max_safe_by_ram = max(1, len(running_jobs) + new_slots_by_ram)
 
     # Disk: (available_disk - reserve) / per_job_disk + len(running)
-    usable_disk = max(0, available_disk - DISK_RESERVE_BYTES)
+    usable_disk = max(0, available_disk - disk_reserve_bytes)
     new_slots_by_disk = max(0, usable_disk // max(1, estimated_disk_per_job))
     max_safe_by_disk = max(1, len(running_jobs) + new_slots_by_disk)
 
     # CPU: just use the core count as a soft cap
     max_safe_by_cpu = cpu_cores
 
-    # ── Final recommendation: minimum of all constraints ──────────
-    recommended = max(1, min(max_safe_by_ram, max_safe_by_disk, max_safe_by_cpu, 32))
+      # ── Final recommendation: minimum of all constraints ──────────
+    recommended = max(1, min(max_safe_by_ram, max_safe_by_disk, max_safe_by_cpu))
 
     # ── Generate warnings ─────────────────────────────────────────
     if swap is not None and swap > 0.15:

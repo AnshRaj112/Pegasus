@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -45,6 +45,7 @@ from pegasus.validation.reconciliation.coordinator import (
     auto_external_enabled,
 )
 from pegasus.validation.reconciliation.exceptions import ReconciliationError, ReconciliationStrategyError
+from pegasus.validation.mapping_analyze import analyze_column_mappings
 from pegasus.validation.reconciliation.partition_manager import multichar_csv_header_frame
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,8 @@ class ValidationRunResult:
     compared_column_count: int
     compared_columns: list[str]
     mismatch_artifact_path: Path | None = None
+    mapping_format_checks: list[dict[str, Any]] | None = None
+    footer_validation: dict[str, Any] | None = None
 
 
 class ValidationService:
@@ -141,6 +144,9 @@ class ValidationService:
         column_mappings: Sequence[ColumnMapping] | None = None,
         artifact_export_parent: Path | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        validate_header_formats: bool = False,
+        validate_footers: bool = False,
+        footer_trailing_rows: int = 1,
     ) -> ValidationRunResult:
         """Run validation off the event loop so Polars work does not block asyncio."""
         return await asyncio.to_thread(
@@ -152,7 +158,40 @@ class ValidationService:
             list(column_mappings or []),
             artifact_export_parent,
             progress_callback,
+            validate_header_formats,
+            validate_footers,
+            footer_trailing_rows,
         )
+
+    def analyze_local_mappings(
+        self,
+        *,
+        source_path: Path,
+        target_path: Path,
+        uid_column: str,
+        delimiter: str,
+        column_mappings: list[ColumnMapping],
+        validate_header_formats: bool,
+        validate_footers: bool,
+        footer_trailing_rows: int,
+    ) -> dict[str, Any]:
+        """Run optional format/footer checks for the mapping wizard."""
+        delim = self._resolve_delimiter(
+            source_path=source_path,
+            target_path=target_path,
+            delimiter=delimiter,
+        )
+        analysis = analyze_column_mappings(
+            source_path=source_path,
+            target_path=target_path,
+            delimiter=delim,
+            column_mappings=column_mappings,
+            validate_header_formats=validate_header_formats,
+            validate_footers=validate_footers,
+            footer_trailing_rows=footer_trailing_rows,
+        )
+        analysis["delimiter"] = delim
+        return analysis
 
     def preview_local_column_headers(
         self,
@@ -195,6 +234,9 @@ class ValidationService:
         column_mappings: list[ColumnMapping] | None = None,
         artifact_export_parent: Path | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        validate_header_formats: bool = False,
+        validate_footers: bool = False,
+        footer_trailing_rows: int = 1,
     ) -> ValidationRunResult:
         uid = uid_column.strip()
         if not uid:
@@ -206,6 +248,24 @@ class ValidationService:
             target_path=target_path,
             delimiter=delimiter,
         )
+
+        mapping_analysis: dict[str, Any] | None = None
+        if validate_header_formats or validate_footers:
+            mappings = column_mappings or []
+            if validate_header_formats and not mappings:
+                compare_src = [c for c in self._read_column_names(source_path, delim) if c != uid]
+                compare_tgt = [c for c in self._read_column_names(target_path, delim) if c != uid]
+                auto = self._auto_map_columns(compare_src, compare_tgt)
+                mappings = [ColumnMapping.model_validate(m) for m in auto]
+            mapping_analysis = analyze_column_mappings(
+                source_path=source_path,
+                target_path=target_path,
+                delimiter=delim,
+                column_mappings=mappings,
+                validate_header_formats=validate_header_formats,
+                validate_footers=validate_footers,
+                footer_trailing_rows=footer_trailing_rows,
+            )
 
         reader = PolarsCSVReader(default_batch_size=rcfg.chunk_rows)
         try:
@@ -279,13 +339,16 @@ class ValidationService:
                 tgt_rows,
                 n_mismatch,
             )
-            return ValidationRunResult(
-                report=report,
-                source_row_count=src_rows,
-                target_row_count=tgt_rows,
-                compared_column_count=compared,
-                compared_columns=compared_columns,
-                mismatch_artifact_path=report.mismatch_artifact_path,
+            return self._attach_mapping_analysis(
+                ValidationRunResult(
+                    report=report,
+                    source_row_count=src_rows,
+                    target_row_count=tgt_rows,
+                    compared_column_count=compared,
+                    compared_columns=compared_columns,
+                    mismatch_artifact_path=report.mismatch_artifact_path,
+                ),
+                mapping_analysis,
             )
 
         want_external = not column_mappings and len(delim) == 1 and (
@@ -360,13 +423,16 @@ class ValidationService:
                     tgt_rows,
                     n_mismatch,
                 )
-                return ValidationRunResult(
-                    report=report,
-                    source_row_count=src_rows,
-                    target_row_count=tgt_rows,
-                    compared_column_count=compared,
-                    compared_columns=compared_columns,
-                    mismatch_artifact_path=report.mismatch_artifact_path,
+                return self._attach_mapping_analysis(
+                    ValidationRunResult(
+                        report=report,
+                        source_row_count=src_rows,
+                        target_row_count=tgt_rows,
+                        compared_column_count=compared,
+                        compared_columns=compared_columns,
+                        mismatch_artifact_path=report.mismatch_artifact_path,
+                    ),
+                    mapping_analysis,
                 )
 
         logger.info(
@@ -425,13 +491,29 @@ class ValidationService:
             target_df.height,
             report.mismatches.height,
         )
-        return ValidationRunResult(
-            report=report,
-            source_row_count=source_df.height,
-            target_row_count=target_df.height,
-            compared_column_count=compared,
-            compared_columns=compared_columns,
-            mismatch_artifact_path=report.mismatch_artifact_path,
+        return self._attach_mapping_analysis(
+            ValidationRunResult(
+                report=report,
+                source_row_count=source_df.height,
+                target_row_count=target_df.height,
+                compared_column_count=compared,
+                compared_columns=compared_columns,
+                mismatch_artifact_path=report.mismatch_artifact_path,
+            ),
+            mapping_analysis,
+        )
+
+    @staticmethod
+    def _attach_mapping_analysis(
+        result: ValidationRunResult,
+        mapping_analysis: dict[str, Any] | None,
+    ) -> ValidationRunResult:
+        if not mapping_analysis:
+            return result
+        return replace(
+            result,
+            mapping_format_checks=list(mapping_analysis.get("format_checks") or []) or None,
+            footer_validation=mapping_analysis.get("footer_validation"),
         )
 
     def _read_column_names(self, path: Path, delimiter: str) -> list[str]:

@@ -138,6 +138,16 @@ export function ValidationPanel() {
   const running = phase === 'running'
   const cpuCores = queueInfo?.cpu_cores_available ?? null
   const ra = queueInfo?.resource_advisor ?? null
+  const effectiveMax = queueInfo?.effective_max_concurrency ?? null
+  const sliderMax = Math.max(
+    1,
+    concurrencySlider,
+    cpuCores ?? 1,
+    ra?.recommended_max_concurrency ?? 1,
+    ra?.limits?.max_safe_by_ram ?? 1,
+    ra?.limits?.max_safe_by_disk ?? 1,
+    queueInfo?.max_concurrency ?? 1,
+  )
   const jobUi = running ? jobRunningCopy(jobProgress.phase, jobProgress.jobId) : null
 
   useEffect(() => {
@@ -197,6 +207,30 @@ export function ValidationPanel() {
   }
 
   async function executeValidation() {
+    setConcurrencyUpdating(true)
+    setConcurrencyError('')
+    try {
+      const res = await fetch(absoluteApiUrl('/api/v1/validate/queue'), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          max_concurrency: concurrencySlider,
+          auto_tune_enabled: queueInfo?.auto_tune_enabled ?? true,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        setConcurrencyError(formatDetail(err.detail) || `Failed to apply settings (${res.status})`)
+        return
+      }
+      setQueueInfo(await res.json())
+    } catch (e) {
+      setConcurrencyError(e instanceof Error ? e.message : String(e))
+      return
+    } finally {
+      setConcurrencyUpdating(false)
+    }
+
     setShowParallelValidationModal(false)
     setPhase('running')
     setElapsedMs(0)
@@ -352,7 +386,12 @@ export function ValidationPanel() {
                 <p className="text-sm font-semibold text-amber-800">
                   Queue position: {Number(jobProgress.progress.queue_position) + 1}
                   {jobProgress.progress?.max_concurrency ? (
-                    <span className="font-normal text-amber-600"> {' '}· {jobProgress.progress.running_jobs ?? '?'}/{jobProgress.progress.max_concurrency} workers active</span>
+                    <span className="font-normal text-amber-600">
+                      {' '}· {jobProgress.progress.running_jobs ?? '?'}/{jobProgress.progress.max_concurrency} workers
+                      {effectiveMax != null && effectiveMax !== queueInfo?.max_concurrency
+                        ? ` (effective cap ${effectiveMax})`
+                        : ''}
+                    </span>
                   ) : null}
                 </p>
                 <p className="mt-1 text-xs text-amber-600">Your job will start when a running validation finishes.</p>
@@ -457,7 +496,18 @@ export function ValidationPanel() {
                 {ra?.recommended_max_concurrency != null && concurrencySlider !== ra.recommended_max_concurrency ? (
                   <button type="button" onClick={() => setConcurrencySlider(ra.recommended_max_concurrency)} className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 hover:bg-blue-200 transition">Use recommended ({ra.recommended_max_concurrency})</button>
                 ) : null}
-                <span className="rounded-md bg-[#FFFDEF] px-2.5 py-1 font-mono text-sm font-bold text-[#EB4C4C]">{concurrencySlider}</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={concurrencySlider}
+                  disabled={concurrencyUpdating}
+                  onChange={(ev) => {
+                    const n = Number(ev.target.value)
+                    if (Number.isFinite(n) && n >= 1) setConcurrencySlider(Math.floor(n))
+                  }}
+                  className="w-20 rounded-md border border-[#F1F1F1] bg-white px-2 py-1 text-center font-mono text-sm font-bold text-[#EB4C4C]"
+                  aria-label="Max parallel jobs"
+                />
               </div>
             </div>
 
@@ -465,17 +515,22 @@ export function ValidationPanel() {
               id="concurrency-slider-modal"
               type="range"
               min={1}
-              max={Math.min(cpuCores ?? 1, 32)}
+              max={sliderMax}
               step={1}
-              value={concurrencySlider}
-              disabled={concurrencyUpdating || !cpuCores}
+              value={Math.min(concurrencySlider, sliderMax)}
+              disabled={concurrencyUpdating}
               onChange={(ev) => setConcurrencySlider(Number(ev.target.value))}
               className="w-full cursor-pointer accent-[#EB4C4C] disabled:cursor-not-allowed disabled:opacity-50"
             />
             <div className="mt-1 flex justify-between text-xs text-slate-400">
               <span>1 (serial)</span>
-              <span>{cpuCores ?? '?'} cores</span>
+              <span>up to {sliderMax} (RAM/disk/CPU guided)</span>
             </div>
+            {effectiveMax != null && queueInfo?.auto_tune_enabled && effectiveMax < concurrencySlider ? (
+              <p className="mt-1 text-xs text-amber-700">
+                Effective cap right now: <strong>{effectiveMax}</strong> (auto-tune; your setting is {concurrencySlider})
+              </p>
+            ) : null}
           </div>
 
           <label className="flex cursor-pointer items-center gap-3">
@@ -495,7 +550,7 @@ export function ValidationPanel() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              disabled={concurrencyUpdating || !cpuCores}
+              disabled={concurrencyUpdating}
               onClick={executeValidation}
               className="rounded-lg bg-[#EB4C4C] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-50"
             >

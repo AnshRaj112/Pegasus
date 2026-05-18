@@ -118,10 +118,11 @@ def test_preview_local_columns_auto_matches_unsorted_headers(
         )
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["source_columns"] == ["name", "city"]
-        assert body["target_columns"] == ["city", "full_name"]
+        assert body["source_columns"] == ["id", "name", "city"]
+        assert body["target_columns"] == ["city", "id", "full_name"]
+        assert body["compare_columns"] == ["name", "city"]
         assert body["auto_mappings"] == [{"source_column": "city", "target_column": "city"}]
-        assert body["unmatched_source_columns"] == ["name"]
+        assert body["unmatched_source_columns"] == ["id", "name"]
 
 
 def test_validate_local_with_explicit_column_mapping(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -181,6 +182,60 @@ def test_browse_local_lists_entries(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         assert "golden.csv" in names
         assert "nested" in names
         assert body["truncated"] is False
+
+
+def test_analyze_local_mapping_formats(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_text("id,created,email\n1,2024-01-01,a@b.com\n", encoding="utf-8")
+        tgt.write_text("id,created,email\n1,01/01/2024,a@b.com\n", encoding="utf-8")
+        r = client.post(
+            "/api/v1/validate/local/analyze",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": ",",
+                "column_mappings": [{"source_column": "created", "target_column": "created"}],
+                "validate_header_formats": True,
+                "validate_footers": False,
+            },
+        )
+        assert r.status_code == 200, r.text
+        checks = r.json()["format_checks"]
+        assert len(checks) == 1
+        assert checks[0]["source_format"] == "iso_date"
+        assert checks[0]["target_format"] == "us_date"
+        assert checks[0]["compatible"] is False
+
+
+def test_validate_local_with_footer_check(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_text("id,x\n1,a\nTOTAL,1\n", encoding="utf-8")
+        tgt.write_text("id,x\n1,a\nTOTAL,1\n", encoding="utf-8")
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": ",",
+                "validate_footers": True,
+                "footer_trailing_rows": 1,
+            },
+        )
+        assert r.status_code == 202, r.text
+        body = _poll_completed(client, r.json()["poll_url"])
+        footer = body.get("footer_validation")
+        assert footer is not None
+        assert footer["match"] is True
 
 
 def test_browse_local_parent_navigation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

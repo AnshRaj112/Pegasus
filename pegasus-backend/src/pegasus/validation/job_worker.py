@@ -79,6 +79,9 @@ def run_job_directory(job_dir: Path) -> int:
     uid_column = str(meta.get("uid_column") or "")
     delimiter = str(meta.get("delimiter") or "auto")
     column_mappings = [ColumnMapping.model_validate(m) for m in list(meta.get("column_mappings") or [])]
+    validate_header_formats = bool(meta.get("validate_header_formats"))
+    validate_footers = bool(meta.get("validate_footers"))
+    footer_trailing_rows = int(meta.get("footer_trailing_rows") or 1)
     mem_iv = int(meta.get("memory_log_interval_seconds") or 0)
     sp = meta.get("source_path")
     tp = meta.get("target_path")
@@ -159,6 +162,9 @@ def run_job_directory(job_dir: Path) -> int:
             column_mappings,
             artifact_export_parent=job_dir,
             progress_callback=_progress_cb,
+            validate_header_formats=validate_header_formats,
+            validate_footers=validate_footers,
+            footer_trailing_rows=footer_trailing_rows,
         )
         end = time.time()
         validation_duration = end - start
@@ -177,6 +183,8 @@ def run_job_directory(job_dir: Path) -> int:
             "compared_columns": result.compared_columns,
             "summary": dict(result.report.summary),
             "mismatch_artifact_rel": artifact.name if artifact and artifact.is_file() else None,
+            "mapping_format_checks": result.mapping_format_checks,
+            "footer_validation": result.footer_validation,
             "durations": {
                 "upload_seconds": upload_duration,
                 "validation_seconds": validation_duration,
