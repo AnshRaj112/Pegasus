@@ -81,7 +81,7 @@ export default function Header({ activeSection, onSectionChange }) {
               color: 'var(--text-4)',
               letterSpacing: '0.04em',
             }}>
-              v0.1.0-alpha
+              {/* v0.1.0-alpha */}
             </span>
           </div>
 
