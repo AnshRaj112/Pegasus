@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 
 const PAGE_SIZE = 10
 
@@ -183,6 +183,7 @@ function Pagination({ page, totalPages, totalItems, pageSize, onPageChange }) {
 
 export function ReportSection({ type, samples = [] }) {
   const [page, setPage] = useState(1)
+  const firstRowRef = useRef(null)
   const style = variantStyles[type] ?? variantStyles.mismatched
 
   const totalPages = Math.max(1, Math.ceil(samples.length / PAGE_SIZE))
@@ -201,6 +202,11 @@ export function ReportSection({ type, samples = [] }) {
     const start = (page - 1) * PAGE_SIZE
     return samples.slice(start, start + PAGE_SIZE)
   }, [samples, page])
+
+  useEffect(() => {
+    if (!visibleSamples.length) return
+    firstRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [page, visibleSamples.length])
 
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
@@ -239,8 +245,10 @@ export function ReportSection({ type, samples = [] }) {
             </div>
           </div>
 
-          {visibleSamples.map((row) => (
-            <RowCard key={`${row.uid}-${row.mismatch_type}-${row.column_name ?? 'column'}`} row={row} variant={type} />
+          {visibleSamples.map((row, index) => (
+            <div key={`${row.uid}-${row.mismatch_type}-${row.column_name ?? 'column'}`} ref={index === 0 ? firstRowRef : null}>
+              <RowCard row={row} variant={type} />
+            </div>
           ))}
 
           <Pagination
