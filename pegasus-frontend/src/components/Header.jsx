@@ -9,7 +9,7 @@ export default function Header({ activeSection, onSectionChange }) {
       position: 'sticky',
       top: 0,
       zIndex: 50,
-      background: 'rgba(10, 10, 11, 0.85)',
+      background: 'var(--surface-0)',
       backdropFilter: 'blur(16px)',
       WebkitBackdropFilter: 'blur(16px)',
       borderBottom: '1px solid var(--border-1)',
