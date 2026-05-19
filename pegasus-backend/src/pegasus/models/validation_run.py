@@ -6,9 +6,9 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text, func
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from pegasus.models.base import Base
@@ -22,6 +22,9 @@ class ValidationRun(Base):
     """One end-to-end CSV comparison run (metadata + aggregate mismatch stats)."""
 
     __tablename__ = "validation_runs"
+    __table_args__ = (
+        Index("ix_validation_runs_file_pair_key_created_at", "file_pair_key", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -29,15 +32,34 @@ class ValidationRun(Base):
         default=uuid.uuid4,
     )
     status: Mapped[ValidationRunStatus] = mapped_column(
-        SAEnum(ValidationRunStatus, native_enum=False, length=32),
+        SAEnum(
+            ValidationRunStatus,
+            native_enum=False,
+            length=32,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
         nullable=False,
         default=ValidationRunStatus.PENDING,
     )
 
     source_filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
     target_filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_pair_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     uid_column: Mapped[str] = mapped_column(String(256), nullable=False)
     delimiter: Mapped[str] = mapped_column(String(8), nullable=False, default=",")
+
+    column_mappings: Mapped[list | None] = mapped_column(JSONB, nullable=False, server_default="[]")
+    compared_columns: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    mapping_format_checks: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    footer_validation: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    validate_header_formats: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    validate_footers: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    upload_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    validation_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     missing_in_target_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     extra_in_target_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

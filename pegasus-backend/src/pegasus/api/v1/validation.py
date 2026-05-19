@@ -35,6 +35,7 @@ from pegasus.schemas.validation import (
     QueueStatusResponse,
     UpdateQueueSettingsRequest,
     ValidateResponse,
+    ValidationDurations,
     ValidationJobAcceptedResponse,
     ValidationJobDetailResponse,
     ValidationSummary,
@@ -42,7 +43,7 @@ from pegasus.schemas.validation import (
 )
 from pegasus.services.validation_job_queue import get_validation_queue
 from pegasus.services.exceptions import ValidationBadRequestError
-from pegasus.services.validation_service import ValidationRunResult
+from pegasus.services.validation_service import ValidationRunDurations, ValidationRunResult
 from pegasus.validation.comparators.models import MismatchReport, MismatchType, empty_mismatch_frame
 
 from .mismatch_sample import (
@@ -290,6 +291,14 @@ def _build_validate_response(
         else None
     )
 
+    api_durations = None
+    if run_result.durations is not None:
+        api_durations = ValidationDurations(
+            upload_seconds=run_result.durations.upload_seconds,
+            validation_seconds=run_result.durations.validation_seconds,
+            total_seconds=run_result.durations.total_seconds,
+        )
+
     return ValidateResponse(
         summary=summary,
         mismatch_counts=counts_model,
@@ -300,6 +309,7 @@ def _build_validate_response(
         value_mismatch_by_column_omitted=vm_omitted,
         mapping_format_checks=format_checks,
         footer_validation=footer_val,
+        durations=api_durations,
     )
 
 
@@ -382,7 +392,18 @@ def _validation_jobs_root(settings: Settings) -> Path:
     return base
 
 
-def _run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.UUID | None]:
+def _durations_from_result_json(res: dict[str, object]) -> ValidationRunDurations | None:
+    raw = res.get("durations")
+    if not isinstance(raw, dict):
+        return None
+    return ValidationRunDurations(
+        upload_seconds=float(raw["upload_seconds"]) if raw.get("upload_seconds") is not None else None,
+        validation_seconds=float(raw["validation_seconds"]) if raw.get("validation_seconds") is not None else None,
+        total_seconds=float(raw["total_seconds"]) if raw.get("total_seconds") is not None else None,
+    )
+
+
+def _run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.UUID | None, dict[str, object]]:
     meta = loads_str((job_dir / "meta.json").read_text(encoding="utf-8"))
     res = loads_str((job_dir / "result.json").read_text(encoding="utf-8"))
     rid = meta.get("run_id")
@@ -407,8 +428,9 @@ def _run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.U
         mismatch_artifact_path=apath,
         mapping_format_checks=list(format_checks_raw) if format_checks_raw else None,
         footer_validation=dict(footer_raw) if isinstance(footer_raw, dict) else None,
+        durations=_durations_from_result_json(res),
     )
-    return vr, run_uuid
+    return vr, run_uuid, meta
 
 
 async def _maybe_persist_completed_job(
@@ -416,14 +438,22 @@ async def _maybe_persist_completed_job(
     *,
     run_id: uuid.UUID | None,
     run_result: ValidationRunResult,
+    job_meta: dict[str, object] | None = None,
 ) -> None:
     if not settings.enable_validation_persistence or run_id is None:
         return
+    mappings_raw = list((job_meta or {}).get("column_mappings") or [])
+    column_mappings = [m for m in mappings_raw if isinstance(m, dict)]
     async with AsyncSessionLocal() as session:
         run = await ValidationRunRepository.get_run(session, run_id)
         if run is None or run.status != ValidationRunStatus.RUNNING:
             return
-        await ValidationRunRepository.complete_success(session, run_id, run_result)
+        await ValidationRunRepository.complete_success(
+            session,
+            run_id,
+            run_result,
+            column_mappings=column_mappings or None,
+        )
         await session.commit()
 
 
@@ -534,6 +564,8 @@ async def validate_csv_files(
                         target_filename=target_file.filename,
                         uid_column=uid_column.strip(),
                         delimiter=delimiter,
+                        source_path=source_file.filename,
+                        target_path=target_file.filename,
                     )
                     await session.commit()
                     run_id = run_orm.id
@@ -631,10 +663,15 @@ async def validate_csv_local_paths(
             async with AsyncSessionLocal() as session:
                 run_orm = await ValidationRunRepository.create_running(
                     session,
-                    source_filename=str(source_path),
-                    target_filename=str(target_path),
+                    source_filename=source_path.name,
+                    target_filename=target_path.name,
+                    source_path=str(source_path),
+                    target_path=str(target_path),
                     uid_column=body.uid_column.strip(),
                     delimiter=body.delimiter,
+                    column_mappings=[m.model_dump() for m in body.column_mappings],
+                    validate_header_formats=body.validate_header_formats,
+                    validate_footers=body.validate_footers,
                 )
                 await session.commit()
                 run_id = run_orm.id
@@ -824,8 +861,8 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
     if cached is not None:
         return cached
 
-    run_result, rid = _run_result_from_job_dir(job_dir)
-    await _maybe_persist_completed_job(settings, run_id=rid, run_result=run_result)
+    run_result, rid, job_meta = _run_result_from_job_dir(job_dir)
+    await _maybe_persist_completed_job(settings, run_id=rid, run_result=run_result, job_meta=job_meta)
     payload = _build_validate_response(settings=settings, run_result=run_result, run_id=rid)
     detail = ValidationJobDetailResponse(
         status="completed",

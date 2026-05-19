@@ -56,6 +56,15 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
+class ValidationRunDurations:
+    """Timing metadata for a validation job."""
+
+    upload_seconds: float | None = None
+    validation_seconds: float | None = None
+    total_seconds: float | None = None
+
+
+@dataclass(slots=True)
 class ValidationRunResult:
     """Outcome of a single validation run."""
 
@@ -67,6 +76,7 @@ class ValidationRunResult:
     mismatch_artifact_path: Path | None = None
     mapping_format_checks: list[dict[str, Any]] | None = None
     footer_validation: dict[str, Any] | None = None
+    durations: ValidationRunDurations | None = None
 
 
 class ValidationService:

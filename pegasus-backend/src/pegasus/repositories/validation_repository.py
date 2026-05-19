@@ -7,13 +7,15 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pegasus.core.file_pair import compute_file_pair_key
 from pegasus.models import MismatchReport, ValidationRun
 from pegasus.models.enums import ValidationRunStatus
-from pegasus.services.validation_service import ValidationRunResult
+from pegasus.services.validation_service import ValidationRunDurations, ValidationRunResult
 from pegasus.validation.comparators.models import MismatchType
 
 logger = logging.getLogger(__name__)
@@ -30,20 +32,34 @@ class ValidationRunRepository:
         target_filename: str | None,
         uid_column: str,
         delimiter: str,
+        source_path: str | None = None,
+        target_path: str | None = None,
+        column_mappings: list[dict[str, Any]] | None = None,
+        validate_header_formats: bool = False,
+        validate_footers: bool = False,
     ) -> ValidationRun:
         """Insert a new run in ``RUNNING`` state with ``started_at`` set."""
         now = datetime.now(UTC)
+        src = (source_path or source_filename or "").strip() or None
+        tgt = (target_path or target_filename or "").strip() or None
+        pair_key = compute_file_pair_key(src, tgt) if src and tgt else None
         run = ValidationRun(
             status=ValidationRunStatus.RUNNING,
             source_filename=source_filename,
             target_filename=target_filename,
+            source_path=source_path,
+            target_path=target_path,
+            file_pair_key=pair_key,
             uid_column=uid_column,
             delimiter=delimiter,
+            column_mappings=column_mappings or [],
+            validate_header_formats=validate_header_formats,
+            validate_footers=validate_footers,
             started_at=now,
         )
         session.add(run)
         await session.flush()
-        logger.info("Created validation run id=%s status=running", run.id)
+        logger.info("Created validation run id=%s status=running pair_key=%s", run.id, pair_key)
         return run
 
     @staticmethod
@@ -69,6 +85,8 @@ class ValidationRunRepository:
         session: AsyncSession,
         run_id: uuid.UUID,
         result: ValidationRunResult,
+        *,
+        column_mappings: list[dict[str, Any]] | None = None,
     ) -> None:
         """Update aggregates and insert all mismatch rows from the Polars report."""
         run = await session.get(ValidationRun, run_id)
@@ -94,10 +112,23 @@ class ValidationRunRepository:
         run.source_row_count = result.source_row_count
         run.target_row_count = result.target_row_count
         run.compared_column_count = result.compared_column_count
+        run.compared_columns = list(result.compared_columns)
         run.is_match = total_mismatch == 0
         run.completed_at = datetime.now(UTC)
         run.updated_at = datetime.now(UTC)
         run.error_detail = None
+
+        if column_mappings is not None:
+            run.column_mappings = column_mappings
+        if result.mapping_format_checks is not None:
+            run.mapping_format_checks = list(result.mapping_format_checks)
+        if result.footer_validation is not None:
+            run.footer_validation = dict(result.footer_validation)
+
+        if result.durations is not None:
+            run.upload_duration_seconds = result.durations.upload_seconds
+            run.validation_duration_seconds = result.durations.validation_seconds
+            run.total_duration_seconds = result.durations.total_seconds
 
         if total_mismatch > 0 and artifact is not None and artifact.is_file():
             p = Path(artifact)
@@ -164,11 +195,58 @@ class ValidationRunRepository:
         return await session.get(ValidationRun, run_id)
 
     @staticmethod
-    async def list_recent(session: AsyncSession, *, limit: int = 20) -> list[ValidationRun]:
+    async def list_recent(
+        session: AsyncSession,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        file_pair_key: str | None = None,
+    ) -> list[ValidationRun]:
         """Return latest runs by ``created_at`` (newest first)."""
-        stmt = select(ValidationRun).order_by(ValidationRun.created_at.desc()).limit(limit)
+        stmt = select(ValidationRun).order_by(ValidationRun.created_at.desc())
+        if file_pair_key:
+            stmt = stmt.where(ValidationRun.file_pair_key == file_pair_key)
+        stmt = stmt.offset(offset).limit(limit)
         result = await session.scalars(stmt)
         return list(result.all())
+
+    @staticmethod
+    async def count_runs(
+        session: AsyncSession,
+        *,
+        file_pair_key: str | None = None,
+    ) -> int:
+        """Count runs optionally filtered by file pair."""
+        stmt = select(func.count()).select_from(ValidationRun)
+        if file_pair_key:
+            stmt = stmt.where(ValidationRun.file_pair_key == file_pair_key)
+        total = await session.scalar(stmt)
+        return int(total or 0)
+
+    @staticmethod
+    async def list_mismatches(
+        session: AsyncSession,
+        run_id: uuid.UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[MismatchReport], int]:
+        """Return mismatch rows for a run and total count."""
+        count_stmt = (
+            select(func.count())
+            .select_from(MismatchReport)
+            .where(MismatchReport.validation_run_id == run_id)
+        )
+        total = int(await session.scalar(count_stmt) or 0)
+        stmt = (
+            select(MismatchReport)
+            .where(MismatchReport.validation_run_id == run_id)
+            .order_by(MismatchReport.created_at.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+        rows = list((await session.scalars(stmt)).all())
+        return rows, total
 
 
 def _optional_str(value: object) -> str | None:
