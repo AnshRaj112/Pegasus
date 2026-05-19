@@ -248,6 +248,49 @@ class ValidationRunRepository:
         rows = list((await session.scalars(stmt)).all())
         return rows, total
 
+    @staticmethod
+    async def delete_run(session: AsyncSession, run_id: uuid.UUID) -> bool:
+        """Delete a run by id. Returns True if deleted, False if not found."""
+        run = await session.get(ValidationRun, run_id)
+        if run is None:
+            return False
+        await session.delete(run)
+        await session.flush()
+        return True
+
+    @staticmethod
+    async def delete_runs_by_file_pair(
+        session: AsyncSession,
+        source_path: str,
+        target_path: str,
+    ) -> int:
+        """Delete all validation runs for a specific source and target file pair."""
+        pair_key = compute_file_pair_key(source_path, target_path)
+        if not pair_key:
+            return 0
+        stmt = select(ValidationRun).where(ValidationRun.file_pair_key == pair_key)
+        result = await session.scalars(stmt)
+        runs = list(result.all())
+        count = len(runs)
+        for run in runs:
+            await session.delete(run)
+        await session.flush()
+        return count
+
+    @staticmethod
+    async def delete_all_runs(session: AsyncSession) -> int:
+        """Delete all validation runs from the database."""
+        stmt = select(ValidationRun)
+        result = await session.scalars(stmt)
+        runs = list(result.all())
+        count = len(runs)
+        for run in runs:
+            await session.delete(run)
+        await session.flush()
+        return count
+
+
+
 
 def _optional_str(value: object) -> str | None:
     if value is None:

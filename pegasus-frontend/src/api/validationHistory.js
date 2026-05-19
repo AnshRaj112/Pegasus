@@ -67,3 +67,33 @@ export function basename(path) {
   const parts = String(path).split(/[/\\]/)
   return parts[parts.length - 1] || path
 }
+
+export async function deleteValidationHistoryRun(runId) {
+  const res = await fetch(absoluteApiUrl(`/api/v1/validate/history/${runId}`), {
+    method: 'DELETE',
+  })
+  const data = await parseJson(res)
+  if (!res.ok) throw new Error(formatDetail(data.detail) || `Delete failed (${res.status})`)
+  return data
+}
+
+export async function deleteValidationHistoryByPair(sourcePath, targetPath) {
+  const params = new URLSearchParams({ source_path: sourcePath, target_path: targetPath })
+  const res = await fetch(absoluteApiUrl(`/api/v1/validate/history?${params}`), {
+    method: 'DELETE',
+  })
+  const data = await parseJson(res)
+  if (!res.ok) throw new Error(formatDetail(data.detail) || `Delete failed (${res.status})`)
+  return data
+}
+
+export async function deleteValidationHistoryAll() {
+  const res = await fetch(absoluteApiUrl('/api/v1/validate/history?all=true'), {
+    method: 'DELETE',
+  })
+  const data = await parseJson(res)
+  if (!res.ok) throw new Error(formatDetail(data.detail) || `Clear history failed (${res.status})`)
+  return data
+}
+
+
