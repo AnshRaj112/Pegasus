@@ -559,6 +559,7 @@ docker run -p 8000:8000 \
 
 ## Additional Resources
 
+- [Developer Onboarding & Setup Guide](./docs/README.md) - Comprehensive step-by-step developer onboarding and runtime setup guide.
 - [Backend README](./pegasus-backend/README.md) - Detailed backend documentation
 - [Frontend README](./pegasus-frontend/README.md) - Detailed frontend documentation
 - [Test Data](./test-data/) - Sample CSV files for testing; use [scripts/generate_validation_data.py](scripts/generate_validation_data.py) to generate large shuffled source/target pairs with missing, extra, and mismatched rows
