@@ -209,3 +209,68 @@ async def list_validation_history_mismatches(
         offset=offset,
         limit=limit,
     )
+
+
+@router.delete(
+    "/validate/history/{run_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a persisted validation run",
+)
+async def delete_validation_history_run(
+    settings: AppSettings,
+    run_id: uuid.UUID,
+) -> None:
+    _require_persistence(settings)
+    try:
+        async with AsyncSessionLocal() as session:
+            deleted = await ValidationRunRepository.delete_run(session, run_id)
+            if not deleted:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown run_id")
+            await session.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to delete validation run %s: %s", run_id, exc)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not delete validation run; check database connectivity",
+        ) from exc
+
+
+@router.delete(
+    "/validate/history",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete persisted validation runs (either all history or for a specific file pair)",
+)
+async def delete_validation_history(
+    settings: AppSettings,
+    source_path: Annotated[str | None, Query(description="Source file path to delete history for")] = None,
+    target_path: Annotated[str | None, Query(description="Target file path to delete history for")] = None,
+    all_history: Annotated[bool, Query(alias="all", description="Set to true to delete all history")] = False,
+) -> None:
+    _require_persistence(settings)
+    if not all_history and (not source_path or not target_path):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Must provide either 'all=true' or both 'source_path' and 'target_path' parameters",
+        )
+    try:
+        async with AsyncSessionLocal() as session:
+            if all_history:
+                count = await ValidationRunRepository.delete_all_runs(session)
+            else:
+                count = await ValidationRunRepository.delete_runs_by_file_pair(session, source_path, target_path)
+            
+            if not all_history and count == 0:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No history found for the specified file pair")
+            await session.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to delete validation history: %s", exc)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not delete validation history; check database connectivity",
+        ) from exc
+
+

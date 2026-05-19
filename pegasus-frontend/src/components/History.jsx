@@ -5,7 +5,88 @@ import {
   fetchValidationHistoryDetail,
   fetchValidationHistoryMismatches,
   formatDuration,
+  deleteValidationHistoryRun,
+  deleteValidationHistoryByPair,
+  deleteValidationHistoryAll,
 } from '../api/validationHistory'
+
+const TrashIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 6h18"/>
+    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+    <line x1="10" x2="10" y1="11" y2="17"/>
+    <line x1="14" x2="14" y1="11" y2="17"/>
+  </svg>
+)
+
+function DeleteButton({ onClick, title }) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }}
+      title={title}
+      style={{
+        background: hovered ? 'var(--danger-muted)' : 'transparent',
+        border: 'none',
+        color: hovered ? 'var(--danger)' : 'var(--text-3)',
+        cursor: 'pointer',
+        padding: '6px',
+        borderRadius: '6px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'all 0.15s ease',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <TrashIcon />
+    </button>
+  )
+}
+
+function ConfirmationModal({ isOpen, title, message, onConfirm, onCancel }) {
+  if (!isOpen) return null
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0,0,0,0.3)',
+      backdropFilter: 'blur(3px)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 9999,
+      animation: 'fade-in 0.12s ease-out',
+    }}>
+      <div style={{
+        background: 'var(--surface-3)',
+        border: '1px solid var(--border-1)',
+        borderRadius: '12px',
+        padding: '20px',
+        maxWidth: '400px',
+        width: '90%',
+        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
+      }}>
+        <h4 style={{ margin: '0 0 8px', fontSize: '15px', color: 'var(--text-1)', fontWeight: 600 }}>{title}</h4>
+        <p style={{ margin: '0 0 20px', fontSize: '13px', color: 'var(--text-2)', lineHeight: '1.5' }}>{message}</p>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn" style={{ background: 'var(--danger)', color: '#fff', fontWeight: 600 }} onClick={onConfirm}>Delete</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 function TabButton({ active, onClick, children }) {
   return (
@@ -157,6 +238,89 @@ export default function History() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selectedRunId, setSelectedRunId] = useState(null)
+  const [confirmState, setConfirmState] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: null,
+  })
+
+  const handleDeleteMapping = (row) => {
+    const srcName = basename(row.source_path || row.source_filename)
+    const tgtName = basename(row.target_path || row.target_filename)
+    setConfirmState({
+      isOpen: true,
+      title: 'Delete Mapping History',
+      message: `Are you sure you want to permanently delete the saved mapping history and all validation runs for ${srcName} ↔ ${tgtName}? This cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          await deleteValidationHistoryByPair(
+            row.source_path || row.source_filename,
+            row.target_path || row.target_filename
+          )
+          setItems((prev) =>
+            prev.filter(
+              (item) =>
+                !(
+                  (item.source_path === row.source_path || item.source_filename === row.source_filename) &&
+                  (item.target_path === row.target_path || item.target_filename === row.target_filename)
+                )
+            )
+          )
+          if (selectedRunId === row.run_id) setSelectedRunId(null)
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e))
+        } finally {
+          setConfirmState((prev) => ({ ...prev, isOpen: false }))
+        }
+      },
+    })
+  }
+
+  const handleDeleteRun = (row) => {
+    const dateStr = row.completed_at
+      ? new Date(row.completed_at).toLocaleString()
+      : new Date(row.created_at).toLocaleString()
+    setConfirmState({
+      isOpen: true,
+      title: 'Delete Validation Run',
+      message: `Are you sure you want to permanently delete the validation run from ${dateStr}? This will also delete all associated mismatch records and report data.`,
+      onConfirm: async () => {
+        try {
+          await deleteValidationHistoryRun(row.run_id)
+          setItems((prev) => prev.filter((item) => item.run_id !== row.run_id))
+          setTotal((prev) => Math.max(0, prev - 1))
+          if (selectedRunId === row.run_id) setSelectedRunId(null)
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e))
+        } finally {
+          setConfirmState((prev) => ({ ...prev, isOpen: false }))
+        }
+      },
+    })
+  }
+
+  const handleClearAll = (tabName) => {
+    const isMapping = tabName === 'mapping'
+    setConfirmState({
+      isOpen: true,
+      title: isMapping ? 'Clear All Mapping History?' : 'Clear All Validation History?',
+      message: `Are you sure you want to permanently delete all historical runs and saved mappings? This action will completely empty your validation database. This cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          await deleteValidationHistoryAll()
+          setItems([])
+          setTotal(0)
+          setSelectedRunId(null)
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e))
+        } finally {
+          setConfirmState((prev) => ({ ...prev, isOpen: false }))
+        }
+      },
+    })
+  }
+
 
   const loadHistory = useCallback(async () => {
     setLoading(true)
@@ -204,10 +368,24 @@ export default function History() {
 
       {topTab === 'mapping' ? (
         <Panel>
-          <h4 style={{ margin: '0 0 8px', fontSize: 15, color: 'var(--text-1)' }}>Saved mappings by file pair</h4>
-          <p style={{ marginTop: 0, fontSize: 13, color: 'var(--text-3)' }}>
-            Latest validation run per source/target pair, including column mappings used.
-          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, borderBottom: '1px solid var(--border-1)', paddingBottom: 12 }}>
+            <div>
+              <h4 style={{ margin: '0 0 4px', fontSize: 15, color: 'var(--text-1)', fontWeight: 600 }}>Saved mappings by file pair</h4>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-3)' }}>
+                Latest validation run per source/target pair, including column mappings used.
+              </p>
+            </div>
+            {mappingPairs.length ? (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)', background: 'var(--danger-muted)', height: 32, padding: '0 10px', fontSize: 12, fontWeight: 500 }}
+                onClick={() => handleClearAll('mapping')}
+              >
+                Clear all mappings
+              </button>
+            ) : null}
+          </div>
           {error ? <p style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</p> : null}
           {loading ? <p style={{ color: 'var(--text-4)' }}>Loading…</p> : null}
           {!loading && !mappingPairs.length ? (
@@ -223,11 +401,14 @@ export default function History() {
                   style={{ padding: 12, cursor: 'pointer', borderRadius: 8, border: '1px solid var(--border-1)' }}
                   onClick={() => { setTopTab('validation'); setSelectedRunId(row.run_id) }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 13, color: 'var(--text-1)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13, color: 'var(--text-1)', fontWeight: 500 }}>
                       {basename(row.source_path || row.source_filename)} ↔ {basename(row.target_path || row.target_filename)}
                     </span>
-                    <StatusBadge isMatch={row.is_match} status={row.status} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <StatusBadge isMatch={row.is_match} status={row.status} />
+                      <DeleteButton title="Delete mapping history" onClick={() => handleDeleteMapping(row)} />
+                    </div>
                   </div>
                   <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-3)' }}>
                     {row.mapping_count} mapping(s) · UID <code>{row.uid_column}</code>
@@ -239,6 +420,25 @@ export default function History() {
         </Panel>
       ) : (
         <Panel>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, borderBottom: '1px solid var(--border-1)', paddingBottom: 12 }}>
+            <div>
+              <h4 style={{ margin: '0 0 4px', fontSize: 15, color: 'var(--text-1)', fontWeight: 600 }}>Validation History Logs</h4>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-3)' }}>
+                All historical validation run logs and mismatch summaries.
+              </p>
+            </div>
+            {items.length ? (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)', background: 'var(--danger-muted)', height: 32, padding: '0 10px', fontSize: 12, fontWeight: 500 }}
+                onClick={() => handleClearAll('validation')}
+              >
+                Clear all history
+              </button>
+            ) : null}
+          </div>
+
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, alignItems: 'flex-end' }}>
             <label style={{ fontSize: 12, color: 'var(--text-3)' }}>
               Source path
@@ -281,6 +481,7 @@ export default function History() {
                     <th style={{ padding: '8px' }}>Mappings</th>
                     <th style={{ padding: '8px' }}>Duration</th>
                     <th style={{ padding: '8px' }}>Result</th>
+                    <th style={{ padding: '8px', textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -301,6 +502,9 @@ export default function History() {
                       <td style={{ padding: '8px' }}>{row.mapping_count}</td>
                       <td style={{ padding: '8px' }}>{formatDuration(row.durations?.validation_seconds ?? row.durations?.total_seconds)}</td>
                       <td style={{ padding: '8px' }}><StatusBadge isMatch={row.is_match} status={row.status} /></td>
+                      <td style={{ padding: '8px', textAlign: 'right' }}>
+                        <DeleteButton title="Delete validation run" onClick={() => handleDeleteRun(row)} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -314,6 +518,13 @@ export default function History() {
           ) : null}
         </Panel>
       )}
+      <ConfirmationModal
+        isOpen={confirmState.isOpen}
+        title={confirmState.title}
+        message={confirmState.message}
+        onConfirm={confirmState.onConfirm}
+        onCancel={() => setConfirmState((prev) => ({ ...prev, isOpen: false }))}
+      />
     </div>
   )
 }
