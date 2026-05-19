@@ -29,7 +29,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env            # create .env based on example
-# set DATABASE_URL in .env (sqlite recommended for quick dev)
+# configure PostgreSQL in .env and manually create the "Pegasus" schema
 alembic -c alembic.ini upgrade head
 uvicorn src.pegasus.main:app --reload --host 0.0.0.0 --port 8000
 ```
@@ -436,8 +436,8 @@ Example response from `GET /api/v1/validate/queue`:
 Environment variables of interest (set in `.env`):
 
 ```bash
-# Database
-DATABASE_URL=sqlite:///./pegasus.db
+# Database connection settings
+PEGASUS_DATABASE_URL=postgresql+asyncpg://postgres:your_secure_password@localhost:5432/pegasus_db
 
 # Reconciliation strategy (auto|ordered_stream|sliding_window|hash_partition|external_sort)
 PEGASUS_VALIDATION_RECONCILIATION_STRATEGY=auto
@@ -522,8 +522,8 @@ npm test
 ### Backend `.env` file
 
 ```bash
-# Database
-DATABASE_URL=sqlite:///./pegasus.db
+# Database connection settings
+PEGASUS_DATABASE_URL=postgresql+asyncpg://postgres:your_secure_password@localhost:5432/pegasus_db
 
 # API
 API_TITLE=Pegasus API
@@ -553,7 +553,7 @@ docker build -t pegasus-backend .
 
 ```bash
 docker run -p 8000:8000 \
-  -e DATABASE_URL=sqlite:///./pegasus.db \
+  -e PEGASUS_DATABASE_URL=postgresql+asyncpg://postgres:your_secure_password@10.200.104.98:5432/postgres \
   pegasus-backend
 ```
 

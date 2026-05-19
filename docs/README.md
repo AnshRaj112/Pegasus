@@ -8,8 +8,8 @@ Welcome to **Pegasus**! This document provides an end-to-end, step-by-step guide
 
 1. [System Prerequisites](#-system-prerequisites)
 2. [Project Architecture & Directory Layout](#-project-architecture--directory-layout)
-3. [Quick-Start Dev Setup (3-Minute SQLite Setup)](#-quick-start-dev-setup-3-minute-sqlite-setup)
-4. [Production Database Setup (PostgreSQL)](#-production-database-setup-postgresql)
+3. [Quick-Start Dev Setup (PostgreSQL Setup)](#-quick-start-dev-setup-postgresql-setup)
+4. [Database Setup & Schema Creation](#-database-setup--schema-creation)
    - [Step A: Create the Database](#step-a-create-the-database)
    - [Step B: Create the Custom Schema (Critical!)](#step-b-create-the-custom-schema-critical)
    - [Step C: Configure Environment Variables](#step-c-configure-environment-variables)
@@ -37,7 +37,6 @@ Before you begin, ensure your machine satisfies these environment specifications
 | **Node.js** | `v18.0.0` | `v20.x.x` (LTS) | Frontend runtime environment |
 | **npm** | `v9.0.0` | `v10.x.x` | Frontend dependency package manager |
 | **PostgreSQL** | `13.0` | `15.0+` | Relational storage for persistent job history & reports |
-| **SQLite** | `3.0` | `3.0+` | Simple local file-based database for zero-dependency dev |
 
 Verify your system setup by running:
 ```bash
@@ -81,9 +80,9 @@ Pegasus/
 
 ---
 
-## 🚀 Quick-Start Dev Setup (3-Minute SQLite Setup)
+## 🚀 Quick-Start Dev Setup (PostgreSQL Setup)
 
-For a rapid, zero-dependency playground, you can run Pegasus using **SQLite** locally:
+To set up Pegasus locally, you will run **PostgreSQL** as the single primary database. Follow these steps:
 
 ### 1. Backend Setup
 ```bash
@@ -100,13 +99,26 @@ pip install -r requirements.txt -r requirements-dev.txt
 # Create a local .env file
 cp .env.example .env
 ```
-Open `.env` in the `pegasus-backend/` directory and ensure the database URL is pointed to SQLite:
+Open `.env` in the `pegasus-backend/` directory and configure your PostgreSQL database connection:
 ```env
-PEGASUS_DATABASE_URL=sqlite+aiosqlite:///./pegasus.db
+# Define PostgreSQL parameters
+DB_USER=postgres
+DB_PASSWORD=your_secure_password
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=pegasus_db
+DB_SCHEMA=Pegasus
 PEGASUS_ENABLE_VALIDATION_PERSISTENCE=true
 ```
 
-Run Alembic migrations to bootstrap the SQLite file with tables:
+Before running migrations, connect to PostgreSQL and create the database and required schema:
+```sql
+CREATE DATABASE pegasus_db;
+\c pegasus_db;
+CREATE SCHEMA "Pegasus";
+```
+
+Run Alembic migrations to bootstrap the database with tables:
 ```bash
 alembic -c alembic.ini upgrade head
 ```
@@ -295,8 +307,8 @@ Create a `.env` file using the configuration options outlined in previous sectio
 PEGASUS_ENVIRONMENT=development
 PEGASUS_DEBUG=true
 
-# Database (SQLite is default, change to Postgres legacy DB_* vars if needed)
-PEGASUS_DATABASE_URL=sqlite+aiosqlite:///./pegasus.db
+# Database connection settings
+PEGASUS_DATABASE_URL=postgresql+asyncpg://postgres:your_secure_password@localhost:5432/pegasus_db
 PEGASUS_ENABLE_VALIDATION_PERSISTENCE=true
 
 # Job Queue Settings
@@ -412,7 +424,7 @@ docker build -t pegasus-backend .
 Run the container, forwarding port 8000 and pointing to your host's database or a local container DB:
 ```bash
 docker run -d -p 8000:8000 \
-  -e DATABASE_URL=sqlite:///./pegasus.db \
+  -e PEGASUS_DATABASE_URL=postgresql+asyncpg://postgres:your_secure_password@10.200.104.98:5432/postgres \
   -e PEGASUS_ENABLE_VALIDATION_PERSISTENCE=true \
   --name pegasus_api \
   pegasus-backend

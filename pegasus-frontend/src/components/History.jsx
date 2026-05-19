@@ -193,9 +193,9 @@ export default function History() {
 
   return (
     <div style={{ padding: 12 }}>
-      <Panel style={{ marginBottom: 12, padding: '12px 16px', fontSize: 12, color: 'var(--text-3)' }}>
+      {/* <Panel style={{ marginBottom: 12, padding: '12px 16px', fontSize: 12, color: 'var(--text-3)' }}>
         History is stored in PostgreSQL when <code style={{ fontSize: 11 }}>PEGASUS_ENABLE_VALIDATION_PERSISTENCE=true</code> and migrations are applied.
-      </Panel>
+      </Panel> */}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <TabButton active={topTab === 'mapping'} onClick={() => setTopTab('mapping')}>Mapping History</TabButton>
