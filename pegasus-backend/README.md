@@ -105,6 +105,21 @@ Apply all pending migrations:
 alembic upgrade head
 ```
 
+> [!IMPORTANT]
+> **Custom Schema Setup (e.g. PostgreSQL with `DB_SCHEMA`):**
+> If you are using PostgreSQL and have configured a custom schema (such as `DB_SCHEMA=Pegasus` in your `.env` file), you **must** ensure that the custom schema exists in your PostgreSQL database before running the migrations.
+> 
+> You can create it by connecting to your database and running:
+> ```sql
+> CREATE SCHEMA "Pegasus";
+> ```
+> 
+> **Troubleshooting `UndefinedTableError`:**
+> If the application fails to start or throws `ProgrammingError: relation "validation_runs" does not exist` when trying to save a validation run, check that:
+> 1. You have successfully run `alembic upgrade head` within your virtual environment.
+> 2. If using a custom schema, the schema (e.g. `Pegasus`) exists in the database.
+> 3. Your database user has sufficient privileges to access and modify the schema.
+
 ### Create a New Migration
 
 After modifying models, generate a new migration:

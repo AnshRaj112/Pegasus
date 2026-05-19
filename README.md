@@ -37,6 +37,7 @@ uvicorn src.pegasus.main:app --reload --host 0.0.0.0 --port 8000
 Notes:
 - API root: http://localhost:8000
 - Swagger: http://localhost:8000/docs
+- **Custom Schema Setup (e.g. PostgreSQL):** If you use a custom database schema (configured via `DB_SCHEMA` in `.env`), you **must** manually create this schema in your database (e.g., `CREATE SCHEMA "Pegasus";` in PostgreSQL) before running `alembic` migrations. Failure to do so will result in `UndefinedTableError` or failed validation run saves.
 
 Frontend
 
