@@ -319,7 +319,7 @@ function RunDetailPanel({ runId, onClose }) {
 
 export default function History({ onLoadMapping }) {
   const navigate = useNavigate()
-  const [topTab, setTopTab] = useState('validation')
+  const [topTab, setTopTab] = useState('mapping')
   const [pairFilter, setPairFilter] = useState({ source: '', target: '' })
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
