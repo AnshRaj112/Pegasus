@@ -12,7 +12,6 @@ import {
   fetchLocalColumnPreview,
 } from '../api/validationHistory'
 
-
 const HISTORY_MISMATCH_PAGE_SIZE = 5000
 
 const TrashIcon = () => (
@@ -91,7 +90,6 @@ function ConfirmationModal({ isOpen, title, message, onConfirm, onCancel }) {
     </div>
   )
 }
-
 
 function TabButton({ active, onClick, children }) {
   return (
@@ -326,9 +324,9 @@ export default function History({ onLoadMapping }) {
   const [loading, setLoading] = useState(false)
   const [loadingMappingId, setLoadingMappingId] = useState(null)
   const [error, setError] = useState('')
-
   const [selectedRunId, setSelectedRunId] = useState(null)
   const [openingRunId, setOpeningRunId] = useState(null)
+
   const [confirmState, setConfirmState] = useState({
     isOpen: false,
     title: '',
@@ -390,7 +388,6 @@ export default function History({ onLoadMapping }) {
       const savedUid = (detail.uid_column || 'id').trim()
       const savedMappings = detail.column_mappings || []
       const savedComparedCols = detail.compared_columns || []
-
       let match = true
 
       // A. Verify UID exists in both files
@@ -422,7 +419,6 @@ export default function History({ onLoadMapping }) {
 
         const sortedCurrent = [...currentCompareCols].sort()
         const sortedSaved = [...savedComparedCols].sort()
-
         const listsEqual = sortedCurrent.length === sortedSaved.length &&
           sortedCurrent.every((val, index) => val === sortedSaved[index])
 
@@ -559,9 +555,6 @@ export default function History({ onLoadMapping }) {
 
   return (
     <div style={{ padding: 12 }}>
-      {/* <Panel style={{ marginBottom: 12, padding: '12px 16px', fontSize: 12, color: 'var(--text-3)' }}>
-        History is stored in PostgreSQL when <code style={{ fontSize: 11 }}>PEGASUS_ENABLE_VALIDATION_PERSISTENCE=true</code> and migrations are applied.
-      </Panel> */}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <TabButton active={topTab === 'mapping'} onClick={() => setTopTab('mapping')}>Mapping History</TabButton>

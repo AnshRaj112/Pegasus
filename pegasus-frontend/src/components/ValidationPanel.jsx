@@ -138,7 +138,6 @@ export function ValidationPanel() {
   const [concurrencyError, setConcurrencyError] = useState('')
   const [queueModalLoading, setQueueModalLoading] = useState(false)
   const [queueModalError, setQueueModalError] = useState('')
-
   const running = phase === 'running'
   const effectiveMax = queueInfo?.effective_max_concurrency ?? null
   const jobUi = running ? jobRunningCopy(jobProgress.phase, jobProgress.jobId) : null
@@ -476,7 +475,6 @@ export function ValidationPanel() {
             ) : null}
             {concurrencyError ? <span className="text-xs text-rose-600">{concurrencyError}</span> : null}
           </div>
-
         </div>
       </Modal>
     </div>

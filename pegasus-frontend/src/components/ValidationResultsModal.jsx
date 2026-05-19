@@ -80,7 +80,6 @@ export default function ValidationResultsModal({ visible, result, onClose, elaps
                 </div>
               </div>
             </div>
-
             <div className="border-t border-slate-200 pt-4">
               <p className="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-700">
                 Mismatch Details

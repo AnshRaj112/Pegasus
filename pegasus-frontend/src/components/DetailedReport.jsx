@@ -8,7 +8,6 @@ export default function DetailedReport() {
   const result = location?.state?.result ?? null
   const [filterUid, setFilterUid] = useState('')
   const [activeSection, setActiveSection] = useState('mismatched')
-
   const samples = result?.mismatch_samples ?? []
   
   const filteredSamples = useMemo(() => {
@@ -21,7 +20,6 @@ export default function DetailedReport() {
   const valueMismatch = filteredSamples.filter((s) => s.mismatch_type === 'value_mismatch')
   const extra = filteredSamples.filter((s) => s.mismatch_type === 'extra_in_target')
   const missing = filteredSamples.filter((s) => s.mismatch_type === 'missing_in_target')
-
   const totalMismatched = samples.filter((s) => s.mismatch_type === 'value_mismatch').length
   const totalExtra = samples.filter((s) => s.mismatch_type === 'extra_in_target').length
   const totalMissing = samples.filter((s) => s.mismatch_type === 'missing_in_target').length
