@@ -8,6 +8,8 @@ import ActionBar        from './ActionBar'
 import ParallelValidationModal from '../ParallelValidationModal'
 import { buildMappingRows, toColumnMappingPayload } from './columnMapping'
 import { buildAnalyzePayload, formatCheckBySource } from './mappingAnalyze'
+import { saveValidationDraft } from '../../api/validationHistory'
+
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
 const pollTimeoutRaw = Number(import.meta.env.VITE_VALIDATION_POLL_TIMEOUT_MS ?? 0)
@@ -68,8 +70,9 @@ function StatCard({ label, value, accent }) {
   )
 }
 
-export default function MappingWizard() {
+export default function MappingWizard({ initialMappingData, onResetInitialData }) {
   const navigate = useNavigate()
+
   const [step, setStep]         = useState(1)
   const [subPhase, setSubPhase] = useState('type-select')
 
@@ -107,6 +110,67 @@ export default function MappingWizard() {
   const [errorMsg, setErrorMsg]     = useState('')
   const [phase, setPhase]           = useState('idle')
   const [jobProgress, setJobProgress] = useState({ phase: 'queued', jobId: null })
+
+  const [draftSaveStatus, setDraftSaveStatus] = useState('idle')
+  const [draftSaveError, setDraftSaveError] = useState('')
+
+  useEffect(() => {
+    if (!initialMappingData) return
+
+    const { detail, preview, step: targetStep, error } = initialMappingData
+
+    // Reset parent data so this effect only executes once upon loading
+    onResetInitialData()
+
+    // Initialize configuration states from detail
+    setSourceStorageType('local')
+    setTargetStorageType('local')
+    setSourcePath(detail.source_path || detail.source_filename || '')
+    setTargetPath(detail.target_path || detail.target_filename || '')
+    setUidColumn(detail.uid_column || 'id')
+    setDelimiter(detail.delimiter || 'auto')
+    setValidateHeaderFormats(detail.validate_header_formats || false)
+    setValidateFooters(detail.validate_footers || false)
+    setFooterTrailingRows(detail.footer_trailing_rows || 1)
+
+    // Load previews
+    if (preview) {
+      setColumnPreview({
+        sourceColumns: preview.source_columns || [],
+        targetColumns: preview.target_columns || [],
+        compareColumns: preview.compare_columns || [],
+        autoMappings: preview.auto_mappings || [],
+        unmatchedSourceColumns: preview.unmatched_source_columns || [],
+        unmatchedTargetColumns: preview.unmatched_target_columns || [],
+        delimiter: preview.delimiter || 'auto',
+      })
+      setColumnPreviewError('')
+    } else if (error) {
+      setColumnPreviewError(error)
+    }
+
+    // Populate customized mappings
+    const savedMappings = detail.column_mappings || []
+    const mappingRows = savedMappings.map((m, idx) => ({
+      id: idx + 1,
+      sourceColumn: m.source_column,
+      targetColumn: m.target_column,
+      isAuto: false,
+    }))
+    setMappings(mappingRows)
+
+    // Route step
+    setStep(targetStep)
+    if (targetStep === 1) {
+      setSubPhase('pick-source')
+    }
+    if (error) {
+      setAnalyzeError(error)
+      setColumnPreviewError(error)
+    }
+  }, [initialMappingData, onResetInitialData])
+
+
 
   function handleDataSourceNext(srcType, tgtType) {
     setSourceStorageType(srcType); setTargetStorageType(tgtType); setSubPhase('pick-source')
@@ -284,7 +348,29 @@ export default function MappingWizard() {
     } finally { setIsRunning(false) }
   }
 
-  function handleSaveAsDraft() { alert('Draft saved! (History section coming soon)') }
+  async function handleSaveAsDraft() {
+    setDraftSaveStatus('saving')
+    setDraftSaveError('')
+    try {
+      await saveValidationDraft({
+        sourcePath: sourcePath.trim(),
+        targetPath: targetPath.trim(),
+        uidColumn: uidColumn.trim(),
+        delimiter: delimiter.trim() || 'auto',
+        columnMappings: toColumnMappingPayload(mappings),
+        validateHeaderFormats,
+        validateFooters,
+      })
+      setDraftSaveStatus('success')
+      setTimeout(() => {
+        setDraftSaveStatus(prev => prev === 'success' ? 'idle' : prev)
+      }, 6000)
+    } catch (err) {
+      setDraftSaveStatus('error')
+      setDraftSaveError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
 
   const showTypeSelect = step === 1 && subPhase === 'type-select'
   const showPickSource = step === 1 && subPhase === 'pick-source'
@@ -295,6 +381,109 @@ export default function MappingWizard() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+      {/* Premium Draft Notification Banners */}
+      {draftSaveStatus === 'saving' && (
+        <div style={{
+          padding: '14px 18px',
+          background: 'var(--surface-1)',
+          color: 'var(--text-2)',
+          border: '1px solid var(--border-1)',
+          borderRadius: 12,
+          fontSize: 13,
+          fontWeight: 500,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8
+        }}>
+          <span style={{
+            display: 'inline-block',
+            width: 12,
+            height: 12,
+            borderRadius: '50%',
+            border: '2px solid rgba(0,0,0,0.1)',
+            borderTopColor: 'var(--text-2)',
+            animation: 'spin 0.7s linear infinite',
+            marginRight: 4
+          }} />
+          Saving mapping configuration as draft…
+        </div>
+      )}
+
+      {draftSaveStatus === 'success' && (
+        <div style={{
+          padding: '14px 18px',
+          background: 'var(--success-0)',
+          color: 'var(--success-2)',
+          border: '1px solid var(--success-1)',
+          borderRadius: 12,
+          fontSize: 13,
+          fontWeight: 500,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          <span>✓ Mapping draft successfully saved to history! You can resume from the History tab at any time.</span>
+          <button
+            onClick={() => setDraftSaveStatus('idle')}
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontWeight: 'bold', fontSize: 14 }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {draftSaveStatus === 'error' && (
+        <div style={{
+          padding: '14px 18px',
+          background: 'var(--error-0)',
+          color: 'var(--error-2)',
+          border: '1px solid var(--error-1)',
+          borderRadius: 12,
+          fontSize: 13,
+          fontWeight: 500,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          <span>✗ Failed to save draft: {draftSaveError}</span>
+          <button
+            onClick={() => setDraftSaveStatus('idle')}
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontWeight: 'bold', fontSize: 14 }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {columnPreviewError && (
+        <div style={{
+          padding: '14px 18px',
+          background: 'var(--error-0)',
+          color: 'var(--error-2)',
+          border: '1px solid var(--error-1)',
+          borderRadius: 12,
+          fontSize: 13,
+          fontWeight: 500,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          animation: 'fadeIn 0.2s ease',
+          marginBottom: 8
+        }}>
+          <span>✗ {columnPreviewError}</span>
+          <button
+            onClick={() => setColumnPreviewError('')}
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontWeight: 'bold', fontSize: 14 }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+
 
       {/* Step indicator */}
       <div style={{

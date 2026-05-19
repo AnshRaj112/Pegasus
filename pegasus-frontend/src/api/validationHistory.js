@@ -96,4 +96,46 @@ export async function deleteValidationHistoryAll() {
   return data
 }
 
+export async function saveValidationDraft({
+  sourcePath,
+  targetPath,
+  uidColumn,
+  delimiter = 'auto',
+  columnMappings = [],
+  validateHeaderFormats = false,
+  validateFooters = false,
+}) {
+  const res = await fetch(absoluteApiUrl('/api/v1/validate/history/draft'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source_path: sourcePath,
+      target_path: targetPath,
+      uid_column: uidColumn,
+      delimiter: delimiter,
+      column_mappings: columnMappings,
+      validate_header_formats: validateHeaderFormats,
+      validate_footers: validateFooters,
+    }),
+  })
+  const data = await parseJson(res)
+  if (!res.ok) throw new Error(formatDetail(data.detail) || `Save draft failed (${res.status})`)
+  return data
+}
+
+export async function fetchLocalColumnPreview({ sourcePath, targetPath, uidColumn, delimiter = 'auto' }) {
+  const params = new URLSearchParams({
+    source_path: sourcePath.trim(),
+    target_path: targetPath.trim(),
+    uid_column: uidColumn.trim(),
+    delimiter: delimiter.trim() || 'auto',
+  })
+  const res = await fetch(absoluteApiUrl(`/api/v1/validate/local/columns?${params}`))
+  const data = await parseJson(res)
+  if (!res.ok) throw new Error(formatDetail(data.detail) || `Column preview failed (${res.status})`)
+  return data
+}
+
+
+
 

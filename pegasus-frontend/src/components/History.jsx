@@ -9,7 +9,9 @@ import {
   deleteValidationHistoryRun,
   deleteValidationHistoryByPair,
   deleteValidationHistoryAll,
+  fetchLocalColumnPreview,
 } from '../api/validationHistory'
+
 
 const HISTORY_MISMATCH_PAGE_SIZE = 5000
 
@@ -315,14 +317,16 @@ function RunDetailPanel({ runId, onClose }) {
   )
 }
 
-export default function History() {
+export default function History({ onLoadMapping }) {
   const navigate = useNavigate()
   const [topTab, setTopTab] = useState('validation')
   const [pairFilter, setPairFilter] = useState({ source: '', target: '' })
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [loadingMappingId, setLoadingMappingId] = useState(null)
   const [error, setError] = useState('')
+
   const [selectedRunId, setSelectedRunId] = useState(null)
   const [openingRunId, setOpeningRunId] = useState(null)
   const [confirmState, setConfirmState] = useState({
@@ -349,6 +353,99 @@ export default function History() {
       setOpeningRunId(null)
     }
   }
+
+  const handleMappingClick = async (row) => {
+    setError('')
+    setLoadingMappingId(row.run_id)
+    try {
+      // 1. Fetch the full detail of this saved validation run/mapping draft
+      const detail = await fetchValidationHistoryDetail(row.run_id)
+
+      // 2. Fetch the current column headers from the server-local files
+      let preview = null
+      let previewError = ''
+      try {
+        preview = await fetchLocalColumnPreview({
+          sourcePath: detail.source_path || detail.source_filename || '',
+          targetPath: detail.target_path || detail.target_filename || '',
+          uidColumn: detail.uid_column || 'id',
+          delimiter: detail.delimiter || 'auto',
+        })
+      } catch (err) {
+        previewError = err instanceof Error ? err.message : String(err)
+      }
+
+      // If we couldn't load the column headers, fallback to Step 1 (Select Files) so paths can be corrected
+      if (!preview) {
+        onLoadMapping({
+          detail,
+          preview: null,
+          step: 1,
+          error: `Underlying files could not be accessed: ${previewError}. Please select the files to edit the saved paths.`,
+        })
+        return
+      }
+
+      // 3. Perform a robust check to see if the file headers or compared columns have changed
+      const savedUid = (detail.uid_column || 'id').trim()
+      const savedMappings = detail.column_mappings || []
+      const savedComparedCols = detail.compared_columns || []
+
+      let match = true
+
+      // A. Verify UID exists in both files
+      if (!preview.source_columns.includes(savedUid) || !preview.target_columns.includes(savedUid)) {
+        match = false
+      }
+
+      // B. Verify that all configured mappings point to columns that actually exist
+      if (match) {
+        for (const m of savedMappings) {
+          if (!preview.source_columns.includes(m.source_column) || !preview.target_columns.includes(m.target_column)) {
+            match = false
+            break
+          }
+        }
+      }
+
+      // C. Reconstruct compared columns and verify they match exactly
+      if (match) {
+        const targetColsMapped = preview.target_columns.map(col => {
+          const m = savedMappings.find(sm => sm.target_column === col)
+          return m ? m.source_column : col
+        })
+
+        const currentCompareCols = preview.source_columns.filter(col => {
+          if (col === savedUid) return false
+          return targetColsMapped.includes(col)
+        })
+
+        const sortedCurrent = [...currentCompareCols].sort()
+        const sortedSaved = [...savedComparedCols].sort()
+
+        const listsEqual = sortedCurrent.length === sortedSaved.length &&
+          sortedCurrent.every((val, index) => val === sortedSaved[index])
+
+        if (!listsEqual) {
+          match = false
+        }
+      }
+
+      // 4. Decide target step: Step 3 (Review & Run) if perfectly matching, else Step 2 (Configure)
+      const targetStep = match ? 3 : 2
+      onLoadMapping({
+        detail,
+        preview,
+        step: targetStep,
+        error: match ? '' : 'Underlying file structure or columns have changed since this mapping was saved. Please configure mappings again.',
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoadingMappingId(null)
+    }
+  }
+
 
   const handleDeleteMapping = (row) => {
     const srcName = basename(row.source_path || row.source_filename)
@@ -502,16 +599,28 @@ export default function History() {
                   key={row.run_id}
                   role="button"
                   tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { setTopTab('validation'); setSelectedRunId(row.run_id) } }}
-                  style={{ padding: 12, cursor: 'pointer', borderRadius: 8, border: '1px solid var(--border-1)' }}
-                  onClick={() => { setTopTab('validation'); setSelectedRunId(row.run_id) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { handleMappingClick(row) } }}
+                  style={{
+                    padding: 12,
+                    cursor: loadingMappingId ? 'wait' : 'pointer',
+                    borderRadius: 8,
+                    border: '1px solid var(--border-1)',
+                    opacity: loadingMappingId === row.run_id ? 0.7 : 1,
+                    pointerEvents: loadingMappingId ? 'none' : 'auto',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onClick={() => handleMappingClick(row)}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 13, color: 'var(--text-1)', fontWeight: 500 }}>
                       {basename(row.source_path || row.source_filename)} ↔ {basename(row.target_path || row.target_filename)}
                     </span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <StatusBadge isMatch={row.is_match} status={row.status} />
+                      {loadingMappingId === row.run_id ? (
+                        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Loading…</span>
+                      ) : (
+                        <StatusBadge isMatch={row.is_match} status={row.status} />
+                      )}
                       <DeleteButton title="Delete mapping history" onClick={() => handleDeleteMapping(row)} />
                     </div>
                   </div>
@@ -521,6 +630,7 @@ export default function History() {
                 </div>
               ))}
             </div>
+
           )}
         </Panel>
       ) : (

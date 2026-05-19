@@ -15,6 +15,7 @@ from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.schemas.validation import ColumnMapping, ColumnMappingFormatCheck, FooterValidationResult, MismatchCounts
 from pegasus.schemas.validation_history import (
+    SaveDraftRequest,
     ValidationDurations,
     ValidationHistoryDetail,
     ValidationHistoryListResponse,
@@ -272,5 +273,63 @@ async def delete_validation_history(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not delete validation history; check database connectivity",
         ) from exc
+
+
+@router.post(
+    "/validate/history/draft",
+    response_model=ValidationHistoryDetail,
+    summary="Save a mapping draft without running validation",
+)
+async def save_validation_draft(
+    settings: AppSettings,
+    body: SaveDraftRequest,
+) -> ValidationHistoryDetail:
+    _require_persistence(settings)
+    
+    # Resolve the paths to absolute paths
+    from pathlib import Path
+    from pegasus.api.v1.validation import resolve_local_csv_path
+    
+    try:
+        source_path = resolve_local_csv_path(body.source_path, settings)
+        target_path = resolve_local_csv_path(body.target_path, settings)
+    except HTTPException:
+        # Fallback if local paths are disabled or files don't exist yet, we still save them as-is
+        source_path = Path(body.source_path)
+        target_path = Path(body.target_path)
+        
+    try:
+        async with AsyncSessionLocal() as session:
+            from pegasus.models import ValidationRun
+            from pegasus.models.enums import ValidationRunStatus
+            
+            src = str(source_path)
+            tgt = str(target_path)
+            pair_key = compute_file_pair_key(src, tgt) if src and tgt else None
+            
+            run = ValidationRun(
+                status=ValidationRunStatus.PENDING,
+                source_filename=source_path.name,
+                target_filename=target_path.name,
+                source_path=src,
+                target_path=tgt,
+                file_pair_key=pair_key,
+                uid_column=body.uid_column.strip(),
+                delimiter=body.delimiter,
+                column_mappings=[m.model_dump() for m in body.column_mappings],
+                validate_header_formats=body.validate_header_formats,
+                validate_footers=body.validate_footers,
+            )
+            session.add(run)
+            await session.commit()
+            await session.refresh(run)
+            return _detail_from_run(run)
+    except Exception as exc:
+        logger.exception("Failed to save draft mapping: %s", exc)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not save draft mapping; check database connectivity",
+        ) from exc
+
 
 

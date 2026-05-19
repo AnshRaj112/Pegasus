@@ -123,3 +123,70 @@ def test_delete_validation_history_missing_params(monkeypatch: pytest.MonkeyPatc
         assert "Must provide either" in r.json()["detail"]
 
 
+def test_save_validation_draft_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from pegasus.models import ValidationRun
+    from pegasus.models.enums import ValidationRunStatus
+
+    monkeypatch.setenv("PEGASUS_ENABLE_VALIDATION_PERSISTENCE", "true")
+    get_settings.cache_clear()
+
+    # Create a mock run
+    mock_run = ValidationRun(
+        id=uuid.uuid4(),
+        status=ValidationRunStatus.PENDING,
+        source_filename="src.csv",
+        target_filename="tgt.csv",
+        source_path="/absolute/src.csv",
+        target_path="/absolute/tgt.csv",
+        uid_column="id",
+        delimiter=",",
+        column_mappings=[{"source_column": "s", "target_column": "t"}],
+        validate_header_formats=False,
+        validate_footers=False,
+    )
+
+    # Patch AsyncSessionLocal
+    mock_session = MagicMock()
+    mock_session.add = MagicMock()
+    mock_session.commit = AsyncMock()
+    mock_session.refresh = AsyncMock()
+
+    with patch("pegasus.api.v1.validation_history.AsyncSessionLocal", return_value=mock_session), \
+         patch("pegasus.api.v1.validation_history._detail_from_run") as mock_detail:
+        
+        from datetime import datetime, UTC
+        from pegasus.schemas.validation_history import ValidationHistoryDetail
+        from pegasus.schemas.validation import MismatchCounts
+        mock_detail.return_value = ValidationHistoryDetail(
+            run_id=mock_run.id,
+            status="pending",
+            source_path=mock_run.source_path,
+            target_path=mock_run.target_path,
+            source_filename=mock_run.source_filename,
+            target_filename=mock_run.target_filename,
+            uid_column=mock_run.uid_column,
+            delimiter=mock_run.delimiter,
+            column_mappings=[],
+            mapping_count=1,
+            mismatch_counts=MismatchCounts(missing_in_target=0, extra_in_target=0, value_mismatch=0),
+            created_at=datetime.now(UTC),
+        )
+
+        with TestClient(create_app()) as client:
+            payload = {
+                "source_path": "/absolute/src.csv",
+                "target_path": "/absolute/tgt.csv",
+                "uid_column": "id",
+                "delimiter": ",",
+                "column_mappings": [{"source_column": "s", "target_column": "t"}],
+                "validate_header_formats": False,
+                "validate_footers": False,
+            }
+            r = client.post("/api/v1/validate/history/draft", json=payload)
+            assert r.status_code == 200
+            assert r.json()["status"] == "pending"
+            assert r.json()["source_filename"] == "src.csv"
+
+
+

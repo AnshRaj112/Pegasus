@@ -80,3 +80,16 @@ class ValidationHistoryMismatchesResponse(BaseModel):
     total: int = Field(ge=0)
     offset: int = Field(ge=0)
     limit: int = Field(ge=1)
+
+
+class SaveDraftRequest(BaseModel):
+    """Payload to save a mapping draft in history."""
+
+    source_path: str = Field(description="Source CSV file path")
+    target_path: str = Field(description="Target CSV file path")
+    uid_column: str = Field(description="Join key column")
+    delimiter: str = Field(default="auto", description="Delimiter")
+    column_mappings: list[ColumnMapping] = Field(default_factory=list, description="Column mappings")
+    validate_header_formats: bool = Field(default=False, description="Header formats validation flag")
+    validate_footers: bool = Field(default=False, description="Footers validation flag")
+
