@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   basename,
   fetchValidationHistory,
@@ -9,6 +10,8 @@ import {
   deleteValidationHistoryByPair,
   deleteValidationHistoryAll,
 } from '../api/validationHistory'
+
+const HISTORY_MISMATCH_PAGE_SIZE = 5000
 
 const TrashIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -107,6 +110,88 @@ function Panel({ children, style }) {
       {children}
     </div>
   )
+}
+
+function parseHistoryRowDetail(rowDetail) {
+  if (!rowDetail) return null
+  if (typeof rowDetail === 'object') return rowDetail
+  if (typeof rowDetail !== 'string') return null
+
+  const trimmed = rowDetail.trim()
+  if (!trimmed || trimmed === '{}') return null
+
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+}
+
+function normalizeHistoryMismatchRow(row) {
+  return {
+    ...row,
+    row_detail: parseHistoryRowDetail(row.row_detail),
+  }
+}
+
+function buildHistoryReportResult(detail, mismatches) {
+  const items = (mismatches?.items ?? []).map(normalizeHistoryMismatchRow)
+  const mismatchCounts = detail?.mismatch_counts ?? {
+    missing_in_target: 0,
+    extra_in_target: 0,
+    value_mismatch: 0,
+  }
+  const totalMismatchRecords =
+    Number(mismatchCounts.missing_in_target ?? 0) +
+    Number(mismatchCounts.extra_in_target ?? 0) +
+    Number(mismatchCounts.value_mismatch ?? 0)
+
+  const groupedItems = {
+    missing_in_target: [],
+    extra_in_target: [],
+    value_mismatch: [],
+  }
+
+  for (const item of items) {
+    if (groupedItems[item.mismatch_type]) {
+      groupedItems[item.mismatch_type].push(item)
+    }
+  }
+
+  return {
+    ...detail,
+    run_id: detail?.run_id,
+    summary: {
+      is_match: detail?.is_match,
+      source_row_count: detail?.source_row_count,
+      target_row_count: detail?.target_row_count,
+      total_mismatch_records: totalMismatchRecords,
+    },
+    mismatch_counts: mismatchCounts,
+    mismatch_samples: items,
+    mismatch_sample_groups: groupedItems,
+  }
+}
+
+async function fetchAllHistoryMismatches(runId) {
+  const items = []
+  let offset = 0
+  let total = 0
+
+  while (true) {
+    const page = await fetchValidationHistoryMismatches(runId, {
+      limit: HISTORY_MISMATCH_PAGE_SIZE,
+      offset,
+    })
+    const pageItems = Array.isArray(page.items) ? page.items : []
+    total = page.total ?? total
+    items.push(...pageItems)
+    offset += pageItems.length
+
+    if (!pageItems.length || offset >= total) break
+  }
+
+  return { run_id: runId, items, total, offset: 0, limit: HISTORY_MISMATCH_PAGE_SIZE }
 }
 
 function StatusBadge({ isMatch, status }) {
@@ -231,6 +316,7 @@ function RunDetailPanel({ runId, onClose }) {
 }
 
 export default function History() {
+  const navigate = useNavigate()
   const [topTab, setTopTab] = useState('validation')
   const [pairFilter, setPairFilter] = useState({ source: '', target: '' })
   const [items, setItems] = useState([])
@@ -238,12 +324,31 @@ export default function History() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selectedRunId, setSelectedRunId] = useState(null)
+  const [openingRunId, setOpeningRunId] = useState(null)
   const [confirmState, setConfirmState] = useState({
     isOpen: false,
     title: '',
     message: '',
     onConfirm: null,
   })
+
+  const handleOpenValidationReport = async (row) => {
+    setError('')
+    setOpeningRunId(row.run_id)
+    setSelectedRunId(null)
+
+    try {
+      const [detail, mismatches] = await Promise.all([
+        fetchValidationHistoryDetail(row.run_id),
+        fetchAllHistoryMismatches(row.run_id),
+      ])
+      navigate('/report', { state: { result: buildHistoryReportResult(detail, mismatches) } })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setOpeningRunId(null)
+    }
+  }
 
   const handleDeleteMapping = (row) => {
     const srcName = basename(row.source_path || row.source_filename)
@@ -488,8 +593,16 @@ export default function History() {
                   {items.map((row) => (
                     <tr
                       key={row.run_id}
-                      onClick={() => setSelectedRunId(row.run_id)}
-                      style={{ borderTop: '1px solid var(--border-1)', cursor: 'pointer' }}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => handleOpenValidationReport(row)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            handleOpenValidationReport(row)
+                          }
+                        }}
+                        style={{ borderTop: '1px solid var(--border-1)', cursor: openingRunId === row.run_id ? 'wait' : 'pointer' }}
                     >
                       <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
                         {row.completed_at ? new Date(row.completed_at).toLocaleString() : new Date(row.created_at).toLocaleString()}
