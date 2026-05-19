@@ -145,32 +145,53 @@ def run_job_directory(job_dir: Path) -> int:
                 },
             )
 
-        _write_json(
-            status_path,
-            {
-                "status": "running",
-                "phase": "validating",
-                "message": "Running external-memory reconciliation",
-                "progress": {"started_at_epoch_s": start},
-            },
-        )
+        file_format = str(meta.get("file_format") or "csv")
+        fixed_width_config = meta.get("fixed_width_config")
+
         resource_policy = meta.get("resource_policy")
         if resource_policy is not None and not isinstance(resource_policy, dict):
             resource_policy = None
 
-        result = service._validate_csv_pair_sync(  # noqa: SLF001 — intentional worker entry
-            src,
-            tgt,
-            uid_column,
-            delimiter,
-            column_mappings,
-            artifact_export_parent=job_dir,
-            progress_callback=_progress_cb,
-            validate_header_formats=validate_header_formats,
-            validate_footers=validate_footers,
-            footer_trailing_rows=footer_trailing_rows,
-            resource_policy=resource_policy,
-        )
+        if file_format == "fixed-width" and isinstance(fixed_width_config, dict):
+            _write_json(
+                status_path,
+                {
+                    "status": "running",
+                    "phase": "validating",
+                    "message": "Running streaming fixed-width validation",
+                    "progress": {"started_at_epoch_s": start},
+                },
+            )
+            result = service.validate_fixed_width_pair_sync(
+                src,
+                tgt,
+                fixed_width_config,
+                artifact_export_parent=job_dir,
+                progress_callback=_progress_cb,
+            )
+        else:
+            _write_json(
+                status_path,
+                {
+                    "status": "running",
+                    "phase": "validating",
+                    "message": "Running external-memory reconciliation",
+                    "progress": {"started_at_epoch_s": start},
+                },
+            )
+            result = service._validate_csv_pair_sync(  # noqa: SLF001 — intentional worker entry
+                src,
+                tgt,
+                uid_column,
+                delimiter,
+                column_mappings,
+                artifact_export_parent=job_dir,
+                progress_callback=_progress_cb,
+                validate_header_formats=validate_header_formats,
+                validate_footers=validate_footers,
+                footer_trailing_rows=footer_trailing_rows,
+                resource_policy=resource_policy,
+            )
         end = time.time()
         validation_duration = end - start
         upload_duration = float(meta.get("upload_duration_seconds") or 0)

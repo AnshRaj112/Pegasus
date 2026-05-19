@@ -660,6 +660,8 @@ async def validate_csv_local_paths(
     run_id: uuid.UUID | None = None
     if settings.enable_validation_persistence:
         try:
+            run_uid_column = "date" if body.file_format == "fixed-width" else body.uid_column.strip()
+            run_delimiter = "fixed" if body.file_format == "fixed-width" else body.delimiter
             async with AsyncSessionLocal() as session:
                 run_orm = await ValidationRunRepository.create_running(
                     session,
@@ -667,8 +669,8 @@ async def validate_csv_local_paths(
                     target_filename=target_path.name,
                     source_path=str(source_path),
                     target_path=str(target_path),
-                    uid_column=body.uid_column.strip(),
-                    delimiter=body.delimiter,
+                    uid_column=run_uid_column,
+                    delimiter=run_delimiter,
                     column_mappings=[m.model_dump() for m in body.column_mappings],
                     validate_header_formats=body.validate_header_formats,
                     validate_footers=body.validate_footers,
@@ -683,8 +685,8 @@ async def validate_csv_local_paths(
             ) from exc
 
     meta = {
-        "uid_column": body.uid_column.strip(),
-        "delimiter": body.delimiter,
+        "uid_column": "date" if body.file_format == "fixed-width" else body.uid_column.strip(),
+        "delimiter": "fixed" if body.file_format == "fixed-width" else body.delimiter,
         "column_mappings": [m.model_dump() for m in body.column_mappings],
         "validate_header_formats": body.validate_header_formats,
         "validate_footers": body.validate_footers,
@@ -693,6 +695,8 @@ async def validate_csv_local_paths(
         "run_id": str(run_id) if run_id else None,
         "source_path": str(source_path),
         "target_path": str(target_path),
+        "file_format": body.file_format,
+        "fixed_width_config": body.fixed_width_config.model_dump() if body.fixed_width_config else None,
     }
     (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
 

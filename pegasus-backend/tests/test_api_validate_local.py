@@ -247,3 +247,75 @@ def test_browse_local_parent_navigation(monkeypatch: pytest.MonkeyPatch, tmp_pat
         r = client.get("/api/v1/validate/local/browse", params={"path": str(nested)})
         assert r.status_code == 200, r.text
         assert r.json()["parent_path"] == str(tmp_path.resolve())
+
+
+def test_validate_local_fixed_width_complete(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.txt"
+        tgt = tmp_path / "t.txt"
+        # Layout:
+        # Col 0-5: ID (Join Key)
+        # Col 5-13: Date (YYYYMMDD)
+        # Col 13-17: Integer (Quantity)
+        # Col 17-22: Text (Status)
+        src.write_text(
+            "USR01202401010042ACTIVE\n"
+            "USR02202401020100PENDING\n",
+            encoding="utf-8"
+        )
+        tgt.write_text(
+            "USR01202401010042ACTIVE\n" # Match
+            "USR02202401020099PAUSED \n", # Quantity Mismatch (100 vs 99), Status Mismatch (PENDING vs PAUSED)
+            encoding="utf-8"
+        )
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "file_format": "fixed-width",
+                "fixed_width_config": {
+                    "uid_column": "UserID",
+                    "uid_source_start": 0,
+                    "uid_source_end": 5,
+                    "uid_target_start": 0,
+                    "uid_target_end": 5,
+                    "fields": [
+                        {
+                            "field_name": "TxDate",
+                            "source_start": 5,
+                            "source_end": 13,
+                            "target_start": 5,
+                            "target_end": 13,
+                            "field_type": "date",
+                            "date_format": "%Y%m%d"
+                        },
+                        {
+                            "field_name": "Quantity",
+                            "source_start": 13,
+                            "source_end": 17,
+                            "target_start": 13,
+                            "target_end": 17,
+                            "field_type": "integer"
+                        },
+                        {
+                            "field_name": "Status",
+                            "source_start": 17,
+                            "source_end": 22,
+                            "target_start": 17,
+                            "target_end": 22,
+                            "field_type": "text"
+                        }
+                    ]
+                }
+            },
+        )
+        assert r.status_code == 202, r.text
+        body = _poll_completed(client, r.json()["poll_url"])
+        assert body["summary"]["source_row_count"] == 2
+        assert body["summary"]["target_row_count"] == 2
+        assert body["summary"]["compared_column_count"] == 3
+        assert set(body["compared_columns"]) == {"TxDate", "Quantity", "Status"}
+        assert body["mismatch_counts"]["value_mismatch"] == 2

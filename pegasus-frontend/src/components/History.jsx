@@ -361,7 +361,18 @@ export default function History({ onLoadMapping }) {
       // 1. Fetch the full detail of this saved validation run/mapping draft
       const detail = await fetchValidationHistoryDetail(row.run_id)
 
-      // 2. Fetch the current column headers from the server-local files
+      // 2. If it's a fixed-width run, bypass CSV column headers preview
+      if (detail.delimiter === 'fixed-width') {
+        onLoadMapping({
+          detail,
+          preview: null,
+          step: 3,
+          error: '',
+        })
+        return
+      }
+
+      // Fetch the current column headers from the server-local files
       let preview = null
       let previewError = ''
       try {
@@ -625,7 +636,13 @@ export default function History({ onLoadMapping }) {
                     </div>
                   </div>
                   <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-3)' }}>
-                    {row.mapping_count} mapping(s) · UID <code>{row.uid_column}</code>
+                    {row.delimiter === 'fixed-width' ? (
+                      <span style={{ color: 'var(--blue, #3b82f6)', fontWeight: 500 }}>Fixed-Width Date validation</span>
+                    ) : (
+                      <>
+                        {row.mapping_count} mapping(s) · UID <code>{row.uid_column}</code>
+                      </>
+                    )}
                   </p>
                 </div>
               ))}
@@ -721,8 +738,15 @@ export default function History({ onLoadMapping }) {
                         {basename(row.source_path || row.source_filename)}
                         <br />
                         <span style={{ color: 'var(--text-4)', fontSize: 11 }}>→ {basename(row.target_path || row.target_filename)}</span>
+                        {row.delimiter === 'fixed-width' && (
+                          <span style={{ display: 'block', fontSize: 10, color: 'var(--blue, #3b82f6)', fontWeight: 600, marginTop: 2 }}>
+                            Fixed-Width Format
+                          </span>
+                        )}
                       </td>
-                      <td style={{ padding: '8px' }}>{row.mapping_count}</td>
+                      <td style={{ padding: '8px' }}>
+                        {row.delimiter === 'fixed-width' ? 'Date slice' : row.mapping_count}
+                      </td>
                       <td style={{ padding: '8px' }}>{formatDuration(row.durations?.validation_seconds ?? row.durations?.total_seconds)}</td>
                       <td style={{ padding: '8px' }}><StatusBadge isMatch={row.is_match} status={row.status} /></td>
                       <td style={{ padding: '8px', textAlign: 'right' }}>

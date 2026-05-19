@@ -1,7 +1,8 @@
 const STEPS = [
-  { id: 1, label: 'Select Files',        desc: 'Source & target'    },
-  { id: 2, label: 'Configure Mapping',   desc: 'Map columns'        },
-  { id: 3, label: 'Review & Run',        desc: 'Validate or draft'  },
+  { id: 1, label: 'Select File Type',    desc: 'CSV or Fixed-Width' },
+  { id: 2, label: 'Select Files',        desc: 'Source & target'    },
+  { id: 3, label: 'Configure Mapping',   desc: 'Map layouts & bounds'},
+  { id: 4, label: 'Review & Run',        desc: 'Validate or draft'  },
 ]
 
 export default function StepIndicator({ currentStep }) {

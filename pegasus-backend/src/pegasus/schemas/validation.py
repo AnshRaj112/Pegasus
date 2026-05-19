@@ -83,13 +83,54 @@ class MismatchSampleGroups(BaseModel):
     value_mismatch: list[MismatchSampleRow] = Field(default_factory=list)
 
 
-class LocalPathValidateRequest(BaseModel):
-    """JSON body for POST /validate/local (server-side CSV paths)."""
+class FixedWidthField(BaseModel):
+    """Configuration for one mapped fixed-width field slice."""
 
-    source_path: str = Field(description="Absolute or user-home path to the expected / golden CSV on the server")
-    target_path: str = Field(description="Absolute or user-home path to the actual / candidate CSV on the server")
-    uid_column: str = Field(description="Column name to join on (must exist in both files)")
-    column_mappings: list["ColumnMapping"] = Field(
+    field_name: str = Field(description="Name of the field")
+    source_start: int = Field(ge=0, description="0-indexed start position in source line")
+    source_end: int = Field(ge=0, description="0-indexed end position in source line")
+    target_start: int = Field(ge=0, description="0-indexed start position in target line")
+    target_end: int = Field(ge=0, description="0-indexed end position in target line")
+    field_type: str = Field(default="text", description="Field type: text, integer, float, date")
+    date_format: str | None = Field(
+        default=None,
+        description="Optional strptime/friendly format if field_type is date (used for both sides when source/target formats omitted)",
+    )
+    source_date_format: str | None = Field(
+        default=None,
+        description="Source-side date format when field_type is date (overrides date_format)",
+    )
+    target_date_format: str | None = Field(
+        default=None,
+        description="Target-side date format when field_type is date (overrides date_format)",
+    )
+
+
+class FixedWidthConfig(BaseModel):
+    """Configuration for fixed-width validation."""
+
+    source_date_start: int | None = Field(default=None, ge=0, description="0-indexed start position of source date")
+    source_date_end: int | None = Field(default=None, ge=0, description="0-indexed end position of source date")
+    source_date_format: str | None = Field(default=None, description="Strptime format of source date")
+    target_date_start: int | None = Field(default=None, ge=0, description="0-indexed start position of target date")
+    target_date_end: int | None = Field(default=None, ge=0, description="0-indexed end position of target date")
+    target_date_format: str | None = Field(default=None, description="Strptime format of target date")
+
+    uid_column: str | None = Field(default=None, description="Join key column name")
+    uid_source_start: int | None = Field(default=None, ge=0, description="0-indexed start of source join key")
+    uid_source_end: int | None = Field(default=None, ge=0, description="0-indexed end of source join key")
+    uid_target_start: int | None = Field(default=None, ge=0, description="0-indexed start of target join key")
+    uid_target_end: int | None = Field(default=None, ge=0, description="0-indexed end of target join key")
+    fields: list[FixedWidthField] = Field(default_factory=list, description="List of fields to validate")
+
+
+class LocalPathValidateRequest(BaseModel):
+    """JSON body for POST /validate/local (server-side paths)."""
+
+    source_path: str = Field(description="Absolute or user-home path to the expected / golden file on the server")
+    target_path: str = Field(description="Absolute or user-home path to the actual / candidate file on the server")
+    uid_column: str = Field(default="line", description="Column name to join on (must exist in both CSV files, ignored for fixed-width)")
+    column_mappings: list[ColumnMapping] = Field(
         default_factory=list,
         description=(
             "Optional source->target column mappings used when header names differ. "
@@ -98,7 +139,7 @@ class LocalPathValidateRequest(BaseModel):
     )
     delimiter: str = Field(
         default="auto",
-        description="Field separator: auto, tab, or explicit delimiter (same rules as multipart /validate)",
+        description="Field separator: auto, tab, or explicit delimiter (ignored for fixed-width)",
     )
     validate_header_formats: bool = Field(
         default=False,
@@ -114,6 +155,8 @@ class LocalPathValidateRequest(BaseModel):
         le=10,
         description="Number of trailing physical rows to treat as footer when validate_footers is true.",
     )
+    file_format: str = Field(default="csv", description="File format type: 'csv' or 'fixed-width'")
+    fixed_width_config: FixedWidthConfig | None = Field(default=None, description="Detailed configuration when file_format is 'fixed-width'")
 
 
 class ColumnMapping(BaseModel):
