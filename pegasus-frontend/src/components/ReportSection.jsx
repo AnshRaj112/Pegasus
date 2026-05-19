@@ -185,7 +185,6 @@ export function ReportSection({ type, samples = [] }) {
   const [page, setPage] = useState(1)
   const firstRowRef = useRef(null)
   const style = variantStyles[type] ?? variantStyles.mismatched
-
   const totalPages = Math.max(1, Math.ceil(samples.length / PAGE_SIZE))
 
   useEffect(() => {

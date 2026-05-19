@@ -2,9 +2,10 @@ import { useState } from 'react'
 import Header         from './components/Header'
 import MappingWizard  from './components/mapping/MappingWizard'
 import History         from './components/History'
+import Dashboard       from './components/Dashboard'
 
 function App() {
-  const [activeSection, setActiveSection] = useState('mapping')
+  const [activeSection, setActiveSection] = useState('dashboard')
   const [initialMappingData, setInitialMappingData] = useState(null)
 
   const handleLoadMapping = (data) => {
@@ -31,6 +32,7 @@ function App() {
           />
         )}
         {activeSection === 'history' && <History onLoadMapping={handleLoadMapping} />}
+        {activeSection === 'dashboard' && <Dashboard />}
       </main>
     </div>
   )

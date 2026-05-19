@@ -1,4 +1,5 @@
 const NAV_ITEMS = [
+  { id: 'dashboard', label: 'Dashboard' },
   { id: 'mapping',  label: 'Mapping'  },
   { id: 'history',  label: 'History'  },
 ]
@@ -31,14 +32,13 @@ export default function Header({ activeSection, onSectionChange }) {
           <img
             src="/Pegasus.png"
             alt="Pegasus"
-            style={{ height: 44, width: 44, objectFit: 'contain', borderRadius: 8, transform: 'translateY(5px)', scale: '190%', marginLeft: 28 }}
+            style={{ height: 44, width: 44, objectFit: 'contain', borderRadius: 8, transform: 'translateY(3px)', scale: '250%', marginLeft: 38 }}
           />
         </div>
 
-        <div style={{ display: 'flex', height: 78, alignItems: 'center', gap: 24, paddingLeft: 156 }}>
+        <div style={{ display: 'flex', height: 78, alignItems: 'center', gap: 24, paddingLeft: 170 }}>
           {/* Divider */}
           <div style={{ width: 1, height: 18, background: 'var(--border-2)', flexShrink: 0, marginLeft: 55 }} />
-
           {/* Navigation tabs */}
           <nav style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 0 }}>
             {NAV_ITEMS.map(({ id, label }) => {
@@ -74,32 +74,18 @@ export default function Header({ activeSection, onSectionChange }) {
               )
             })}
           </nav>
-
-          {/* Spacer + right slot */}
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{
-              fontSize: 11,
-              fontWeight: 500,
-              color: 'var(--text-4)',
-              letterSpacing: '0.04em',
-            }}>
-              {/* v0.1.0-alpha */}
-            </span>
-          </div>
         </div>
 
         {/* Right: profile area */}
         <div style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginRight: 0 }}>
-            
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginRight: 0 }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
               <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)', margin: 0 }}>Super User</span>
               <span style={{ fontSize: 12, color: 'var(--text-3)', margin: 0 }}>Admin</span>
             </div>
-            <img src="./photo.jpg" alt="Profile" style={{ width: 48, height: 48, borderRadius: 9999, objectFit: 'cover', border: '1px solid var(--border-2)'}} />
+            <img src="./photo.jpg" alt="Profile" style={{ width: 48, height: 48, borderRadius: 9999, objectFit: 'cover', scale: '120%' }} />
           </div>
         </div>
-
       </div>
     </header>
   )
