@@ -126,7 +126,7 @@ export default function Step2_FilePicker({ panelLabel, value, onSelect, onBack, 
               <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
                 <path d="M5.5 8.5v-6M2 5L5.5 1.5 9 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-              Up
+              Back
             </button>
           )}
           <button
@@ -208,7 +208,7 @@ export default function Step2_FilePicker({ panelLabel, value, onSelect, onBack, 
                   <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ color: 'var(--text-3)', flexShrink: 0 }}>
                     <path d="M1 2.5a.5.5 0 01.5-.5h3.2l1 1H12a.5.5 0 01.5.5v7a.5.5 0 01-.5.5H1.5a.5.5 0 01-.5-.5V2.5z" stroke="currentColor" strokeWidth="1.2" fill="currentColor" fillOpacity="0.1"/>
                   </svg>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+                  <span style={{ whiteSpace: 'normal', wordBreak: 'break-word', textAlign: 'left', lineHeight: 1.2 }}>{f.name}</span>
                   <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--text-4)' }}>
                     <path d="M3 1l4 4-4 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
@@ -230,7 +230,7 @@ export default function Step2_FilePicker({ panelLabel, value, onSelect, onBack, 
               <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)' }}>
                 Files
               </span>
-              <code style={{ marginLeft: 4, fontSize: 10, color: 'var(--text-4)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <code style={{ marginLeft: 4, fontSize: 10, color: 'var(--text-4)', maxWidth: '100%', whiteSpace: 'normal', wordBreak: 'break-all' }}>
                 {listedDir}
               </code>
               <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-4)', fontFamily: 'Geist Mono, monospace' }}>
@@ -315,8 +315,8 @@ export default function Step2_FilePicker({ panelLabel, value, onSelect, onBack, 
                         <span style={{
                           fontSize: 11, fontFamily: 'Geist Mono, monospace',
                           color: selected ? 'var(--accent)' : 'var(--text-2)',
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                           width: '100%', textAlign: 'center',
+                          whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.25,
                         }} title={f.name}>
                           {f.name}
                         </span>
