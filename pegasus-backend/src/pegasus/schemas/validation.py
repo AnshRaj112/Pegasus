@@ -232,6 +232,14 @@ class LocalBrowseRootsResponse(BaseModel):
     roots: list[LocalBrowseRootInfo] = Field(default_factory=list)
 
 
+class ValidationDurations(BaseModel):
+    """Upload, validation, and total wall-clock seconds for a completed job."""
+
+    upload_seconds: float | None = Field(default=None, ge=0)
+    validation_seconds: float | None = Field(default=None, ge=0)
+    total_seconds: float | None = Field(default=None, ge=0)
+
+
 class ValidateResponse(BaseModel):
     """Response body for POST /validate."""
 
@@ -271,6 +279,10 @@ class ValidateResponse(BaseModel):
     footer_validation: FooterValidationResult | None = Field(
         default=None,
         description="Present when validate_footers was true on the request.",
+    )
+    durations: ValidationDurations | None = Field(
+        default=None,
+        description="Wall-clock timings when available from the validation worker.",
     )
 
 

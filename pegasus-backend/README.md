@@ -6,8 +6,7 @@ A FastAPI-based data validation engine that compares CSV files and generates det
 
 - **Python**: 3.12 or higher
 - **pip**: Package manager for Python
-- **PostgreSQL**: 13.0 or higher (for production database)
-- **SQLite**: 3.0 or higher (for development/testing)
+- **PostgreSQL**: 13.0 or higher (primary database)
 
 Verify your Python installation:
 ```bash
@@ -54,8 +53,8 @@ pip install -r requirements-dev.txt
 The backend uses environment variables for configuration. Create a `.env` file in the `pegasus-backend/` directory:
 
 ```bash
-# Database
-DATABASE_URL=sqlite:///./pegasus.db
+# Database connection settings
+PEGASUS_DATABASE_URL=postgresql+asyncpg://postgres:your_secure_password@localhost:5432/pegasus_db
 
 # API
 API_TITLE=Pegasus API
@@ -64,12 +63,6 @@ LOG_LEVEL=INFO
 
 # CORS (for connecting with frontend)
 ALLOWED_ORIGINS=["http://localhost:5173"]
-```
-
-For production, use a PostgreSQL connection string:
-```
-DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/pegasus
-```
 
 ## Running the Project
 
@@ -104,6 +97,21 @@ Apply all pending migrations:
 ```bash
 alembic upgrade head
 ```
+
+> [!IMPORTANT]
+> **Custom Schema Setup (e.g. PostgreSQL with `DB_SCHEMA`):**
+> If you are using PostgreSQL and have configured a custom schema (such as `DB_SCHEMA=Pegasus` in your `.env` file), you **must** ensure that the custom schema exists in your PostgreSQL database before running the migrations.
+> 
+> You can create it by connecting to your database and running:
+> ```sql
+> CREATE SCHEMA "Pegasus";
+> ```
+> 
+> **Troubleshooting `UndefinedTableError`:**
+> If the application fails to start or throws `ProgrammingError: relation "validation_runs" does not exist` when trying to save a validation run, check that:
+> 1. You have successfully run `alembic upgrade head` within your virtual environment.
+> 2. If using a custom schema, the schema (e.g. `Pegasus`) exists in the database.
+> 3. Your database user has sufficient privileges to access and modify the schema.
 
 ### Create a New Migration
 
@@ -540,7 +548,7 @@ docker build -t pegasus-backend .
 
 Run the container:
 ```bash
-docker run -p 8000:8000 -e DATABASE_URL=sqlite:///./pegasus.db pegasus-backend
+docker run -p 8000:8000 -e PEGASUS_DATABASE_URL=postgresql+asyncpg://postgres:your_secure_password@10.200.104.98:5432/postgres pegasus-backend
 ```
 
 ## Tech Stack
@@ -556,7 +564,7 @@ docker run -p 8000:8000 -e DATABASE_URL=sqlite:///./pegasus.db pegasus-backend
 ## Troubleshooting
 
 ### Database Connection Issues
-- Ensure PostgreSQL/SQLite is running
+- Ensure PostgreSQL is running
 - Check `DATABASE_URL` in `.env` file
 - Run migrations: `alembic upgrade head`
 

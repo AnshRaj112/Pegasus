@@ -8,12 +8,25 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from pegasus.core.config import get_settings
 from pegasus.main import create_app
+from pegasus.services.validation_job_queue import reset_validation_queue
+
+
+@pytest.fixture(autouse=True)
+def _clear_settings_cache_each_test() -> None:
+    """Isolate env/monkeypatch changes from ``get_settings`` lru_cache across tests."""
+    get_settings.cache_clear()
+    reset_validation_queue()
+    yield
+    get_settings.cache_clear()
+    reset_validation_queue()
 
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(create_app())
+    with TestClient(create_app()) as c:
+        yield c
 
 
 def _poll_completed(client: TestClient, poll_url: str, *, timeout_sec: float = 30.0) -> dict:
@@ -58,7 +71,11 @@ def test_validate_happy_path(client: TestClient) -> None:
     assert body["mismatch_counts"]["value_mismatch"] >= 1
     assert len(body["mismatch_sample_groups"]["value_mismatch"]) >= 1
     assert "name" in body["compared_columns"]
-    assert body.get("run_id") is None
+    from pegasus.core.config import get_settings
+    if get_settings().enable_validation_persistence:
+        assert body.get("run_id") is not None
+    else:
+        assert body.get("run_id") is None
 
 
 def test_validate_missing_uid_column(client: TestClient) -> None:
