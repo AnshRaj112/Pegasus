@@ -96,9 +96,10 @@ function FixedWidthConfigurator({
           Configure Fixed-Width Date Validation
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-3)', maxWidth: 760 }}>
-          Each line is one raw text record (not CSV columns). Set 0-indexed start/end positions for the date slice on each side.
-          Formats can differ (e.g. source <code style={{ fontFamily: 'monospace' }}>%Y%m%d</code>, target <code style={{ fontFamily: 'monospace' }}>%Y-%m-%d</code>);
-          rows match when the calendar date is the same. If your files have headers like Name, Email, DOB, use CSV validation instead.
+          Each line is one raw text record (not CSV columns). Set 0-indexed start/end positions for the date field only
+          (for example DOB at characters 58–68 in the sample layout). Formats can differ
+          (e.g. source <code style={{ fontFamily: 'monospace' }}>dd/mm/yyyy</code>, target <code style={{ fontFamily: 'monospace' }}>yyyy/mm/dd</code>);
+          rows match when the calendar date is the same. If your files have a header row and comma-separated columns, use CSV validation instead.
         </p>
       </div>
 
@@ -253,12 +254,12 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [sourcePath, setSourcePath] = useState('')
   const [targetPath, setTargetPath] = useState('')
   const [fileFormat, setFileFormat] = useState('csv')
-  const [sourceDateStart, setSourceDateStart] = useState(0)
-  const [sourceDateEnd, setSourceDateEnd] = useState(10)
-  const [sourceDateFormat, setSourceDateFormat] = useState('%Y%m%d')
-  const [targetDateStart, setTargetDateStart] = useState(0)
-  const [targetDateEnd, setTargetDateEnd] = useState(10)
-  const [targetDateFormat, setTargetDateFormat] = useState('%Y-%m-%d')
+  const [sourceDateStart, setSourceDateStart] = useState(58)
+  const [sourceDateEnd, setSourceDateEnd] = useState(68)
+  const [sourceDateFormat, setSourceDateFormat] = useState('dd/mm/yyyy')
+  const [targetDateStart, setTargetDateStart] = useState(58)
+  const [targetDateEnd, setTargetDateEnd] = useState(68)
+  const [targetDateFormat, setTargetDateFormat] = useState('yyyy/mm/dd')
   const [mappings, setMappings]   = useState([])
   const [uidColumn, setUidColumn] = useState('id')
   const [delimiter, setDelimiter] = useState('auto')
@@ -315,12 +316,12 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       setFileFormat('fixed-width')
       const saved = detail.column_mappings || []
       const getVal = (name) => saved.find(m => m.source_column === name)?.target_column || ''
-      setSourceDateStart(Number(getVal('source_date_start')) || 0)
-      setSourceDateEnd(Number(getVal('source_date_end')) || 10)
-      setSourceDateFormat(getVal('source_date_format') || '%Y%m%d')
-      setTargetDateStart(Number(getVal('target_date_start')) || 0)
-      setTargetDateEnd(Number(getVal('target_date_end')) || 10)
-      setTargetDateFormat(getVal('target_date_format') || '%Y-%m-%d')
+      setSourceDateStart(Number(getVal('source_date_start')) || 58)
+      setSourceDateEnd(Number(getVal('source_date_end')) || 68)
+      setSourceDateFormat(getVal('source_date_format') || 'dd/mm/yyyy')
+      setTargetDateStart(Number(getVal('target_date_start')) || 58)
+      setTargetDateEnd(Number(getVal('target_date_end')) || 68)
+      setTargetDateFormat(getVal('target_date_format') || 'yyyy/mm/dd')
     } else {
       setFileFormat('csv')
       setUidColumn(detail.uid_column || 'id')
@@ -510,6 +511,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         source_path: sourcePath.trim(),
         target_path: targetPath.trim(),
         file_format: 'fixed-width',
+        delimiter: 'fixed',
         fixed_width_config: {
           source_date_start: sourceDateStart,
           source_date_end: sourceDateEnd,
@@ -517,7 +519,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           target_date_start: targetDateStart,
           target_date_end: targetDateEnd,
           target_date_format: targetDateFormat.trim(),
-        }
+        },
       } : {
         source_path: sourcePath.trim(),
         target_path: targetPath.trim(),
@@ -1102,8 +1104,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                   <StatCard label="Match" value={result.summary?.is_match ? 'Yes' : 'No'} accent={result.summary?.is_match ? 'var(--success)' : 'var(--danger)'} />
-                  <StatCard label="Source rows" value={result.summary?.source_row_count ?? '—'} />
-                  <StatCard label="Target rows" value={result.summary?.target_row_count ?? '—'} />
+                  <StatCard label={fileFormat === 'fixed-width' ? 'Lines compared' : 'Source rows'} value={result.summary?.source_row_count ?? '—'} />
+                  <StatCard label={fileFormat === 'fixed-width' ? 'Target lines' : 'Target rows'} value={result.summary?.target_row_count ?? '—'} />
                   <StatCard label="Mismatches" value={result.summary?.total_mismatch_records ?? '—'} accent={result.summary?.total_mismatch_records > 0 ? 'var(--danger)' : undefined} />
                 </div>
                 <button

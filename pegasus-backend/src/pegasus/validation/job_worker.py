@@ -145,14 +145,22 @@ def run_job_directory(job_dir: Path) -> int:
                 },
             )
 
-        file_format = str(meta.get("file_format") or "csv")
-        fixed_width_config = meta.get("fixed_width_config")
+        from pegasus.validation.fixed_width_meta import resolve_fixed_width_config
+
+        fixed_width_config = resolve_fixed_width_config(
+            file_format=str(meta.get("file_format") or "csv"),
+            delimiter=str(meta.get("delimiter") or ""),
+            fixed_width_config=meta.get("fixed_width_config")
+            if isinstance(meta.get("fixed_width_config"), dict)
+            else None,
+            column_mappings=list(meta.get("column_mappings") or []),
+        )
 
         resource_policy = meta.get("resource_policy")
         if resource_policy is not None and not isinstance(resource_policy, dict):
             resource_policy = None
 
-        if file_format == "fixed-width" and isinstance(fixed_width_config, dict):
+        if fixed_width_config is not None:
             _write_json(
                 status_path,
                 {

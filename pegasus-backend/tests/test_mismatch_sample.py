@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json
+
 import polars as pl
 import pytest
 
 from pegasus.api.v1.mismatch_sample import (
     allocate_category_sample_limits,
     build_stratified_mismatch_sample,
+    load_value_mismatch_sample_from_ndjson,
     value_mismatch_counts_by_column,
+    value_mismatch_counts_by_column_ndjson,
 )
 from pegasus.validation.comparators.models import MismatchType
 
@@ -74,6 +78,51 @@ def test_allocate_reserves_at_least_one_row_per_nonempty_category_when_budget_al
     m, e, v = allocate_category_sample_limits(40, 40, 42, 100)
     assert m >= 1 and e >= 1 and v >= 1
     assert m + e + v == 100
+
+
+def test_load_value_mismatch_sample_reads_all_logical_rows(tmp_path) -> None:
+    """Regression: head(n_val) must not stop after duplicate NDJSON rows for one line."""
+    path = tmp_path / "mismatches.ndjson"
+    rows = []
+    for line_no in (1, 2, 3):
+        for _ in range(2):
+            rows.append(
+                {
+                    "uid": f"Line {line_no}",
+                    "mismatch_type": MismatchType.VALUE_MISMATCH.value,
+                    "column_name": "date",
+                    "source_value": "a",
+                    "target_value": "b",
+                    "row_detail": "{}",
+                }
+            )
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    out = load_value_mismatch_sample_from_ndjson(path, n_val=3, value_sample_limit=100)
+    assert out.height == 3
+    assert set(out["uid"].to_list()) == {"Line 1", "Line 2", "Line 3"}
+
+
+def test_value_mismatch_counts_by_column_ndjson_dedupes(tmp_path) -> None:
+    path = tmp_path / "mismatches.ndjson"
+    path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "uid": "Line 1",
+                    "mismatch_type": MismatchType.VALUE_MISMATCH.value,
+                    "column_name": "date",
+                    "source_value": "x",
+                    "target_value": "y",
+                    "row_detail": "{}",
+                }
+            )
+            for _ in range(2)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert value_mismatch_counts_by_column_ndjson(path) == {"date": 1}
 
 
 def test_value_mismatch_counts_by_column() -> None:

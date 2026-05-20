@@ -46,6 +46,7 @@ from pegasus.services.exceptions import ValidationBadRequestError
 from pegasus.services.validation_service import ValidationRunDurations, ValidationRunResult
 from pegasus.validation.comparators.models import MismatchReport, MismatchType, empty_mismatch_frame
 from pegasus.validation.delimiter_tokens import FIXED_WIDTH_DELIMITER, normalize_delimiter_for_storage
+from pegasus.validation.fixed_width_meta import coerce_local_validate_fields, is_fixed_width_run
 
 from .mismatch_sample import (
     build_grouped_mismatch_samples,
@@ -653,6 +654,20 @@ async def validate_csv_local_paths(
     source_path = resolve_local_csv_path(body.source_path, settings)
     target_path = resolve_local_csv_path(body.target_path, settings)
 
+    file_format, delimiter, fixed_width_config_dict = coerce_local_validate_fields(
+        file_format=body.file_format,
+        delimiter=body.delimiter,
+        fixed_width_config=body.fixed_width_config.model_dump()
+        if body.fixed_width_config is not None
+        else None,
+        column_mappings=[m.model_dump() for m in body.column_mappings],
+    )
+    if is_fixed_width_run(file_format=file_format, delimiter=delimiter) and not fixed_width_config_dict:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="fixed_width_config is required for fixed-width validation (date slice positions and formats)",
+        )
+
     job_id = uuid.uuid4()
     jobs_root = _validation_jobs_root(settings)
     job_dir = jobs_root / str(job_id)
@@ -661,11 +676,11 @@ async def validate_csv_local_paths(
     run_id: uuid.UUID | None = None
     if settings.enable_validation_persistence:
         try:
-            run_uid_column = "date" if body.file_format == "fixed-width" else body.uid_column.strip()
+            run_uid_column = "date" if is_fixed_width_run(file_format=file_format, delimiter=delimiter) else body.uid_column.strip()
             run_delimiter = (
                 FIXED_WIDTH_DELIMITER
-                if body.file_format == "fixed-width"
-                else normalize_delimiter_for_storage(body.delimiter)
+                if is_fixed_width_run(file_format=file_format, delimiter=delimiter)
+                else normalize_delimiter_for_storage(delimiter)
             )
             async with AsyncSessionLocal() as session:
                 run_orm = await ValidationRunRepository.create_running(
@@ -690,9 +705,11 @@ async def validate_csv_local_paths(
             ) from exc
 
     meta = {
-        "uid_column": "date" if body.file_format == "fixed-width" else body.uid_column.strip(),
+        "uid_column": "date" if is_fixed_width_run(file_format=file_format, delimiter=delimiter) else body.uid_column.strip(),
         "delimiter": (
-            FIXED_WIDTH_DELIMITER if body.file_format == "fixed-width" else body.delimiter
+            FIXED_WIDTH_DELIMITER
+            if is_fixed_width_run(file_format=file_format, delimiter=delimiter)
+            else delimiter
         ),
         "column_mappings": [m.model_dump() for m in body.column_mappings],
         "validate_header_formats": body.validate_header_formats,
@@ -702,8 +719,8 @@ async def validate_csv_local_paths(
         "run_id": str(run_id) if run_id else None,
         "source_path": str(source_path),
         "target_path": str(target_path),
-        "file_format": body.file_format,
-        "fixed_width_config": body.fixed_width_config.model_dump() if body.fixed_width_config else None,
+        "file_format": file_format,
+        "fixed_width_config": fixed_width_config_dict,
     }
     (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
 

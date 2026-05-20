@@ -102,3 +102,73 @@ def test_validate_local_fixed_width_different_date_formats(
         assert body["mismatch_counts"]["value_mismatch"] == 1
         assert body["mismatch_counts"]["missing_in_target"] == 0
         assert body["mismatch_counts"]["extra_in_target"] == 0
+
+
+def test_validate_local_fixed_width_dob_slice_cross_formats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sample script layout: DOB at 58:68, DD/MM/YYYY vs YYYY/MM/DD should match."""
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    repo_root = Path(__file__).resolve().parents[2]
+    src = repo_root / "scripts" / "source_data.txt"
+    tgt = repo_root / "scripts" / "target_data.txt"
+    if not src.is_file() or not tgt.is_file():
+        pytest.skip("scripts/source_data.txt and scripts/target_data.txt not present")
+
+    with TestClient(create_app()) as client:
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src.resolve()),
+                "target_path": str(tgt.resolve()),
+                "delimiter": "fixed",
+                "fixed_width_config": {
+                    "source_date_start": 58,
+                    "source_date_end": 68,
+                    "source_date_format": "dd/mm/yyyy",
+                    "target_date_start": 58,
+                    "target_date_end": 68,
+                    "target_date_format": "yyyy/mm/dd",
+                },
+            },
+        )
+        assert r.status_code == 202, r.text
+        body = _poll_completed(client, r.json()["poll_url"])
+        assert body["summary"]["is_match"] is True
+        assert body["mismatch_counts"]["value_mismatch"] == 0
+
+
+def test_validate_local_fixed_width_routes_via_delimiter_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Jobs with delimiter=fixed and draft column_mappings must not fall back to CSV."""
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    line = "00001   Alice Smith         alice@example.com             10/06/2026\n"
+    src = tmp_path / "source.txt"
+    tgt = tmp_path / "target.txt"
+    src.write_text(line, encoding="utf-8")
+    tgt.write_text(line.replace("10/06/2026", "2026/06/10"), encoding="utf-8")
+
+    with TestClient(create_app()) as client:
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "delimiter": "fixed-width",
+                "column_mappings": [
+                    {"source_column": "source_date_start", "target_column": "58"},
+                    {"source_column": "source_date_end", "target_column": "68"},
+                    {"source_column": "source_date_format", "target_column": "dd/mm/yyyy"},
+                    {"source_column": "target_date_start", "target_column": "58"},
+                    {"source_column": "target_date_end", "target_column": "68"},
+                    {"source_column": "target_date_format", "target_column": "yyyy/mm/dd"},
+                ],
+            },
+        )
+        assert r.status_code == 202, r.text
+        body = _poll_completed(client, r.json()["poll_url"])
+        assert body["summary"]["is_match"] is True

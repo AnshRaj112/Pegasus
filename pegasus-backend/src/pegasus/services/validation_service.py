@@ -697,6 +697,21 @@ class ValidationService:
         fields = fixed_width_config.get("fields", [])
         has_fields = len(fields) > 0
 
+        if not has_fields:
+            src_start_check = int(fixed_width_config.get("source_date_start", 0))
+            src_end_check = int(fixed_width_config.get("source_date_end", 0))
+            tgt_start_check = int(fixed_width_config.get("target_date_start", 0))
+            tgt_end_check = int(fixed_width_config.get("target_date_end", 0))
+            if src_end_check <= src_start_check or tgt_end_check <= tgt_start_check:
+                raise ValidationBadRequestError(
+                    "fixed_width_config must define non-empty date slice positions "
+                    "(source_date_end > source_date_start and target_date_end > target_date_start)"
+                )
+            if not str(fixed_width_config.get("source_date_format") or "").strip():
+                raise ValidationBadRequestError("fixed_width_config.source_date_format is required")
+            if not str(fixed_width_config.get("target_date_format") or "").strip():
+                raise ValidationBadRequestError("fixed_width_config.target_date_format is required")
+
         # Slicing parameters for single-date fallback mode
         src_start = int(fixed_width_config.get("source_date_start", 0)) if not has_fields else 0
         src_end = int(fixed_width_config.get("source_date_end", 0)) if not has_fields else 0
@@ -738,6 +753,9 @@ class ValidationService:
         if artifact_path is not None:
             log_fp = open(artifact_path, "w", encoding="utf-8")
 
+        def _row_detail_json(payload: dict[str, Any]) -> str:
+            return json.dumps(payload, default=str)
+
         def safe_cast(value_str: str, f_type: str, d_format: str | None) -> tuple[Any, str | None]:
             v = value_str.strip()
             if not v:
@@ -760,8 +778,16 @@ class ValidationService:
                  open(target_path, "r", encoding="utf-8", buffering=buffer_size) as tgt_file:
                       
                 for line_idx, (src_line, tgt_line) in enumerate(zip_longest(src_file, tgt_file), start=1):
+                    if (
+                        src_line is not None
+                        and tgt_line is not None
+                        and not src_line.strip()
+                        and not tgt_line.strip()
+                    ):
+                        continue
+
                     total_rows += 1
-                    
+
                     if progress_callback is not None and line_idx % 1_000_000 == 0:
                         progress_callback({
                             "phase": "validating",
@@ -780,7 +806,11 @@ class ValidationService:
                                 "column_name": uid_col,
                                 "source_value": src_line.rstrip()[:100],
                                 "target_value": None,
-                                "row_detail": {"error": "Target file reached EOF early", "source_line": src_line.rstrip()}
+                                "row_detail": _row_detail_json({
+                                    "error": "Target file reached EOF early",
+                                    "source_line": src_line.rstrip(),
+                                    "source_record": {"line": src_line.rstrip()[:200]},
+                                }),
                             }) + "\n")
                         continue
 
@@ -794,7 +824,11 @@ class ValidationService:
                                 "column_name": uid_col,
                                 "source_value": None,
                                 "target_value": tgt_line.rstrip()[:100],
-                                "row_detail": {"error": "Source file reached EOF early", "target_line": tgt_line.rstrip()}
+                                "row_detail": _row_detail_json({
+                                    "error": "Source file reached EOF early",
+                                    "target_line": tgt_line.rstrip(),
+                                    "target_record": {"line": tgt_line.rstrip()[:200]},
+                                }),
                             }) + "\n")
                         continue
 
@@ -843,11 +877,13 @@ class ValidationService:
                                         "column_name": f_name,
                                         "source_value": src_raw.strip(),
                                         "target_value": tgt_raw.strip(),
-                                        "row_detail": {
+                                        "row_detail": _row_detail_json({
                                             "error": err_msg or "Value mismatch",
                                             "source_line": src_line.rstrip()[:200],
-                                            "target_line": tgt_line.rstrip()[:200]
-                                        }
+                                            "target_line": tgt_line.rstrip()[:200],
+                                            "source_record": {f_name: src_raw.strip()},
+                                            "target_record": {f_name: tgt_raw.strip()},
+                                        }),
                                     }) + "\n")
                     else:
                         # Fallback mode: single date validation
@@ -856,57 +892,61 @@ class ValidationService:
 
                         src_date = None
                         tgt_date = None
-                        parse_failed = False
+                        src_err: str | None = None
+                        tgt_err: str | None = None
 
                         try:
                             src_date = parse_fixed_width_date(src_raw, src_format)
-                        except ValueError as e:
-                            parse_failed = True
-                            mismatches += 1
-                            if log_fp is not None:
-                                log_fp.write(json.dumps({
-                                    "uid": f"Line {line_idx}",
-                                    "mismatch_type": "value_mismatch",
-                                    "column_name": "date",
-                                    "source_value": src_raw,
-                                    "target_value": tgt_raw,
-                                    "row_detail": {"error": f"Source date parse failed: {e}", "source_line": src_line.rstrip()[:200]}
-                                }) + "\n")
+                        except ValueError as exc:
+                            src_err = str(exc)
 
                         try:
                             tgt_date = parse_fixed_width_date(tgt_raw, tgt_format)
-                        except ValueError as e:
-                            if not parse_failed:
-                                mismatches += 1
-                            parse_failed = True
+                        except ValueError as exc:
+                            tgt_err = str(exc)
+
+                        if src_err or tgt_err:
+                            mismatches += 1
+                            value_mismatch += 1
+                            if log_fp is not None:
+                                err_parts = []
+                                if src_err:
+                                    err_parts.append(f"Source: {src_err}")
+                                if tgt_err:
+                                    err_parts.append(f"Target: {tgt_err}")
+                                log_fp.write(json.dumps({
+                                    "uid": f"Line {line_idx}",
+                                    "mismatch_type": "value_mismatch",
+                                    "column_name": "date",
+                                    "source_value": src_raw.strip(),
+                                    "target_value": tgt_raw.strip(),
+                                    "row_detail": _row_detail_json({
+                                        "error": "; ".join(err_parts),
+                                        "source_line": src_line.rstrip()[:200],
+                                        "target_line": tgt_line.rstrip()[:200],
+                                        "source_record": {"date": src_raw.strip()},
+                                        "target_record": {"date": tgt_raw.strip()},
+                                    }),
+                                }) + "\n")
+                        elif src_date != tgt_date:
+                            mismatches += 1
+                            value_mismatch += 1
                             if log_fp is not None:
                                 log_fp.write(json.dumps({
                                     "uid": f"Line {line_idx}",
                                     "mismatch_type": "value_mismatch",
                                     "column_name": "date",
-                                    "source_value": src_raw,
-                                    "target_value": tgt_raw,
-                                    "row_detail": {"error": f"Target date parse failed: {e}", "target_line": tgt_line.rstrip()[:200]}
+                                    "source_value": src_raw.strip(),
+                                    "target_value": tgt_raw.strip(),
+                                    "row_detail": _row_detail_json({
+                                        "source_date": str(src_date),
+                                        "target_date": str(tgt_date),
+                                        "source_line": src_line.rstrip()[:200],
+                                        "target_line": tgt_line.rstrip()[:200],
+                                        "source_record": {"date": src_raw.strip(), "parsed_date": str(src_date)},
+                                        "target_record": {"date": tgt_raw.strip(), "parsed_date": str(tgt_date)},
+                                    }),
                                 }) + "\n")
-
-                        if not parse_failed:
-                            if src_date != tgt_date:
-                                mismatches += 1
-                                value_mismatch += 1
-                                if log_fp is not None:
-                                    log_fp.write(json.dumps({
-                                        "uid": f"Line {line_idx}",
-                                        "mismatch_type": "value_mismatch",
-                                        "column_name": "date",
-                                        "source_value": src_raw,
-                                        "target_value": tgt_raw,
-                                        "row_detail": {
-                                            "source_date": str(src_date),
-                                            "target_date": str(tgt_date),
-                                            "source_line": src_line.rstrip()[:200],
-                                            "target_line": tgt_line.rstrip()[:200]
-                                        }
-                                    }) + "\n")
         finally:
             if log_fp is not None:
                 log_fp.close()
@@ -915,7 +955,7 @@ class ValidationService:
         summary = {
             "missing_in_target": missing_in_target,
             "extra_in_target": missing_in_source,
-            "value_mismatch": value_mismatch + (mismatches - missing_in_target - missing_in_source - value_mismatch),
+            "value_mismatch": value_mismatch,
         }
         report = MismatchReport(
             mismatches=pl.DataFrame(),

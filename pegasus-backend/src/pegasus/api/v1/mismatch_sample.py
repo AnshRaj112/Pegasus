@@ -38,6 +38,7 @@ def value_mismatch_counts_by_column_ndjson(
     """Stream a mismatch NDJSON file and aggregate value_mismatch rows by column (bounded scan)."""
     counts: dict[str, int] = {}
     vm_seen = 0
+    seen_keys: set[tuple[str, str]] = set()
     with path.open(encoding="utf-8") as fp:
         for line in fp:
             line = line.strip()
@@ -49,10 +50,15 @@ def value_mismatch_counts_by_column_ndjson(
                 continue
             if obj.get("mismatch_type") != MismatchType.VALUE_MISMATCH.value:
                 continue
+            uid = str(obj.get("uid") or "")
+            col = obj.get("column_name")
+            dedupe_key = (uid, str(col) if col not in (None, "") else "(unknown)")
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
             vm_seen += 1
             if max_rows is not None and max_rows > 0 and vm_seen > max_rows:
                 return {}
-            col = obj.get("column_name")
             key = str(col) if col not in (None, "") else "(unknown)"
             counts[key] = counts.get(key, 0) + 1
     return counts
@@ -170,6 +176,13 @@ def _empty_sample_frame(mismatches: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame(schema=mismatches.schema)
 
 
+def dedupe_value_mismatch_rows(vm: pl.DataFrame) -> pl.DataFrame:
+    """Collapse duplicate artifact rows for the same UID/column (legacy double-logging)."""
+    if vm.height <= 1:
+        return vm
+    return vm.unique(subset=["uid", "column_name", "mismatch_type"], keep="first")
+
+
 def load_value_mismatch_sample_from_ndjson(
     path: Path,
     *,
@@ -180,13 +193,15 @@ def load_value_mismatch_sample_from_ndjson(
     lv = min(n_val, value_sample_limit) if value_sample_limit > 0 else 0
     if lv <= 0:
         return empty_mismatch_frame()
-    vm_cap = min(n_val, max(value_sample_limit * 64, 2048))
+    # Read enough NDJSON rows to cover all logical mismatches (artifact may over-count).
+    read_cap = max(value_sample_limit * 64, 2048, n_val)
     vm_partial = (
         pl.scan_ndjson(str(path), schema=MISMATCH_REPORT_SCHEMA)
         .filter(pl.col("mismatch_type") == pl.lit(MismatchType.VALUE_MISMATCH.value))
-        .head(vm_cap)
+        .head(read_cap)
         .collect()
     )
+    vm_partial = dedupe_value_mismatch_rows(vm_partial)
     return stratified_value_mismatch_sample(vm_partial, lv)
 
 
