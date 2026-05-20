@@ -34,10 +34,29 @@ const generateMockData = (days) => {
   return data
 }
 
+// Generate hourly mock data for the past N hours (useful for "Past 24 Hours")
+const generateHourlyMockData = (hours) => {
+  const data = []
+  let now = dayjs()
+  for (let i = hours - 1; i >= 0; i--) {
+    const passed = Math.floor(Math.random() * 10) + 1
+    const failed = Math.floor(Math.random() * 4)
+    data.push({
+      date: now.subtract(i, 'hour').format('HH:mm'),
+      fullDate: now.subtract(i, 'hour').format('YYYY-MM-DDTHH:mm:ss'),
+      passed,
+      failed,
+      total: passed + failed
+    })
+  }
+  return data
+}
+
 const mockDataWeekly = generateMockData(7)
 const mockDataMonthly = generateMockData(30)
 // For custom we just slice from monthly or generate more
 const mockDataCustom = generateMockData(14)
+const mockDataDaily = generateHourlyMockData(24)
 
 export default function Dashboard() {
   const [filterType, setFilterType] = useState('weekly')
@@ -48,6 +67,7 @@ export default function Dashboard() {
     if (filterType === 'weekly') return mockDataWeekly
     if (filterType === 'monthly') return mockDataMonthly
     if (filterType === 'custom') return mockDataCustom // In a real app, filter based on dateRange
+    if (filterType === 'daily') return mockDataDaily
     return mockDataWeekly
   }, [filterType, dateRange])
 
@@ -89,7 +109,6 @@ export default function Dashboard() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, animation: 'fade-in 0.3s ease-out' }}>
-      
       {/* Header and Filter */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
         <div>
@@ -110,6 +129,7 @@ export default function Dashboard() {
             }}
             style={{ width: 120 }}
             options={[
+              { value: 'daily', label: 'Past 24 Hours' },
               { value: 'weekly', label: 'Last 7 Days' },
               { value: 'monthly', label: 'Last 30 Days' },
               { value: 'custom', label: 'Custom Range' },
@@ -126,7 +146,6 @@ export default function Dashboard() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 24, alignItems: 'start' }}>
-        
         {/* Main Chart Area */}
         <div className="card" style={{ padding: 24, height: 480, display: 'flex', flexDirection: 'column' }}>
           <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-1)', marginBottom: 24, margin: 0 }}>
@@ -185,7 +204,6 @@ export default function Dashboard() {
 
         {/* Statistics Panel */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          
           <div className="card" style={{ padding: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
             <div style={{ 
               width: 48, height: 48, borderRadius: 12, 
@@ -239,7 +257,6 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
-
         </div>
       </div>
     </div>
