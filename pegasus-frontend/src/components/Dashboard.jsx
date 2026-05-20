@@ -42,7 +42,7 @@ const generateHourlyMockData = (hours) => {
     const passed = Math.floor(Math.random() * 10) + 1
     const failed = Math.floor(Math.random() * 4)
     data.push({
-      date: now.subtract(i, 'hour').format('HH:mm'),
+      date: now.subtract(i, 'hour').format('HH:00'),
       fullDate: now.subtract(i, 'hour').format('YYYY-MM-DDTHH:mm:ss'),
       passed,
       failed,
