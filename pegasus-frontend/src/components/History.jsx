@@ -13,6 +13,8 @@ import {
 } from '../api/validationHistory'
 
 const HISTORY_MISMATCH_PAGE_SIZE = 5000
+const HISTORY_PAGE_SIZE = 15
+const HISTORY_FETCH_BATCH_SIZE = 100
 
 const TrashIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -112,6 +114,40 @@ function Panel({ children, style }) {
   )
 }
 
+function PaginationControls({ page, pageCount, totalItems, startItem, endItem, onPrevious, onNext, label }) {
+  if (!totalItems) return null
+
+  return (
+    <div
+      style={{
+        marginTop: 14,
+        paddingTop: 12,
+        borderTop: '1px solid var(--border-1)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        flexWrap: 'wrap',
+      }}
+    >
+      <p style={{ margin: 0, fontSize: 12, color: 'var(--text-3)' }}>
+        Showing {startItem}-{endItem} of {totalItems} {label}
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button type="button" className="btn btn-secondary" onClick={onPrevious} disabled={page <= 1}>
+          Previous
+        </button>
+        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          Page {page} of {pageCount}
+        </span>
+        <button type="button" className="btn btn-secondary" onClick={onNext} disabled={page >= pageCount}>
+          Next
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function parseHistoryRowDetail(rowDetail) {
   if (!rowDetail) return null
   if (typeof rowDetail === 'object') return rowDetail
@@ -192,6 +228,29 @@ async function fetchAllHistoryMismatches(runId) {
   }
 
   return { run_id: runId, items, total, offset: 0, limit: HISTORY_MISMATCH_PAGE_SIZE }
+}
+
+async function fetchAllValidationHistoryRows({ sourcePath, targetPath } = {}) {
+  const items = []
+  let offset = 0
+  let total = 0
+
+  while (true) {
+    const page = await fetchValidationHistory({
+      limit: HISTORY_FETCH_BATCH_SIZE,
+      offset,
+      sourcePath,
+      targetPath,
+    })
+    const pageItems = Array.isArray(page.items) ? page.items : []
+    total = page.total ?? total
+    items.push(...pageItems)
+    offset += pageItems.length
+
+    if (!pageItems.length || offset >= total) break
+  }
+
+  return { items, total }
 }
 
 function StatusBadge({ isMatch, status }) {
@@ -319,9 +378,13 @@ export default function History({ onLoadMapping }) {
   const navigate = useNavigate()
   const [topTab, setTopTab] = useState('mapping')
   const [pairFilter, setPairFilter] = useState({ source: '', target: '' })
-  const [items, setItems] = useState([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(false)
+  const [mappingRows, setMappingRows] = useState([])
+  const [mappingLoading, setMappingLoading] = useState(false)
+  const [mappingPage, setMappingPage] = useState(1)
+  const [validationRows, setValidationRows] = useState([])
+  const [validationTotal, setValidationTotal] = useState(0)
+  const [validationPage, setValidationPage] = useState(1)
+  const [validationLoading, setValidationLoading] = useState(false)
   const [loadingMappingId, setLoadingMappingId] = useState(null)
   const [error, setError] = useState('')
   const [selectedRunId, setSelectedRunId] = useState(null)
@@ -467,7 +530,16 @@ export default function History({ onLoadMapping }) {
             row.source_path || row.source_filename,
             row.target_path || row.target_filename
           )
-          setItems((prev) =>
+          setMappingRows((prev) =>
+            prev.filter(
+              (item) =>
+                !(
+                  (item.source_path === row.source_path || item.source_filename === row.source_filename) &&
+                  (item.target_path === row.target_path || item.target_filename === row.target_filename)
+                )
+            )
+          )
+          setValidationRows((prev) =>
             prev.filter(
               (item) =>
                 !(
@@ -497,8 +569,9 @@ export default function History({ onLoadMapping }) {
       onConfirm: async () => {
         try {
           await deleteValidationHistoryRun(row.run_id)
-          setItems((prev) => prev.filter((item) => item.run_id !== row.run_id))
-          setTotal((prev) => Math.max(0, prev - 1))
+          setMappingRows((prev) => prev.filter((item) => item.run_id !== row.run_id))
+          setValidationRows((prev) => prev.filter((item) => item.run_id !== row.run_id))
+          setValidationTotal((prev) => Math.max(0, prev - 1))
           if (selectedRunId === row.run_id) setSelectedRunId(null)
         } catch (e) {
           setError(e instanceof Error ? e.message : String(e))
@@ -518,8 +591,11 @@ export default function History({ onLoadMapping }) {
       onConfirm: async () => {
         try {
           await deleteValidationHistoryAll()
-          setItems([])
-          setTotal(0)
+          setMappingRows([])
+          setValidationRows([])
+          setValidationTotal(0)
+          setMappingPage(1)
+          setValidationPage(1)
           setSelectedRunId(null)
         } catch (e) {
           setError(e instanceof Error ? e.message : String(e))
@@ -531,38 +607,92 @@ export default function History({ onLoadMapping }) {
   }
 
 
-  const loadHistory = useCallback(async () => {
-    setLoading(true)
+  const loadMappingHistory = useCallback(async () => {
+    setMappingLoading(true)
+    setError('')
+    try {
+      const data = await fetchAllValidationHistoryRows()
+      setMappingRows(Array.isArray(data.items) ? data.items : [])
+    } catch (e) {
+      setMappingRows([])
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setMappingLoading(false)
+    }
+  }, [])
+
+  const loadValidationHistory = useCallback(async (page = validationPage) => {
+    setValidationLoading(true)
     setError('')
     try {
       const data = await fetchValidationHistory({
-        limit: 50,
+        limit: HISTORY_PAGE_SIZE,
+        offset: (page - 1) * HISTORY_PAGE_SIZE,
         sourcePath: pairFilter.source.trim() || undefined,
         targetPath: pairFilter.target.trim() || undefined,
       })
-      setItems(Array.isArray(data.items) ? data.items : [])
-      setTotal(data.total ?? 0)
+      setValidationRows(Array.isArray(data.items) ? data.items : [])
+      setValidationTotal(data.total ?? 0)
     } catch (e) {
-      setItems([])
-      setTotal(0)
+      setValidationRows([])
+      setValidationTotal(0)
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setLoading(false)
+      setValidationLoading(false)
     }
-  }, [pairFilter.source, pairFilter.target])
+  }, [pairFilter.source, pairFilter.target, validationPage])
 
   useEffect(() => {
-    loadHistory()
-  }, [loadHistory])
+    if (topTab === 'mapping') {
+      loadMappingHistory()
+    }
+  }, [topTab, loadMappingHistory])
+
+  useEffect(() => {
+    if (topTab === 'validation') {
+      loadValidationHistory(validationPage)
+    }
+  }, [topTab, validationPage, loadValidationHistory])
 
   const mappingPairs = useMemo(() => {
     const seen = new Map()
-    for (const row of items) {
+    for (const row of mappingRows) {
       const key = `${row.source_path || row.source_filename}|${row.target_path || row.target_filename}`
       if (!seen.has(key)) seen.set(key, row)
     }
     return [...seen.values()]
-  }, [items])
+  }, [mappingRows])
+
+  const mappingPageCount = Math.max(1, Math.ceil(mappingPairs.length / HISTORY_PAGE_SIZE))
+  const validationPageCount = Math.max(1, Math.ceil(validationTotal / HISTORY_PAGE_SIZE))
+  const safeMappingPage = Math.min(mappingPage, mappingPageCount)
+  const safeValidationPage = Math.min(validationPage, validationPageCount)
+  const paginatedMappingPairs = useMemo(() => {
+    const start = (safeMappingPage - 1) * HISTORY_PAGE_SIZE
+    return mappingPairs.slice(start, start + HISTORY_PAGE_SIZE)
+  }, [mappingPairs, safeMappingPage])
+  const validationStart = validationTotal === 0 ? 0 : (safeValidationPage - 1) * HISTORY_PAGE_SIZE + 1
+  const validationEnd = validationTotal === 0 ? 0 : Math.min(validationTotal, validationStart + validationRows.length - 1)
+
+  useEffect(() => {
+    if (mappingPage !== safeMappingPage) setMappingPage(safeMappingPage)
+  }, [mappingPage, safeMappingPage])
+
+  useEffect(() => {
+    if (validationPage !== safeValidationPage) setValidationPage(safeValidationPage)
+  }, [validationPage, safeValidationPage])
+
+  const handleApplyValidationFilter = () => {
+    setValidationPage(1)
+    if (topTab === 'validation') {
+      loadValidationHistory(1)
+    }
+  }
+
+  const handlePreviousMappingPage = () => setMappingPage((page) => Math.max(1, page - 1))
+  const handleNextMappingPage = () => setMappingPage((page) => Math.min(mappingPageCount, page + 1))
+  const handlePreviousValidationPage = () => setValidationPage((page) => Math.max(1, page - 1))
+  const handleNextValidationPage = () => setValidationPage((page) => Math.min(validationPageCount, page + 1))
 
   return (
     <div style={{ padding: 12 }}>
@@ -593,12 +723,12 @@ export default function History({ onLoadMapping }) {
             ) : null}
           </div>
           {error ? <p style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</p> : null}
-          {loading ? <p style={{ color: 'var(--text-4)' }}>Loading…</p> : null}
-          {!loading && !mappingPairs.length ? (
+          {mappingLoading ? <p style={{ color: 'var(--text-4)' }}>Loading…</p> : null}
+          {!mappingLoading && !mappingPairs.length ? (
             <p style={{ color: 'var(--text-4)', marginBottom: 0 }}>No mapping history yet. Run a validation with persistence enabled.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {mappingPairs.map((row) => (
+              {paginatedMappingPairs.map((row) => (
                 <div
                   key={row.run_id}
                   role="button"
@@ -640,8 +770,17 @@ export default function History({ onLoadMapping }) {
                 </div>
               ))}
             </div>
-
           )}
+          <PaginationControls
+            page={safeMappingPage}
+            pageCount={mappingPageCount}
+            totalItems={mappingPairs.length}
+            startItem={mappingPairs.length ? (safeMappingPage - 1) * HISTORY_PAGE_SIZE + 1 : 0}
+            endItem={mappingPairs.length ? Math.min(mappingPairs.length, safeMappingPage * HISTORY_PAGE_SIZE) : 0}
+            onPrevious={handlePreviousMappingPage}
+            onNext={handleNextMappingPage}
+            label="mapping groups"
+          />
         </Panel>
       ) : (
         <Panel>
@@ -652,7 +791,7 @@ export default function History({ onLoadMapping }) {
                 All historical validation run logs and mismatch summaries.
               </p>
             </div>
-            {items.length ? (
+            {validationRows.length ? (
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -685,18 +824,18 @@ export default function History({ onLoadMapping }) {
                 style={{ display: 'block', marginTop: 4, minWidth: 220, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border-1)' }}
               />
             </label>
-            <button type="button" className="btn btn-secondary" onClick={loadHistory} disabled={loading}>
-              {loading ? 'Loading…' : 'Apply filter'}
+            <button type="button" className="btn btn-secondary" onClick={handleApplyValidationFilter} disabled={validationLoading}>
+              {validationLoading ? 'Loading…' : 'Apply filter'}
             </button>
           </div>
 
           {error ? <p style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</p> : null}
 
-          {!loading && !items.length && !error ? (
+          {!validationLoading && !validationRows.length && !error ? (
             <p style={{ color: 'var(--text-4)', marginBottom: 0 }}>No validations recorded yet.</p>
           ) : null}
 
-          {items.length ? (
+          {validationRows.length ? (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
                 <thead>
@@ -710,7 +849,7 @@ export default function History({ onLoadMapping }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((row) => (
+                  {validationRows.map((row) => (
                     <tr
                       key={row.run_id}
                         role="button"
@@ -749,7 +888,16 @@ export default function History({ onLoadMapping }) {
                   ))}
                 </tbody>
               </table>
-              <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--text-4)' }}>{items.length} shown · {total} total</p>
+              <PaginationControls
+                page={safeValidationPage}
+                pageCount={validationPageCount}
+                totalItems={validationTotal}
+                startItem={validationStart}
+                endItem={validationEnd}
+                onPrevious={handlePreviousValidationPage}
+                onNext={handleNextValidationPage}
+                label="validation runs"
+              />
             </div>
           ) : null}
 
