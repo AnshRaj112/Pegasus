@@ -164,6 +164,39 @@ class ColumnMapping(BaseModel):
 
     source_column: str = Field(description="Source column name to validate")
     target_column: str = Field(description="Target column name to compare against the source column")
+    compare_mode: str = Field(
+        default="auto",
+        description=(
+            "How to compare values: auto (smart dates), text (exact string), "
+            "date (calendar date with optional formats), phone (digits only), digits (digits only)"
+        ),
+    )
+    source_date_format: str | None = Field(
+        default=None,
+        description="strptime/friendly date format for source when compare_mode is date",
+    )
+    target_date_format: str | None = Field(
+        default=None,
+        description="strptime/friendly date format for target when compare_mode is date",
+    )
+    source_strip_prefix: str | None = Field(
+        default=None,
+        description="Remove this prefix from source values before compare (e.g. +91)",
+    )
+    target_strip_prefix: str | None = Field(
+        default=None,
+        description="Remove this prefix from target values before compare",
+    )
+    source_regex_pattern: str | None = Field(
+        default=None,
+        description="Optional regex applied to source value before compare",
+    )
+    source_regex_replacement: str = Field(default="", description="Replacement for source_regex_pattern")
+    target_regex_pattern: str | None = Field(
+        default=None,
+        description="Optional regex applied to target value before compare",
+    )
+    target_regex_replacement: str = Field(default="", description="Replacement for target_regex_pattern")
 
 
 class LocalBrowseEntry(BaseModel):

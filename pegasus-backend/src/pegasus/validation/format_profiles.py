@@ -9,6 +9,7 @@ from typing import Sequence
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_EU_DASH_DATE = re.compile(r"^\d{1,2}-\d{1,2}-\d{4}$")
 _US_DATE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$")
 _ISO_DATETIME = re.compile(
     r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$"
@@ -25,6 +26,7 @@ _BOOL = re.compile(r"^(true|false|yes|no|0|1)$", re.IGNORECASE)
 class FormatKind(StrEnum):
     EMAIL = "email"
     ISO_DATE = "iso_date"
+    EU_DASH_DATE = "eu_dash_date"
     US_DATE = "us_date"
     DATETIME = "datetime"
     INTEGER = "integer"
@@ -63,6 +65,8 @@ def _classify_value(raw: str) -> FormatKind:
         return FormatKind.DATETIME
     if _ISO_DATE.match(s):
         return FormatKind.ISO_DATE
+    if _EU_DASH_DATE.match(s):
+        return FormatKind.EU_DASH_DATE
     if _US_DATE.match(s):
         return FormatKind.US_DATE
     if _BOOL.match(s):
@@ -118,11 +122,12 @@ def formats_compatible(source: FormatKind, target: FormatKind) -> tuple[bool, st
         if source in group and target in group:
             return True, f"Numeric family match ({source.value} / {target.value})."
 
-    if {source, target} == {FormatKind.ISO_DATE, FormatKind.US_DATE}:
-        return (
-            False,
-            f"Date formats differ: source looks like {source.value}, target like {target.value}.",
-        )
+    if source in {FormatKind.ISO_DATE, FormatKind.EU_DASH_DATE, FormatKind.US_DATE} and target in {
+        FormatKind.ISO_DATE,
+        FormatKind.EU_DASH_DATE,
+        FormatKind.US_DATE,
+    }:
+        return True, f"Date family match ({source.value} / {target.value}); values compare by calendar date."
     if {source, target} == {FormatKind.ISO_DATE, FormatKind.DATETIME} or {
         source,
         target,

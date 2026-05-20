@@ -325,12 +325,14 @@ def compare_aligned_row_dicts(
     source_row: dict[str, Any],
     target_row: dict[str, Any],
     collector: MismatchSink,
+    compare_rules: dict[str, Any] | None = None,
 ) -> None:
     """Field-compare two aligned rows (same UID) and push any differences to *collector*."""
     for name in compare_columns:
         s_val = source_row.get(name)
         t_val = target_row.get(name)
-        if _eq_missing(s_val, t_val):
+        rule = (compare_rules or {}).get(name)
+        if _eq_missing(s_val, t_val, rule):
             continue
         collector.add_value_mismatch(
             uid=uid,
@@ -342,11 +344,8 @@ def compare_aligned_row_dicts(
         )
 
 
-def _eq_missing(left: Any, right: Any) -> bool:
-    """Mirror Polars ``eq_missing`` semantics for scalar Python values."""
-    if left is None and right is None:
-        return True
-    try:
-        return bool(left == right)
-    except Exception:
-        return False
+def _eq_missing(left: Any, right: Any, rule: Any = None) -> bool:
+    """Return True when two aligned cell values are equal (including cross-format dates)."""
+    from pegasus.validation.value_compare import values_equal_for_validation
+
+    return values_equal_for_validation(left, right, rule)

@@ -13,6 +13,7 @@ from pegasus.core.database import AsyncSessionLocal
 from pegasus.core.file_pair import compute_file_pair_key
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
+from pegasus.validation.delimiter_tokens import normalize_delimiter_for_storage
 from pegasus.schemas.validation import ColumnMapping, ColumnMappingFormatCheck, FooterValidationResult, MismatchCounts
 from pegasus.schemas.validation_history import (
     SaveDraftRequest,
@@ -315,7 +316,7 @@ async def save_validation_draft(
                 target_path=tgt,
                 file_pair_key=pair_key,
                 uid_column=body.uid_column.strip(),
-                delimiter=body.delimiter,
+                delimiter=normalize_delimiter_for_storage(body.delimiter),
                 column_mappings=[m.model_dump() for m in body.column_mappings],
                 validate_header_formats=body.validate_header_formats,
                 validate_footers=body.validate_footers,

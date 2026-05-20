@@ -360,7 +360,7 @@ export default function History({ onLoadMapping }) {
       const detail = await fetchValidationHistoryDetail(row.run_id)
 
       // 2. If it's a fixed-width run, bypass CSV column headers preview
-      if (detail.delimiter === 'fixed-width') {
+      if (detail.delimiter === 'fixed-width' || detail.delimiter === 'fixed') {
         onLoadMapping({
           detail,
           preview: null,
@@ -438,8 +438,8 @@ export default function History({ onLoadMapping }) {
         }
       }
 
-      // 4. Decide target step: Step 3 (Review & Run) if perfectly matching, else Step 2 (Configure)
-      const targetStep = match ? 3 : 2
+      // 4. Step 3 = configure mapping; step 4 = review & run when saved mapping still matches files
+      const targetStep = match ? 4 : 3
       onLoadMapping({
         detail,
         preview,
@@ -629,7 +629,7 @@ export default function History({ onLoadMapping }) {
                     </div>
                   </div>
                   <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-3)' }}>
-                    {row.delimiter === 'fixed-width' ? (
+                    {row.delimiter === 'fixed-width' || row.delimiter === 'fixed' ? (
                       <span style={{ color: 'var(--blue, #3b82f6)', fontWeight: 500 }}>Fixed-Width Date validation</span>
                     ) : (
                       <>
@@ -731,14 +731,14 @@ export default function History({ onLoadMapping }) {
                         {basename(row.source_path || row.source_filename)}
                         <br />
                         <span style={{ color: 'var(--text-4)', fontSize: 11 }}>→ {basename(row.target_path || row.target_filename)}</span>
-                        {row.delimiter === 'fixed-width' && (
+                        {(row.delimiter === 'fixed-width' || row.delimiter === 'fixed') && (
                           <span style={{ display: 'block', fontSize: 10, color: 'var(--blue, #3b82f6)', fontWeight: 600, marginTop: 2 }}>
                             Fixed-Width Format
                           </span>
                         )}
                       </td>
                       <td style={{ padding: '8px' }}>
-                        {row.delimiter === 'fixed-width' ? 'Date slice' : row.mapping_count}
+                        {row.delimiter === 'fixed-width' || row.delimiter === 'fixed' ? 'Date slice' : row.mapping_count}
                       </td>
                       <td style={{ padding: '8px' }}>{formatDuration(row.durations?.validation_seconds ?? row.durations?.total_seconds)}</td>
                       <td style={{ padding: '8px' }}><StatusBadge isMatch={row.is_match} status={row.status} /></td>

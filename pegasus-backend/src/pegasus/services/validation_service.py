@@ -32,6 +32,7 @@ from pegasus.services.exceptions import (
 )
 from pegasus.validation.comparators.exceptions import UIDComparisonError
 from pegasus.validation.comparators.models import MismatchReport
+from pegasus.validation.compare_rules import build_rules_by_source_column
 from pegasus.validation.comparators.uid_based import UIDBasedComparator
 from pegasus.validation.readers.exceptions import (
     CSVFileNotFoundError,
@@ -509,6 +510,7 @@ class ValidationService:
         shared = src_cols & tgt_cols
         compared_columns = sorted(shared - {uid})
         compared = len(compared_columns)
+        compare_rules = build_rules_by_source_column(column_mappings)
 
         comparator = UIDBasedComparator(stringify_null_in_report=True)
         try:
@@ -517,6 +519,7 @@ class ValidationService:
                 target_df,
                 uid_column=uid,
                 compare_columns=None,
+                compare_rules=compare_rules,
             )
         except UIDComparisonError as exc:
             logger.warning("UID comparison rejected input: %s", exc)
@@ -557,7 +560,7 @@ class ValidationService:
         reader = PolarsCSVReader(default_batch_size=512)
         if len(delimiter) > 1:
             frame = multichar_csv_header_frame(path, delimiter=delimiter)
-            return list(frame.columns)
+            return [c.strip() for c in frame.columns]
         schema = reader.detect_schema(path, delimiter=delimiter, encoding="utf-8")
         return list(schema.keys())
 
@@ -664,7 +667,11 @@ class ValidationService:
         except Exception as exc:
             raise CSVParseError(f"Failed pandas fallback parse for {path.name}: {exc}") from exc
 
-        return pl.from_pandas(pdf, include_index=False)
+        df = pl.from_pandas(pdf, include_index=False)
+        rename_map = {col: col.strip() for col in df.columns if col != col.strip()}
+        if rename_map:
+            df = df.rename(rename_map)
+        return df
 
     def validate_fixed_width_pair_sync(
         self,

@@ -1,3 +1,7 @@
+import { useRef, useState } from 'react'
+import ColumnCompareRuleEditor from './ColumnCompareRuleEditor'
+import { mappingHasCustomRule } from './columnMapping'
+
 export default function Step3_Configure({
   sourcePath,
   targetPath,
@@ -33,6 +37,13 @@ export default function Step3_Configure({
     onMappingChange(activeMappings.map(m => (m.id === id ? { ...m, targetCol: val } : m)))
   }
 
+  function updateMapping(id, patch) {
+    onMappingChange(activeMappings.map(m => (m.id === id ? { ...m, ...patch } : m)))
+  }
+
+  const [openRuleId, setOpenRuleId] = useState(null)
+  const ruleAnchorRefs = useRef({})
+
   return (
     <div style={{ animation: 'fade-in 0.2s ease' }}>
       <div style={{ marginBottom: 20 }}>
@@ -43,8 +54,8 @@ export default function Step3_Configure({
           Configure column mapping
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-3)', maxWidth: 760 }}>
-          Source columns are matched to target columns by exact header name first, even when the files are unsorted.
-          Any source column that still has no target match stays visible here so you can map it manually.
+          Map columns as usual. Use the <strong style={{ color: 'var(--text-2)' }}>⚙</strong> icon on a row only when that
+          column needs special handling (e.g. strip <code style={{ fontFamily: 'monospace' }}>+91</code> from source phone numbers).
         </p>
       </div>
 
@@ -211,7 +222,7 @@ export default function Step3_Configure({
 
       <div style={{ border: '1px solid var(--border-1)', borderRadius: 10, overflow: 'hidden' }}>
         <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 28px 1fr 28px',
+          display: 'grid', gridTemplateColumns: '1fr 28px 1fr 44px',
           padding: '8px 14px',
           background: 'var(--surface-2)',
           borderBottom: '1px solid var(--border-1)',
@@ -220,7 +231,7 @@ export default function Step3_Configure({
           <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)' }}>Source</span>
           <div />
           <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)' }}>Target</span>
-          <div />
+          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', textAlign: 'center' }} title="Per-column compare rules">Rule</span>
         </div>
 
         <div>
@@ -228,7 +239,7 @@ export default function Step3_Configure({
             <div
               className="mapping-row"
               style={{
-                display: 'grid', gridTemplateColumns: '1fr 28px 1fr 28px',
+                display: 'grid', gridTemplateColumns: '1fr 28px 1fr 44px',
                 padding: '6px 14px', gap: 8, alignItems: 'center',
                 background: 'var(--surface-2)',
                 borderBottom: activeMappings.length > 0 ? '1px solid var(--border-1)' : 'none',
@@ -266,20 +277,8 @@ export default function Step3_Configure({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'center' }}>
-                <span
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: 24, height: 24, borderRadius: 6,
-                    color: 'var(--text-2)',
-                    background: 'var(--surface-1)',
-                    fontSize: 10, fontWeight: 700,
-                    letterSpacing: '0.04em',
-                  }}
-                  title="Pinned join key"
-                >
-                  UID
-                </span>
+              <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 4 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-4)' }}>—</span>
               </div>
             </div>
           )}
@@ -287,30 +286,29 @@ export default function Step3_Configure({
             const isMapped = !!m.targetCol
             const formatCheck = validateHeaderFormats && isMapped ? formatCheckBySource.get(m.sourceCol) : null
             const formatWarn = formatCheck && formatCheck.compatible === false
+            const hasCustomRule = mappingHasCustomRule(m)
+            const ruleOpen = openRuleId === m.id
             return (
               <div
                 key={m.id}
                 className="mapping-row"
                 style={{
-                  display: 'grid', gridTemplateColumns: '1fr 28px 1fr 28px',
-                  padding: '6px 14px', gap: 8, alignItems: 'center',
+                  display: 'grid', gridTemplateColumns: '1fr 28px 1fr 44px',
+                  padding: '6px 14px', gap: 8, alignItems: 'start',
                   background: 'var(--surface-1)',
                   borderBottom: idx < activeMappings.length - 1 ? '1px solid var(--border-1)' : 'none',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, paddingTop: 2 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.sourceCol}>
                       {m.sourceCol}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-4)' }}>
-                      Source column
-                    </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 6 }}>
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ color: 'var(--text-4)' }}>
                     <path d="M3 7h8M8 4.5L10.5 7 8 9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
@@ -340,7 +338,7 @@ export default function Step3_Configure({
                   </select>
                   {!isMapped && (
                     <div style={{ marginTop: 5, fontSize: 11, color: 'var(--danger)' }}>
-                      Source column not mapped yet. Pick a target header to compare this field.
+                      Pick a target column to compare.
                     </div>
                   )}
                   {formatWarn && (
@@ -350,20 +348,51 @@ export default function Step3_Configure({
                   )}
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, paddingTop: 2 }}>
                   <span
                     style={{
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      width: 24, height: 24, borderRadius: 6,
+                      width: 22, height: 22, borderRadius: 6, fontSize: 10, fontWeight: 700,
                       color: formatWarn ? 'var(--danger)' : isMapped ? 'var(--success)' : 'var(--danger)',
                       background: formatWarn ? 'var(--danger-muted)' : isMapped ? 'var(--success-muted)' : 'var(--danger-muted)',
-                      fontSize: 10, fontWeight: 700,
-                      letterSpacing: '0.04em',
                     }}
-                    title={formatWarn ? formatCheck?.message : isMapped ? `Mapped to ${m.targetCol}` : 'Needs mapping'}
+                    title={formatWarn ? formatCheck?.message : isMapped ? 'Mapped' : 'Unmapped'}
                   >
                     {formatWarn ? '!' : isMapped ? 'OK' : '!'}
                   </span>
+                  {isMapped && (
+                    <>
+                      <button
+                        type="button"
+                        ref={el => { ruleAnchorRefs.current[m.id] = el }}
+                        onClick={() => setOpenRuleId(ruleOpen ? null : m.id)}
+                        title={hasCustomRule ? 'Edit custom compare rule' : 'Add custom compare rule'}
+                        aria-label={`Compare rules for ${m.sourceCol}`}
+                        aria-expanded={ruleOpen}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 28, height: 28, borderRadius: 7, border: '1px solid',
+                          borderColor: hasCustomRule || ruleOpen ? 'var(--accent-border)' : 'var(--border-2)',
+                          background: hasCustomRule || ruleOpen ? 'var(--accent-muted)' : 'var(--surface-1)',
+                          color: hasCustomRule || ruleOpen ? 'var(--accent)' : 'var(--text-3)',
+                          cursor: 'pointer', padding: 0,
+                        }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+                          <path d="M7 1.5l.9 2.7 2.7.9-2.7.9L7 8.7l-.9-2.7-2.7-.9 2.7-.9L7 1.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                          <path d="M11.5 9.5v3M10 11h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                        </svg>
+                      </button>
+                      {ruleOpen && (
+                        <ColumnCompareRuleEditor
+                          row={m}
+                          anchorRef={{ current: ruleAnchorRefs.current[m.id] }}
+                          onChange={updated => onMappingChange(activeMappings.map(row => (row.id === m.id ? updated : row)))}
+                          onClose={() => setOpenRuleId(null)}
+                        />
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             )

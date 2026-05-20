@@ -13,6 +13,8 @@ import polars.exceptions as pl_exc
 from pegasus.validation.comparators.base import ValidationComparator
 from pegasus.validation.comparators.exceptions import ComparisonError, UIDComparisonError
 from pegasus.validation.comparators.models import MismatchReport, MismatchType, empty_mismatch_frame
+from pegasus.validation.compare_rules import CompareRule
+from pegasus.validation.value_compare import polars_values_differ_expr
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,7 @@ class UIDBasedComparator:
         uid_column: str,
         compare_columns: Sequence[str] | None = None,
         omit_row_detail: bool | None = None,
+        compare_rules: dict[str, CompareRule] | None = None,
     ) -> MismatchReport:
         """Match rows on ``uid_column`` and emit a long-form :class:`MismatchReport`.
 
@@ -114,7 +117,14 @@ class UIDBasedComparator:
 
         missing_parts = self._missing_in_target(source, uid_column, tgt_uid, omit_row_detail=omit)
         extra_parts = self._extra_in_target(target, uid_column, src_uid, omit_row_detail=omit)
-        value_parts = self._value_mismatches(source, target, uid_column, compare_cols, omit_row_detail=omit)
+        value_parts = self._value_mismatches(
+            source,
+            target,
+            uid_column,
+            compare_cols,
+            omit_row_detail=omit,
+            compare_rules=compare_rules,
+        )
 
         frames = [f for f in (missing_parts, extra_parts, value_parts) if f.height > 0]
         if not frames:
@@ -305,6 +315,7 @@ class UIDBasedComparator:
         compare_columns: Sequence[str],
         *,
         omit_row_detail: bool,
+        compare_rules: dict[str, CompareRule] | None = None,
     ) -> pl.DataFrame:
         if not compare_columns:
             return empty_mismatch_frame()
@@ -324,12 +335,9 @@ class UIDBasedComparator:
         joined = src_m.join(tgt_m, on=uid_column, how="inner", suffix="_target")
 
         # Build horizontal any-diff filter to skip fully-matching rows
-        _NULL = "__NULL__"
+        rules = compare_rules or {}
         diff_exprs = [
-            (
-                pl.col(name).cast(pl.String).fill_null(_NULL)
-                != pl.col(f"{name}_target").cast(pl.String).fill_null(_NULL)
-            )
+            polars_values_differ_expr(name, f"{name}_target", rules.get(name))
             for name in compare_columns
         ]
         any_diff = pl.any_horizontal(diff_exprs)
@@ -349,10 +357,7 @@ class UIDBasedComparator:
                 if tgt_col not in mismatched.columns:
                     continue
 
-                mask = (
-                    pl.col(name).cast(pl.String).fill_null(_NULL)
-                    != pl.col(tgt_col).cast(pl.String).fill_null(_NULL)
-                )
+                mask = polars_values_differ_expr(name, tgt_col, rules.get(name))
                 diff = mismatched.filter(mask)
                 if diff.is_empty():
                     continue
