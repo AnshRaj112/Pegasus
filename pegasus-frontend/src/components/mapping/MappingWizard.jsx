@@ -6,7 +6,7 @@ import Step2_FilePicker from './Step2_FilePicker'
 import Step3_Configure  from './Step3_Configure'
 import ActionBar        from './ActionBar'
 import ParallelValidationModal from '../ParallelValidationModal'
-import { buildMappingRows, toColumnMappingPayload } from './columnMapping'
+import { buildMappingRows, mappingRowFromApi, toColumnMappingPayload } from './columnMapping'
 import { buildAnalyzePayload, formatCheckBySource } from './mappingAnalyze'
 import { saveValidationDraft } from '../../api/validationHistory'
 
@@ -96,7 +96,9 @@ function FixedWidthConfigurator({
           Configure Fixed-Width Date Validation
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-3)', maxWidth: 760 }}>
-          Specify character positions (0-indexed) and date format per side. Formats can differ (e.g. source dd-mm-yyyy, target mm-dd-yyyy); rows match when the parsed calendar date is the same.
+          Each line is one raw text record (not CSV columns). Set 0-indexed start/end positions for the date slice on each side.
+          Formats can differ (e.g. source <code style={{ fontFamily: 'monospace' }}>%Y%m%d</code>, target <code style={{ fontFamily: 'monospace' }}>%Y-%m-%d</code>);
+          rows match when the calendar date is the same. If your files have headers like Name, Email, DOB, use CSV validation instead.
         </p>
       </div>
 
@@ -309,7 +311,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     setValidateFooters(detail.validate_footers || false)
     setFooterTrailingRows(detail.footer_trailing_rows || 1)
 
-    if (detail.delimiter === 'fixed-width') {
+    if (detail.delimiter === 'fixed-width' || detail.delimiter === 'fixed') {
       setFileFormat('fixed-width')
       const saved = detail.column_mappings || []
       const getVal = (name) => saved.find(m => m.source_column === name)?.target_column || ''
@@ -326,7 +328,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     }
 
     // Load previews
-    if (preview && detail.delimiter !== 'fixed-width') {
+    if (preview && detail.delimiter !== 'fixed-width' && detail.delimiter !== 'fixed') {
       setColumnPreview({
         sourceColumns: preview.source_columns || [],
         targetColumns: preview.target_columns || [],
@@ -343,14 +345,15 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
 
     // Populate customized mappings
     const savedMappings = detail.column_mappings || []
-    if (detail.delimiter !== 'fixed-width') {
-      const mappingRows = savedMappings.map((m, idx) => ({
-        id: idx + 1,
-        sourceColumn: m.source_column,
-        targetColumn: m.target_column,
-        isAuto: false,
-      }))
-      setMappings(mappingRows)
+    if (detail.delimiter !== 'fixed-width' && detail.delimiter !== 'fixed') {
+      const previousRows = savedMappings.map(m => mappingRowFromApi(m))
+      const compareCols = preview?.compare_columns
+        || preview?.source_columns?.filter(col => col !== (detail.uid_column || 'id').trim())
+        || []
+      const targetCols = (preview?.target_columns || []).filter(
+        col => col !== (detail.uid_column || 'id').trim(),
+      )
+      setMappings(buildMappingRows(compareCols, targetCols, previousRows, preview?.auto_mappings || []))
     }
 
     // Route step
@@ -373,7 +376,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   function handleTargetSelected(path) { setTargetPath(path); setStep(3); }
 
   useEffect(() => {
-    if (step !== 2 || !sourcePath || !targetPath || fileFormat === 'fixed-width') return
+    if (step !== 3 || !sourcePath || !targetPath || fileFormat === 'fixed-width') return
 
     const controller = new AbortController()
 
@@ -433,10 +436,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
 
     loadColumnPreview()
     return () => controller.abort()
-  }, [step, sourcePath, targetPath, uidColumn, delimiter])
+  }, [step, sourcePath, targetPath, uidColumn, delimiter, fileFormat])
 
   useEffect(() => {
-    if (step !== 2 || !sourcePath || !targetPath || fileFormat === 'fixed-width') return
+    if (step !== 3 || !sourcePath || !targetPath || fileFormat === 'fixed-width') return
     if (!validateHeaderFormats && !validateFooters) {
       setFormatChecks([])
       setFooterValidation(null)
@@ -497,10 +500,11 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     validateHeaderFormats,
     validateFooters,
     footerTrailingRows,
+    fileFormat,
   ])
 
   async function handleValidate() {
-    setIsRunning(true); setPhase('running'); setResult(null); setErrorMsg(''); setStep(3)
+    setIsRunning(true); setPhase('running'); setResult(null); setErrorMsg('')
     try {
       const bodyPayload = fileFormat === 'fixed-width' ? {
         source_path: sourcePath.trim(),
@@ -565,7 +569,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         sourcePath: sourcePath.trim(),
         targetPath: targetPath.trim(),
         uidColumn: 'date',
-        delimiter: 'fixed-width',
+        delimiter: 'fixed',
         columnMappings: [
           { source_column: 'source_date_start', target_column: String(sourceDateStart) },
           { source_column: 'source_date_end', target_column: String(sourceDateEnd) },
@@ -889,45 +893,6 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         {/* Step 2: Configure */}
         {showConfigure && (
           <>
-            {/* Format Selector Tabs */}
-            <div style={{
-              display: 'flex',
-              background: 'var(--surface-2)',
-              border: '1px solid var(--border-2)',
-              padding: 4,
-              borderRadius: 10,
-              marginBottom: 20,
-              gap: 4
-            }}>
-              {[
-                { id: 'csv', label: 'CSV File Validation' },
-                { id: 'fixed-width', label: 'Fixed-Width Date Validation' }
-              ].map(opt => {
-                const active = fileFormat === opt.id
-                return (
-                  <button
-                    key={opt.id}
-                    onClick={() => setFileFormat(opt.id)}
-                    style={{
-                      flex: 1,
-                      height: 36,
-                      borderRadius: 7,
-                      border: 'none',
-                      background: active ? 'var(--surface-1)' : 'transparent',
-                      color: active ? 'var(--accent)' : 'var(--text-3)',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                )
-              })}
-            </div>
-
             {fileFormat === 'csv' ? (
               <Step3_Configure
                 sourcePath={sourcePath}

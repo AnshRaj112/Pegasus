@@ -37,12 +37,11 @@ _PARALLEL_COLUMN_THRESHOLD = 16
 _DEFAULT_MAX_COLUMN_WORKERS = max(1, min(os.cpu_count() or 4, 8))
 
 
-def _null_safe_ne(col: str, col_target: str) -> pl.Expr:
+def _null_safe_ne(col: str, col_target: str, rule: object | None = None) -> pl.Expr:
     """Return an expression that is True when the two columns differ (null-aware)."""
-    return (
-        pl.col(col).cast(pl.String).fill_null("__NULL__")
-        != pl.col(col_target).cast(pl.String).fill_null("__NULL__")
-    )
+    from pegasus.validation.value_compare import polars_values_differ_expr
+
+    return polars_values_differ_expr(col, col_target, rule)
 
 
 def emit_value_mismatches_single_pass(
@@ -55,6 +54,7 @@ def emit_value_mismatches_single_pass(
     streaming: bool = True,
     parallel_columns: bool = True,
     max_column_workers: int = _DEFAULT_MAX_COLUMN_WORKERS,
+    compare_rules: dict[str, object] | None = None,
 ) -> None:
     """Detect value mismatches across *all* compare_columns with ONE join materialisation.
 
@@ -106,7 +106,8 @@ def emit_value_mismatches_single_pass(
     # ── 1. Build horizontal any-diff filter ──────────────────────────────
     #    This ensures we only materialise rows that have *at least one* mismatch.
     #    For matching datasets the result is empty → near-zero cost.
-    diff_exprs = [_null_safe_ne(c, f"{c}_target") for c in compare_columns]
+    rules = compare_rules or {}
+    diff_exprs = [_null_safe_ne(c, f"{c}_target", rules.get(c)) for c in compare_columns]
     any_diff = pl.any_horizontal(diff_exprs)
 
     # Select only the columns we need: uid + source cols + target cols
@@ -165,6 +166,7 @@ def emit_value_mismatches_single_pass(
             col_chunks=col_chunks,
             collector=collector,
             max_workers=max_column_workers,
+            compare_rules=rules,
         )
     else:
         _process_columns_sequential(
@@ -172,6 +174,7 @@ def emit_value_mismatches_single_pass(
             uid_column=uid_column,
             col_chunks=col_chunks,
             collector=collector,
+            compare_rules=rules,
         )
 
 
@@ -184,11 +187,17 @@ def _process_columns_sequential(
     uid_column: str,
     col_chunks: list[list[str]],
     collector: MismatchSink,
+    compare_rules: dict[str, object] | None = None,
 ) -> None:
     """Process column chunks sequentially — simple path for ≤16 columns."""
     has_bulk = hasattr(collector, "bulk_append_from_frame")
     for chunk_cols in col_chunks:
-        frames = _scan_column_chunk(df, uid_column=uid_column, chunk_cols=chunk_cols)
+        frames = _scan_column_chunk(
+            df,
+            uid_column=uid_column,
+            chunk_cols=chunk_cols,
+            compare_rules=compare_rules,
+        )
         _flush_frames_to_collector(frames, collector=collector, has_bulk=has_bulk)
 
 
@@ -202,6 +211,7 @@ def _process_columns_parallel(
     col_chunks: list[list[str]],
     collector: MismatchSink,
     max_workers: int,
+    compare_rules: dict[str, object] | None = None,
 ) -> None:
     """Process column chunks in parallel using a thread pool.
 
@@ -227,6 +237,7 @@ def _process_columns_parallel(
                 df,
                 uid_column=uid_column,
                 chunk_cols=chunk,
+                compare_rules=compare_rules,
             ): idx
             for idx, chunk in enumerate(col_chunks)
         }
@@ -261,6 +272,7 @@ def _scan_column_chunk(
     *,
     uid_column: str,
     chunk_cols: list[str],
+    compare_rules: dict[str, object] | None = None,
 ) -> list[pl.DataFrame]:
     """Scan a chunk of columns on an already-materialised DataFrame.
 
@@ -268,13 +280,14 @@ def _scan_column_chunk(
     This function is **pure** — no side effects, safe to call from any thread.
     """
     frames: list[pl.DataFrame] = []
+    rules = compare_rules or {}
     for col in chunk_cols:
         tgt_col = f"{col}_target"
         if tgt_col not in df.columns:
             continue
 
         # Fast in-memory boolean mask — no disk I/O, no join re-execution
-        mask = _null_safe_ne(col, tgt_col)
+        mask = _null_safe_ne(col, tgt_col, rules.get(col))
         diff = df.filter(mask)
         if diff.is_empty():
             continue
