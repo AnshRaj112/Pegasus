@@ -12,7 +12,7 @@ import {
 } from 'recharts'
 import dayjs from 'dayjs'
 // Helper: convert ISO/Date to IST (UTC+5:30) and format
-function formatToIST(iso, { short = false } = {}) {
+function formatToIST(iso, { short = false, compact = false } = {}) {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
@@ -21,11 +21,13 @@ function formatToIST(iso, { short = false } = {}) {
   const YYYY = ist.getUTCFullYear()
   const MM = ist.getUTCMonth() // 0-based
   const DD = String(ist.getUTCDate()).padStart(2, '0')
-  const hh = String(ist.getUTCHours()).padStart(2, '0')
+  const hour24 = ist.getUTCHours()
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12
   const mm = String(ist.getUTCMinutes()).padStart(2, '0')
-  if (short) return `${hh}:${mm} IST`
+  const suffix = hour24 >= 12 ? 'PM' : 'AM'
+  if (short) return compact ? `${hour12} ${suffix}` : `${hour12}:${mm} ${suffix}`
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  return `${months[MM]} ${DD}, ${YYYY} ${hh}:${mm} IST`
+  return `${months[MM]} ${DD}, ${YYYY} ${hour12}:${mm} ${suffix} IST`
 }
 import { CheckCircle, XCircle, Activity } from 'lucide-react'
 import { fetchValidationDailyStats, fetchValidationHistory } from '../api/validationHistory'
@@ -37,7 +39,7 @@ function getDayBoundaryHourlySeries(runs) {
   const buckets = Array.from({ length: 25 }, (_, index) => {
     const timestamp = startOfDay.add(index, 'hour')
     return {
-      date: formatToIST(timestamp.toISOString(), { short: true }),
+      date: formatToIST(timestamp.toISOString(), { short: true, compact: true }),
       fullDate: formatToIST(timestamp.toISOString()),
       passed: 0,
       failed: 0,
@@ -67,7 +69,7 @@ function getDayBoundaryHourlySeries(runs) {
 }
 
 function formatDailyTick(value) {
-  const match = typeof value === 'string' ? value.match(/^(\d{1,2}):00\s([AP]M)$/) : null
+  const match = typeof value === 'string' ? value.match(/^(\d{1,2})(?::00)?\s([AP]M)$/) : null
   if (!match) return value
   const hour = Number.parseInt(match[1], 10)
   const suffix = match[2]
@@ -218,10 +220,10 @@ export default function Dashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 24, alignItems: 'start' }}>
         {/* Main Chart Area */}
         <div className="card" style={{ padding: 24, height: 540, display: 'flex', flexDirection: 'column' }}>
-          <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-1)', marginBottom: 40, margin: 0 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-1)', margin: 0, paddingBottom: 18 }}>
             Validation Trends
           </h3>
-          <div style={{ flex: 1, minHeight: 0, paddingTop: 4 }}>
+          <div style={{ flex: 1, minHeight: 0, paddingTop: 12 }}>
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartData} margin={{ top: 10, right: 28, left: 0, bottom: 46 }}>
                 <defs>
@@ -256,7 +258,21 @@ export default function Dashboard() {
                   tick={{ fill: 'var(--text-3)', fontSize: 12 }}
                 />
                 <Tooltip content={<CustomTooltip />} />
-                <Legend iconType="circle" wrapperStyle={{ paddingTop: 20 }} />
+                <Legend
+                  iconType="circle"
+                  wrapperStyle={{ paddingTop: 28 }}
+                  wrapperClassName="dashboard-legend"
+                  content={({ payload }) => (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24, width: '100%', paddingTop: 12, paddingBottom: 4 }}>
+                      {(payload ?? []).map((entry) => (
+                        <div key={entry.value} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 9999, background: entry.color, display: 'inline-block' }} />
+                          <span style={{ color: 'var(--text-2)', fontSize: 13, fontWeight: 500 }}>{entry.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                />
                 <Area 
                   type="monotone" 
                   dataKey="passed" 
