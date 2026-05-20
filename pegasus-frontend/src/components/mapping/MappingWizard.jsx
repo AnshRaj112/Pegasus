@@ -246,15 +246,12 @@ function FixedWidthConfigurator({
 
 export default function MappingWizard({ initialMappingData, onResetInitialData }) {
   const navigate = useNavigate()
-
   const [step, setStep]         = useState(1)
   const [subPhase, setSubPhase] = useState('format-select')
-
   const [sourceStorageType, setSourceStorageType] = useState(null)
   const [targetStorageType, setTargetStorageType] = useState(null)
   const [sourcePath, setSourcePath] = useState('')
   const [targetPath, setTargetPath] = useState('')
-
   const [fileFormat, setFileFormat] = useState('csv')
   const [sourceDateStart, setSourceDateStart] = useState(0)
   const [sourceDateEnd, setSourceDateEnd] = useState(10)
@@ -262,10 +259,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [targetDateStart, setTargetDateStart] = useState(0)
   const [targetDateEnd, setTargetDateEnd] = useState(10)
   const [targetDateFormat, setTargetDateFormat] = useState('%Y-%m-%d')
-
   const [mappings, setMappings]   = useState([])
   const [uidColumn, setUidColumn] = useState('id')
   const [delimiter, setDelimiter] = useState('auto')
+
   const [columnPreview, setColumnPreview] = useState({
     sourceColumns: [],
     targetColumns: [],
@@ -275,9 +272,9 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     unmatchedTargetColumns: [],
     delimiter: 'auto',
   })
+
   const [columnPreviewLoading, setColumnPreviewLoading] = useState(false)
   const [columnPreviewError, setColumnPreviewError] = useState('')
-
   const [validateHeaderFormats, setValidateHeaderFormats] = useState(false)
   const [validateFooters, setValidateFooters] = useState(false)
   const [footerTrailingRows, setFooterTrailingRows] = useState(1)
