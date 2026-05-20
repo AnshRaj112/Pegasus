@@ -778,12 +778,10 @@ class ValidationService:
                  open(target_path, "r", encoding="utf-8", buffering=buffer_size) as tgt_file:
                       
                 for line_idx, (src_line, tgt_line) in enumerate(zip_longest(src_file, tgt_file), start=1):
-                    if (
-                        src_line is not None
-                        and tgt_line is not None
-                        and not src_line.strip()
-                        and not tgt_line.strip()
-                    ):
+                    # Treat trailing/empty lines as non-existent when both sides are blank
+                    s_blank = src_line is None or not src_line.strip()
+                    t_blank = tgt_line is None or not (tgt_line.strip() if tgt_line is not None else False)
+                    if s_blank and t_blank:
                         continue
 
                     total_rows += 1

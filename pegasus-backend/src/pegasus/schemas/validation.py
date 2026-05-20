@@ -280,7 +280,7 @@ class LocalColumnPreviewResponse(BaseModel):
         default_factory=list,
         description="Source columns available for value comparison after removing the selected UID column",
     )
-    auto_mappings: list[ColumnMapping] = Field(
+    auto_mappings: list[dict] = Field(
         default_factory=list,
         description="Exact name matches discovered automatically from source and target headers",
     )

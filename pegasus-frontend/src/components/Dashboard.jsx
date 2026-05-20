@@ -43,10 +43,12 @@ export default function Dashboard() {
         const data = await fetchValidationDailyStats(opts)
         if (cancelled) return
         const items = data.items ?? []
+        const isHourly = filterType === 'daily'
         setChartData(
           items.map((row) => ({
-            date: dayjs(row.date).format('MMM DD'),
-            fullDate: row.date,
+            // For 1-day view show hourly labels; otherwise show month/day
+            date: isHourly ? dayjs(row.date).format('HH:00') : dayjs(row.date).format('MMM DD'),
+            fullDate: dayjs(row.date).format('MMM DD, YYYY HH:mm'),
             passed: row.passed,
             failed: row.failed,
             total: row.total,
@@ -80,7 +82,7 @@ export default function Dashboard() {
           padding: '12px',
           boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
         }}>
-          <p style={{ fontWeight: 600, color: 'var(--text-1)', marginBottom: 8 }}>{label}</p>
+          <p style={{ fontWeight: 600, color: 'var(--text-1)', marginBottom: 8 }}>{payload[0]?.payload?.fullDate ?? label}</p>
           {payload.map((entry, index) => (
             <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: entry.color }} />

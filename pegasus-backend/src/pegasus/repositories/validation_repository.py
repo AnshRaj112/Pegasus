@@ -265,6 +265,59 @@ class ValidationRunRepository:
         return out
 
     @staticmethod
+    async def hourly_completed_stats(
+        session: AsyncSession,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> list[tuple[datetime, int, int]]:
+        """Group terminal runs by hour of ``completed_at`` (UTC bucket)."""
+        hour_bucket = func.date_trunc("hour", ValidationRun.completed_at).label("hour_bucket")
+        passed = func.sum(
+            case(
+                (
+                    and_(
+                        ValidationRun.status == ValidationRunStatus.COMPLETED,
+                        ValidationRun.is_match.is_(True),
+                    ),
+                    1,
+                ),
+                else_=0,
+            )
+        )
+        failed = func.sum(
+            case(
+                (
+                    or_(
+                        ValidationRun.status == ValidationRunStatus.FAILED,
+                        and_(
+                            ValidationRun.status == ValidationRunStatus.COMPLETED,
+                            or_(
+                                ValidationRun.is_match.is_(False),
+                                ValidationRun.is_match.is_(None),
+                            ),
+                        ),
+                    ),
+                    1,
+                ),
+                else_=0,
+            )
+        )
+        stmt = (
+            select(hour_bucket, passed, failed)
+            .where(ValidationRun.completed_at.isnot(None))
+            .where(ValidationRun.completed_at >= start)
+            .where(ValidationRun.completed_at < end)
+            .group_by(hour_bucket)
+            .order_by(hour_bucket)
+        )
+        rows = await session.execute(stmt)
+        out: list[tuple[datetime, int, int]] = []
+        for bucket, p, f in rows.all():
+            out.append((bucket, int(p or 0), int(f or 0)))
+        return out
+
+    @staticmethod
     async def count_runs(
         session: AsyncSession,
         *,

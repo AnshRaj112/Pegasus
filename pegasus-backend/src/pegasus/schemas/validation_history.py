@@ -36,9 +36,9 @@ class ValidationHistorySummary(BaseModel):
 
 
 class ValidationDailyStatRow(BaseModel):
-    """Passed vs failed validation counts for one day (by ``completed_at``)."""
+    """Passed vs failed validation counts for one day or hourly bucket (UTC ``completed_at``)."""
 
-    date: date
+    date: datetime
     passed: int = Field(ge=0, description="Completed runs with full data match")
     failed: int = Field(ge=0, description="Failed runs or completed with mismatches")
     total: int = Field(ge=0)

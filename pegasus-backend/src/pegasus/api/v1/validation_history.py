@@ -167,30 +167,43 @@ async def validation_history_daily_stats(
 
     try:
         async with AsyncSessionLocal() as session:
-            raw = await ValidationRunRepository.daily_completed_stats(
-                session, start=start_dt, end=end_dt
-            )
+            # If the range is one day or less, return hourly buckets instead of daily.
+            if (end_dt - start_dt) <= timedelta(days=1):
+                raw = await ValidationRunRepository.hourly_completed_stats(session, start=start_dt, end=end_dt)
+                # Build mapping by hour (datetime)
+                by_bucket: dict[datetime, tuple[int, int]] = {b: (p, f) for b, p, f in raw}
+                items: list[ValidationDailyStatRow] = []
+                total_passed = total_failed = 0
+                cur = start_dt
+                while cur < end_dt:
+                    p, f = by_bucket.get(cur, (0, 0))
+                    items.append(ValidationDailyStatRow(date=cur, passed=p, failed=f, total=p + f))
+                    total_passed += p
+                    total_failed += f
+                    cur += timedelta(hours=1)
+            else:
+                raw = await ValidationRunRepository.daily_completed_stats(session, start=start_dt, end=end_dt)
+                by_day: dict[date, tuple[int, int]] = {}
+                for bucket, p, f in raw:
+                    d = bucket.date() if hasattr(bucket, "date") else bucket
+                    by_day[d] = (p, f)
+                items = []
+                total_passed = total_failed = 0
+                d = start_d
+                while d <= end_d:
+                    p, f = by_day.get(d, (0, 0))
+                    # normalize to midnight UTC
+                    dt = datetime.combine(d, time.min, tzinfo=UTC)
+                    items.append(ValidationDailyStatRow(date=dt, passed=p, failed=f, total=p + f))
+                    total_passed += p
+                    total_failed += f
+                    d += timedelta(days=1)
     except Exception as exc:
         logger.exception("Failed to load daily validation stats: %s", exc)
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not load validation stats; check database connectivity",
         ) from exc
-
-    by_day: dict[date, tuple[int, int]] = {}
-    for bucket, p, f in raw:
-        d = bucket.date() if hasattr(bucket, "date") else bucket
-        by_day[d] = (p, f)
-
-    items: list[ValidationDailyStatRow] = []
-    total_passed = total_failed = 0
-    d = start_d
-    while d <= end_d:
-        p, f = by_day.get(d, (0, 0))
-        items.append(ValidationDailyStatRow(date=d, passed=p, failed=f, total=p + f))
-        total_passed += p
-        total_failed += f
-        d += timedelta(days=1)
 
     return ValidationDailyStatsResponse(
         items=items,

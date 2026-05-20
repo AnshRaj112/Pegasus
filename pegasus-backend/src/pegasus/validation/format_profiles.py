@@ -122,11 +122,14 @@ def formats_compatible(source: FormatKind, target: FormatKind) -> tuple[bool, st
         if source in group and target in group:
             return True, f"Numeric family match ({source.value} / {target.value})."
 
-    if source in {FormatKind.ISO_DATE, FormatKind.EU_DASH_DATE, FormatKind.US_DATE} and target in {
-        FormatKind.ISO_DATE,
-        FormatKind.EU_DASH_DATE,
-        FormatKind.US_DATE,
-    }:
+    date_kinds = {FormatKind.ISO_DATE, FormatKind.EU_DASH_DATE, FormatKind.US_DATE}
+    if source in date_kinds and target in date_kinds:
+        # Treat ISO date as distinct (ISO vs US/EU are not considered safely compatible).
+        if source == FormatKind.ISO_DATE or target == FormatKind.ISO_DATE:
+            return (
+                False,
+                f"Format mismatch: source {source.value}, target {target.value}.",
+            )
         return True, f"Date family match ({source.value} / {target.value}); values compare by calendar date."
     if {source, target} == {FormatKind.ISO_DATE, FormatKind.DATETIME} or {
         source,
