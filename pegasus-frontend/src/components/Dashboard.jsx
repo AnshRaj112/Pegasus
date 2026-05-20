@@ -12,9 +12,43 @@ import {
 } from 'recharts'
 import dayjs from 'dayjs'
 import { CheckCircle, XCircle, Activity } from 'lucide-react'
-import { fetchValidationDailyStats } from '../api/validationHistory'
+import { fetchValidationDailyStats, fetchValidationHistory } from '../api/validationHistory'
 
 const { RangePicker } = DatePicker
+
+function getDayBoundaryHourlySeries(runs) {
+  const startOfDay = dayjs().startOf('day')
+  const buckets = Array.from({ length: 25 }, (_, index) => {
+    const timestamp = startOfDay.add(index, 'hour')
+    return {
+      date: timestamp.format('h:mm A'),
+      fullDate: timestamp.toISOString(),
+      passed: 0,
+      failed: 0,
+      total: 0,
+    }
+  })
+
+  for (const run of runs) {
+    const runTime = dayjs(run.completed_at ?? run.created_at)
+    if (!runTime.isValid()) continue
+
+    const hourOffset = runTime.startOf('hour').diff(startOfDay, 'hour')
+    if (hourOffset < 0 || hourOffset > 24) continue
+
+    const bucket = buckets[hourOffset]
+    const passed = run.is_match === true || run.status === 'success'
+
+    if (passed) {
+      bucket.passed += 1
+    } else {
+      bucket.failed += 1
+    }
+    bucket.total += 1
+  }
+
+  return buckets
+}
 
 export default function Dashboard() {
   const [filterType, setFilterType] = useState('weekly')
@@ -32,14 +66,36 @@ export default function Dashboard() {
         }
         return
       }
-      const opts =
-        filterType === 'custom'
-          ? { from: dateRange[0].format('YYYY-MM-DD'), to: dateRange[1].format('YYYY-MM-DD') }
-          : {
-              days:
-                filterType === 'weekly' ? 7 : filterType === 'monthly' ? 30 : 1,
-            }
       try {
+        if (filterType === 'daily') {
+          const data = await fetchValidationHistory({ limit: 200, offset: 0 })
+          if (cancelled) return
+          const items = Array.isArray(data.items) ? data.items : []
+          const todayStart = dayjs().startOf('day')
+          const todayEnd = todayStart.add(1, 'day')
+          const dailyRuns = items.filter((row) => {
+            const completedAt = dayjs(row.completed_at ?? row.created_at)
+            return completedAt.isValid() && completedAt.isAfter(todayStart.subtract(1, 'millisecond')) && completedAt.isBefore(todayEnd.add(1, 'millisecond'))
+          })
+
+          const hourlySeries = getDayBoundaryHourlySeries(dailyRuns)
+          setChartData(hourlySeries)
+          setTotals({
+            passed: hourlySeries.reduce((sum, row) => sum + row.passed, 0),
+            failed: hourlySeries.reduce((sum, row) => sum + row.failed, 0),
+            total: hourlySeries.reduce((sum, row) => sum + row.total, 0),
+          })
+          return
+        }
+
+        const opts =
+          filterType === 'custom'
+            ? { from: dateRange[0].format('YYYY-MM-DD'), to: dateRange[1].format('YYYY-MM-DD') }
+            : {
+                days:
+                  filterType === 'weekly' ? 7 : filterType === 'monthly' ? 30 : 1,
+              }
+
         const data = await fetchValidationDailyStats(opts)
         if (cancelled) return
         const items = data.items ?? []
@@ -157,6 +213,10 @@ export default function Dashboard() {
                   axisLine={false} 
                   tickLine={false} 
                   tick={{ fill: 'var(--text-3)', fontSize: 12 }}
+                  interval={filterType === 'daily' ? 2 : 'preserveStartEnd'}
+                  minTickGap={filterType === 'daily' ? 20 : 30}
+                  angle={filterType === 'daily' ? -45 : 0}
+                  textAnchor={filterType === 'daily' ? 'end' : 'middle'}
                   dy={10}
                 />
                 <YAxis 
