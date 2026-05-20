@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pegasus.core.file_pair import compute_file_pair_key
@@ -210,6 +210,59 @@ class ValidationRunRepository:
         stmt = stmt.offset(offset).limit(limit)
         result = await session.scalars(stmt)
         return list(result.all())
+
+    @staticmethod
+    async def daily_completed_stats(
+        session: AsyncSession,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> list[tuple[datetime, int, int]]:
+        """Group terminal runs by calendar day of ``completed_at`` (UTC bucket)."""
+        day_bucket = func.date_trunc("day", ValidationRun.completed_at).label("day_bucket")
+        passed = func.sum(
+            case(
+                (
+                    and_(
+                        ValidationRun.status == ValidationRunStatus.COMPLETED,
+                        ValidationRun.is_match.is_(True),
+                    ),
+                    1,
+                ),
+                else_=0,
+            )
+        )
+        failed = func.sum(
+            case(
+                (
+                    or_(
+                        ValidationRun.status == ValidationRunStatus.FAILED,
+                        and_(
+                            ValidationRun.status == ValidationRunStatus.COMPLETED,
+                            or_(
+                                ValidationRun.is_match.is_(False),
+                                ValidationRun.is_match.is_(None),
+                            ),
+                        ),
+                    ),
+                    1,
+                ),
+                else_=0,
+            )
+        )
+        stmt = (
+            select(day_bucket, passed, failed)
+            .where(ValidationRun.completed_at.isnot(None))
+            .where(ValidationRun.completed_at >= start)
+            .where(ValidationRun.completed_at < end)
+            .group_by(day_bucket)
+            .order_by(day_bucket)
+        )
+        rows = await session.execute(stmt)
+        out: list[tuple[datetime, int, int]] = []
+        for bucket, p, f in rows.all():
+            out.append((bucket, int(p or 0), int(f or 0)))
+        return out
 
     @staticmethod
     async def count_runs(

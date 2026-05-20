@@ -29,6 +29,20 @@ async function parseJson(res) {
   }
 }
 
+export async function fetchValidationDailyStats({ days = 7, from, to } = {}) {
+  const params = new URLSearchParams()
+  if (from && to) {
+    params.set('from', from)
+    params.set('to', to)
+  } else {
+    params.set('days', String(days))
+  }
+  const res = await fetch(absoluteApiUrl(`/api/v1/validate/history/daily-stats?${params}`))
+  const data = await parseJson(res)
+  if (!res.ok) throw new Error(formatDetail(data.detail) || `Daily stats failed (${res.status})`)
+  return data
+}
+
 export async function fetchValidationHistory({ limit = 50, offset = 0, sourcePath, targetPath } = {}) {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
   if (sourcePath) params.set('source_path', sourcePath)

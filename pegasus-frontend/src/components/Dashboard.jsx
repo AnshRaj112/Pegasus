@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Select, DatePicker } from 'antd'
 import {
   AreaChart,
@@ -12,76 +12,63 @@ import {
 } from 'recharts'
 import dayjs from 'dayjs'
 import { CheckCircle, XCircle, Activity } from 'lucide-react'
+import { fetchValidationDailyStats } from '../api/validationHistory'
 
-const { Option } = Select
 const { RangePicker } = DatePicker
-
-// Generate some mock data for the last 30 days
-const generateMockData = (days) => {
-  const data = []
-  let today = dayjs()
-  for (let i = days - 1; i >= 0; i--) {
-    const passed = Math.floor(Math.random() * 50) + 20
-    const failed = Math.floor(Math.random() * 10) + 1
-    data.push({
-      date: today.subtract(i, 'day').format('MMM DD'),
-      fullDate: today.subtract(i, 'day').format('YYYY-MM-DD'),
-      passed,
-      failed,
-      total: passed + failed
-    })
-  }
-  return data
-}
-
-// Generate hourly mock data for the past N hours (useful for "Past 24 Hours")
-const generateHourlyMockData = (hours) => {
-  const data = []
-  let now = dayjs()
-  for (let i = hours - 1; i >= 0; i--) {
-    const passed = Math.floor(Math.random() * 10) + 1
-    const failed = Math.floor(Math.random() * 4)
-    data.push({
-      date: now.subtract(i, 'hour').format('HH:00'),
-      fullDate: now.subtract(i, 'hour').format('YYYY-MM-DDTHH:mm:ss'),
-      passed,
-      failed,
-      total: passed + failed
-    })
-  }
-  return data
-}
-
-const mockDataWeekly = generateMockData(7)
-const mockDataMonthly = generateMockData(30)
-// For custom we just slice from monthly or generate more
-const mockDataCustom = generateMockData(14)
-const mockDataDaily = generateHourlyMockData(24)
 
 export default function Dashboard() {
   const [filterType, setFilterType] = useState('weekly')
   const [dateRange, setDateRange] = useState(null)
+  const [chartData, setChartData] = useState([])
+  const [totals, setTotals] = useState({ passed: 0, failed: 0, total: 0 })
 
-  // Determine which data to show based on filter
-  const currentData = useMemo(() => {
-    if (filterType === 'weekly') return mockDataWeekly
-    if (filterType === 'monthly') return mockDataMonthly
-    if (filterType === 'custom') return mockDataCustom // In a real app, filter based on dateRange
-    if (filterType === 'daily') return mockDataDaily
-    return mockDataWeekly
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (filterType === 'custom' && (!dateRange?.[0] || !dateRange?.[1])) {
+        if (!cancelled) {
+          setChartData([])
+          setTotals({ passed: 0, failed: 0, total: 0 })
+        }
+        return
+      }
+      const opts =
+        filterType === 'custom'
+          ? { from: dateRange[0].format('YYYY-MM-DD'), to: dateRange[1].format('YYYY-MM-DD') }
+          : {
+              days:
+                filterType === 'weekly' ? 7 : filterType === 'monthly' ? 30 : 1,
+            }
+      try {
+        const data = await fetchValidationDailyStats(opts)
+        if (cancelled) return
+        const items = data.items ?? []
+        setChartData(
+          items.map((row) => ({
+            date: dayjs(row.date).format('MMM DD'),
+            fullDate: row.date,
+            passed: row.passed,
+            failed: row.failed,
+            total: row.total,
+          }))
+        )
+        const t = data.totals ?? { passed: 0, failed: 0, total: 0 }
+        setTotals({
+          passed: t.passed ?? 0,
+          failed: t.failed ?? 0,
+          total: t.total ?? (t.passed ?? 0) + (t.failed ?? 0),
+        })
+      } catch {
+        if (!cancelled) {
+          setChartData([])
+          setTotals({ passed: 0, failed: 0, total: 0 })
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [filterType, dateRange])
-
-  // Calculate totals
-  const totals = useMemo(() => {
-    return currentData.reduce(
-      (acc, curr) => ({
-        passed: acc.passed + curr.passed,
-        failed: acc.failed + curr.failed,
-        total: acc.total + curr.total
-      }),
-      { passed: 0, failed: 0, total: 0 }
-    )
-  }, [currentData])
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -129,7 +116,7 @@ export default function Dashboard() {
             }}
             style={{ width: 120 }}
             options={[
-              { value: 'daily', label: 'Past 24 Hours' },
+              { value: 'daily', label: 'Last 1 Day' },
               { value: 'weekly', label: 'Last 7 Days' },
               { value: 'monthly', label: 'Last 30 Days' },
               { value: 'custom', label: 'Custom Range' },
@@ -153,7 +140,7 @@ export default function Dashboard() {
           </h3>
           <div style={{ flex: 1, minHeight: 0 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={currentData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorPassed" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="var(--success)" stopOpacity={0.3}/>
@@ -234,7 +221,7 @@ export default function Dashboard() {
                 {totals.passed.toLocaleString()}
               </h2>
               <p style={{ margin: '4px 0 0 0', color: 'var(--success)', fontSize: 12, fontWeight: 500 }}>
-                {((totals.passed / totals.total) * 100).toFixed(1)}% success rate
+                {totals.total ? ((totals.passed / totals.total) * 100).toFixed(1) : '0.0'}% success rate
               </p>
             </div>
           </div>
@@ -253,7 +240,7 @@ export default function Dashboard() {
                 {totals.failed.toLocaleString()}
               </h2>
               <p style={{ margin: '4px 0 0 0', color: 'var(--danger)', fontSize: 12, fontWeight: 500 }}>
-                {((totals.failed / totals.total) * 100).toFixed(1)}% failure rate
+                {totals.total ? ((totals.failed / totals.total) * 100).toFixed(1) : '0.0'}% failure rate
               </p>
             </div>
           </div>

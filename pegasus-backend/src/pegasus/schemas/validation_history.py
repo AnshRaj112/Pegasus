@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -33,6 +33,26 @@ class ValidationHistorySummary(BaseModel):
     durations: ValidationDurations = Field(default_factory=ValidationDurations)
     created_at: datetime
     completed_at: datetime | None = None
+
+
+class ValidationDailyStatRow(BaseModel):
+    """Passed vs failed validation counts for one day (by ``completed_at``)."""
+
+    date: date
+    passed: int = Field(ge=0, description="Completed runs with full data match")
+    failed: int = Field(ge=0, description="Failed runs or completed with mismatches")
+    total: int = Field(ge=0)
+
+
+class ValidationDailyTotals(BaseModel):
+    passed: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    total: int = Field(ge=0)
+
+
+class ValidationDailyStatsResponse(BaseModel):
+    items: list[ValidationDailyStatRow] = Field(default_factory=list)
+    totals: ValidationDailyTotals
 
 
 class ValidationHistoryListResponse(BaseModel):

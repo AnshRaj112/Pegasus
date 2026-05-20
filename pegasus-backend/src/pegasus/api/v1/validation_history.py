@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -17,6 +18,9 @@ from pegasus.validation.delimiter_tokens import normalize_delimiter_for_storage
 from pegasus.schemas.validation import ColumnMapping, ColumnMappingFormatCheck, FooterValidationResult, MismatchCounts
 from pegasus.schemas.validation_history import (
     SaveDraftRequest,
+    ValidationDailyStatRow,
+    ValidationDailyStatsResponse,
+    ValidationDailyTotals,
     ValidationDurations,
     ValidationHistoryDetail,
     ValidationHistoryListResponse,
@@ -134,6 +138,67 @@ async def list_validation_history(
         items=[_summary_from_run(r) for r in runs],
         total=total,
         file_pair_key=pair_key,
+    )
+
+
+@router.get(
+    "/validate/history/daily-stats",
+    response_model=ValidationDailyStatsResponse,
+    summary="Daily passed/failed counts from persisted validation runs",
+)
+async def validation_history_daily_stats(
+    settings: AppSettings,
+    days: Annotated[int, Query(ge=1, le=366)] = 30,
+    date_from: Annotated[date | None, Query(alias="from")] = None,
+    date_to: Annotated[date | None, Query(alias="to")] = None,
+) -> ValidationDailyStatsResponse:
+    _require_persistence(settings)
+    today = datetime.now(UTC).date()
+    if date_from is not None and date_to is not None:
+        start_d, end_d = date_from, date_to
+    else:
+        end_d = today
+        start_d = end_d - timedelta(days=days - 1)
+    if start_d > end_d:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="'from' must be before or equal to 'to'")
+
+    start_dt = datetime.combine(start_d, time.min, tzinfo=UTC)
+    end_dt = datetime.combine(end_d, time.min, tzinfo=UTC) + timedelta(days=1)
+
+    try:
+        async with AsyncSessionLocal() as session:
+            raw = await ValidationRunRepository.daily_completed_stats(
+                session, start=start_dt, end=end_dt
+            )
+    except Exception as exc:
+        logger.exception("Failed to load daily validation stats: %s", exc)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not load validation stats; check database connectivity",
+        ) from exc
+
+    by_day: dict[date, tuple[int, int]] = {}
+    for bucket, p, f in raw:
+        d = bucket.date() if hasattr(bucket, "date") else bucket
+        by_day[d] = (p, f)
+
+    items: list[ValidationDailyStatRow] = []
+    total_passed = total_failed = 0
+    d = start_d
+    while d <= end_d:
+        p, f = by_day.get(d, (0, 0))
+        items.append(ValidationDailyStatRow(date=d, passed=p, failed=f, total=p + f))
+        total_passed += p
+        total_failed += f
+        d += timedelta(days=1)
+
+    return ValidationDailyStatsResponse(
+        items=items,
+        totals=ValidationDailyTotals(
+            passed=total_passed,
+            failed=total_failed,
+            total=total_passed + total_failed,
+        ),
     )
 
 
