@@ -11,6 +11,22 @@ import {
   Legend
 } from 'recharts'
 import dayjs from 'dayjs'
+// Helper: convert ISO/Date to IST (UTC+5:30) and format
+function formatToIST(iso, { short = false } = {}) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const istMs = d.getTime() + 330 * 60 * 1000 // +5:30
+  const ist = new Date(istMs)
+  const YYYY = ist.getUTCFullYear()
+  const MM = ist.getUTCMonth() // 0-based
+  const DD = String(ist.getUTCDate()).padStart(2, '0')
+  const hh = String(ist.getUTCHours()).padStart(2, '0')
+  const mm = String(ist.getUTCMinutes()).padStart(2, '0')
+  if (short) return `${hh}:${mm} IST`
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  return `${months[MM]} ${DD}, ${YYYY} ${hh}:${mm} IST`
+}
 import { CheckCircle, XCircle, Activity } from 'lucide-react'
 import { fetchValidationDailyStats, fetchValidationHistory } from '../api/validationHistory'
 
@@ -21,8 +37,8 @@ function getDayBoundaryHourlySeries(runs) {
   const buckets = Array.from({ length: 25 }, (_, index) => {
     const timestamp = startOfDay.add(index, 'hour')
     return {
-      date: timestamp.format('h:mm A'),
-      fullDate: timestamp.toISOString(),
+      date: formatToIST(timestamp.toISOString(), { short: true }),
+      fullDate: formatToIST(timestamp.toISOString()),
       passed: 0,
       failed: 0,
       total: 0,
@@ -111,9 +127,9 @@ export default function Dashboard() {
         const isHourly = filterType === 'daily'
         setChartData(
           items.map((row) => ({
-            // For 1-day view show hourly labels; otherwise show month/day
-            date: isHourly ? dayjs(row.date).format('HH:00') : dayjs(row.date).format('MMM DD'),
-            fullDate: dayjs(row.date).format('MMM DD, YYYY HH:mm'),
+            // For 1-day view show hourly labels in IST; otherwise show month/day
+            date: isHourly ? formatToIST(row.date, { short: true }) : dayjs(row.date).format('MMM DD'),
+            fullDate: isHourly ? formatToIST(row.date) : dayjs(row.date).format('MMM DD, YYYY'),
             passed: row.passed,
             failed: row.failed,
             total: row.total,
