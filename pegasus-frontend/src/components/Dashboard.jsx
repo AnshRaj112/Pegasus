@@ -50,6 +50,15 @@ function getDayBoundaryHourlySeries(runs) {
   return buckets
 }
 
+function formatDailyTick(value) {
+  const match = typeof value === 'string' ? value.match(/^(\d{1,2}):00\s([AP]M)$/) : null
+  if (!match) return value
+  const hour = Number.parseInt(match[1], 10)
+  const suffix = match[2]
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12
+  return `${displayHour} ${suffix}`
+}
+
 export default function Dashboard() {
   const [filterType, setFilterType] = useState('weekly')
   const [dateRange, setDateRange] = useState(null)
@@ -190,13 +199,13 @@ export default function Dashboard() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 24, alignItems: 'start' }}>
         {/* Main Chart Area */}
-        <div className="card" style={{ padding: 24, height: 480, display: 'flex', flexDirection: 'column' }}>
-          <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-1)', marginBottom: 24, margin: 0 }}>
+        <div className="card" style={{ padding: 24, height: 540, display: 'flex', flexDirection: 'column' }}>
+          <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-1)', marginBottom: 40, margin: 0 }}>
             Validation Trends
           </h3>
-          <div style={{ flex: 1, minHeight: 0 }}>
+          <div style={{ flex: 1, minHeight: 0, paddingTop: 4 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <AreaChart data={chartData} margin={{ top: 10, right: 28, left: 0, bottom: 46 }}>
                 <defs>
                   <linearGradient id="colorPassed" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="var(--success)" stopOpacity={0.3}/>
@@ -212,12 +221,16 @@ export default function Dashboard() {
                   dataKey="date" 
                   axisLine={false} 
                   tickLine={false} 
-                  tick={{ fill: 'var(--text-3)', fontSize: 12 }}
+                  height={56}
+                  tick={{ fill: 'var(--text-3)', fontSize: filterType === 'daily' ? 11 : 12 }}
+                  padding={filterType === 'daily' ? { left: 12, right: 24 } : { left: 0, right: 0 }}
                   interval={filterType === 'daily' ? 2 : 'preserveStartEnd'}
-                  minTickGap={filterType === 'daily' ? 20 : 30}
-                  angle={filterType === 'daily' ? -45 : 0}
-                  textAnchor={filterType === 'daily' ? 'end' : 'middle'}
-                  dy={10}
+                  minTickGap={filterType === 'daily' ? 24 : 30}
+                  angle={filterType === 'daily' ? 0 : 0}
+                  textAnchor="middle"
+                  tickMargin={filterType === 'daily' ? 24 : 10}
+                  dy={filterType === 'daily' ? 12 : 10}
+                  tickFormatter={filterType === 'daily' ? formatDailyTick : undefined}
                 />
                 <YAxis 
                   axisLine={false} 
