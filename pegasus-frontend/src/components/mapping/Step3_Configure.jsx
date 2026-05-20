@@ -1,6 +1,9 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import ColumnCompareRuleEditor from './ColumnCompareRuleEditor'
+import CompareRuleIconButton from './CompareRuleIconButton'
 import { mappingHasCustomRule } from './columnMapping'
+
+const MAPPING_GRID = 'minmax(0, 1fr) 28px minmax(0, 1fr) 32px'
 
 export default function Step3_Configure({
   sourcePath,
@@ -37,12 +40,16 @@ export default function Step3_Configure({
     onMappingChange(activeMappings.map(m => (m.id === id ? { ...m, targetCol: val } : m)))
   }
 
-  function updateMapping(id, patch) {
-    onMappingChange(activeMappings.map(m => (m.id === id ? { ...m, ...patch } : m)))
-  }
+  const [openRule, setOpenRule] = useState(null)
+  const openRuleRow = openRule ? activeMappings.find(m => m.id === openRule.rowId) : null
 
-  const [openRuleId, setOpenRuleId] = useState(null)
-  const ruleAnchorRefs = useRef({})
+  function toggleRuleEditor(row, anchorEl) {
+    if (openRule?.rowId === row.id) {
+      setOpenRule(null)
+      return
+    }
+    setOpenRule({ rowId: row.id, anchorEl })
+  }
 
   return (
     <div style={{ animation: 'fade-in 0.2s ease' }}>
@@ -54,8 +61,8 @@ export default function Step3_Configure({
           Configure column mapping
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-3)', maxWidth: 760 }}>
-          Map columns as usual. Use the <strong style={{ color: 'var(--text-2)' }}>⚙</strong> icon on a row only when that
-          column needs special handling (e.g. strip <code style={{ fontFamily: 'monospace' }}>+91</code> from source phone numbers).
+          Map columns as usual. Use the rule icon beside source or target when that field needs custom matching
+          (e.g. strip <code style={{ fontFamily: 'monospace' }}>+91</code> on source phone numbers).
         </p>
       </div>
 
@@ -220,18 +227,19 @@ export default function Step3_Configure({
         </div>
       )}
 
-      <div style={{ border: '1px solid var(--border-1)', borderRadius: 10, overflow: 'hidden' }}>
+      <div style={{ border: '1px solid var(--border-1)', borderRadius: 10, overflow: 'visible' }}>
         <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 28px 1fr 44px',
+          display: 'grid', gridTemplateColumns: MAPPING_GRID,
           padding: '8px 14px',
           background: 'var(--surface-2)',
           borderBottom: '1px solid var(--border-1)',
+          borderRadius: '9px 9px 0 0',
           alignItems: 'center', gap: 8,
         }}>
           <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)' }}>Source</span>
           <div />
           <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)' }}>Target</span>
-          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', textAlign: 'center' }} title="Per-column compare rules">Rule</span>
+          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', textAlign: 'center' }}>Status</span>
         </div>
 
         <div>
@@ -239,21 +247,19 @@ export default function Step3_Configure({
             <div
               className="mapping-row"
               style={{
-                display: 'grid', gridTemplateColumns: '1fr 28px 1fr 44px',
-                padding: '6px 14px', gap: 8, alignItems: 'center',
+                display: 'grid', gridTemplateColumns: MAPPING_GRID,
+                padding: '8px 14px', gap: 8, alignItems: 'center',
                 background: 'var(--surface-2)',
                 borderBottom: activeMappings.length > 0 ? '1px solid var(--border-1)' : 'none',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                 <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--text-4)', flexShrink: 0 }} />
-                <div style={{ minWidth: 0 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={uidRow.sourceCol}>
                     {uidRow.sourceCol}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-4)' }}>
-                    UID / join key
-                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-4)' }}>UID / join key</div>
                 </div>
               </div>
 
@@ -263,7 +269,7 @@ export default function Step3_Configure({
                 </svg>
               </div>
 
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <div style={{
                   height: 28, padding: '0 8px', borderRadius: 8,
                   display: 'flex', alignItems: 'center',
@@ -272,13 +278,10 @@ export default function Step3_Configure({
                 }}>
                   {uidRow.targetCol}
                 </div>
-                <div style={{ marginTop: 5, fontSize: 11, color: 'var(--text-4)' }}>
-                  This row is pinned and used as the comparison key.
-                </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 4 }}>
-                <span style={{ fontSize: 10, color: 'var(--text-4)' }}>—</span>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-4)' }}>UID</span>
               </div>
             </div>
           )}
@@ -287,72 +290,99 @@ export default function Step3_Configure({
             const formatCheck = validateHeaderFormats && isMapped ? formatCheckBySource.get(m.sourceCol) : null
             const formatWarn = formatCheck && formatCheck.compatible === false
             const hasCustomRule = mappingHasCustomRule(m)
-            const ruleOpen = openRuleId === m.id
+            const ruleOpen = openRule?.rowId === m.id
             return (
               <div
                 key={m.id}
                 className="mapping-row"
                 style={{
-                  display: 'grid', gridTemplateColumns: '1fr 28px 1fr 44px',
-                  padding: '6px 14px', gap: 8, alignItems: 'start',
+                  display: 'grid', gridTemplateColumns: MAPPING_GRID,
+                  padding: '8px 14px', gap: 8, alignItems: 'center',
                   background: 'var(--surface-1)',
                   borderBottom: idx < activeMappings.length - 1 ? '1px solid var(--border-1)' : 'none',
+                  borderRadius: idx === activeMappings.length - 1 ? '0 0 9px 9px' : undefined,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, paddingTop: 2 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.sourceCol}>
-                      {m.sourceCol}
-                    </div>
+                  <div
+                    style={{
+                      flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, color: 'var(--text-1)',
+                      fontFamily: 'Geist Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}
+                    title={m.sourceCol}
+                  >
+                    {m.sourceCol}
                   </div>
+                  {isMapped && (
+                    <span data-compare-rule-row={m.id}>
+                      <CompareRuleIconButton
+                        active={ruleOpen}
+                        configured={hasCustomRule}
+                        label={`Source rules for ${m.sourceCol}`}
+                        onClick={e => toggleRuleEditor(m, e.currentTarget)}
+                      />
+                    </span>
+                  )}
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ color: 'var(--text-4)' }}>
                     <path d="M3 7h8M8 4.5L10.5 7 8 9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                 </div>
 
-                <div>
-                  <select
-                    value={m.targetCol}
-                    onChange={e => handleTargetChange(m.id, e.target.value)}
-                    disabled={previewLoading || targetColumns.length === 0}
-                    className="input input-mono"
-                    style={{
-                      height: 28, fontSize: 12, padding: '0 24px 0 8px', width: '100%',
-                      borderColor: isMapped ? 'var(--border-2)' : 'var(--danger-border)',
-                      color: isMapped ? 'var(--text-1)' : 'var(--danger)',
-                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%2371717a' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
-                      backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center',
-                      backgroundColor: isMapped ? 'var(--surface-1)' : 'rgba(239, 68, 68, 0.06)',
-                    }}
-                  >
-                    <option value="">— not mapped —</option>
-                    {targetColumns.map(c => (
-                      <option key={c} value={c} disabled={usedTargets.has(c) && c !== m.targetCol}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <select
+                      value={m.targetCol}
+                      onChange={e => handleTargetChange(m.id, e.target.value)}
+                      disabled={previewLoading || targetColumns.length === 0}
+                      className="input input-mono"
+                      style={{
+                        flex: 1, minWidth: 0, height: 28, fontSize: 12, padding: '0 24px 0 8px',
+                        borderColor: isMapped ? 'var(--border-2)' : 'var(--danger-border)',
+                        color: isMapped ? 'var(--text-1)' : 'var(--danger)',
+                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%2371717a' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
+                        backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center',
+                        backgroundColor: isMapped ? 'var(--surface-1)' : 'rgba(239, 68, 68, 0.06)',
+                      }}
+                    >
+                      <option value="">— not mapped —</option>
+                      {targetColumns.map(c => (
+                        <option key={c} value={c} disabled={usedTargets.has(c) && c !== m.targetCol}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                    {isMapped && (
+                      <span data-compare-rule-row={m.id}>
+                        <CompareRuleIconButton
+                          active={ruleOpen}
+                          configured={hasCustomRule}
+                          label={`Target rules for ${m.targetCol}`}
+                          onClick={e => toggleRuleEditor(m, e.currentTarget)}
+                        />
+                      </span>
+                    )}
+                  </div>
                   {!isMapped && (
-                    <div style={{ marginTop: 5, fontSize: 11, color: 'var(--danger)' }}>
+                    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--danger)' }}>
                       Pick a target column to compare.
                     </div>
                   )}
                   {formatWarn && (
-                    <div style={{ marginTop: 5, fontSize: 11, color: 'var(--danger)' }}>
+                    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--danger)' }}>
                       Format: {formatCheck.source_format} → {formatCheck.target_format}. {formatCheck.message}
                     </div>
                   )}
                 </div>
 
-                <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, paddingTop: 2 }}>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
                   <span
                     style={{
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      width: 22, height: 22, borderRadius: 6, fontSize: 10, fontWeight: 700,
+                      width: 24, height: 24, borderRadius: 6, fontSize: 10, fontWeight: 700,
                       color: formatWarn ? 'var(--danger)' : isMapped ? 'var(--success)' : 'var(--danger)',
                       background: formatWarn ? 'var(--danger-muted)' : isMapped ? 'var(--success-muted)' : 'var(--danger-muted)',
                     }}
@@ -360,40 +390,8 @@ export default function Step3_Configure({
                   >
                     {formatWarn ? '!' : isMapped ? 'OK' : '!'}
                   </span>
-                  {isMapped && (
-                    <>
-                      <button
-                        type="button"
-                        ref={el => { ruleAnchorRefs.current[m.id] = el }}
-                        onClick={() => setOpenRuleId(ruleOpen ? null : m.id)}
-                        title={hasCustomRule ? 'Edit custom compare rule' : 'Add custom compare rule'}
-                        aria-label={`Compare rules for ${m.sourceCol}`}
-                        aria-expanded={ruleOpen}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          width: 28, height: 28, borderRadius: 7, border: '1px solid',
-                          borderColor: hasCustomRule || ruleOpen ? 'var(--accent-border)' : 'var(--border-2)',
-                          background: hasCustomRule || ruleOpen ? 'var(--accent-muted)' : 'var(--surface-1)',
-                          color: hasCustomRule || ruleOpen ? 'var(--accent)' : 'var(--text-3)',
-                          cursor: 'pointer', padding: 0,
-                        }}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-                          <path d="M7 1.5l.9 2.7 2.7.9-2.7.9L7 8.7l-.9-2.7-2.7-.9 2.7-.9L7 1.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-                          <path d="M11.5 9.5v3M10 11h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                        </svg>
-                      </button>
-                      {ruleOpen && (
-                        <ColumnCompareRuleEditor
-                          row={m}
-                          anchorRef={{ current: ruleAnchorRefs.current[m.id] }}
-                          onChange={updated => onMappingChange(activeMappings.map(row => (row.id === m.id ? updated : row)))}
-                          onClose={() => setOpenRuleId(null)}
-                        />
-                      )}
-                    </>
-                  )}
                 </div>
+
               </div>
             )
           }) : (
@@ -402,6 +400,16 @@ export default function Step3_Configure({
             </div>
           )}
         </div>
+
+        {openRuleRow && openRule?.anchorEl && (
+          <ColumnCompareRuleEditor
+            row={openRuleRow}
+            rowId={openRuleRow.id}
+            anchorEl={openRule.anchorEl}
+            onChange={updated => onMappingChange(activeMappings.map(row => (row.id === openRuleRow.id ? updated : row)))}
+            onClose={() => setOpenRule(null)}
+          />
+        )}
       </div>
     </div>
   )

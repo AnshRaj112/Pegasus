@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { clearCompareRule } from './columnMapping'
 
 const COMPARE_MODES = [
@@ -11,42 +12,71 @@ const COMPARE_MODES = [
 
 export default function ColumnCompareRuleEditor({
   row,
+  rowId,
   onChange,
   onClose,
-  anchorRef,
+  anchorEl,
 }) {
   const panelRef = useRef(null)
+  const [position, setPosition] = useState({ top: 0, left: 0 })
+
+  useLayoutEffect(() => {
+    if (!anchorEl) return
+    const rect = anchorEl.getBoundingClientRect()
+    const width = 300
+    const panelHeight = 380
+    const gap = 8
+    const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))
+    const spaceBelow = window.innerHeight - rect.bottom - gap
+    const spaceAbove = rect.top - gap
+    let top
+    if (spaceBelow >= panelHeight || spaceBelow >= spaceAbove) {
+      top = rect.bottom + gap
+    } else {
+      top = Math.max(12, rect.top - panelHeight - gap)
+    }
+    top = Math.min(top, window.innerHeight - panelHeight - 12)
+    setPosition({ top: Math.max(12, top), left })
+  }, [anchorEl])
 
   useEffect(() => {
     function handlePointerDown(event) {
       const target = event.target
       if (panelRef.current?.contains(target)) return
-      if (anchorRef?.current?.contains(target)) return
+      if (target.closest?.(`[data-compare-rule-row="${rowId}"]`)) return
       onClose?.()
     }
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') onClose?.()
+    }
     document.addEventListener('mousedown', handlePointerDown)
-    return () => document.removeEventListener('mousedown', handlePointerDown)
-  }, [anchorRef, onClose])
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [rowId, onClose])
 
   function patch(fields) {
     onChange({ ...row, ...fields })
   }
 
-  return (
+  const panel = (
     <div
       ref={panelRef}
       style={{
-        position: 'absolute',
-        top: '100%',
-        right: 0,
-        marginTop: 6,
-        zIndex: 20,
+        position: 'fixed',
+        top: position.top,
+        left: position.left,
+        zIndex: 2000,
         width: 300,
+        maxHeight: 'min(70vh, 420px)',
+        overflowY: 'auto',
         padding: '12px 14px',
         borderRadius: 10,
         background: 'var(--surface-1)',
         border: '1px solid var(--border-2)',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+        boxShadow: '0 12px 40px rgba(0,0,0,0.18)',
         animation: 'fade-in 0.15s ease',
       }}
       role="dialog"
@@ -54,9 +84,7 @@ export default function ColumnCompareRuleEditor({
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 8 }}>
         <div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)' }}>
-            Custom compare
-          </div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)' }}>Custom compare</div>
           <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 2 }}>
             {row.sourceCol} → {row.targetCol}
           </div>
@@ -75,7 +103,7 @@ export default function ColumnCompareRuleEditor({
       </div>
 
       <p style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 10, lineHeight: 1.45 }}>
-        Other columns use default matching. Only this field uses the rules below.
+        Applies to this column pair only. Other columns use default matching.
       </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
@@ -137,7 +165,7 @@ export default function ColumnCompareRuleEditor({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
         <input
           type="text"
-          placeholder="Remove from source before compare (e.g. +91)"
+          placeholder="Remove from source (e.g. +91)"
           value={row.sourceStripPrefix || ''}
           onChange={e => patch({ sourceStripPrefix: e.target.value })}
           className="input input-mono"
@@ -145,7 +173,7 @@ export default function ColumnCompareRuleEditor({
         />
         <input
           type="text"
-          placeholder="Remove from target before compare (optional)"
+          placeholder="Remove from target (optional)"
           value={row.targetStripPrefix || ''}
           onChange={e => patch({ targetStripPrefix: e.target.value })}
           className="input input-mono"
@@ -195,4 +223,6 @@ export default function ColumnCompareRuleEditor({
       </button>
     </div>
   )
+
+  return createPortal(panel, document.body)
 }
