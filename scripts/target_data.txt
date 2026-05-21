@@ -1,3 +1,0 @@
-00001   Alice Smith         alice@example.com             2026/06/10
-00002   Bob Jones           bob@example.com               1995/12/25
-00003   Charlie Brown       charlie@example.com           2000/01/02

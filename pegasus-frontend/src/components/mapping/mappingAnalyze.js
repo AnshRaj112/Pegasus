@@ -10,9 +10,32 @@ export function hasFormatWarnings(formatChecks = []) {
   return formatChecks.some(c => c && c.compatible === false)
 }
 
+function buildStoragePayload(prefix, { storageType, path, cloudConfig }) {
+  if (storageType === 'cloud') {
+    const normalizedProvider = String(cloudConfig?.provider || 'google-cloud-storage').trim() || 'google-cloud-storage'
+    return {
+      [`${prefix}_cloud`]: {
+        provider: normalizedProvider,
+        bucket: String(cloudConfig?.bucket || '').trim(),
+        object_name: String(cloudConfig?.objectName || '').trim(),
+        credentials_json: String(cloudConfig?.credentialsJson || ''),
+        project_id: String(cloudConfig?.projectId || '').trim() || undefined,
+      },
+    }
+  }
+
+  return {
+    [`${prefix}_path`]: String(path || '').trim(),
+  }
+}
+
 export function buildAnalyzePayload({
+  sourceStorageType,
   sourcePath,
+  sourceCloudConfig,
+  targetStorageType,
   targetPath,
+  targetCloudConfig,
   uidColumn,
   delimiter,
   mappings,
@@ -21,8 +44,8 @@ export function buildAnalyzePayload({
   footerTrailingRows,
 }) {
   return {
-    source_path: sourcePath.trim(),
-    target_path: targetPath.trim(),
+    ...buildStoragePayload('source', { storageType: sourceStorageType, path: sourcePath, cloudConfig: sourceCloudConfig }),
+    ...buildStoragePayload('target', { storageType: targetStorageType, path: targetPath, cloudConfig: targetCloudConfig }),
     uid_column: uidColumn.trim(),
     delimiter: delimiter.trim() || 'auto',
     column_mappings: mappings

@@ -36,6 +36,51 @@ function normalizeResult(data) {
   return { ...data, mismatch_samples: [...(g.missing_in_target ?? []), ...(g.extra_in_target ?? []), ...(g.value_mismatch ?? [])] }
 }
 
+const DEFAULT_CLOUD_CONFIG = {
+  provider: 'google-cloud-storage',
+  bucket: '',
+  objectName: '',
+  credentialsJson: '',
+  projectId: '',
+}
+
+function describeStorageInput(storageType, path, cloudConfig) {
+  if (storageType === 'cloud') {
+    const bucket = String(cloudConfig?.bucket || '').trim()
+    const objectName = String(cloudConfig?.objectName || '').trim()
+    if (bucket && objectName) return `gs://${bucket}/${objectName}`
+    if (bucket) return `gs://${bucket}/...`
+    return 'Google Cloud Storage'
+  }
+  return path || '—'
+}
+
+function buildStoragePayload(prefix, storageType, path, cloudConfig) {
+  if (storageType === 'cloud') {
+    return {
+      [`${prefix}_cloud`]: {
+        provider: String(cloudConfig?.provider || 'google-cloud-storage').trim() || 'google-cloud-storage',
+        bucket: String(cloudConfig?.bucket || '').trim(),
+        object_name: String(cloudConfig?.objectName || '').trim(),
+        credentials_json: String(cloudConfig?.credentialsJson || ''),
+        project_id: String(cloudConfig?.projectId || '').trim() || undefined,
+      },
+    }
+  }
+  return { [`${prefix}_path`]: String(path || '').trim() }
+}
+
+function isStorageSelectionComplete(storageType, path, cloudConfig) {
+  if (storageType === 'cloud') {
+    return Boolean(
+      String(cloudConfig?.bucket || '').trim()
+      && String(cloudConfig?.objectName || '').trim()
+      && String(cloudConfig?.credentialsJson || '').trim(),
+    )
+  }
+  return Boolean(String(path || '').trim())
+}
+
 async function pollJob(pollPath, { timeoutMs = 0, intervalMs = 400, onPoll } = {}) {
   const url = absoluteApiUrl(pollPath)
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Number.POSITIVE_INFINITY
@@ -253,6 +298,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [targetStorageType, setTargetStorageType] = useState(null)
   const [sourcePath, setSourcePath] = useState('')
   const [targetPath, setTargetPath] = useState('')
+  const [sourceCloudConfig, setSourceCloudConfig] = useState(DEFAULT_CLOUD_CONFIG)
+  const [targetCloudConfig, setTargetCloudConfig] = useState(DEFAULT_CLOUD_CONFIG)
   const [fileFormat, setFileFormat] = useState('csv')
   const [sourceDateStart, setSourceDateStart] = useState(58)
   const [sourceDateEnd, setSourceDateEnd] = useState(68)
@@ -306,6 +353,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     // Initialize configuration states from detail
     setSourceStorageType('local')
     setTargetStorageType('local')
+    setSourceCloudConfig(DEFAULT_CLOUD_CONFIG)
+    setTargetCloudConfig(DEFAULT_CLOUD_CONFIG)
     setSourcePath(detail.source_path || detail.source_filename || '')
     setTargetPath(detail.target_path || detail.target_filename || '')
     setValidateHeaderFormats(detail.validate_header_formats || false)
@@ -373,11 +422,29 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   function handleDataSourceNext(srcType, tgtType) {
     setSourceStorageType(srcType); setTargetStorageType(tgtType); setStep(2); setSubPhase('pick-source')
   }
-  function handleSourceSelected(path) { setSourcePath(path); setSubPhase('pick-target') }
-  function handleTargetSelected(path) { setTargetPath(path); setStep(3); }
+  function handleSourceSelected(selection) {
+    if (typeof selection === 'string') {
+      setSourcePath(selection)
+    } else if (selection && typeof selection === 'object') {
+      setSourceCloudConfig(selection)
+      setSourcePath('')
+    }
+    setSubPhase('pick-target')
+  }
+  function handleTargetSelected(selection) {
+    if (typeof selection === 'string') {
+      setTargetPath(selection)
+    } else if (selection && typeof selection === 'object') {
+      setTargetCloudConfig(selection)
+      setTargetPath('')
+    }
+    setStep(3)
+  }
 
   useEffect(() => {
-    if (step !== 3 || !sourcePath || !targetPath || fileFormat === 'fixed-width') return
+    const hasSource = isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
+    const hasTarget = isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
+    if (step !== 3 || !hasSource || !hasTarget || fileFormat === 'fixed-width') return
 
     const controller = new AbortController()
 
@@ -385,15 +452,16 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       setColumnPreviewLoading(true)
       setColumnPreviewError('')
       try {
-        const params = new URLSearchParams({
-          source_path: sourcePath.trim(),
-          target_path: targetPath.trim(),
-          uid_column: uidColumn.trim(),
-          delimiter: delimiter.trim() || 'auto',
-        })
-        const res = await fetch(absoluteApiUrl(`/api/v1/validate/local/columns?${params}`), {
-          method: 'GET',
+        const res = await fetch(absoluteApiUrl('/api/v1/validate/local/columns'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
+          body: JSON.stringify({
+            ...buildStoragePayload('source', sourceStorageType, sourcePath, sourceCloudConfig),
+            ...buildStoragePayload('target', targetStorageType, targetPath, targetCloudConfig),
+            uid_column: uidColumn.trim(),
+            delimiter: delimiter.trim() || 'auto',
+          }),
         })
         const raw = await res.text()
         let data = {}
@@ -437,10 +505,23 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
 
     loadColumnPreview()
     return () => controller.abort()
-  }, [step, sourcePath, targetPath, uidColumn, delimiter, fileFormat])
+  }, [
+    step,
+    sourceStorageType,
+    targetStorageType,
+    sourcePath,
+    targetPath,
+    sourceCloudConfig,
+    targetCloudConfig,
+    uidColumn,
+    delimiter,
+    fileFormat,
+  ])
 
   useEffect(() => {
-    if (step !== 3 || !sourcePath || !targetPath || fileFormat === 'fixed-width') return
+    const hasSource = isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
+    const hasTarget = isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
+    if (step !== 3 || !hasSource || !hasTarget || fileFormat === 'fixed-width') return
     if (!validateHeaderFormats && !validateFooters) {
       setFormatChecks([])
       setFooterValidation(null)
@@ -458,8 +539,12 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
           body: JSON.stringify(buildAnalyzePayload({
+            sourceStorageType,
             sourcePath,
+            sourceCloudConfig,
+            targetStorageType,
             targetPath,
+            targetCloudConfig,
             uidColumn,
             delimiter,
             mappings,
@@ -495,6 +580,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     step,
     sourcePath,
     targetPath,
+    sourceStorageType,
+    targetStorageType,
+    sourceCloudConfig,
+    targetCloudConfig,
     uidColumn,
     delimiter,
     mappings,
@@ -507,9 +596,11 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   async function handleValidate() {
     setIsRunning(true); setPhase('running'); setResult(null); setErrorMsg('')
     try {
+      const sourcePayload = buildStoragePayload('source', sourceStorageType, sourcePath, sourceCloudConfig)
+      const targetPayload = buildStoragePayload('target', targetStorageType, targetPath, targetCloudConfig)
       const bodyPayload = fileFormat === 'fixed-width' ? {
-        source_path: sourcePath.trim(),
-        target_path: targetPath.trim(),
+        ...sourcePayload,
+        ...targetPayload,
         file_format: 'fixed-width',
         delimiter: 'fixed',
         fixed_width_config: {
@@ -521,8 +612,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           target_date_format: targetDateFormat.trim(),
         },
       } : {
-        source_path: sourcePath.trim(),
-        target_path: targetPath.trim(),
+        ...sourcePayload,
+        ...targetPayload,
         uid_column: uidColumn.trim(),
         delimiter: delimiter.trim() || 'auto',
         column_mappings: toColumnMappingPayload(mappings),
@@ -567,9 +658,11 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     setDraftSaveStatus('saving')
     setDraftSaveError('')
     try {
+      const sourceDisplay = describeStorageInput(sourceStorageType, sourcePath, sourceCloudConfig)
+      const targetDisplay = describeStorageInput(targetStorageType, targetPath, targetCloudConfig)
       const draftPayload = fileFormat === 'fixed-width' ? {
-        sourcePath: sourcePath.trim(),
-        targetPath: targetPath.trim(),
+        sourcePath: sourceDisplay,
+        targetPath: targetDisplay,
         uidColumn: 'date',
         delimiter: 'fixed',
         columnMappings: [
@@ -583,8 +676,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         validateHeaderFormats: false,
         validateFooters: false,
       } : {
-        sourcePath: sourcePath.trim(),
-        targetPath: targetPath.trim(),
+        sourcePath: sourceDisplay,
+        targetPath: targetDisplay,
         uidColumn: uidColumn.trim(),
         delimiter: delimiter.trim() || 'auto',
         columnMappings: toColumnMappingPayload(mappings),
@@ -611,8 +704,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const showConfigure  = step === 3
   const showReview     = step === 4
   const isValidForRun  = fileFormat === 'fixed-width'
-    ? (!!sourcePath && !!targetPath && !!sourceDateFormat.trim() && !!targetDateFormat.trim())
-    : (!!sourcePath && !!targetPath && !!uidColumn.trim())
+    ? (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig) && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig) && !!sourceDateFormat.trim() && !!targetDateFormat.trim())
+    : (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig) && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig) && !!uidColumn.trim())
+  const sourceDisplay = describeStorageInput(sourceStorageType, sourcePath, sourceCloudConfig)
+  const targetDisplay = describeStorageInput(targetStorageType, targetPath, targetCloudConfig)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -874,7 +969,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         {showPickSource && (
           <Step2_FilePicker
             panelLabel="Source"
+            storageType={sourceStorageType}
             value={sourcePath}
+            cloudConfig={sourceCloudConfig}
+            onCloudConfigChange={setSourceCloudConfig}
             onSelect={handleSourceSelected}
             onBack={() => setSubPhase('type-select')}
             disabled={false}
@@ -885,7 +983,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         {showPickTarget && (
           <Step2_FilePicker
             panelLabel="Target"
+            storageType={targetStorageType}
             value={targetPath}
+            cloudConfig={targetCloudConfig}
+            onCloudConfigChange={setTargetCloudConfig}
             onSelect={handleTargetSelected}
             onBack={() => setSubPhase('pick-source')}
             disabled={false}
@@ -897,8 +998,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           <>
             {fileFormat === 'csv' ? (
               <Step3_Configure
-                sourcePath={sourcePath}
-                targetPath={targetPath}
+                sourcePath={sourceDisplay}
+                targetPath={targetDisplay}
                 sourceColumns={columnPreview.sourceColumns}
                 targetColumns={columnPreview.targetColumns.filter(col => col !== uidColumn.trim())}
                 compareColumns={columnPreview.compareColumns}
@@ -923,8 +1024,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               />
             ) : (
               <FixedWidthConfigurator
-                sourcePath={sourcePath}
-                targetPath={targetPath}
+                sourcePath={sourceDisplay}
+                targetPath={targetDisplay}
                 sourceDateStart={sourceDateStart}
                 setSourceDateStart={setSourceDateStart}
                 sourceDateEnd={sourceDateEnd}
@@ -982,8 +1083,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
             {/* File summary */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
               {[
-                { label: 'Source file', value: sourcePath, accent: 'var(--accent)' },
-                { label: 'Target file', value: targetPath, accent: 'var(--blue)' },
+                { label: 'Source file', value: sourceDisplay, accent: 'var(--accent)' },
+                { label: 'Target file', value: targetDisplay, accent: 'var(--blue)' },
               ].map(({ label, value, accent }) => (
                 <div key={label} style={{
                   padding: '12px 14px', borderRadius: 9,

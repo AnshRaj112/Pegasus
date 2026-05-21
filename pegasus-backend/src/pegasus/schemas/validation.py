@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from pegasus.validation.comparators.models import MismatchType
 
@@ -124,11 +125,40 @@ class FixedWidthConfig(BaseModel):
     fields: list[FixedWidthField] = Field(default_factory=list, description="List of fields to validate")
 
 
+class GoogleCloudStorageConfig(BaseModel):
+    """Google Cloud Storage object reference plus credentials."""
+
+    provider: Literal["google-cloud-storage"] = Field(
+        default="google-cloud-storage",
+        description="Only Google Cloud Storage is supported for cloud validation inputs right now.",
+    )
+    bucket: str = Field(description="GCS bucket name")
+    object_name: str = Field(description="Path of the CSV object inside the bucket")
+    credentials_json: str = Field(
+        description="Raw service account JSON string copied from Google Cloud",
+    )
+    project_id: str | None = Field(default=None, description="Optional project id override")
+
+
 class LocalPathValidateRequest(BaseModel):
     """JSON body for POST /validate/local (server-side paths)."""
 
-    source_path: str = Field(description="Absolute or user-home path to the expected / golden file on the server")
-    target_path: str = Field(description="Absolute or user-home path to the actual / candidate file on the server")
+    source_path: str | None = Field(
+        default=None,
+        description="Absolute or user-home path to the expected / golden file on the server",
+    )
+    target_path: str | None = Field(
+        default=None,
+        description="Absolute or user-home path to the actual / candidate file on the server",
+    )
+    source_cloud: GoogleCloudStorageConfig | None = Field(
+        default=None,
+        description="Google Cloud Storage source reference used when the source file is not local",
+    )
+    target_cloud: GoogleCloudStorageConfig | None = Field(
+        default=None,
+        description="Google Cloud Storage target reference used when the target file is not local",
+    )
     uid_column: str = Field(default="line", description="Column name to join on (must exist in both CSV files, ignored for fixed-width)")
     column_mappings: list[ColumnMapping] = Field(
         default_factory=list,
@@ -157,6 +187,22 @@ class LocalPathValidateRequest(BaseModel):
     )
     file_format: str = Field(default="csv", description="File format type: 'csv' or 'fixed-width'")
     fixed_width_config: FixedWidthConfig | None = Field(default=None, description="Detailed configuration when file_format is 'fixed-width'")
+
+    @model_validator(mode="after")
+    def _validate_storage_inputs(self) -> "LocalPathValidateRequest":
+        if self.source_path is None and self.source_cloud is None:
+            raise ValueError("source_path or source_cloud is required")
+        if self.target_path is None and self.target_cloud is None:
+            raise ValueError("target_path or target_cloud is required")
+        return self
+
+    @property
+    def source_is_cloud(self) -> bool:
+        return self.source_cloud is not None
+
+    @property
+    def target_is_cloud(self) -> bool:
+        return self.target_cloud is not None
 
 
 class ColumnMapping(BaseModel):
@@ -253,14 +299,24 @@ class FooterValidationResult(BaseModel):
 class MappingAnalyzeRequest(BaseModel):
     """JSON body for POST /validate/local/analyze (mapping wizard pre-checks)."""
 
-    source_path: str
-    target_path: str
+    source_path: str | None = None
+    target_path: str | None = None
+    source_cloud: GoogleCloudStorageConfig | None = None
+    target_cloud: GoogleCloudStorageConfig | None = None
     uid_column: str
     delimiter: str = "auto"
     column_mappings: list[ColumnMapping] = Field(default_factory=list)
     validate_header_formats: bool = False
     validate_footers: bool = False
     footer_trailing_rows: int = Field(default=1, ge=0, le=10)
+
+    @model_validator(mode="after")
+    def _validate_storage_inputs(self) -> "MappingAnalyzeRequest":
+        if self.source_path is None and self.source_cloud is None:
+            raise ValueError("source_path or source_cloud is required")
+        if self.target_path is None and self.target_cloud is None:
+            raise ValueError("target_path or target_cloud is required")
+        return self
 
 
 class MappingAnalyzeResponse(BaseModel):

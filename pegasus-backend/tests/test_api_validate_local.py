@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from pegasus.api.v1 import validation as validation_api
 from pegasus.core.config import get_settings
 from pegasus.main import create_app
 from pegasus.services.validation_job_queue import reset_validation_queue
@@ -147,6 +148,89 @@ def test_validate_local_with_explicit_column_mapping(monkeypatch: pytest.MonkeyP
         body = _poll_completed(client, r.json()["poll_url"])
         assert body["summary"]["is_match"] is True
         assert set(body["compared_columns"]) == {"city", "name"}
+
+
+def test_validate_local_accepts_google_cloud_storage_inputs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+
+    def fake_download(cloud, dest_path: Path):
+        if cloud.object_name == "source.csv":
+            dest_path.write_text("id,name\n1,alice\n2,bob\n", encoding="utf-8")
+        else:
+            dest_path.write_text("id,name\n1,alice\n2,robert\n", encoding="utf-8")
+        return dest_path
+
+    monkeypatch.setattr(validation_api, "_download_gcs_object_to_path", fake_download)
+
+    with TestClient(create_app()) as client:
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_cloud": {
+                    "provider": "google-cloud-storage",
+                    "bucket": "demo-bucket",
+                    "object_name": "source.csv",
+                    "credentials_json": '{"type":"service_account","project_id":"demo"}',
+                },
+                "target_cloud": {
+                    "provider": "google-cloud-storage",
+                    "bucket": "demo-bucket",
+                    "object_name": "target.csv",
+                    "credentials_json": '{"type":"service_account","project_id":"demo"}',
+                },
+                "uid_column": "id",
+                "delimiter": ",",
+            },
+        )
+        assert r.status_code == 202, r.text
+        body = _poll_completed(client, r.json()["poll_url"])
+        assert body["summary"]["source_row_count"] == 2
+        assert body["mismatch_counts"]["value_mismatch"] >= 1
+
+
+def test_preview_local_columns_accepts_google_cloud_storage_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+
+    def fake_download(cloud, dest_path: Path):
+        if cloud.object_name == "source.csv":
+            dest_path.write_text("id,name,city\n1,alice,paris\n", encoding="utf-8")
+        else:
+            dest_path.write_text("city,id,full_name\nparis,1,alice\n", encoding="utf-8")
+        return dest_path
+
+    monkeypatch.setattr(validation_api, "_download_gcs_object_to_path", fake_download)
+
+    with TestClient(create_app()) as client:
+        r = client.post(
+            "/api/v1/validate/local/columns",
+            json={
+                "source_cloud": {
+                    "provider": "google-cloud-storage",
+                    "bucket": "demo-bucket",
+                    "object_name": "source.csv",
+                    "credentials_json": '{"type":"service_account","project_id":"demo"}',
+                },
+                "target_cloud": {
+                    "provider": "google-cloud-storage",
+                    "bucket": "demo-bucket",
+                    "object_name": "target.csv",
+                    "credentials_json": '{"type":"service_account","project_id":"demo"}',
+                },
+                "uid_column": "id",
+                "delimiter": ",",
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["source_columns"] == ["id", "name", "city"]
+        assert body["target_columns"] == ["city", "id", "full_name"]
+        assert body["auto_mappings"] == [{"source_column": "city", "target_column": "city"}]
 
 
 def test_browse_local_forbidden_when_local_paths_disabled(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import gc
 import logging
 import os
@@ -9,6 +10,7 @@ import tempfile
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from collections import OrderedDict
 from pathlib import Path
 from typing import Annotated
@@ -24,6 +26,7 @@ from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.schemas.validation import (
     ColumnMappingFormatCheck,
     FooterValidationResult,
+    GoogleCloudStorageConfig,
     LocalBrowseEntry,
     LocalBrowseResponse,
     LocalColumnPreviewResponse,
@@ -126,6 +129,110 @@ def resolve_local_csv_path(raw: str, settings: Settings) -> Path:
     if not resolved.is_file():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Not a regular file: {resolved}")
     return resolved
+
+
+@dataclass(slots=True)
+class ResolvedValidationInput:
+    path: Path
+    cleanup_path: Path | None
+    display_name: str
+
+
+def _resolve_cloud_credentials(raw_json: str) -> dict[str, object]:
+    try:
+        parsed = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Cloud credential payload must be valid JSON",
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Cloud credential payload must be a JSON object",
+        )
+    return parsed
+
+
+def _download_gcs_object_to_path(
+    cloud: GoogleCloudStorageConfig,
+    dest_path: Path,
+) -> Path:
+    try:
+        from google.cloud import storage as gcs_storage
+        from google.oauth2 import service_account
+    except ImportError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="google-cloud-storage is required for cloud validation inputs",
+        ) from exc
+
+    info = _resolve_cloud_credentials(cloud.credentials_json)
+    try:
+        credentials = service_account.Credentials.from_service_account_info(info)
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid Google Cloud service account JSON: {exc}",
+        ) from exc
+
+    bucket_name = cloud.bucket.strip()
+    object_name = cloud.object_name.strip()
+    if not bucket_name or not object_name:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Cloud bucket and object_name are required",
+        )
+
+    try:
+        project_id = cloud.project_id or info.get("project_id")
+        client = gcs_storage.Client(credentials=credentials, project=project_id)
+        blob = client.bucket(bucket_name).blob(object_name)
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        blob.download_to_filename(str(dest_path))
+        return dest_path
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to download gs://{bucket_name}/{object_name}: {exc}",
+        ) from exc
+
+
+def resolve_validation_input(
+    *,
+    settings: Settings,
+    label: str,
+    path: str | None = None,
+    cloud: GoogleCloudStorageConfig | None = None,
+    destination_path: Path | None = None,
+) -> ResolvedValidationInput:
+    """Resolve either a local path or a cloud object into a concrete CSV path."""
+    if cloud is not None:
+        suffix = Path(cloud.object_name or "").suffix or _DEFAULT_UPLOAD_SUFFIX
+        if destination_path is None:
+            fd, tmp_path = tempfile.mkstemp(prefix=f"pegasus_{label}_cloud_", suffix=suffix)
+            os.close(fd)
+            dest = Path(tmp_path)
+            cleanup = dest
+        else:
+            dest = destination_path
+            cleanup = None
+        download_path = _download_gcs_object_to_path(cloud, dest)
+        return ResolvedValidationInput(
+            path=download_path,
+            cleanup_path=cleanup,
+            display_name=f"gs://{cloud.bucket.strip()}/{cloud.object_name.strip()}",
+        )
+
+    if path is None or not path.strip():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"{label.capitalize()} path or cloud reference is required",
+        )
+    resolved = resolve_local_csv_path(path, settings)
+    return ResolvedValidationInput(path=resolved, cleanup_path=None, display_name=str(resolved))
 
 
 def resolve_local_dir_for_browse(raw: str, settings: Settings) -> Path:
@@ -615,7 +722,7 @@ async def validate_csv_files(
                 logger.error("Failed to record validation failure in database: %s", persist_exc)
         raise
     finally:
-        for p in (source_path, target_path):
+        for p in (source_input.cleanup_path, target_input.cleanup_path):
             if p is not None:
                 try:
                     p.unlink(missing_ok=True)
@@ -651,9 +758,6 @@ async def validate_csv_local_paths(
     body: Annotated[LocalPathValidateRequest, Body()],
 ) -> ValidationJobAcceptedResponse:
     """Queue validation for server-local CSV paths (worker reads files in-place)."""
-    source_path = resolve_local_csv_path(body.source_path, settings)
-    target_path = resolve_local_csv_path(body.target_path, settings)
-
     file_format, delimiter, fixed_width_config_dict = coerce_local_validate_fields(
         file_format=body.file_format,
         delimiter=body.delimiter,
@@ -673,6 +777,21 @@ async def validate_csv_local_paths(
     job_dir = jobs_root / str(job_id)
     job_dir.mkdir(parents=True, exist_ok=False)
 
+    source_input = resolve_validation_input(
+        settings=settings,
+        label="source",
+        path=body.source_path,
+        cloud=body.source_cloud,
+        destination_path=job_dir / "source.csv" if body.source_cloud is not None else None,
+    )
+    target_input = resolve_validation_input(
+        settings=settings,
+        label="target",
+        path=body.target_path,
+        cloud=body.target_cloud,
+        destination_path=job_dir / "target.csv" if body.target_cloud is not None else None,
+    )
+
     run_id: uuid.UUID | None = None
     if settings.enable_validation_persistence:
         try:
@@ -685,10 +804,10 @@ async def validate_csv_local_paths(
             async with AsyncSessionLocal() as session:
                 run_orm = await ValidationRunRepository.create_running(
                     session,
-                    source_filename=source_path.name,
-                    target_filename=target_path.name,
-                    source_path=str(source_path),
-                    target_path=str(target_path),
+                    source_filename=source_input.display_name,
+                    target_filename=target_input.display_name,
+                    source_path=str(source_input.path),
+                    target_path=str(target_input.path),
                     uid_column=run_uid_column,
                     delimiter=run_delimiter,
                     column_mappings=[m.model_dump() for m in body.column_mappings],
@@ -717,8 +836,10 @@ async def validate_csv_local_paths(
         "footer_trailing_rows": body.footer_trailing_rows,
         "memory_log_interval_seconds": settings.validation_memory_log_interval_seconds,
         "run_id": str(run_id) if run_id else None,
-        "source_path": str(source_path),
-        "target_path": str(target_path),
+        "source_path": str(source_input.path),
+        "target_path": str(target_input.path),
+        "source_filename": source_input.display_name,
+        "target_filename": target_input.display_name,
         "file_format": file_format,
         "fixed_width_config": fixed_width_config_dict,
     }
@@ -755,27 +876,35 @@ async def analyze_local_mappings(
     settings: AppSettings,
     body: Annotated[MappingAnalyzeRequest, Body()],
 ) -> MappingAnalyzeResponse:
-    source = resolve_local_csv_path(body.source_path, settings)
-    target = resolve_local_csv_path(body.target_path, settings)
-    analysis = service.analyze_local_mappings(
-        source_path=source,
-        target_path=target,
-        uid_column=body.uid_column.strip(),
-        delimiter=body.delimiter,
-        column_mappings=body.column_mappings,
-        validate_header_formats=body.validate_header_formats,
-        validate_footers=body.validate_footers,
-        footer_trailing_rows=body.footer_trailing_rows,
-    )
-    return MappingAnalyzeResponse(
-        format_checks=[ColumnMappingFormatCheck.model_validate(c) for c in analysis.get("format_checks", [])],
-        footer_validation=(
-            FooterValidationResult.model_validate(analysis["footer_validation"])
-            if analysis.get("footer_validation")
-            else None
-        ),
-        delimiter=str(analysis.get("delimiter") or body.delimiter),
-    )
+    source_input = resolve_validation_input(settings=settings, label="source", path=body.source_path, cloud=body.source_cloud)
+    target_input = resolve_validation_input(settings=settings, label="target", path=body.target_path, cloud=body.target_cloud)
+    try:
+        analysis = service.analyze_local_mappings(
+            source_path=source_input.path,
+            target_path=target_input.path,
+            uid_column=body.uid_column.strip(),
+            delimiter=body.delimiter,
+            column_mappings=body.column_mappings,
+            validate_header_formats=body.validate_header_formats,
+            validate_footers=body.validate_footers,
+            footer_trailing_rows=body.footer_trailing_rows,
+        )
+        return MappingAnalyzeResponse(
+            format_checks=[ColumnMappingFormatCheck.model_validate(c) for c in analysis.get("format_checks", [])],
+            footer_validation=(
+                FooterValidationResult.model_validate(analysis["footer_validation"])
+                if analysis.get("footer_validation")
+                else None
+            ),
+            delimiter=str(analysis.get("delimiter") or body.delimiter),
+        )
+    finally:
+        for p in (source_input.cleanup_path, target_input.cleanup_path):
+            if p is not None:
+                try:
+                    p.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning("Failed to remove temp cloud input %s: %s", p, exc)
 
 
 @router.get(
@@ -804,6 +933,39 @@ async def preview_local_csv_columns(
         delimiter=delimiter,
     )
     return LocalColumnPreviewResponse(**preview)
+
+
+@router.post(
+    "/validate/local/columns",
+    response_model=LocalColumnPreviewResponse,
+    summary="Preview source and target CSV headers for mapping (body variant for cloud inputs)",
+    responses={
+        400: {"description": "Invalid paths, cloud inputs, or delimiter"},
+        403: {"description": "Local path validation disabled"},
+    },
+)
+async def preview_local_csv_columns_body(
+    service: ValidationServiceDep,
+    settings: AppSettings,
+    body: Annotated[LocalPathValidateRequest, Body()],
+) -> LocalColumnPreviewResponse:
+    source_input = resolve_validation_input(settings=settings, label="source", path=body.source_path, cloud=body.source_cloud)
+    target_input = resolve_validation_input(settings=settings, label="target", path=body.target_path, cloud=body.target_cloud)
+    try:
+        preview = service.preview_local_column_headers(
+            source_path=source_input.path,
+            target_path=target_input.path,
+            uid_column=body.uid_column,
+            delimiter=body.delimiter,
+        )
+        return LocalColumnPreviewResponse(**preview)
+    finally:
+        for p in (source_input.cleanup_path, target_input.cleanup_path):
+            if p is not None:
+                try:
+                    p.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning("Failed to remove temp cloud input %s: %s", p, exc)
 
 @router.get(
     "/validate/local/browse",

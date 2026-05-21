@@ -24,9 +24,9 @@ const SOURCE_TYPES = [
       </svg>
     ),
     title:       'Cloud Storage',
-    description: 'S3, GCS, Azure Blob, and similar.',
-    badge:       'Soon',
-    available:   false,
+    description: 'Google Cloud Storage is available now; other providers stay blocked.',
+    badge:       'Open',
+    available:   true,
   },
   {
     id: 'datastore',
