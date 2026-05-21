@@ -29,6 +29,7 @@ from pegasus.schemas.validation import (
     GoogleCloudStorageConfig,
     LocalBrowseEntry,
     LocalBrowseResponse,
+    FixedWidthLayoutPreviewResponse,
     LocalColumnPreviewResponse,
     LocalPathValidateRequest,
     MappingAnalyzeRequest,
@@ -55,6 +56,7 @@ from .mismatch_sample import (
     build_grouped_mismatch_samples,
     load_mismatch_polars_for_api,
     load_value_mismatch_sample_from_ndjson,
+    stream_all_value_mismatch_rows_from_ndjson,
     stream_presence_mismatch_rows_from_ndjson,
     value_mismatch_counts_by_column,
     value_mismatch_counts_by_column_ndjson,
@@ -309,17 +311,7 @@ def _build_validate_response(
     presence_cap = settings.validation_presence_mismatch_response_max_rows
 
     raw_sample_limit = settings.validation_mismatch_sample_limit
-    sample_limit = raw_sample_limit
-    if total_records > 0:
-        if sample_limit <= 0:
-            sample_limit = min(10_000, total_records)
-            logger.info(
-                "validation_mismatch_sample_limit was %s; using effective sample_limit=%s for value_mismatch samples",
-                raw_sample_limit,
-                sample_limit,
-            )
-        if raw_sample_limit > 0:
-            sample_limit = min(sample_limit, raw_sample_limit)
+    sample_limit = raw_sample_limit if raw_sample_limit > 0 else 0
     category_counts = (
         counts_model.missing_in_target,
         counts_model.extra_in_target,
@@ -334,15 +326,22 @@ def _build_validate_response(
             n_ext=counts_model.extra_in_target,
             presence_max_rows=presence_cap,
         )
-        val_df = load_value_mismatch_sample_from_ndjson(
-            artifact,
-            n_val=counts_model.value_mismatch,
-            value_sample_limit=sample_limit,
-        )
+        if sample_limit <= 0:
+            val_rows = stream_all_value_mismatch_rows_from_ndjson(
+                artifact,
+                n_val=counts_model.value_mismatch,
+            )
+        else:
+            val_df = load_value_mismatch_sample_from_ndjson(
+                artifact,
+                n_val=counts_model.value_mismatch,
+                value_sample_limit=sample_limit,
+            )
+            val_rows = val_df.to_dicts()
         sample_groups = MismatchSampleGroups(
             missing_in_target=[MismatchSampleRow.model_validate(r) for r in miss_rows],
             extra_in_target=[MismatchSampleRow.model_validate(r) for r in ext_rows],
-            value_mismatch=[MismatchSampleRow.model_validate(r) for r in val_df.to_dicts()],
+            value_mismatch=[MismatchSampleRow.model_validate(r) for r in val_rows],
         )
     elif total_records > 0:
         mismatch_stats_frame = load_mismatch_polars_for_api(
@@ -905,6 +904,27 @@ async def analyze_local_mappings(
                     p.unlink(missing_ok=True)
                 except OSError as exc:
                     logger.warning("Failed to remove temp cloud input %s: %s", p, exc)
+
+
+@router.get(
+    "/validate/local/fixed-width/columns",
+    response_model=FixedWidthLayoutPreviewResponse,
+    summary="Infer fixed-width column slices from sample lines",
+    responses={
+        400: {"description": "Invalid paths"},
+        403: {"description": "Local path validation disabled"},
+    },
+)
+async def preview_local_fixed_width_columns(
+    service: ValidationServiceDep,
+    settings: AppSettings,
+    source_path: Annotated[str, Query(description="Absolute source file path")],
+    target_path: Annotated[str, Query(description="Absolute target file path")],
+) -> FixedWidthLayoutPreviewResponse:
+    source = resolve_local_csv_path(source_path, settings)
+    target = resolve_local_csv_path(target_path, settings)
+    preview = service.preview_fixed_width_layout(source_path=source, target_path=target)
+    return FixedWidthLayoutPreviewResponse(**preview)
 
 
 @router.get(

@@ -115,9 +115,67 @@ function StatCard({ label, value, accent }) {
   )
 }
 
+function buildFixedWidthValidateConfig({
+  columns,
+  joinColumn,
+  matchStrategy,
+  dateColumn,
+  sourceDateStart,
+  sourceDateEnd,
+  sourceDateFormat,
+  targetDateStart,
+  targetDateEnd,
+  targetDateFormat,
+}) {
+  const join = columns.find(c => c.field_name === joinColumn)
+  const fields = columns.map(col => {
+    const isDate = col.field_name === dateColumn
+    return {
+      field_name: col.field_name,
+      source_start: Number(col.source_start),
+      source_end: Number(col.source_end),
+      target_start: Number(col.target_start),
+      target_end: Number(col.target_end),
+      field_type: isDate ? 'date' : 'text',
+      ...(isDate
+        ? {
+            source_date_format: sourceDateFormat.trim(),
+            target_date_format: targetDateFormat.trim(),
+          }
+        : {}),
+    }
+  })
+  return {
+    uid_column: joinColumn,
+    uid_source_start: join ? Number(join.source_start) : 0,
+    uid_source_end: join ? Number(join.source_end) : 0,
+    uid_target_start: join ? Number(join.target_start) : 0,
+    uid_target_end: join ? Number(join.target_end) : 0,
+    fields,
+    match_strategy: matchStrategy,
+    fuzzy_similarity_threshold: 0.75,
+    source_date_start: sourceDateStart,
+    source_date_end: sourceDateEnd,
+    source_date_format: sourceDateFormat.trim(),
+    target_date_start: targetDateStart,
+    target_date_end: targetDateEnd,
+    target_date_format: targetDateFormat.trim(),
+  }
+}
+
 function FixedWidthConfigurator({
   sourcePath,
   targetPath,
+  columns,
+  setColumns,
+  joinColumn,
+  setJoinColumn,
+  matchStrategy,
+  setMatchStrategy,
+  dateColumn,
+  setDateColumn,
+  layoutLoading,
+  layoutError,
   sourceDateStart,
   setSourceDateStart,
   sourceDateEnd,
@@ -130,6 +188,8 @@ function FixedWidthConfigurator({
   setTargetDateEnd,
   targetDateFormat,
   setTargetDateFormat,
+  sourceSample,
+  targetSample,
 }) {
   return (
     <div style={{ animation: 'fade-in 0.25s ease' }}>
@@ -138,13 +198,12 @@ function FixedWidthConfigurator({
           Step 2 of 3
         </div>
         <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1.2, marginBottom: 6 }}>
-          Configure Fixed-Width Date Validation
+          Configure Fixed-Width Validation
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-3)', maxWidth: 760 }}>
-          Each line is one raw text record (not CSV columns). Set 0-indexed start/end positions for the date field only
-          (for example DOB at characters 58–68 in the sample layout). Formats can differ
-          (e.g. source <code style={{ fontFamily: 'monospace' }}>dd/mm/yyyy</code>, target <code style={{ fontFamily: 'monospace' }}>yyyy/mm/dd</code>);
-          rows match when the calendar date is the same. If your files have a header row and comma-separated columns, use CSV validation instead.
+          Columns are detected from your files. Choose which column should <strong>match rows</strong> between source
+          and target (the target may be unsorted). All other columns are compared on that basis.
+          Use <strong>Similar keys</strong> when typos or rearrangements happen (e.g. username <code style={{ fontFamily: 'monospace' }}>abc</code> vs <code style={{ fontFamily: 'monospace' }}>bca</code>) — those appear as value mismatches, not missing/extra rows.
         </p>
       </div>
 
@@ -169,8 +228,117 @@ function FixedWidthConfigurator({
         ))}
       </div>
 
+      {layoutLoading ? (
+        <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 16 }}>Detecting columns…</p>
+      ) : null}
+      {layoutError ? (
+        <p style={{ fontSize: 13, color: 'var(--danger)', marginBottom: 16 }}>{layoutError}</p>
+      ) : null}
+
+      {(sourceSample || targetSample) ? (
+        <div style={{
+          marginBottom: 16, padding: '10px 12px', borderRadius: 8,
+          background: 'var(--surface-2)', border: '1px solid var(--border-1)', fontSize: 11,
+          fontFamily: 'Geist Mono, monospace', color: 'var(--text-3)',
+        }}>
+          <div style={{ marginBottom: 4 }}><span style={{ color: 'var(--text-4)' }}>Source sample: </span>{sourceSample || '—'}</div>
+          <div><span style={{ color: 'var(--text-4)' }}>Target sample: </span>{targetSample || '—'}</div>
+        </div>
+      ) : null}
+
+      <div style={{
+        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20,
+        padding: 16, borderRadius: 12, background: 'var(--surface-1)', border: '1px solid var(--border-1)',
+      }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)' }}>Match rows by column</span>
+          <select
+            value={joinColumn}
+            onChange={e => setJoinColumn(e.target.value)}
+            className="input"
+            style={{ height: 36 }}
+          >
+            {columns.map(col => (
+              <option key={col.field_name} value={col.field_name}>{col.field_name}</option>
+            ))}
+          </select>
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)' }}>Row matching mode</span>
+          <select
+            value={matchStrategy}
+            onChange={e => setMatchStrategy(e.target.value)}
+            className="input"
+            style={{ height: 36 }}
+          >
+            <option value="exact">Exact key — join values must match exactly</option>
+            <option value="fuzzy">Similar keys — typos / anagrams pair as mismatches</option>
+          </select>
+        </label>
+      </div>
+
+      {columns.length > 0 ? (
+        <div style={{
+          marginBottom: 20, borderRadius: 12, border: '1px solid var(--border-1)',
+          overflow: 'hidden', background: 'var(--surface-1)',
+        }}>
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
+                <th style={{ padding: '8px 10px' }}>Column</th>
+                <th style={{ padding: '8px 10px' }}>Src start</th>
+                <th style={{ padding: '8px 10px' }}>Src end</th>
+                <th style={{ padding: '8px 10px' }}>Tgt start</th>
+                <th style={{ padding: '8px 10px' }}>Tgt end</th>
+                <th style={{ padding: '8px 10px' }}>Date field</th>
+              </tr>
+            </thead>
+            <tbody>
+              {columns.map((col, i) => (
+                <tr key={col.field_name} style={{ borderTop: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 10px', fontWeight: 600 }}>{col.field_name}</td>
+                  {['source_start', 'source_end', 'target_start', 'target_end'].map(key => (
+                    <td key={key} style={{ padding: '6px 8px' }}>
+                      <input
+                        type="number"
+                        min={0}
+                        value={col[key]}
+                        onChange={e => {
+                          const next = [...columns]
+                          next[i] = { ...col, [key]: Number(e.target.value) || 0 }
+                          setColumns(next)
+                          if (col.field_name === dateColumn && key === 'source_start') setSourceDateStart(Number(e.target.value) || 0)
+                          if (col.field_name === dateColumn && key === 'source_end') setSourceDateEnd(Number(e.target.value) || 0)
+                          if (col.field_name === dateColumn && key === 'target_start') setTargetDateStart(Number(e.target.value) || 0)
+                          if (col.field_name === dateColumn && key === 'target_end') setTargetDateEnd(Number(e.target.value) || 0)
+                        }}
+                        className="input input-mono"
+                        style={{ width: '100%', height: 30, fontSize: 11 }}
+                      />
+                    </td>
+                  ))}
+                  <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                    <input
+                      type="radio"
+                      name="fw-date-col"
+                      checked={dateColumn === col.field_name}
+                      onChange={() => {
+                        setDateColumn(col.field_name)
+                        setSourceDateStart(Number(col.source_start))
+                        setSourceDateEnd(Number(col.source_end))
+                        setTargetDateStart(Number(col.target_start))
+                        setTargetDateEnd(Number(col.target_end))
+                      }}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        {/* Source Configuration */}
         <div style={{
           background: 'var(--surface-1)',
           border: '1px solid var(--border-1)',
@@ -180,7 +348,7 @@ function FixedWidthConfigurator({
         }}>
           <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--accent)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }} />
-            Source Date Layout
+            Source date format ({dateColumn || '—'})
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <label>
@@ -238,7 +406,7 @@ function FixedWidthConfigurator({
         }}>
           <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--blue, #3b82f6)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--blue, #3b82f6)' }} />
-            Target Date Layout
+            Target date format ({dateColumn || '—'})
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <label>
@@ -307,6 +475,14 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [targetDateStart, setTargetDateStart] = useState(58)
   const [targetDateEnd, setTargetDateEnd] = useState(68)
   const [targetDateFormat, setTargetDateFormat] = useState('yyyy/mm/dd')
+  const [fwColumns, setFwColumns] = useState([])
+  const [fwJoinColumn, setFwJoinColumn] = useState('name')
+  const [fwMatchStrategy, setFwMatchStrategy] = useState('fuzzy')
+  const [fwDateColumn, setFwDateColumn] = useState('dob')
+  const [fwLayoutLoading, setFwLayoutLoading] = useState(false)
+  const [fwLayoutError, setFwLayoutError] = useState('')
+  const [fwSourceSample, setFwSourceSample] = useState('')
+  const [fwTargetSample, setFwTargetSample] = useState('')
   const [mappings, setMappings]   = useState([])
   const [uidColumn, setUidColumn] = useState('id')
   const [delimiter, setDelimiter] = useState('auto')
@@ -521,6 +697,57 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   useEffect(() => {
     const hasSource = isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
     const hasTarget = isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
+    if (step !== 3 || !hasSource || !hasTarget || fileFormat !== 'fixed-width') return
+
+    const controller = new AbortController()
+    const params = new URLSearchParams()
+    if (sourceStorageType === 'local' && sourcePath.trim()) params.set('source_path', sourcePath.trim())
+    if (targetStorageType === 'local' && targetPath.trim()) params.set('target_path', targetPath.trim())
+    if (!params.get('source_path') || !params.get('target_path')) return
+
+    async function loadLayout() {
+      setFwLayoutLoading(true)
+      setFwLayoutError('')
+      try {
+        const res = await fetch(
+          absoluteApiUrl(`/api/v1/validate/local/fixed-width/columns?${params}`),
+          { signal: controller.signal },
+        )
+        const raw = await res.text()
+        let data = {}
+        if (raw) try { data = JSON.parse(raw) } catch { throw new Error(raw.trim().slice(0, 400)) }
+        if (!res.ok) throw new Error(formatDetail(data.detail) || `${res.status} ${res.statusText}`)
+        const cols = Array.isArray(data.columns) ? data.columns : []
+        setFwColumns(cols)
+        setFwSourceSample(data.source_sample || '')
+        setFwTargetSample(data.target_sample || '')
+        const suggested = data.suggested_join_column || cols[0]?.field_name || 'id'
+        setFwJoinColumn(suggested)
+        const dateName = cols.some(c => c.field_name === 'dob') ? 'dob' : (cols[cols.length - 1]?.field_name || 'dob')
+        setFwDateColumn(dateName)
+        const dcol = cols.find(c => c.field_name === dateName)
+        if (dcol) {
+          setSourceDateStart(Number(dcol.source_start))
+          setSourceDateEnd(Number(dcol.source_end))
+          setTargetDateStart(Number(dcol.target_start))
+          setTargetDateEnd(Number(dcol.target_end))
+        }
+      } catch (err) {
+        if (err?.name !== 'AbortError') {
+          setFwLayoutError(err instanceof Error ? err.message : String(err))
+          setFwColumns([])
+        }
+      } finally {
+        if (!controller.signal.aborted) setFwLayoutLoading(false)
+      }
+    }
+    loadLayout()
+    return () => controller.abort()
+  }, [step, sourceStorageType, targetStorageType, sourcePath, targetPath, fileFormat])
+
+  useEffect(() => {
+    const hasSource = isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
+    const hasTarget = isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
     if (step !== 3 || !hasSource || !hasTarget || fileFormat === 'fixed-width') return
     if (!validateHeaderFormats && !validateFooters) {
       setFormatChecks([])
@@ -603,14 +830,18 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         ...targetPayload,
         file_format: 'fixed-width',
         delimiter: 'fixed',
-        fixed_width_config: {
-          source_date_start: sourceDateStart,
-          source_date_end: sourceDateEnd,
-          source_date_format: sourceDateFormat.trim(),
-          target_date_start: targetDateStart,
-          target_date_end: targetDateEnd,
-          target_date_format: targetDateFormat.trim(),
-        },
+        fixed_width_config: buildFixedWidthValidateConfig({
+          columns: fwColumns,
+          joinColumn: fwJoinColumn,
+          matchStrategy: fwMatchStrategy,
+          dateColumn: fwDateColumn,
+          sourceDateStart,
+          sourceDateEnd,
+          sourceDateFormat,
+          targetDateStart,
+          targetDateEnd,
+          targetDateFormat,
+        }),
       } : {
         ...sourcePayload,
         ...targetPayload,
@@ -704,7 +935,12 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const showConfigure  = step === 3
   const showReview     = step === 4
   const isValidForRun  = fileFormat === 'fixed-width'
-    ? (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig) && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig) && !!sourceDateFormat.trim() && !!targetDateFormat.trim())
+    ? (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
+      && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
+      && fwColumns.length > 0
+      && !!fwJoinColumn
+      && !!sourceDateFormat.trim()
+      && !!targetDateFormat.trim())
     : (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig) && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig) && !!uidColumn.trim())
   const sourceDisplay = describeStorageInput(sourceStorageType, sourcePath, sourceCloudConfig)
   const targetDisplay = describeStorageInput(targetStorageType, targetPath, targetCloudConfig)
@@ -1026,6 +1262,18 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               <FixedWidthConfigurator
                 sourcePath={sourceDisplay}
                 targetPath={targetDisplay}
+                columns={fwColumns}
+                setColumns={setFwColumns}
+                joinColumn={fwJoinColumn}
+                setJoinColumn={setFwJoinColumn}
+                matchStrategy={fwMatchStrategy}
+                setMatchStrategy={setFwMatchStrategy}
+                dateColumn={fwDateColumn}
+                setDateColumn={setFwDateColumn}
+                layoutLoading={fwLayoutLoading}
+                layoutError={fwLayoutError}
+                sourceSample={fwSourceSample}
+                targetSample={fwTargetSample}
                 sourceDateStart={sourceDateStart}
                 setSourceDateStart={setSourceDateStart}
                 sourceDateEnd={sourceDateEnd}
@@ -1121,9 +1369,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 background: 'var(--surface-2)', border: '1px solid var(--border-1)',
                 fontSize: 12, color: 'var(--text-3)', marginBottom: 12, flexWrap: 'wrap',
               }}>
-                <span>Format: <strong style={{ color: 'var(--text-1)' }}>Fixed-Width Date Validation</strong></span>
-                <span>Source date slice: <strong style={{ color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace' }}>[{sourceDateStart}:{sourceDateEnd}] ({sourceDateFormat})</strong></span>
-                <span>Target date slice: <strong style={{ color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace' }}>[{targetDateStart}:{targetDateEnd}] ({targetDateFormat})</strong></span>
+                <span>Format: <strong style={{ color: 'var(--text-1)' }}>Fixed-Width</strong></span>
+                <span>Match by: <strong style={{ color: 'var(--text-1)' }}>{fwJoinColumn}</strong> ({fwMatchStrategy})</span>
+                <span>Columns: <strong style={{ color: 'var(--text-1)' }}>{fwColumns.map(c => c.field_name).join(', ')}</strong></span>
+                <span>Date: <strong style={{ color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace' }}>{fwDateColumn} [{sourceDateStart}:{sourceDateEnd}]</strong></span>
               </div>
             )}
 

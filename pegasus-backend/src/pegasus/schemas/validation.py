@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from enum import Enum
 from typing import Any
 from typing import Literal
 from uuid import UUID
@@ -107,6 +108,13 @@ class FixedWidthField(BaseModel):
     )
 
 
+class FixedWidthMatchStrategy(str, Enum):
+    """How rows are paired when the target file is not in the same order as the source."""
+
+    EXACT = "exact"
+    FUZZY = "fuzzy"
+
+
 class FixedWidthConfig(BaseModel):
     """Configuration for fixed-width validation."""
 
@@ -123,6 +131,16 @@ class FixedWidthConfig(BaseModel):
     uid_target_start: int | None = Field(default=None, ge=0, description="0-indexed start of target join key")
     uid_target_end: int | None = Field(default=None, ge=0, description="0-indexed end of target join key")
     fields: list[FixedWidthField] = Field(default_factory=list, description="List of fields to validate")
+    match_strategy: FixedWidthMatchStrategy = Field(
+        default=FixedWidthMatchStrategy.EXACT,
+        description="exact: join key must match; fuzzy: similar keys pair as value mismatches",
+    )
+    fuzzy_similarity_threshold: float = Field(
+        default=0.75,
+        ge=0.5,
+        le=1.0,
+        description="Minimum join-key similarity (0–1) for fuzzy pairing",
+    )
 
 
 class GoogleCloudStorageConfig(BaseModel):
@@ -325,6 +343,26 @@ class MappingAnalyzeResponse(BaseModel):
     format_checks: list[ColumnMappingFormatCheck] = Field(default_factory=list)
     footer_validation: FooterValidationResult | None = None
     delimiter: str = "auto"
+
+
+class FixedWidthColumnPreview(BaseModel):
+    """One inferred or user-edited fixed-width column slice."""
+
+    field_name: str
+    source_start: int = Field(ge=0)
+    source_end: int = Field(ge=0)
+    target_start: int = Field(ge=0)
+    target_end: int = Field(ge=0)
+    field_type: str = "text"
+
+
+class FixedWidthLayoutPreviewResponse(BaseModel):
+    """Detected columns and sample lines for the fixed-width mapping UI."""
+
+    columns: list[FixedWidthColumnPreview] = Field(default_factory=list)
+    suggested_join_column: str = "id"
+    source_sample: str = ""
+    target_sample: str = ""
 
 
 class LocalColumnPreviewResponse(BaseModel):

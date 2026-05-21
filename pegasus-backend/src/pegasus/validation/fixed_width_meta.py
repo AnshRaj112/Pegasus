@@ -66,6 +66,70 @@ def fixed_width_config_from_column_mappings(mappings: list[Any] | None) -> dict[
         return None
 
 
+def materialize_fixed_width_fields(config: dict[str, Any]) -> dict[str, Any]:
+    """Ensure ``fields`` and ``uid_column`` exist (legacy date-only payloads)."""
+    cfg = dict(config)
+    if cfg.get("fields"):
+        return cfg
+
+    uid = str(cfg.get("uid_column") or "name").strip()
+    fields: list[dict[str, Any]] = []
+    src_ds = cfg.get("source_date_start")
+    src_de = cfg.get("source_date_end")
+    tgt_ds = cfg.get("target_date_start")
+    tgt_de = cfg.get("target_date_end")
+    if src_ds is not None and src_de is not None and tgt_ds is not None and tgt_de is not None:
+        fields.append({
+            "field_name": "dob",
+            "source_start": int(src_ds),
+            "source_end": int(src_de),
+            "target_start": int(tgt_ds),
+            "target_end": int(tgt_de),
+            "field_type": "date",
+            "source_date_format": cfg.get("source_date_format"),
+            "target_date_format": cfg.get("target_date_format"),
+        })
+    join_field = next((f for f in fields if f["field_name"] == uid), None)
+    if join_field is None and uid == "name":
+        fields = [
+            {
+                "field_name": "id",
+                "source_start": 0,
+                "source_end": 5,
+                "target_start": 0,
+                "target_end": 5,
+                "field_type": "text",
+            },
+            {
+                "field_name": "name",
+                "source_start": 8,
+                "source_end": 28,
+                "target_start": 8,
+                "target_end": 28,
+                "field_type": "text",
+            },
+            {
+                "field_name": "email",
+                "source_start": 28,
+                "source_end": 58,
+                "target_start": 28,
+                "target_end": 58,
+                "field_type": "text",
+            },
+            *fields,
+        ]
+    cfg["fields"] = fields
+    cfg["uid_column"] = uid
+    if cfg.get("uid_source_start") is None:
+        join = next((f for f in fields if f["field_name"] == uid), None)
+        if join is not None:
+            cfg["uid_source_start"] = join["source_start"]
+            cfg["uid_source_end"] = join["source_end"]
+            cfg["uid_target_start"] = join["target_start"]
+            cfg["uid_target_end"] = join["target_end"]
+    return cfg
+
+
 def resolve_fixed_width_config(
     *,
     file_format: str | None,
@@ -77,8 +141,9 @@ def resolve_fixed_width_config(
     if not is_fixed_width_run(file_format=file_format, delimiter=delimiter):
         return None
     if isinstance(fixed_width_config, dict) and fixed_width_config:
-        return dict(fixed_width_config)
-    return fixed_width_config_from_column_mappings(column_mappings)
+        return materialize_fixed_width_fields(dict(fixed_width_config))
+    built = fixed_width_config_from_column_mappings(column_mappings)
+    return materialize_fixed_width_fields(built) if built else None
 
 
 def coerce_local_validate_fields(

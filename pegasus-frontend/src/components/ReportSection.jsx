@@ -63,6 +63,30 @@ function DetailBlock({ title, record, tone }) {
   )
 }
 
+function mismatchDisplayValues(row) {
+  const detail = row.row_detail ?? {}
+  const sourceRecord = detail.source_record
+  const targetRecord = detail.target_record
+  const columnName = row.column_name
+
+  if (
+    columnName
+    && sourceRecord
+    && typeof sourceRecord === 'object'
+    && columnName in sourceRecord
+  ) {
+    return {
+      source: sourceRecord[columnName],
+      target:
+        targetRecord && typeof targetRecord === 'object' && columnName in targetRecord
+          ? targetRecord[columnName]
+          : row.target_value,
+    }
+  }
+
+  return { source: row.source_value, target: row.target_value }
+}
+
 function RowCard({ row, variant }) {
   const style = variantStyles[variant] ?? variantStyles.mismatched
   const typeLabel =
@@ -75,6 +99,7 @@ function RowCard({ row, variant }) {
   const detail = row.row_detail ?? {}
   const hasSource = detail.source_record && typeof detail.source_record === 'object'
   const hasTarget = detail.target_record && typeof detail.target_record === 'object'
+  const { source: displaySource, target: displayTarget } = mismatchDisplayValues(row)
 
   return (
     <article className={`rounded-3xl border p-5 shadow-sm ${style.accent}`}>
@@ -111,7 +136,7 @@ function RowCard({ row, variant }) {
             Expected (source)
           </p>
           <p className="mt-2 break-words text-sm font-semibold text-emerald-900">
-            {formatValue(row.source_value)}
+            {formatValue(displaySource)}
           </p>
         </div>
         <div className="rounded-2xl bg-white/80 p-4 ring-1 ring-black/5">
@@ -119,7 +144,7 @@ function RowCard({ row, variant }) {
             Actual (target)
           </p>
           <p className="mt-2 break-words text-sm font-semibold text-rose-900">
-            {formatValue(row.target_value)}
+            {formatValue(displayTarget)}
           </p>
         </div>
       </div>

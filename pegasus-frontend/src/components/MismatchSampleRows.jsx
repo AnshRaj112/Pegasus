@@ -20,6 +20,16 @@ function RecordCard({ title, record, variant }) {
   )
 }
 
+function cellValue(row, side) {
+  const detail = row.row_detail ?? {}
+  const record = side === 'source' ? detail.source_record : detail.target_record
+  const columnName = row.column_name
+  if (columnName && record && typeof record === 'object' && columnName in record) {
+    return record[columnName]
+  }
+  return side === 'source' ? row.source_value : row.target_value
+}
+
 export function MismatchSampleRows({ samples }) {
   if (!samples?.length) return null
 
@@ -31,6 +41,14 @@ export function MismatchSampleRows({ samples }) {
         const isMissing = row.mismatch_type === 'missing_in_target'
         const isExtra = row.mismatch_type === 'extra_in_target'
         const isValue = row.mismatch_type === 'value_mismatch'
+        const sourceDisplay = cellValue(row, 'source')
+        const targetDisplay = cellValue(row, 'target')
+        const singleFieldRecord =
+          isValue
+          && row.column_name
+          && detail?.source_record
+          && typeof detail.source_record === 'object'
+          && Object.keys(detail.source_record).length === 1
 
         const mainRow = (
           <tr key={`${key}-main`} className="border-b border-[#F1F1F1] text-slate-700">
@@ -50,8 +68,8 @@ export function MismatchSampleRows({ samples }) {
             >
               {isMissing
                 ? '—'
-                : row.source_value != null && row.source_value !== ''
-                  ? row.source_value
+                : sourceDisplay != null && sourceDisplay !== ''
+                  ? sourceDisplay
                   : '—'}
             </td>
             <td
@@ -63,8 +81,8 @@ export function MismatchSampleRows({ samples }) {
             >
               {isExtra
                 ? '—'
-                : row.target_value != null && row.target_value !== ''
-                  ? row.target_value
+                : targetDisplay != null && targetDisplay !== ''
+                  ? targetDisplay
                   : '—'}
             </td>
           </tr>
@@ -72,7 +90,8 @@ export function MismatchSampleRows({ samples }) {
 
         const detailRow =
           detail &&
-          (detail.source_record || detail.target_record) ? (
+          (detail.source_record || detail.target_record) &&
+          !singleFieldRecord ? (
             <tr key={`${key}-detail`} className="border-b border-[#F1F1F1] bg-[#FFFDEF]">
               <td colSpan={5} className="px-3 py-3 align-top">
                 <div className="mb-3 text-xs text-slate-600">
