@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pegasus import __version__ as package_version
@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql+asyncpg://pegasus:pegasus@localhost:5432/pegasus",
         description="SQLAlchemy async URL (e.g. postgresql+asyncpg://...)",
+    )
+    database_encryption_key: str | None = Field(
+        default=None,
+        description=(
+            "Fernet key used to encrypt validation history payloads before they are written to PostgreSQL."
+        ),
     )
 
     cors_origins: str = Field(
@@ -228,6 +234,15 @@ class Settings(BaseSettings):
             "Disable to honor only the user-set max_concurrency."
         ),
     )
+
+    @model_validator(mode="after")
+    def _validate_encryption_key(self) -> "Settings":
+        key = (self.database_encryption_key or "").strip()
+        if self.enable_validation_persistence and not key:
+            raise ValueError(
+                "PEGASUS_DATABASE_ENCRYPTION_KEY is required when PEGASUS_ENABLE_VALIDATION_PERSISTENCE=true"
+            )
+        return self
     validation_queue_ram_multiplier: float = Field(
         default=4.0,
         ge=1.0,

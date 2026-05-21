@@ -10,6 +10,7 @@ from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from pegasus.core.field_encryption import EncryptedText
 from pegasus.models.base import Base
 
 if TYPE_CHECKING:
@@ -33,12 +34,12 @@ class MismatchReport(Base):
         index=True,
     )
 
-    uid: Mapped[str] = mapped_column(String(1024), nullable=False)
-    mismatch_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    column_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    source_value: Mapped[str | None] = mapped_column(Text, nullable=True)
-    target_value: Mapped[str | None] = mapped_column(Text, nullable=True)
-    row_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uid: Mapped[str] = mapped_column(EncryptedText(), nullable=False)
+    mismatch_type: Mapped[str] = mapped_column(EncryptedText(), nullable=False)
+    column_name: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
+    source_value: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
+    target_value: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
+    row_detail: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

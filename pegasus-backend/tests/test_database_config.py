@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+from cryptography.fernet import Fernet
+
 from pegasus.core.config import get_settings
 from pegasus.core.database import resolve_database_url
 from pegasus.core.db_health_check import format_database_target
@@ -8,11 +12,13 @@ from pegasus.core.database_url import (
     postgres_search_path,
     resolve_database_schema,
 )
+from pegasus.core.field_encryption import decrypt_value, encrypt_value, get_database_fernet
 
 
 def _reset_config_cache() -> None:
     get_settings.cache_clear()
     clear_dotenv_cache()
+    get_database_fernet.cache_clear()
 
 
 def test_resolve_database_url_prefers_pegasus_database_url(monkeypatch) -> None:
@@ -63,3 +69,25 @@ def test_resolve_database_schema_from_db_schema(monkeypatch) -> None:
 
     assert resolve_database_schema() == "Pegasus"
     assert postgres_search_path("Pegasus") == '"Pegasus",public'
+
+
+def test_validation_persistence_requires_database_encryption_key(monkeypatch) -> None:
+    monkeypatch.setenv("PEGASUS_ENABLE_VALIDATION_PERSISTENCE", "true")
+    monkeypatch.setenv("PEGASUS_DATABASE_ENCRYPTION_KEY", "")
+    _reset_config_cache()
+
+    with pytest.raises(ValueError, match="PEGASUS_DATABASE_ENCRYPTION_KEY"):
+        get_settings()
+
+
+def test_database_encryption_round_trip(monkeypatch) -> None:
+    key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv("PEGASUS_ENABLE_VALIDATION_PERSISTENCE", "true")
+    monkeypatch.setenv("PEGASUS_DATABASE_ENCRYPTION_KEY", key)
+    _reset_config_cache()
+
+    secret = {"bucket": "demo", "object": "source.csv", "nested": [1, 2, 3]}
+    token = encrypt_value(secret)
+
+    assert token != str(secret)
+    assert decrypt_value(token) == secret

@@ -8,9 +8,10 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text, func
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from pegasus.core.field_encryption import EncryptedJSON, EncryptedText
 from pegasus.models.base import Base
 from pegasus.models.enums import ValidationRunStatus
 
@@ -42,18 +43,18 @@ class ValidationRun(Base):
         default=ValidationRunStatus.PENDING,
     )
 
-    source_filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    target_filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
-    target_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_filename: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
+    target_filename: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
+    source_path: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
+    target_path: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
     file_pair_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    uid_column: Mapped[str] = mapped_column(String(256), nullable=False)
-    delimiter: Mapped[str] = mapped_column(String(8), nullable=False, default=",")
+    uid_column: Mapped[str] = mapped_column(EncryptedText(), nullable=False)
+    delimiter: Mapped[str] = mapped_column(EncryptedText(), nullable=False, default=",")
 
-    column_mappings: Mapped[list | None] = mapped_column(JSONB, nullable=False, server_default="[]")
-    compared_columns: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    mapping_format_checks: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    footer_validation: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    column_mappings: Mapped[list | None] = mapped_column(EncryptedJSON(), nullable=False, default=list)
+    compared_columns: Mapped[list | None] = mapped_column(EncryptedJSON(), nullable=True)
+    mapping_format_checks: Mapped[list | None] = mapped_column(EncryptedJSON(), nullable=True)
+    footer_validation: Mapped[dict | None] = mapped_column(EncryptedJSON(), nullable=True)
     validate_header_formats: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     validate_footers: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
@@ -71,7 +72,7 @@ class ValidationRun(Base):
     compared_column_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_match: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
-    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
