@@ -53,6 +53,8 @@ from pegasus.validation.reconciliation.exceptions import ReconciliationError, Re
 from pegasus.validation.mapping_analyze import analyze_column_mappings
 from pegasus.validation.reconciliation.partition_manager import multichar_csv_header_frame
 from pegasus.validation.fixed_width_dates import normalize_strptime_format, parse_fixed_width_date
+from pegasus.validation.fixed_width_layout import preview_fixed_width_layout
+from pegasus.validation.fixed_width_matching import fuzzy_pair_by_join_key
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +216,18 @@ class ValidationService:
         )
         analysis["delimiter"] = delim
         return analysis
+
+    def preview_fixed_width_layout(
+        self,
+        *,
+        source_path: Path,
+        target_path: Path,
+    ) -> dict[str, Any]:
+        """Infer column slices from the first non-empty line of each file."""
+        return preview_fixed_width_layout(
+            source_path=str(source_path),
+            target_path=str(target_path),
+        )
 
     def preview_local_column_headers(
         self,
@@ -682,9 +696,12 @@ class ValidationService:
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> ValidationRunResult:
         """Stream two fixed-width files and validate dates line-by-line in lockstep."""
-        from itertools import zip_longest
+        from collections import defaultdict, deque
         import json
 
+        from pegasus.validation.fixed_width_meta import materialize_fixed_width_fields
+
+        fixed_width_config = materialize_fixed_width_fields(dict(fixed_width_config))
         source_path = Path(source_path).resolve()
         target_path = Path(target_path).resolve()
 
@@ -728,12 +745,41 @@ class ValidationService:
             else ""
         )
 
-        # Join Key slicing parameters for complete multi-field validation
-        uid_col = str(fixed_width_config.get("uid_column", "id")) if has_fields else "date"
-        uid_src_start = fixed_width_config.get("uid_source_start")
-        uid_src_end = fixed_width_config.get("uid_source_end")
-        uid_tgt_start = fixed_width_config.get("uid_target_start")
-        uid_tgt_end = fixed_width_config.get("uid_target_end")
+        uid_col = str(fixed_width_config.get("uid_column") or "").strip()
+        if not uid_col:
+            raise ValidationBadRequestError(
+                "fixed_width_config.uid_column is required — choose which column to match rows by (e.g. id, name, email)"
+            )
+        if not has_fields:
+            raise ValidationBadRequestError(
+                "fixed_width_config.fields is required — list every column slice to compare"
+            )
+
+        join_field = next((f for f in fields if str(f.get("field_name")) == uid_col), None)
+        if join_field is not None:
+            uid_src_start = int(join_field["source_start"])
+            uid_src_end = int(join_field["source_end"])
+            uid_tgt_start = int(join_field["target_start"])
+            uid_tgt_end = int(join_field["target_end"])
+        else:
+            uid_src_start = int(fixed_width_config.get("uid_source_start", -1))
+            uid_src_end = int(fixed_width_config.get("uid_source_end", -1))
+            uid_tgt_start = int(fixed_width_config.get("uid_target_start", -1))
+            uid_tgt_end = int(fixed_width_config.get("uid_target_end", -1))
+            if uid_src_end <= uid_src_start or uid_tgt_end <= uid_tgt_start:
+                raise ValidationBadRequestError(
+                    f"Join column '{uid_col}' was not found in fixed_width_config.fields "
+                    "and uid slice positions were not provided"
+                )
+        if uid_src_end <= uid_src_start or uid_tgt_end <= uid_tgt_start:
+            raise ValidationBadRequestError(
+                f"Join column '{uid_col}' must have non-empty source and target slice positions"
+            )
+
+        match_strategy = str(fixed_width_config.get("match_strategy") or "exact").strip().lower()
+        fuzzy_threshold = float(fixed_width_config.get("fuzzy_similarity_threshold") or 0.75)
+        use_fuzzy = match_strategy == "fuzzy"
+        use_uid_alignment = True
 
         artifact_path = None
         if artifact_export_parent is not None:
@@ -741,6 +787,8 @@ class ValidationService:
             artifact_path = artifact_export_parent / "mismatches.ndjson"
 
         total_rows = 0
+        source_row_count = 0
+        target_row_count = 0
         mismatches = 0
         missing_in_target = 0
         missing_in_source = 0
@@ -773,178 +821,210 @@ class ValidationService:
             except Exception as e:
                 return None, str(e)
 
-        try:
-            with open(source_path, "r", encoding="utf-8", buffering=buffer_size) as src_file, \
-                 open(target_path, "r", encoding="utf-8", buffering=buffer_size) as tgt_file:
-                      
-                for line_idx, (src_line, tgt_line) in enumerate(zip_longest(src_file, tgt_file), start=1):
-                    # Treat trailing/empty lines as non-existent when both sides are blank
-                    s_blank = src_line is None or not src_line.strip()
-                    t_blank = tgt_line is None or not (tgt_line.strip() if tgt_line is not None else False)
-                    if s_blank and t_blank:
-                        continue
+        def _uid_from_line(line: str, start: int | None, end: int | None, fallback: str) -> str:
+            if start is None or end is None:
+                return fallback
+            return line[int(start):int(end)].strip() or fallback
 
+        def _emit_value_mismatch(
+            *,
+            row_uid: str,
+            column_name: str,
+            source_value: str | None,
+            target_value: str | None,
+            row_detail: dict[str, Any],
+        ) -> None:
+            nonlocal mismatches, value_mismatch
+            mismatches += 1
+            value_mismatch += 1
+            if log_fp is not None:
+                log_fp.write(json.dumps({
+                    "uid": row_uid,
+                    "mismatch_type": "value_mismatch",
+                    "column_name": column_name,
+                    "source_value": source_value,
+                    "target_value": target_value,
+                    "row_detail": _row_detail_json(row_detail),
+                }) + "\n")
+
+        def _compare_mapped_fields(
+            *,
+            src_line: str,
+            tgt_line: str,
+            row_uid: str,
+            display_line_idx: int,
+            pairing_note: str | None = None,
+        ) -> None:
+            nonlocal mismatches, value_mismatch
+            for field in fields:
+                f_name = field["field_name"]
+                f_type = field.get("field_type", "text")
+                shared_fmt = field.get("date_format")
+                src_fmt = field.get("source_date_format") or shared_fmt
+                tgt_fmt = field.get("target_date_format") or shared_fmt
+
+                src_s = int(field["source_start"])
+                src_e = int(field["source_end"])
+                tgt_s = int(field["target_start"])
+                tgt_e = int(field["target_end"])
+
+                src_raw = src_line[src_s:src_e]
+                tgt_raw = tgt_line[tgt_s:tgt_e]
+
+                src_val, src_err = safe_cast(src_raw, f_type, src_fmt)
+                tgt_val, tgt_err = safe_cast(tgt_raw, f_type, tgt_fmt)
+
+                has_mismatch = False
+                err_msg = None
+                if src_err or tgt_err:
+                    has_mismatch = True
+                    err_msg = f"Parsing error: Source({src_err}) Target({tgt_err})"
+                elif src_val != tgt_val:
+                    has_mismatch = True
+
+                if has_mismatch:
+                    detail: dict[str, Any] = {
+                        "error": err_msg or "Value mismatch",
+                        "line_index": display_line_idx,
+                        "source_record": {f_name: src_raw.strip()},
+                        "target_record": {f_name: tgt_raw.strip()},
+                    }
+                    if pairing_note:
+                        detail["pairing"] = pairing_note
+                    _emit_value_mismatch(
+                        row_uid=row_uid,
+                        column_name=f_name,
+                        source_value=src_raw.strip(),
+                        target_value=tgt_raw.strip(),
+                        row_detail=detail,
+                    )
+
+        def _compare_aligned_pair(
+            *,
+            src_line: str,
+            tgt_line: str,
+            row_uid: str,
+            display_line_idx: int,
+            pairing_note: str | None = None,
+        ) -> None:
+            _compare_mapped_fields(
+                src_line=src_line,
+                tgt_line=tgt_line,
+                row_uid=row_uid,
+                display_line_idx=display_line_idx,
+                pairing_note=pairing_note,
+            )
+
+        try:
+            target_by_uid: dict[str, deque[tuple[int, str]]] = defaultdict(deque)
+            unmatched_src: list[tuple[int, str, str]] = []
+
+            with open(target_path, "r", encoding="utf-8", buffering=buffer_size) as tgt_file:
+                for target_idx, tgt_line in enumerate(tgt_file, start=1):
+                    if not tgt_line.strip():
+                        continue
+                    target_row_count += 1
+                    uid = _uid_from_line(
+                        tgt_line,
+                        uid_tgt_start,
+                        uid_tgt_end,
+                        f"Line {target_idx}",
+                    )
+                    target_by_uid[uid].append((target_idx, tgt_line))
+
+            with open(source_path, "r", encoding="utf-8", buffering=buffer_size) as src_file:
+                for source_idx, src_line in enumerate(src_file, start=1):
+                    if not src_line.strip():
+                        continue
+                    source_row_count += 1
                     total_rows += 1
 
-                    if progress_callback is not None and line_idx % 1_000_000 == 0:
+                    if progress_callback is not None and source_row_count % 1_000_000 == 0:
                         progress_callback({
                             "phase": "validating",
-                            "message": f"Processed {line_idx:,} rows",
+                            "message": f"Processed {source_row_count:,} rows",
                             "percent": None,
                         })
 
-                    # Check for length mismatch / EOF
-                    if src_line is not None and tgt_line is None:
-                        mismatches += 1
-                        missing_in_target += 1
-                        if log_fp is not None:
-                            log_fp.write(json.dumps({
-                                "uid": f"Line {line_idx}",
-                                "mismatch_type": "missing_in_target",
-                                "column_name": uid_col,
-                                "source_value": src_line.rstrip()[:100],
-                                "target_value": None,
-                                "row_detail": _row_detail_json({
-                                    "error": "Target file reached EOF early",
-                                    "source_line": src_line.rstrip(),
-                                    "source_record": {"line": src_line.rstrip()[:200]},
-                                }),
-                            }) + "\n")
+                    row_uid = _uid_from_line(
+                        src_line,
+                        uid_src_start,
+                        uid_src_end,
+                        f"Line {source_idx}",
+                    )
+                    bucket = target_by_uid.get(row_uid)
+                    if not bucket:
+                        unmatched_src.append((source_idx, src_line, row_uid))
                         continue
 
-                    if src_line is None and tgt_line is not None:
-                        mismatches += 1
-                        missing_in_source += 1
-                        if log_fp is not None:
-                            log_fp.write(json.dumps({
-                                "uid": f"Line {line_idx}",
-                                "mismatch_type": "extra_in_target",
-                                "column_name": uid_col,
-                                "source_value": None,
-                                "target_value": tgt_line.rstrip()[:100],
-                                "row_detail": _row_detail_json({
-                                    "error": "Source file reached EOF early",
-                                    "target_line": tgt_line.rstrip(),
-                                    "target_record": {"line": tgt_line.rstrip()[:200]},
-                                }),
-                            }) + "\n")
-                        continue
+                    _, tgt_line = bucket.popleft()
+                    if not bucket:
+                        del target_by_uid[row_uid]
 
-                    # Slice out Join Key (UID)
-                    row_uid = f"Line {line_idx}"
-                    if has_fields and uid_src_start is not None and uid_src_end is not None:
-                        row_uid = src_line[int(uid_src_start):int(uid_src_end)].strip() or f"Line {line_idx}"
+                    _compare_aligned_pair(
+                        src_line=src_line,
+                        tgt_line=tgt_line,
+                        row_uid=row_uid,
+                        display_line_idx=source_idx,
+                    )
 
-                    if has_fields:
-                        # Validate all configured mapped fields
-                        for field in fields:
-                            f_name = field["field_name"]
-                            f_type = field.get("field_type", "text")
-                            shared_fmt = field.get("date_format")
-                            src_fmt = field.get("source_date_format") or shared_fmt
-                            tgt_fmt = field.get("target_date_format") or shared_fmt
+            unmatched_tgt: list[tuple[int, str, str]] = []
+            for leftover_uid, leftover_lines in target_by_uid.items():
+                while leftover_lines:
+                    target_idx, tgt_line = leftover_lines.popleft()
+                    unmatched_tgt.append((target_idx, tgt_line, leftover_uid))
 
-                            # Safe slice boundary handling
-                            src_s = int(field["source_start"])
-                            src_e = int(field["source_end"])
-                            tgt_s = int(field["target_start"])
-                            tgt_e = int(field["target_end"])
+            if use_fuzzy and unmatched_src and unmatched_tgt:
+                pairs, unmatched_src, unmatched_tgt = fuzzy_pair_by_join_key(
+                    unmatched_src,
+                    unmatched_tgt,
+                    threshold=fuzzy_threshold,
+                )
+                for (src_idx, src_line, src_key), (tgt_idx, tgt_line, tgt_key), score in pairs:
+                    pairing_note = (
+                        f"Fuzzy matched on '{uid_col}' (similarity {score:.2f}): "
+                        f"source {src_key!r} vs target {tgt_key!r}"
+                    )
+                    _compare_aligned_pair(
+                        src_line=src_line,
+                        tgt_line=tgt_line,
+                        row_uid=src_key,
+                        display_line_idx=src_idx,
+                        pairing_note=pairing_note,
+                    )
 
-                            src_raw = src_line[src_s:src_e]
-                            tgt_raw = tgt_line[tgt_s:tgt_e]
+            for _src_idx, src_line, row_uid in unmatched_src:
+                mismatches += 1
+                missing_in_target += 1
+                if log_fp is not None:
+                    log_fp.write(json.dumps({
+                        "uid": row_uid,
+                        "mismatch_type": "missing_in_target",
+                        "column_name": uid_col,
+                        "source_value": src_line.rstrip()[:100],
+                        "target_value": None,
+                        "row_detail": _row_detail_json({
+                            "error": f"No target row with matching {uid_col}",
+                            "source_line": src_line.rstrip()[:200],
+                        }),
+                    }) + "\n")
 
-                            src_val, src_err = safe_cast(src_raw, f_type, src_fmt)
-                            tgt_val, tgt_err = safe_cast(tgt_raw, f_type, tgt_fmt)
-
-                            has_mismatch = False
-                            err_msg = None
-
-                            if src_err or tgt_err:
-                                has_mismatch = True
-                                err_msg = f"Parsing error: Source({src_err}) Target({tgt_err})"
-                            elif src_val != tgt_val:
-                                has_mismatch = True
-
-                            if has_mismatch:
-                                mismatches += 1
-                                value_mismatch += 1
-                                if log_fp is not None:
-                                    log_fp.write(json.dumps({
-                                        "uid": row_uid,
-                                        "mismatch_type": "value_mismatch",
-                                        "column_name": f_name,
-                                        "source_value": src_raw.strip(),
-                                        "target_value": tgt_raw.strip(),
-                                        "row_detail": _row_detail_json({
-                                            "error": err_msg or "Value mismatch",
-                                            "source_line": src_line.rstrip()[:200],
-                                            "target_line": tgt_line.rstrip()[:200],
-                                            "source_record": {f_name: src_raw.strip()},
-                                            "target_record": {f_name: tgt_raw.strip()},
-                                        }),
-                                    }) + "\n")
-                    else:
-                        # Fallback mode: single date validation
-                        src_raw = src_line[src_start:src_end]
-                        tgt_raw = tgt_line[tgt_start:tgt_end]
-
-                        src_date = None
-                        tgt_date = None
-                        src_err: str | None = None
-                        tgt_err: str | None = None
-
-                        try:
-                            src_date = parse_fixed_width_date(src_raw, src_format)
-                        except ValueError as exc:
-                            src_err = str(exc)
-
-                        try:
-                            tgt_date = parse_fixed_width_date(tgt_raw, tgt_format)
-                        except ValueError as exc:
-                            tgt_err = str(exc)
-
-                        if src_err or tgt_err:
-                            mismatches += 1
-                            value_mismatch += 1
-                            if log_fp is not None:
-                                err_parts = []
-                                if src_err:
-                                    err_parts.append(f"Source: {src_err}")
-                                if tgt_err:
-                                    err_parts.append(f"Target: {tgt_err}")
-                                log_fp.write(json.dumps({
-                                    "uid": f"Line {line_idx}",
-                                    "mismatch_type": "value_mismatch",
-                                    "column_name": "date",
-                                    "source_value": src_raw.strip(),
-                                    "target_value": tgt_raw.strip(),
-                                    "row_detail": _row_detail_json({
-                                        "error": "; ".join(err_parts),
-                                        "source_line": src_line.rstrip()[:200],
-                                        "target_line": tgt_line.rstrip()[:200],
-                                        "source_record": {"date": src_raw.strip()},
-                                        "target_record": {"date": tgt_raw.strip()},
-                                    }),
-                                }) + "\n")
-                        elif src_date != tgt_date:
-                            mismatches += 1
-                            value_mismatch += 1
-                            if log_fp is not None:
-                                log_fp.write(json.dumps({
-                                    "uid": f"Line {line_idx}",
-                                    "mismatch_type": "value_mismatch",
-                                    "column_name": "date",
-                                    "source_value": src_raw.strip(),
-                                    "target_value": tgt_raw.strip(),
-                                    "row_detail": _row_detail_json({
-                                        "source_date": str(src_date),
-                                        "target_date": str(tgt_date),
-                                        "source_line": src_line.rstrip()[:200],
-                                        "target_line": tgt_line.rstrip()[:200],
-                                        "source_record": {"date": src_raw.strip(), "parsed_date": str(src_date)},
-                                        "target_record": {"date": tgt_raw.strip(), "parsed_date": str(tgt_date)},
-                                    }),
-                                }) + "\n")
+            for target_idx, tgt_line, row_uid in unmatched_tgt:
+                mismatches += 1
+                missing_in_source += 1
+                if log_fp is not None:
+                    log_fp.write(json.dumps({
+                        "uid": row_uid,
+                        "mismatch_type": "extra_in_target",
+                        "column_name": uid_col,
+                        "source_value": None,
+                        "target_value": tgt_line.rstrip()[:100],
+                        "row_detail": _row_detail_json({
+                            "error": f"No source row with matching {uid_col}",
+                            "target_line": tgt_line.rstrip()[:200],
+                            "target_line_index": target_idx,
+                        }),
+                    }) + "\n")
         finally:
             if log_fp is not None:
                 log_fp.close()
@@ -961,12 +1041,12 @@ class ValidationService:
             mismatch_artifact_path=artifact_path,
         )
 
-        compared_columns = [f["field_name"] for f in fields] if has_fields else ["date"]
+        compared_columns = [f["field_name"] for f in fields]
 
         return ValidationRunResult(
             report=report,
-            source_row_count=total_rows - missing_in_source,
-            target_row_count=total_rows - missing_in_target,
+            source_row_count=source_row_count,
+            target_row_count=target_row_count,
             compared_column_count=len(compared_columns),
             compared_columns=compared_columns,
             mismatch_artifact_path=artifact_path,

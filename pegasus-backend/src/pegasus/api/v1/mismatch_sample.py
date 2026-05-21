@@ -183,6 +183,40 @@ def dedupe_value_mismatch_rows(vm: pl.DataFrame) -> pl.DataFrame:
     return vm.unique(subset=["uid", "column_name", "mismatch_type"], keep="first")
 
 
+def stream_all_value_mismatch_rows_from_ndjson(
+    path: Path,
+    *,
+    n_val: int,
+) -> list[dict[str, Any]]:
+    """Read every value_mismatch row from the artifact (deduped by uid + column)."""
+    if n_val <= 0:
+        return []
+    val_lit = MismatchType.VALUE_MISMATCH.value
+    seen: set[tuple[str, str]] = set()
+    out: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as fp:
+        for line in fp:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj: dict[str, Any] = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if obj.get("mismatch_type") != val_lit:
+                continue
+            uid = str(obj.get("uid") or "")
+            col = obj.get("column_name")
+            dedupe_key = (uid, str(col) if col not in (None, "") else "(unknown)")
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            out.append(obj)
+            if len(out) >= n_val:
+                break
+    return out
+
+
 def load_value_mismatch_sample_from_ndjson(
     path: Path,
     *,
@@ -255,7 +289,7 @@ def build_grouped_mismatch_samples(
     and samples are built with bounded ``head`` / lazy scans—much cheaper for huge reports.
     """
     empty = _empty_sample_frame(mismatches)
-    if mismatches.is_empty() or sample_limit <= 0:
+    if mismatches.is_empty():
         return empty, empty, empty
 
     miss_lit = pl.lit(MismatchType.MISSING_IN_TARGET.value)
@@ -270,23 +304,31 @@ def build_grouped_mismatch_samples(
         vm = mismatches.filter(pl.col("mismatch_type") == val_lit)
         lm = miss.height if cap <= 0 else min(miss.height, cap)
         le = ext.height if cap <= 0 else min(ext.height, cap)
-        lv = min(vm.height, sample_limit) if sample_limit > 0 else 0
+        lv = vm.height if sample_limit <= 0 else min(vm.height, sample_limit)
         miss_s = miss.head(lm) if lm else empty
         ext_s = ext.head(le) if le else empty
-        val_s = stratified_value_mismatch_sample(vm, lv) if lv else empty
+        if lv and sample_limit <= 0:
+            val_s = dedupe_value_mismatch_rows(vm)
+        else:
+            val_s = stratified_value_mismatch_sample(vm, lv) if lv else empty
         return miss_s, ext_s, val_s
 
     n_miss, n_ext, n_val = category_counts
     lm = n_miss if cap <= 0 else min(n_miss, cap)
     le = n_ext if cap <= 0 else min(n_ext, cap)
-    lv = min(n_val, sample_limit) if sample_limit > 0 else 0
+    lv = n_val if sample_limit <= 0 else min(n_val, sample_limit)
     lf = mismatches.lazy()
     miss_s = lf.filter(pl.col("mismatch_type") == miss_lit).head(lm).collect() if lm else empty
     ext_s = lf.filter(pl.col("mismatch_type") == ext_lit).head(le).collect() if le else empty
     if lv > 0:
-        vm_cap = min(n_val, max(sample_limit * 64, 2048))
-        vm_partial = lf.filter(pl.col("mismatch_type") == val_lit).head(vm_cap).collect()
-        val_s = stratified_value_mismatch_sample(vm_partial, lv)
+        if sample_limit <= 0:
+            val_s = dedupe_value_mismatch_rows(
+                lf.filter(pl.col("mismatch_type") == val_lit).collect(),
+            )
+        else:
+            vm_cap = min(n_val, max(sample_limit * 64, 2048))
+            vm_partial = lf.filter(pl.col("mismatch_type") == val_lit).head(vm_cap).collect()
+            val_s = stratified_value_mismatch_sample(vm_partial, lv)
     else:
         val_s = empty
     return miss_s, ext_s, val_s

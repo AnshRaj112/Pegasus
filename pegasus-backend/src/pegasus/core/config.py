@@ -81,14 +81,11 @@ class Settings(BaseSettings):
         description="Max bytes per individual CSV upload on POST /validate (each file checked separately)",
     )
     validation_mismatch_sample_limit: int = Field(
-        default=100,
+        default=0,
         ge=0,
-        le=10_000,
         description=(
-            "Max value_mismatch sample rows returned in mismatch_sample_groups.value_mismatch "
-            "(stratified across compared columns). Missing/extra lists include all rows up to "
-            "validation_presence_mismatch_response_max_rows per side. If set to 0, the API uses an "
-            "automatic cap (up to 10_000) for value samples."
+            "Max value_mismatch sample rows in mismatch_sample_groups.value_mismatch "
+            "(stratified across columns when > 0). 0 returns every value mismatch."
         ),
     )
     validation_presence_mismatch_response_max_rows: int = Field(
