@@ -16,9 +16,10 @@ Start with the overview, then move through validation types, backend logic, fron
 - [Troubleshooting](07-troubleshooting.md)
 - [FAQ](08-faq.md)
 - [Onboarding checklist](09-onboarding-checklist.md)
+- [Scripts guide](10-scripts.md)
 
 ## How To Use This Pack
 
-Read the overview once, then use the validation-specific pages to understand the supported formats. The backend logic page explains how files move through the system, how queueing works, and where persistence happens. The frontend page covers the UI entry points and API calls. The tests page is the fastest way to understand the current quality coverage.
+Read the overview once, then use the validation-specific pages to understand the supported formats. The backend logic page explains how files move through the system, how queueing works, and where persistence happens. The frontend page covers the UI entry points and API calls. The tests page is the fastest way to understand the current quality coverage. The scripts guide explains every repository utility script and the exact inputs each one expects.
 
 If you are debugging a production issue, jump first to Troubleshooting. If you are joining the project for the first time, use the onboarding checklist before touching code.

@@ -7,6 +7,7 @@ This is the default validation path for tabular files that use a delimiter such 
 - The file format is CSV or another delimited table.
 - The user provides a UID column that exists in both source and target.
 - The comparison columns are derived from the shared schema or from the mapping wizard.
+- The row order may be different between source and target, because matching happens by UID instead of by physical row number.
 
 ## User Inputs
 
@@ -16,14 +17,30 @@ This is the default validation path for tabular files that use a delimiter such 
 - Optional column mappings.
 - Optional header-format validation.
 - Optional footer validation.
+- Optional local-path browsing when the backend allows it.
 
-## Core Behavior
+## What The Backend Actually Does
 
-- The backend resolves the delimiter before reading rows.
-- Column names are read from both files so the UI can suggest matches.
-- Compare rules are built from the selected mappings.
-- The validation service loads the two datasets and compares them by UID.
-- The result includes missing rows, extra rows, mismatched values, and summary counts.
+1. It resolves the delimiter, either from user input or through shared auto-detection.
+2. It reads headers from both files so the UI can compare source and target columns.
+3. It subtracts the UID column from the compare set.
+4. It builds compare rules from the mapped or automatically matched columns.
+5. It loads the full pair through the validation service or a reconciliation worker, depending on size and runtime policy.
+6. It produces missing-row, extra-row, and value-mismatch records.
+7. It returns counts, mismatch samples, and optional artifacts back to the API caller.
+
+## Validation Result Shape
+
+The result usually contains:
+
+- Source and target row counts.
+- Compared column count.
+- The exact set of compared columns.
+- Missing-in-target mismatch counts.
+- Extra-in-target mismatch counts.
+- Value mismatch counts.
+- Sample mismatch rows for the UI.
+- Timing metadata for upload, comparison, and total runtime.
 
 ## Supporting Logic
 
@@ -32,6 +49,15 @@ This is the default validation path for tabular files that use a delimiter such 
 - Column mapping analysis for the wizard.
 - Footer and header format checks when enabled.
 - UID-based comparison and mismatch reporting.
+- History persistence if the run is configured to be saved.
+
+## How To Validate A CSV Flow Manually
+
+1. Start the backend and frontend.
+2. Use a small fixture pair with a known UID column.
+3. Run a validation with `delimiter=auto` once and with the explicit delimiter once.
+4. Compare the counts against the generated fixture manifest or known mismatch set.
+5. Open the history page and confirm the run appears when persistence is enabled.
 
 ## Typical Failure Modes
 
@@ -40,6 +66,7 @@ This is the default validation path for tabular files that use a delimiter such 
 - The source and target headers do not align.
 - A mapping references a column that does not exist.
 - The footer check fails because the file has extra trailer rows.
+- The run is accepted but the queue is too busy, so the UI appears to stall.
 
 ## What To Check First
 
@@ -47,3 +74,4 @@ This is the default validation path for tabular files that use a delimiter such 
 - Confirm the UID value is present in both files and has a stable type.
 - Confirm auto-detection did not choose the wrong delimiter.
 - Confirm compare columns exclude the UID column.
+- Confirm the backend log shows the same delimiter the UI selected.
