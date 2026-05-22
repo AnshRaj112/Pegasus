@@ -2,6 +2,10 @@
 
 Welcome to **Pegasus**! This document provides an end-to-end, step-by-step guide to setting up, configuring, migrating, running, and testing the Pegasus Data Validation & Reconciliation platform from scratch. Whether you are a new developer onboarding to the project or looking to deploy it locally, this guide has everything you need.
 
+## Knowledge Transfer Docs
+
+For the KT-style walkthrough of validations, logic, frontend flows, tests, troubleshooting, FAQ, and onboarding, start here: [KT index](kt/README.md).
+
 ---
 
 ## 📋 Table of Contents
