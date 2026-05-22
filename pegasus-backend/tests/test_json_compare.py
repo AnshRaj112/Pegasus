@@ -46,14 +46,25 @@ def test_collect_json_mismatches_counts_granular_rows() -> None:
     assert len(rows) == 1
 
 
-def test_generated_test_json_expected_fifty_mismatches() -> None:
+def test_field_mismatch_suffix_pairs_as_value_mismatch() -> None:
+    source = {"errors": [{"error": "required", "field": "field_481"}]}
+    target = {"errors": [{"error": "required_mismatch", "field": "field_481_mismatch"}]}
+    summary, rows = collect_json_mismatches(source, target)
+    assert summary == {"missing_in_target": 0, "extra_in_target": 0, "value_mismatch": 2}
+    assert {r["column_name"] for r in rows} == {"error", "field"}
+    assert all(r["uid"] == "field_481" for r in rows)
+
+
+def test_generated_test_json_fifty_attribute_mismatches() -> None:
     root = Path(__file__).resolve().parents[2] / "test-data" / "generated-test-json"
     if not (root / "source.json").is_file():
         return
     src = json.loads((root / "source.json").read_text(encoding="utf-8"))
     tgt = json.loads((root / "target.json").read_text(encoding="utf-8"))
     summary, rows = collect_json_mismatches(src, tgt)
-    assert sum(summary.values()) == 50
+    assert summary["missing_in_target"] == 0
+    assert summary["extra_in_target"] == 0
+    assert summary["value_mismatch"] == 50
     assert len(rows) == 50
 
 

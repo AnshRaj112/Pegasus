@@ -190,6 +190,15 @@ def _append_row(
     })
 
 
+_FIELD_MISMATCH_SUFFIX = "_mismatch"
+
+
+def _paired_target_field(source_field: str, tgt_map: dict[str, Any]) -> str | None:
+    """Target field name that corresponds to *source_field* (e.g. ``field_1`` -> ``field_1_mismatch``)."""
+    candidate = f"{source_field}{_FIELD_MISMATCH_SUFFIX}"
+    return candidate if candidate in tgt_map else None
+
+
 def _field_indexed_list(items: list[Any]) -> dict[str, Any] | None:
     """Map ``field`` -> item when the list is a list of unique field-keyed objects."""
     if not isinstance(items, list):
@@ -207,6 +216,53 @@ def _field_indexed_list(items: list[Any]) -> dict[str, Any] | None:
     return out
 
 
+def _diff_matched_error_records(
+    rows: list[dict[str, Any]],
+    summary: dict[str, int],
+    *,
+    uid: str,
+    source_obj: dict[str, Any],
+    target_obj: dict[str, Any],
+    path: str,
+) -> None:
+    """Compare one source/target error object key-by-key (counts each attribute difference)."""
+    for key in sorted(set(source_obj) | set(target_obj)):
+        child_path = f"{path}.{key}"
+        if key not in source_obj:
+            _append_row(
+                rows,
+                summary,
+                uid=uid,
+                mismatch_type="extra_in_target",
+                column_name=key,
+                source_value=None,
+                target_value=target_obj[key],
+                path=child_path,
+            )
+        elif key not in target_obj:
+            _append_row(
+                rows,
+                summary,
+                uid=uid,
+                mismatch_type="missing_in_target",
+                column_name=key,
+                source_value=source_obj[key],
+                target_value=None,
+                path=child_path,
+            )
+        elif not json_values_equal(source_obj[key], target_obj[key]):
+            _append_row(
+                rows,
+                summary,
+                uid=uid,
+                mismatch_type="value_mismatch",
+                column_name=key,
+                source_value=source_obj[key],
+                target_value=target_obj[key],
+                path=child_path,
+            )
+
+
 def _diff_field_indexed_lists(
     rows: list[dict[str, Any]],
     summary: dict[str, int],
@@ -218,7 +274,32 @@ def _diff_field_indexed_lists(
 ) -> None:
     src_map = _field_indexed_list(source_list) or {}
     tgt_map = _field_indexed_list(target_list) or {}
+    matched_target_fields: set[str] = set()
+
+    for field in sorted(set(src_map) & set(tgt_map)):
+        matched_target_fields.add(field)
+        _diff_matched_error_records(
+            rows,
+            summary,
+            uid=field,
+            source_obj=src_map[field],
+            target_obj=tgt_map[field],
+            path=f"{path}[field={field}]",
+        )
+
     for field in sorted(set(src_map) - set(tgt_map)):
+        paired = _paired_target_field(field, tgt_map)
+        if paired is not None and paired not in matched_target_fields:
+            matched_target_fields.add(paired)
+            _diff_matched_error_records(
+                rows,
+                summary,
+                uid=field,
+                source_obj=src_map[field],
+                target_obj=tgt_map[paired],
+                path=f"{path}[field={field}|{paired}]",
+            )
+            continue
         _append_row(
             rows,
             summary,
@@ -229,7 +310,8 @@ def _diff_field_indexed_lists(
             target_value=None,
             path=f"{path}[field={field}]",
         )
-    for field in sorted(set(tgt_map) - set(src_map)):
+
+    for field in sorted(set(tgt_map) - matched_target_fields):
         _append_row(
             rows,
             summary,
@@ -240,18 +322,6 @@ def _diff_field_indexed_lists(
             target_value=tgt_map[field],
             path=f"{path}[field={field}]",
         )
-    for field in sorted(set(src_map) & set(tgt_map)):
-        if not json_values_equal(src_map[field], tgt_map[field]):
-            _append_row(
-                rows,
-                summary,
-                uid=field,
-                mismatch_type="value_mismatch",
-                column_name=column_name,
-                source_value=src_map[field],
-                target_value=tgt_map[field],
-                path=f"{path}[field={field}]",
-            )
 
 
 def _diff_multiset_lists(
