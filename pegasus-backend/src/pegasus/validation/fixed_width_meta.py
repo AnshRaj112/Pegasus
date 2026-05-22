@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from pegasus.validation.delimiter_tokens import FIXED_WIDTH_DELIMITER, is_fixed_width_delimiter
+from pegasus.validation.delimiter_tokens import (
+    FIXED_WIDTH_DELIMITER,
+    JSON_DELIMITER,
+    is_fixed_width_delimiter,
+    is_json_delimiter,
+)
 
 _FIXED_WIDTH_FORMAT_ALIASES = frozenset({"fixed-width", "fixed_width", "fixedwidth"})
+_JSON_FORMAT_ALIASES = frozenset({"json"})
 
 _DRAFT_CONFIG_KEYS = (
     "source_date_start",
@@ -19,15 +25,26 @@ _DRAFT_CONFIG_KEYS = (
 
 
 def normalize_file_format(file_format: str | None) -> str:
-    """Return ``csv`` or ``fixed-width``."""
+    """Return ``csv``, ``fixed-width``, or ``json``."""
     token = (file_format or "csv").strip().lower().replace("_", "-")
+    if token in _JSON_FORMAT_ALIASES:
+        return "json"
     if token in _FIXED_WIDTH_FORMAT_ALIASES or token == "fixed-width":
         return "fixed-width"
     return "csv"
 
 
+def is_json_run(*, file_format: str | None = None, delimiter: str | None = None) -> bool:
+    """True when the job should compare two JSON documents (not CSV / fixed-width)."""
+    if normalize_file_format(file_format) == "json":
+        return True
+    return is_json_delimiter(delimiter)
+
+
 def is_fixed_width_run(*, file_format: str | None = None, delimiter: str | None = None) -> bool:
     """True when the job should use streaming fixed-width validation (not CSV)."""
+    if is_json_run(file_format=file_format, delimiter=delimiter):
+        return False
     if normalize_file_format(file_format) == "fixed-width":
         return True
     return is_fixed_width_delimiter(delimiter)
@@ -153,7 +170,9 @@ def coerce_local_validate_fields(
     fixed_width_config: dict[str, Any] | None,
     column_mappings: list[Any] | None,
 ) -> tuple[str, str, dict[str, Any] | None]:
-    """Normalize local-path validate request fields for fixed-width runs."""
+    """Normalize local-path validate request fields for fixed-width / JSON runs."""
+    if is_json_run(file_format=file_format, delimiter=delimiter):
+        return "json", JSON_DELIMITER, None
     if not is_fixed_width_run(file_format=file_format, delimiter=delimiter):
         return file_format, delimiter, fixed_width_config
     resolved = resolve_fixed_width_config(

@@ -203,8 +203,14 @@ class LocalPathValidateRequest(BaseModel):
         le=10,
         description="Number of trailing physical rows to treat as footer when validate_footers is true.",
     )
-    file_format: str = Field(default="csv", description="File format type: 'csv' or 'fixed-width'")
-    fixed_width_config: FixedWidthConfig | None = Field(default=None, description="Detailed configuration when file_format is 'fixed-width'")
+    file_format: str = Field(
+        default="csv",
+        description="File format type: 'csv', 'fixed-width', or 'json'",
+    )
+    fixed_width_config: FixedWidthConfig | None = Field(
+        default=None,
+        description="Detailed configuration when file_format is 'fixed-width'",
+    )
 
     @model_validator(mode="after")
     def _validate_storage_inputs(self) -> "LocalPathValidateRequest":
