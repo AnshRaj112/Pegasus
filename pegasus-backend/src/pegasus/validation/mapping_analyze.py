@@ -12,14 +12,19 @@ import polars as pl
 from pegasus.schemas.validation import ColumnMapping
 from pegasus.validation.footer_validation import read_trailing_csv_rows, validate_footer_rows
 from pegasus.validation.format_profiles import check_mapping_format
+from pegasus.validation.readers.delimiter_detection import polars_supports_csv_delimiter
+
+
 def _read_sample_frame(path: Path, *, delimiter: str, sample_rows: int) -> pl.DataFrame:
-    if len(delimiter) > 1:
+    if not polars_supports_csv_delimiter(delimiter):
         pdf = pd.read_csv(
             path,
             sep=re.escape(delimiter),
             engine="python",
             encoding="utf-8",
             nrows=sample_rows,
+            quotechar='"',
+            doublequote=True,
         )
         return pl.from_pandas(pdf, include_index=False)
     return pl.read_csv(

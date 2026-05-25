@@ -509,6 +509,7 @@ class PolarsCSVReader(CSVReader):
             "infer_schema_length": infer_schema_length,
             "low_memory": True,
             "try_parse_dates": try_parse_dates,
+            "quote_char": '"',
         }
         out.update(extra)
         out["separator"] = delimiter
@@ -560,6 +561,7 @@ class PolarsCSVReader(CSVReader):
             "infer_schema_length": infer_schema_length,
             "try_parse_dates": try_parse_dates,
             "low_memory": True,
+            "quote_char": '"',
         }
         out.update(extra)
         out["has_header"] = has_header

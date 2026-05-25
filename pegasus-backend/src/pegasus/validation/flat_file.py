@@ -1,8 +1,9 @@
 """Universal flat-file (delimiter-separated) parsing and schema validation.
 
-Uses literal delimiter splitting so any UTF-8 string works as a separator
-(multi-character, emoji, control characters, etc.). Does not use the stdlib
-``csv`` module, which only accepts single-character delimiters.
+Supports any UTF-8 delimiter (multi-character, emoji, control characters) and
+RFC 4180-style double-quoted fields so commas (or other delimiter characters)
+inside values—e.g. ``"Pune, Maharashtra, 123456"`` or names like
+``"Vidit J. Tiwari"``—do not create extra columns.
 """
 
 from __future__ import annotations
@@ -108,17 +109,92 @@ def normalize_delimiter(token: str) -> str:
     return raw
 
 
-def split_line(line: str, delimiter: str) -> list[str]:
-    """Split one physical line on a literal delimiter (any length, any Unicode).
+def _split_line_respecting_quotes(line: str, delimiter: str, quote_char: str) -> list[str]:
+    """Split *line* on *delimiter* only outside *quote_char* regions (RFC 4180)."""
+    fields: list[str] = []
+    buf: list[str] = []
+    in_quotes = False
+    i = 0
+    dlen = len(delimiter)
+    while i < len(line):
+        ch = line[i]
+        if ch == quote_char:
+            if in_quotes and i + 1 < len(line) and line[i + 1] == quote_char:
+                buf.append(quote_char)
+                i += 2
+                continue
+            in_quotes = not in_quotes
+            i += 1
+            continue
+        if not in_quotes and dlen > 0 and line[i : i + dlen] == delimiter:
+            fields.append("".join(buf))
+            buf.clear()
+            i += dlen
+            continue
+        buf.append(ch)
+        i += 1
+    fields.append("".join(buf))
+    return fields
 
-    This is the core primitive: ``str.split`` on the exact delimiter string.
-    It does not interpret CSV quoting; field values are returned verbatim
-    (aside from stripping trailing ``\\r`` / ``\\n`` from the line itself).
+
+def replace_outside_quotes(
+    text: str,
+    old: str,
+    new: str,
+    *,
+    quote_char: str = '"',
+) -> str:
+    """Replace *old* with *new* only in portions of *text* that are outside quotes."""
+    if not old:
+        return text
+    out: list[str] = []
+    in_quotes = False
+    i = 0
+    olen = len(old)
+    while i < len(text):
+        ch = text[i]
+        if ch == quote_char:
+            if in_quotes and i + 1 < len(text) and text[i + 1] == quote_char:
+                out.append(quote_char)
+                out.append(quote_char)
+                i += 2
+                continue
+            in_quotes = not in_quotes
+            out.append(ch)
+            i += 1
+            continue
+        if not in_quotes and text[i : i + olen] == old:
+            out.append(new)
+            i += olen
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def split_line(
+    line: str,
+    delimiter: str,
+    *,
+    quote_char: str = '"',
+    respect_quotes: bool = True,
+) -> list[str]:
+    """Split one physical line into fields (any delimiter length, Unicode-safe).
+
+    When *respect_quotes* is true (default), delimiters inside double-quoted
+    fields are ignored. Escaped quotes (``""``) become a single quote in the value.
     """
     if not delimiter:
         raise EmptyDelimiterError("Delimiter must not be empty")
     physical = line.rstrip("\r\n")
-    return physical.split(delimiter)
+    if not respect_quotes or quote_char not in physical:
+        return physical.split(delimiter)
+    return _split_line_respecting_quotes(physical, delimiter, quote_char)
+
+
+def field_count(line: str, delimiter: str, *, quote_char: str = '"') -> int:
+    """Number of fields on a line (quote-aware)."""
+    return len(split_line(line, delimiter, quote_char=quote_char))
 
 
 def parse_lines(
@@ -128,6 +204,8 @@ def parse_lines(
     has_header: bool = True,
     strip_fields: bool = False,
     skip_empty_lines: bool = True,
+    quote_char: str = '"',
+    respect_quotes: bool = True,
 ) -> FlatFileParseResult:
     """Parse an iterable of text lines into headers and row field lists."""
     delim = normalize_delimiter(delimiter)
@@ -145,7 +223,12 @@ def parse_lines(
         )
 
     def _fields(line: str) -> list[str]:
-        parts = split_line(line, delim)
+        parts = split_line(
+            line,
+            delim,
+            quote_char=quote_char,
+            respect_quotes=respect_quotes,
+        )
         return [p.strip() for p in parts] if strip_fields else parts
 
     if has_header:
@@ -194,6 +277,8 @@ def parse_file(
     has_header: bool = True,
     strip_fields: bool = False,
     skip_empty_lines: bool = True,
+    quote_char: str = '"',
+    respect_quotes: bool = True,
 ) -> FlatFileParseResult:
     """Read a UTF-8 (or other encoding) flat file and parse all rows."""
     file_path = Path(path)
@@ -204,6 +289,8 @@ def parse_file(
         has_header=has_header,
         strip_fields=strip_fields,
         skip_empty_lines=skip_empty_lines,
+        quote_char=quote_char,
+        respect_quotes=respect_quotes,
     )
 
 
@@ -215,6 +302,8 @@ def parse_stream(
     has_header: bool = True,
     strip_fields: bool = False,
     skip_empty_lines: bool = True,
+    quote_char: str = '"',
+    respect_quotes: bool = True,
 ) -> FlatFileParseResult:
     """Parse from an open text stream or binary stream (decoded as UTF-8)."""
     if isinstance(stream, BinaryIO):
@@ -228,6 +317,8 @@ def parse_stream(
         has_header=has_header,
         strip_fields=strip_fields,
         skip_empty_lines=skip_empty_lines,
+        quote_char=quote_char,
+        respect_quotes=respect_quotes,
     )
 
 

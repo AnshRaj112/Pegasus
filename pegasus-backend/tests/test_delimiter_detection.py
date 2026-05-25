@@ -11,12 +11,47 @@ from pegasus.core.config import get_settings
 from pegasus.main import create_app
 from pegasus.validation.readers.delimiter_detection import (
     detect_delimiter,
+    polars_supports_csv_delimiter,
     resolve_shared_auto_delimiter,
 )
 
 
 def _repo_test_data() -> Path:
     return Path(__file__).resolve().parents[2] / "test-data"
+
+
+def test_polars_supports_csv_delimiter_single_byte_only() -> None:
+    assert polars_supports_csv_delimiter(",")
+    assert polars_supports_csv_delimiter("\t")
+    assert not polars_supports_csv_delimiter("xx")
+    assert not polars_supports_csv_delimiter("||")
+    assert not polars_supports_csv_delimiter("🚀")
+
+
+def test_preview_local_columns_emoji_delimiter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    delim = "🚀"
+    src = tmp_path / "source.csv"
+    tgt = tmp_path / "target.csv"
+    src.write_text(f"id{delim}name{delim}score\n1{delim}alice{delim}9\n", encoding="utf-8")
+    tgt.write_text(f"id{delim}name{delim}score\n1{delim}alice{delim}10\n", encoding="utf-8")
+
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        r = client.get(
+            "/api/v1/validate/local/columns",
+            params={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": delim,
+            },
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["delimiter"] == delim
+    assert body["source_columns"] == ["id", "name", "score"]
+    assert body["target_columns"] == ["id", "name", "score"]
 
 
 def test_detect_alphabetic_multichar_xx_delimiter(tmp_path: Path) -> None:

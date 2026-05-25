@@ -212,6 +212,32 @@ def test_split_physical_lines_does_not_break_on_record_separator() -> None:
     assert split_physical_lines(text) == [f"a{delim}b", f"c{delim}d"]
 
 
+def test_split_line_quoted_comma_in_address() -> None:
+    line = '1,"Vidit J. Tiwari","Pune, Maharashtra, 123456"'
+    assert split_line(line, ",") == [
+        "1",
+        "Vidit J. Tiwari",
+        "Pune, Maharashtra, 123456",
+    ]
+
+
+def test_split_line_unquoted_name_with_periods() -> None:
+    assert split_line("42,Vidit J. Tiwari,active", ",") == ["42", "Vidit J. Tiwari", "active"]
+
+
+def test_parse_lines_quoted_address_column() -> None:
+    lines = [
+        "id,name,address",
+        '10,Alice,"Pune, Maharashtra, 123456"',
+        '11,Bob,"Mumbai, MH, 400001"',
+    ]
+    result = parse_lines(lines, ",")
+    assert result.headers == ["id", "name", "address"]
+    assert len(result.rows) == 2
+    assert result.rows[0][2] == "Pune, Maharashtra, 123456"
+    assert result.ok
+
+
 def test_split_line_empty_delimiter_raises() -> None:
     with pytest.raises(EmptyDelimiterError):
         split_line("a,b", "")

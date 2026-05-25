@@ -11,6 +11,8 @@ from pathlib import Path
 
 import clevercsv
 
+from pegasus.validation.flat_file import field_count
+
 # Sniff delimiters from a bounded prefix only (never read multi‑GiB files into RAM).
 _DEFAULT_SNIFF_PREFIX_BYTES = 512 * 1024
 
@@ -28,6 +30,16 @@ class DelimiterDetectionResult:
 
     delimiter: str
     strategy: str
+
+
+def polars_supports_csv_delimiter(delimiter: str) -> bool:
+    """True when *delimiter* can be passed to Polars ``scan_csv``/``read_csv``.
+
+    Polars requires a single-byte separator. Multi-character tokens (``xx``,
+    ``||``) and single Unicode code points that encode to multiple UTF-8 bytes
+    (e.g. ``🚀``) must use the pandas fallback parser instead.
+    """
+    return len(delimiter) == 1 and len(delimiter.encode("utf-8")) == 1
 
 
 def resolve_shared_auto_delimiter(source_path: Path, target_path: Path) -> DelimiterDetectionResult:
@@ -110,7 +122,7 @@ def _file_delimiter_stability(path: Path, delim: str) -> tuple[int | None, float
     if len(lines) < 2:
         return None, float("-inf")
 
-    counts = [ln.count(delim) + 1 for ln in lines]
+    counts = [field_count(ln, delim) for ln in lines]
     mode_value, mode_freq = Counter(counts).most_common(1)[0]
     if mode_value < 2:
         return None, float("-inf")
@@ -199,11 +211,10 @@ def _multi_char_candidates(header: str) -> list[str]:
 
 
 def _score_delimiter_candidate(lines: list[str], cand: str) -> tuple[int, float, float, str] | None:
-    counts = [line.count(cand) for line in lines]
-    active = [c for c in counts if c > 0]
+    fields = [field_count(line, cand) for line in lines]
+    active = [f for f in fields if f > 1]
     if len(active) < max(2, len(lines) // 3):
         return None
-    fields = [c + 1 for c in active]
     variance = statistics.pvariance(fields) if len(fields) > 1 else 0.0
     return (len(active), -variance, sum(fields) / len(fields), cand)
 
@@ -229,13 +240,10 @@ def _detect_single_char_delimiter(lines: list[str]) -> str | None:
     candidates = [",", ";", "|", "\t", ":", "\x1f", "\x1e", "\x1d"]
     scored: list[tuple[int, float, float, str]] = []
     for cand in candidates:
-        counts = [line.count(cand) for line in lines]
-        active = [c for c in counts if c > 0]
-        if not active:
+        row = _score_delimiter_candidate(lines, cand)
+        if row is None:
             continue
-        fields = [c + 1 for c in active]
-        variance = statistics.pvariance(fields) if len(fields) > 1 else 0.0
-        scored.append((len(active), -variance, sum(fields) / len(fields), cand))
+        scored.append(row)
     if not scored:
         return None
     scored.sort(reverse=True)

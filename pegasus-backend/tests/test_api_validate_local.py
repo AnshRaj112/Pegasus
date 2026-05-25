@@ -150,6 +150,40 @@ def test_validate_local_with_explicit_column_mapping(monkeypatch: pytest.MonkeyP
         assert set(body["compared_columns"]) == {"city", "name"}
 
 
+def test_validate_local_auto_detects_spaced_emoji_delimiter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    delim = "👍"
+    src = tmp_path / "source.csv"
+    tgt = tmp_path / "target.csv"
+    src.write_text(
+        f"id {delim} sku {delim} amount {delim} region {delim} attr4\n"
+        f"1 {delim} SKU-0001 {delim} 100 {delim} EMEA {delim} one\n",
+        encoding="utf-8",
+    )
+    tgt.write_text(
+        f"id {delim} sku {delim} amount {delim} region {delim} attr4\n"
+        f"1 {delim} SKU-0001 {delim} 101 {delim} EMEA {delim} one\n",
+        encoding="utf-8",
+    )
+
+    with TestClient(create_app()) as client:
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": "auto",
+            },
+        )
+        assert r.status_code == 202, r.text
+        body = _poll_completed(client, r.json()["poll_url"])
+        assert body["summary"]["source_row_count"] == 1
+        assert body["summary"]["target_row_count"] == 1
+        assert body["mismatch_counts"]["value_mismatch"] == 1
+
+
 def test_validate_local_accepts_google_cloud_storage_inputs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

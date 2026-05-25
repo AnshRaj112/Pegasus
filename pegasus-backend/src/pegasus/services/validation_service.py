@@ -39,7 +39,10 @@ from pegasus.validation.readers.exceptions import (
     CSVParseError,
     CSVValidationError,
 )
-from pegasus.validation.readers.delimiter_detection import resolve_shared_auto_delimiter
+from pegasus.validation.readers.delimiter_detection import (
+    polars_supports_csv_delimiter,
+    resolve_shared_auto_delimiter,
+)
 from pegasus.validation.readers.polars_csv_reader import PolarsCSVReader
 from pegasus.validation.reconciliation.config import (
     ReconciliationRuntimeConfig,
@@ -326,7 +329,7 @@ class ValidationService:
         log_swap_pressure_warning(logger)
 
         combined_bytes = source_path.stat().st_size + target_path.stat().st_size
-        use_multichar_streaming = len(delim) > 1
+        use_multichar_streaming = not polars_supports_csv_delimiter(delim)
 
         rcfg = self._apply_host_reconciliation_tuning(
             rcfg,
@@ -403,7 +406,7 @@ class ValidationService:
                 mapping_analysis,
             )
 
-        want_external = not column_mappings and len(delim) == 1 and (
+        want_external = not column_mappings and polars_supports_csv_delimiter(delim) and (
             self._settings.validation_force_external_reconciliation
             or rcfg.strategy != ReconciliationStrategy.AUTO
             or auto_external_enabled(source_path=source_path, target_path=target_path, cfg=rcfg)
@@ -571,10 +574,10 @@ class ValidationService:
         )
 
     def _read_column_names(self, path: Path, delimiter: str) -> list[str]:
-        reader = PolarsCSVReader(default_batch_size=512)
-        if len(delimiter) > 1:
+        if not polars_supports_csv_delimiter(delimiter):
             frame = multichar_csv_header_frame(path, delimiter=delimiter)
             return [c.strip() for c in frame.columns]
+        reader = PolarsCSVReader(default_batch_size=512)
         schema = reader.detect_schema(path, delimiter=delimiter, encoding="utf-8")
         return list(schema.keys())
 
@@ -660,7 +663,7 @@ class ValidationService:
         return token
 
     def _read_dataframe(self, reader: PolarsCSVReader, path: Path, delimiter: str) -> pl.DataFrame:
-        if len(delimiter) == 1:
+        if polars_supports_csv_delimiter(delimiter):
             return reader.read_file(
                 path,
                 delimiter=delimiter,
@@ -668,15 +671,16 @@ class ValidationService:
                 use_streaming_engine=True,
             )
 
-        # Multi-character delimiters are not supported by Polars CSV parser.
-        # Use pandas python engine, then convert to Polars for downstream pipeline.
-        logger.info("Using pandas fallback for multi-character delimiter %r on %s", delimiter, path.name)
+        # Polars only accepts single-byte separators; use pandas for multi-char / emoji / etc.
+        logger.info("Using pandas fallback for delimiter %r on %s", delimiter, path.name)
         try:
             pdf = pd.read_csv(
                 path,
                 sep=re.escape(delimiter),
                 engine="python",
                 encoding="utf-8",
+                quotechar='"',
+                doublequote=True,
             )
         except Exception as exc:
             raise CSVParseError(f"Failed pandas fallback parse for {path.name}: {exc}") from exc

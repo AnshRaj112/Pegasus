@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
+
+from pegasus.validation.flat_file import split_line
 
 
 def _parse_csv_line(line: str, delimiter: str) -> list[str]:
-    """Split one physical line into fields (stdlib csv only supports 1-char delimiters)."""
-    if len(delimiter) != 1:
-        return [part.strip() for part in line.split(delimiter)]
-    try:
-        return next(csv.reader([line], delimiter=delimiter))
-    except csv.Error:
-        return [line]
+    """Split one physical line into fields (quote-aware for any delimiter)."""
+    return split_line(line, delimiter)
 
 
 def read_trailing_csv_rows(
