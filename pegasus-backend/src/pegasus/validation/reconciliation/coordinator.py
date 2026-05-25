@@ -263,10 +263,13 @@ class ReconciliationCoordinator:
         tuple
             ``(report, source_row_count, target_row_count, resolved_strategy)``
         """
-        if len(delimiter) != 1:
+        from pegasus.validation.readers.delimiter_detection import polars_supports_csv_delimiter
+
+        if not polars_supports_csv_delimiter(delimiter):
             raise ReconciliationStrategyError(
-                "External-memory reconciliation currently requires a single-character delimiter "
-                "(Polars lazy CSV). Use validation without external mode for multi-char separators."
+                "External-memory reconciliation requires a single-byte delimiter "
+                "(Polars lazy CSV). Use validation without external mode for multi-char or "
+                "multi-byte Unicode separators."
             )
 
         strategy = self._resolve_strategy(cfg, source_path=source_path, target_path=target_path)
@@ -320,9 +323,12 @@ class ReconciliationCoordinator:
         ``cfg.parallel_spill_sides`` is True (default), cutting the I/O-bound
         read+partition phase nearly in half.
         """
-        if len(delimiter) < 2:
+        from pegasus.validation.readers.delimiter_detection import polars_supports_csv_delimiter
+
+        if polars_supports_csv_delimiter(delimiter):
             raise ReconciliationStrategyError(
-                "run_multichar_hash_partition_csv_pair requires a multi-character delimiter"
+                "run_multichar_hash_partition_csv_pair requires a delimiter Polars cannot parse "
+                "(multi-character or multi-byte Unicode separators)"
             )
         logger.info(
             "Starting multichar hash-partition reconciliation delimiter=%r buckets=%d sub=%d chunk_rows=%d parallel_spill=%s",

@@ -729,7 +729,7 @@ async def validate_csv_files(
                 logger.error("Failed to record validation failure in database: %s", persist_exc)
         raise
     finally:
-        for p in (source_input.cleanup_path, target_input.cleanup_path):
+        for p in (source_path, target_path):
             if p is not None:
                 try:
                     p.unlink(missing_ok=True)

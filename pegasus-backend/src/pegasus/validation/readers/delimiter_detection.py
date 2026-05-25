@@ -11,6 +11,8 @@ from pathlib import Path
 
 import clevercsv
 
+from pegasus.validation.flat_file import field_count
+
 # Sniff delimiters from a bounded prefix only (never read multi‑GiB files into RAM).
 _DEFAULT_SNIFF_PREFIX_BYTES = 512 * 1024
 
@@ -28,6 +30,16 @@ class DelimiterDetectionResult:
 
     delimiter: str
     strategy: str
+
+
+def polars_supports_csv_delimiter(delimiter: str) -> bool:
+    """True when *delimiter* can be passed to Polars ``scan_csv``/``read_csv``.
+
+    Polars requires a single-byte separator. Multi-character tokens (``xx``,
+    ``||``) and single Unicode code points that encode to multiple UTF-8 bytes
+    (e.g. ``🚀``) must use the pandas fallback parser instead.
+    """
+    return len(delimiter) == 1 and len(delimiter.encode("utf-8")) == 1
 
 
 def resolve_shared_auto_delimiter(source_path: Path, target_path: Path) -> DelimiterDetectionResult:
@@ -60,6 +72,7 @@ def resolve_shared_auto_delimiter(source_path: Path, target_path: Path) -> Delim
         "|",
         "||",
         "::",
+        "xx",
     ):
         if d not in candidates:
             candidates.append(d)
@@ -109,7 +122,7 @@ def _file_delimiter_stability(path: Path, delim: str) -> tuple[int | None, float
     if len(lines) < 2:
         return None, float("-inf")
 
-    counts = [ln.count(delim) + 1 for ln in lines]
+    counts = [field_count(ln, delim) for ln in lines]
     mode_value, mode_freq = Counter(counts).most_common(1)[0]
     if mode_value < 2:
         return None, float("-inf")
@@ -166,23 +179,57 @@ def detect_delimiter(path: Path) -> DelimiterDetectionResult:
     return DelimiterDetectionResult(delimiter=single, strategy="heuristic-single-char")
 
 
+def _repeated_substring_candidates(
+    header: str,
+    *,
+    min_len: int = 2,
+    max_len: int = 8,
+    min_occurrences: int = 2,
+) -> list[str]:
+    """Substrings that repeat in the header (covers alphabetic delimiters like ``xx``)."""
+    if len(header) < min_len:
+        return []
+    counts: Counter[str] = Counter()
+    upper = min(max_len, len(header))
+    for length in range(min_len, upper + 1):
+        for start in range(len(header) - length + 1):
+            counts[header[start : start + length]] += 1
+    return [token for token, freq in counts.items() if freq >= min_occurrences]
+
+
+def _multi_char_candidates(header: str) -> list[str]:
+    """Build delimiter candidates for multi-character detection."""
+    # Symbol-heavy tokens: "||", "::", tab combinations, etc.
+    symbolic = re.findall(r"[^A-Za-z0-9_\"']{2,}", header)
+    repeated = _repeated_substring_candidates(header)
+    merged: list[str] = []
+    for token in (*symbolic, *repeated):
+        if not token or token in merged:
+            continue
+        merged.append(token)
+    return sorted(merged, key=len, reverse=True)
+
+
+def _score_delimiter_candidate(lines: list[str], cand: str) -> tuple[int, float, float, str] | None:
+    fields = [field_count(line, cand) for line in lines]
+    active = [f for f in fields if f > 1]
+    if len(active) < max(2, len(lines) // 3):
+        return None
+    variance = statistics.pvariance(fields) if len(fields) > 1 else 0.0
+    return (len(active), -variance, sum(fields) / len(fields), cand)
+
+
 def _detect_multi_char_delimiter(lines: list[str]) -> str | None:
     header = lines[0]
-    # Candidate tokens between potential fields, e.g. "||", "::", "\t|"
-    raw = re.findall(r"[^A-Za-z0-9_\"']{2,}", header)
-    candidates = sorted({tok for tok in raw if tok.strip()}, key=len, reverse=True)
+    candidates = _multi_char_candidates(header)
     if not candidates:
         return None
 
     scored: list[tuple[int, float, float, str]] = []
     for cand in candidates:
-        counts = [line.count(cand) for line in lines]
-        active = [c for c in counts if c > 0]
-        if len(active) < max(2, len(lines) // 3):
-            continue
-        fields = [c + 1 for c in active]
-        variance = statistics.pvariance(fields) if len(fields) > 1 else 0.0
-        scored.append((len(active), -variance, sum(fields) / len(fields), cand))
+        row = _score_delimiter_candidate(lines, cand)
+        if row is not None:
+            scored.append(row)
     if not scored:
         return None
     scored.sort(reverse=True)
@@ -193,13 +240,10 @@ def _detect_single_char_delimiter(lines: list[str]) -> str | None:
     candidates = [",", ";", "|", "\t", ":", "\x1f", "\x1e", "\x1d"]
     scored: list[tuple[int, float, float, str]] = []
     for cand in candidates:
-        counts = [line.count(cand) for line in lines]
-        active = [c for c in counts if c > 0]
-        if not active:
+        row = _score_delimiter_candidate(lines, cand)
+        if row is None:
             continue
-        fields = [c + 1 for c in active]
-        variance = statistics.pvariance(fields) if len(fields) > 1 else 0.0
-        scored.append((len(active), -variance, sum(fields) / len(fields), cand))
+        scored.append(row)
     if not scored:
         return None
     scored.sort(reverse=True)

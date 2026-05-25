@@ -96,7 +96,9 @@ class PartitionManager:
             side=side,
             sub_partition_buckets=self._sub_buckets,
         )
-        if len(delimiter) > 1:
+        from pegasus.validation.readers.delimiter_detection import polars_supports_csv_delimiter
+
+        if not polars_supports_csv_delimiter(delimiter):
             return spill_multichar_csv_via_polars(
                 csv_path,
                 workspace=self._workspace,
@@ -189,10 +191,10 @@ def spill_multichar_csv_via_polars(
         with open(csv_path, "r", encoding="utf-8") as f:
             raw_header = f.readline().rstrip("\n\r")
 
-        # Split header: simple str.split works because headers almost never contain
-        # quoted delimiters; fall back to regex only for the single header line.
-        header_fields = raw_header.replace(delimiter, _UNIT_SEP).split(_UNIT_SEP)
-        columns = [c.strip().strip('"') for c in header_fields]
+        from pegasus.validation.flat_file import replace_outside_quotes, split_line
+
+        header_fields = split_line(raw_header, delimiter)
+        columns = [c.strip() for c in header_fields]
         n_cols = len(columns)
 
         if n_cols == 0:
@@ -214,7 +216,10 @@ def spill_multichar_csv_via_polars(
             # ---- Vectorized split (no Python loops) ----
             # Step A: replace multi-char delimiter → single char, entirely in Polars C++
             replaced = batch.select(
-                pl.col(line_col).str.replace_all(delimiter, _UNIT_SEP, literal=True)
+                pl.col(line_col).map_elements(
+                    lambda line: replace_outside_quotes(line, delimiter, _UNIT_SEP),
+                    return_dtype=pl.String,
+                )
             )
 
             # Step B: split by the single char → produces a list column
@@ -278,9 +283,21 @@ def multichar_csv_header_frame(csv_path: Path, *, delimiter: str) -> pl.DataFram
     """Return a zero-row Polars frame whose schema matches the CSV header (pandas ``nrows=0``)."""
     sep = re.escape(delimiter)
     try:
-        pdf = pd.read_csv(csv_path, sep=sep, engine="python", encoding="utf-8", nrows=0)
+        pdf = pd.read_csv(
+            csv_path,
+            sep=sep,
+            engine="python",
+            encoding="utf-8",
+            nrows=0,
+            quotechar='"',
+            doublequote=True,
+        )
     except Exception as exc:
         raise ReconciliationError(f"Cannot read CSV header for multichar path: {csv_path}") from exc
     if pdf.columns.empty:
         raise ReconciliationError(f"CSV has no columns: {csv_path}")
-    return pl.from_pandas(pdf, include_index=False)
+    frame = pl.from_pandas(pdf, include_index=False)
+    rename_map = {col: col.strip() for col in frame.columns if col != col.strip()}
+    if rename_map:
+        frame = frame.rename(rename_map)
+    return frame
