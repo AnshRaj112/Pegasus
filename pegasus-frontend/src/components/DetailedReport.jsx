@@ -8,7 +8,17 @@ export default function DetailedReport() {
   const result = location?.state?.result ?? null
   const [filterUid, setFilterUid] = useState('')
   const [activeSection, setActiveSection] = useState('mismatched')
-  const samples = result?.mismatch_samples ?? []
+  const samples = useMemo(() => {
+    const direct = result?.mismatch_samples ?? []
+    if (direct.length > 0) return direct
+    const groups = result?.mismatch_sample_groups
+    if (!groups) return []
+    return [
+      ...(groups.missing_in_target ?? []),
+      ...(groups.extra_in_target ?? []),
+      ...(groups.value_mismatch ?? []),
+    ]
+  }, [result])
   
   const filteredSamples = useMemo(() => {
     if (!filterUid.trim()) return samples

@@ -120,7 +120,8 @@ export default function ValidationResultsModal({ visible, result, onClose, elaps
               </div>
             )}
 
-            {result.mismatch_samples?.length > 0 && (
+            {((result.mismatch_samples?.length ?? 0) > 0
+              || (result.summary?.total_mismatch_records ?? 0) > 0) && (
               <button
                 type="button"
                 onClick={handleViewReport}
