@@ -1,0 +1,19 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env.backend
+    ports:
+      - "8000:8000"
+    container_name: pegasus-backend
+    volumes:
+      # Your home directory at the same path inside the container — use normal paths in the UI.
+      - /home/ansh.raj:/home/ansh.raj:ro
+    environment:
+      PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS: "true"
+      PEGASUS_VALIDATION_LOCAL_PATH_DEFAULT_BROWSE: /home/ansh.raj/Pegasus/test-data
+      # Ensure no stale remap from an old shell or .env on the host.
+      PEGASUS_VALIDATION_LOCAL_PATH_HOST_PREFIX: ""
+      PEGASUS_VALIDATION_LOCAL_PATH_CONTAINER_PREFIX: ""

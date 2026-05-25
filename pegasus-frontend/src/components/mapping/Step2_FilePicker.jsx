@@ -1,4 +1,5 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { fetchLocalBrowseConfig } from '../../api/validationHistory'
 
 const DEFAULT_CLOUD_CONFIG = {
   provider: 'google-cloud-storage',
@@ -78,6 +79,18 @@ export default function Step2_FilePicker({
   const [error, setError]             = useState('')
   const [selectedFile, setSelectedFile] = useState(value || null)
   const [hasListed, setHasListed]     = useState(false)
+
+  useEffect(() => {
+    if (storageType !== 'local') return
+    let cancelled = false
+    fetchLocalBrowseConfig()
+      .then((cfg) => {
+        if (cancelled || !cfg?.default_browse_path) return
+        setFolderInput((prev) => (prev.trim() ? prev : cfg.default_browse_path))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [storageType])
 
   const loadDirectory = useCallback(async (dirPath) => {
     setLoading(true); setError('')

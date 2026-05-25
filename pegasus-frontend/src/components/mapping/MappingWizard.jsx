@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import StepIndicator    from './StepIndicator'
 import Step1_DataSource from './Step1_DataSource'
@@ -527,16 +527,15 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
 
   const [draftSaveStatus, setDraftSaveStatus] = useState('idle')
   const [draftSaveError, setDraftSaveError] = useState('')
+  const preserveFixedWidthDatesRef = useRef(false)
 
   useEffect(() => {
     if (!initialMappingData) return
 
     const { detail, preview, step: targetStep, error } = initialMappingData
+    preserveFixedWidthDatesRef.current = targetStep === 4
+      && (detail.delimiter === 'fixed-width' || detail.delimiter === 'fixed')
 
-    // Reset parent data so this effect only executes once upon loading
-    onResetInitialData()
-
-    // Initialize configuration states from detail
     // Initialize configuration states from detail
     setSourceStorageType('local')
     setTargetStorageType('local')
@@ -580,16 +579,25 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       setColumnPreviewError(error)
     }
 
-    // Populate customized mappings
+    // Populate customized mappings (use saved detail when live preview is unavailable)
     const savedMappings = detail.column_mappings || []
     if (detail.delimiter !== 'fixed-width' && detail.delimiter !== 'fixed') {
+      const uid = (detail.uid_column || 'id').trim()
       const previousRows = savedMappings.map(m => mappingRowFromApi(m))
-      const compareCols = preview?.compare_columns
-        || preview?.source_columns?.filter(col => col !== (detail.uid_column || 'id').trim())
-        || []
-      const targetCols = (preview?.target_columns || []).filter(
-        col => col !== (detail.uid_column || 'id').trim(),
-      )
+      let compareCols = (preview?.compare_columns?.length
+        ? preview.compare_columns
+        : (detail.compared_columns?.length
+          ? detail.compared_columns
+          : savedMappings.map(m => m.source_column).filter(col => col && col !== uid)))
+      let targetCols = (preview?.target_columns?.length
+        ? preview.target_columns.filter(col => col !== uid)
+        : [...new Set(savedMappings.map(m => m.target_column).filter(Boolean))])
+      if (!compareCols.length && previousRows.length) {
+        compareCols = previousRows.map(row => row.sourceCol).filter(Boolean)
+      }
+      if (!targetCols.length && previousRows.length) {
+        targetCols = [...new Set(previousRows.map(row => row.targetCol).filter(Boolean))]
+      }
       setMappings(buildMappingRows(compareCols, targetCols, previousRows, preview?.auto_mappings || []))
     }
 
@@ -597,11 +605,15 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     setStep(targetStep)
     if (targetStep === 2) {
       setSubPhase('pick-source')
+    } else if (targetStep === 4) {
+      setSubPhase('type-select')
     }
     if (error) {
       setAnalyzeError(error)
       setColumnPreviewError(error)
     }
+
+    queueMicrotask(() => onResetInitialData())
   }, [initialMappingData, onResetInitialData])
 
 
@@ -708,7 +720,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   useEffect(() => {
     const hasSource = isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
     const hasTarget = isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
-    if (step !== 3 || !hasSource || !hasTarget || fileFormat !== 'fixed-width') return
+    if ((step !== 3 && step !== 4) || !hasSource || !hasTarget || fileFormat !== 'fixed-width') return
 
     const controller = new AbortController()
     const params = new URLSearchParams()
@@ -737,12 +749,13 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         const dateName = cols.some(c => c.field_name === 'dob') ? 'dob' : (cols[cols.length - 1]?.field_name || 'dob')
         setFwDateColumn(dateName)
         const dcol = cols.find(c => c.field_name === dateName)
-        if (dcol) {
+        if (dcol && !preserveFixedWidthDatesRef.current) {
           setSourceDateStart(Number(dcol.source_start))
           setSourceDateEnd(Number(dcol.source_end))
           setTargetDateStart(Number(dcol.target_start))
           setTargetDateEnd(Number(dcol.target_end))
         }
+        preserveFixedWidthDatesRef.current = false
       } catch (err) {
         if (err?.name !== 'AbortError') {
           setFwLayoutError(err instanceof Error ? err.message : String(err))

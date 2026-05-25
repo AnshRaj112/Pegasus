@@ -544,6 +544,13 @@ ALLOWED_ORIGINS=["http://localhost:5173"]
 
 ### Build Backend Docker Image
 
+Create a backend `.env` file first if you do not already have one:
+
+```bash
+cp pegasus-backend/.env.example pegasus-backend/.env.backend
+# edit pegasus-backend/.env.backend and set PEGASUS_DATABASE_URL
+```
+
 ```bash
 cd pegasus-backend
 docker build -t pegasus-backend .
@@ -552,9 +559,8 @@ docker build -t pegasus-backend .
 ### Run Backend Container
 
 ```bash
-docker run -p 8000:8000 \
-  -e PEGASUS_DATABASE_URL=postgresql+asyncpg://postgres:your_secure_password@10.200.104.98:5432/postgres \
-  pegasus-backend
+cd pegasus-backend
+docker run -p 8000:8000 --env-file .env.backend pegasus-backend
 ```
 
 ## Additional Resources

@@ -137,6 +137,13 @@ export async function saveValidationDraft({
   return data
 }
 
+export async function fetchLocalBrowseConfig() {
+  const res = await fetch(absoluteApiUrl('/api/v1/validate/local/browse/config'))
+  const data = await parseJson(res)
+  if (!res.ok) throw new Error(formatDetail(data.detail) || `Browse config failed (${res.status})`)
+  return data
+}
+
 export async function fetchLocalColumnPreview({ sourcePath, targetPath, uidColumn, delimiter = 'auto' }) {
   const params = new URLSearchParams({
     source_path: sourcePath.trim(),

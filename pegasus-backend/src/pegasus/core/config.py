@@ -186,6 +186,24 @@ class Settings(BaseSettings):
         default="",
         description="Deprecated (ignored). Paths are chosen at runtime via the UI or API request body.",
     )
+    validation_local_path_host_prefix: str = Field(
+        default="",
+        description=(
+            "When set with validation_local_path_container_prefix, API paths under this host "
+            "prefix are translated before opening files (Docker bind mounts)."
+        ),
+    )
+    validation_local_path_container_prefix: str = Field(
+        default="",
+        description="In-container mount point paired with validation_local_path_host_prefix.",
+    )
+    validation_local_path_default_browse: str = Field(
+        default="",
+        description=(
+            "Default directory for GET /validate/local/browse when path is omitted. "
+            "Use the in-container path (e.g. /data/pegasus) when running in Docker."
+        ),
+    )
     validation_value_mismatch_column_stats_max_rows: int = Field(
         default=250_000,
         ge=0,

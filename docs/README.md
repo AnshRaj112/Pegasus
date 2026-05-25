@@ -418,20 +418,23 @@ pytest --cov=pegasus tests/
 
 If you'd like to containerize and run the backend inside Docker:
 
-### 1. Build the Docker Image
+### 1. Create a backend `.env` file
 From the `pegasus-backend/` directory:
 ```bash
-docker build -t pegasus-backend .
+cp .env.example .env.backend
+# edit .env.backend and set PEGASUS_DATABASE_URL
 ```
 
-### 2. Run the Container
-Run the container, forwarding port 8000 and pointing to your host's database or a local container DB:
+### 2. Start the Container
+Use Docker Compose so the container reads configuration from `.env`:
 ```bash
-docker run -d -p 8000:8000 \
-  -e PEGASUS_DATABASE_URL=postgresql+asyncpg://postgres:your_secure_password@10.200.104.98:5432/postgres \
-  -e PEGASUS_ENABLE_VALIDATION_PERSISTENCE=true \
-  --name pegasus_api \
-  pegasus-backend
+docker compose up --build
+```
+
+If you want to use `docker run` instead, keep the database URL in `.env` and pass the file to Docker:
+```bash
+docker build -t pegasus-backend .
+docker run -d -p 8000:8000 --env-file .env.backend --name pegasus_api pegasus-backend
 ```
 
 ---

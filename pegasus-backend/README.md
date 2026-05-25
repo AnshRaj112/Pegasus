@@ -541,14 +541,38 @@ pytest --cov=pegasus tests/
 
 ## Docker Support
 
-Build the Docker image:
+Create a backend `.env` file first if you do not already have one:
 ```bash
-docker build -t pegasus-backend .
+cp .env.example .env.backend
+# edit .env.backend and set PEGASUS_DATABASE_URL
 ```
 
-Run the container:
+Start the backend with Docker Compose so the container reads its configuration from `.env`:
 ```bash
-docker run -p 8000:8000 -e PEGASUS_DATABASE_URL=postgresql+asyncpg://postgres:your_secure_password@10.200.104.98:5432/postgres pegasus-backend
+sudo docker compose up --build
+```
+
+**Local path validation in Docker:** the default `docker-compose.yml` bind-mounts your home directory at the same path (`$HOME:$HOME`). In the UI, use normal absolute paths (e.g. `/home/you/Pegasus/test-data/source.csv`) — anywhere under your home directory works.
+
+Paths **outside** `$HOME` (network drives, `/mnt/...`) are not visible until you add a read-only volume, for example:
+
+```bash
+cp docker-compose.override.example.yml docker-compose.override.yml
+# edit docker-compose.override.yml, then:
+docker compose up --build
+```
+
+If you mount a host folder at a *different* path inside the container (e.g. `../test-data:/data/pegasus`), set both `PEGASUS_VALIDATION_LOCAL_PATH_HOST_PREFIX` and `PEGASUS_VALIDATION_LOCAL_PATH_CONTAINER_PREFIX` in `.env.backend` so the UI shows host paths while the API opens files under the mount.
+
+To validate from **any** path without mount configuration, run the API on the host instead of Docker (`uvicorn pegasus.main:app` with `PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS=true`).
+
+If you prefer `docker run`, mount home and pass the env file:
+```bash
+docker build -t pegasus-backend .
+docker run --env-file .env.backend -p 8000:8000 \
+  -v "$HOME:$HOME:ro" \
+  -e PEGASUS_VALIDATION_LOCAL_PATH_DEFAULT_BROWSE="$HOME" \
+  pegasus-backend
 ```
 
 ## Tech Stack

@@ -253,6 +253,85 @@ async function fetchAllValidationHistoryRows({ sourcePath, targetPath } = {}) {
   return { items, total }
 }
 
+function hasHistoryFilePaths(detail) {
+  const source = (detail.source_path || detail.source_filename || '').trim()
+  const target = (detail.target_path || detail.target_filename || '').trim()
+  return Boolean(source && target)
+}
+
+function hasSavedMappingConfig(detail) {
+  if (detail.delimiter === 'fixed-width' || detail.delimiter === 'fixed') {
+    return true
+  }
+  const mappings = detail.column_mappings || []
+  const compared = detail.compared_columns || []
+  return mappings.length > 0 || compared.length > 0
+}
+
+function columnStructureWarning(detail, preview) {
+  if (!preview) return ''
+
+  const savedUid = (detail.uid_column || 'id').trim()
+  const savedMappings = detail.column_mappings || []
+  const savedComparedCols = detail.compared_columns || []
+
+  if (!preview.source_columns.includes(savedUid) || !preview.target_columns.includes(savedUid)) {
+    return 'The join key column changed in one or both files since this mapping was saved.'
+  }
+
+  for (const m of savedMappings) {
+    if (!preview.source_columns.includes(m.source_column) || !preview.target_columns.includes(m.target_column)) {
+      return 'One or more mapped columns are missing from the current files.'
+    }
+  }
+
+  const targetColsMapped = preview.target_columns.map(col => {
+    const m = savedMappings.find(sm => sm.target_column === col)
+    return m ? m.source_column : col
+  })
+  const currentCompareCols = preview.source_columns.filter(col => {
+    if (col === savedUid) return false
+    return targetColsMapped.includes(col)
+  })
+  const sortedCurrent = [...currentCompareCols].sort()
+  const sortedSaved = [...savedComparedCols].sort()
+  const listsEqual = sortedCurrent.length === sortedSaved.length
+    && sortedCurrent.every((val, index) => val === sortedSaved[index])
+  if (!listsEqual) {
+    return 'Compared columns differ from the saved mapping; review mappings before validating.'
+  }
+
+  return ''
+}
+
+function resolveMappingHistoryResume(detail, preview, previewError) {
+  if (!hasHistoryFilePaths(detail)) {
+    return {
+      step: 1,
+      error: previewError
+        ? `Underlying files could not be accessed: ${previewError}. Please select the files to edit the saved paths.`
+        : 'Saved file paths are missing. Please select the source and target files.',
+    }
+  }
+
+  if (!hasSavedMappingConfig(detail)) {
+    return {
+      step: 3,
+      error: previewError || 'No saved column mappings found for this file pair. Configure mappings to continue.',
+    }
+  }
+
+  const warnings = [
+    previewError ? `Could not refresh file headers: ${previewError}. Saved mappings are loaded; re-select files if validation fails.` : '',
+    columnStructureWarning(detail, preview),
+  ].filter(Boolean)
+
+  return {
+    step: 4,
+    error: warnings.join(' '),
+  }
+}
+
 function StatusBadge({ isMatch, status }) {
   if (status && status !== 'completed') {
     return (
@@ -422,18 +501,14 @@ export default function History({ onLoadMapping }) {
       // 1. Fetch the full detail of this saved validation run/mapping draft
       const detail = await fetchValidationHistoryDetail(row.run_id)
 
-      // 2. If it's a fixed-width run, bypass CSV column headers preview
+      // Fixed-width runs skip CSV header preview; resume at review when paths exist.
       if (detail.delimiter === 'fixed-width' || detail.delimiter === 'fixed') {
-        onLoadMapping({
-          detail,
-          preview: null,
-          step: 3,
-          error: '',
-        })
+        const { step, error } = resolveMappingHistoryResume(detail, null, '')
+        onLoadMapping({ detail, preview: null, step, error })
         return
       }
 
-      // Fetch the current column headers from the server-local files
+      // Refresh headers when possible; routing uses saved mappings, not preview success.
       let preview = null
       let previewError = ''
       try {
@@ -447,68 +522,8 @@ export default function History({ onLoadMapping }) {
         previewError = err instanceof Error ? err.message : String(err)
       }
 
-      // If we couldn't load the column headers, fallback to Step 1 (Select Files) so paths can be corrected
-      if (!preview) {
-        onLoadMapping({
-          detail,
-          preview: null,
-          step: 1,
-          error: `Underlying files could not be accessed: ${previewError}. Please select the files to edit the saved paths.`,
-        })
-        return
-      }
-
-      // 3. Perform a robust check to see if the file headers or compared columns have changed
-      const savedUid = (detail.uid_column || 'id').trim()
-      const savedMappings = detail.column_mappings || []
-      const savedComparedCols = detail.compared_columns || []
-      let match = true
-
-      // A. Verify UID exists in both files
-      if (!preview.source_columns.includes(savedUid) || !preview.target_columns.includes(savedUid)) {
-        match = false
-      }
-
-      // B. Verify that all configured mappings point to columns that actually exist
-      if (match) {
-        for (const m of savedMappings) {
-          if (!preview.source_columns.includes(m.source_column) || !preview.target_columns.includes(m.target_column)) {
-            match = false
-            break
-          }
-        }
-      }
-
-      // C. Reconstruct compared columns and verify they match exactly
-      if (match) {
-        const targetColsMapped = preview.target_columns.map(col => {
-          const m = savedMappings.find(sm => sm.target_column === col)
-          return m ? m.source_column : col
-        })
-
-        const currentCompareCols = preview.source_columns.filter(col => {
-          if (col === savedUid) return false
-          return targetColsMapped.includes(col)
-        })
-
-        const sortedCurrent = [...currentCompareCols].sort()
-        const sortedSaved = [...savedComparedCols].sort()
-        const listsEqual = sortedCurrent.length === sortedSaved.length &&
-          sortedCurrent.every((val, index) => val === sortedSaved[index])
-
-        if (!listsEqual) {
-          match = false
-        }
-      }
-
-      // 4. Step 3 = configure mapping; step 4 = review & run when saved mapping still matches files
-      const targetStep = match ? 4 : 3
-      onLoadMapping({
-        detail,
-        preview,
-        step: targetStep,
-        error: match ? '' : 'Underlying file structure or columns have changed since this mapping was saved. Please configure mappings again.',
-      })
+      const { step, error } = resolveMappingHistoryResume(detail, preview, previewError)
+      onLoadMapping({ detail, preview, step, error })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

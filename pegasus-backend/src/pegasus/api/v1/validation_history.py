@@ -12,6 +12,10 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pegasus.api.deps import AppSettings
 from pegasus.core.database import AsyncSessionLocal
 from pegasus.core.file_pair import compute_file_pair_key
+from pegasus.core.local_paths import (
+    compute_file_pair_key_for_settings,
+    to_display_path,
+)
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.validation.delimiter_tokens import normalize_delimiter_for_storage
@@ -58,13 +62,15 @@ def _mismatch_counts_from_run(run) -> MismatchCounts:
     )
 
 
-def _summary_from_run(run) -> ValidationHistorySummary:
+def _summary_from_run(run, settings: AppSettings) -> ValidationHistorySummary:
     mappings = run.column_mappings if isinstance(run.column_mappings, list) else []
+    source_path = to_display_path(run.source_path, settings) if run.source_path else None
+    target_path = to_display_path(run.target_path, settings) if run.target_path else None
     return ValidationHistorySummary(
         run_id=run.id,
         status=run.status.value if isinstance(run.status, ValidationRunStatus) else str(run.status),
-        source_path=run.source_path,
-        target_path=run.target_path,
+        source_path=source_path,
+        target_path=target_path,
         source_filename=run.source_filename,
         target_filename=run.target_filename,
         uid_column=run.uid_column,
@@ -78,8 +84,8 @@ def _summary_from_run(run) -> ValidationHistorySummary:
     )
 
 
-def _detail_from_run(run) -> ValidationHistoryDetail:
-    base = _summary_from_run(run)
+def _detail_from_run(run, settings: AppSettings) -> ValidationHistoryDetail:
+    base = _summary_from_run(run, settings)
     raw_mappings = run.column_mappings if isinstance(run.column_mappings, list) else []
     compared = run.compared_columns if isinstance(run.compared_columns, list) else []
     format_checks_raw = run.mapping_format_checks if isinstance(run.mapping_format_checks, list) else []
@@ -114,7 +120,7 @@ async def list_validation_history(
     _require_persistence(settings)
     pair_key = None
     if source_path and target_path:
-        pair_key = compute_file_pair_key(source_path, target_path)
+        pair_key = compute_file_pair_key_for_settings(source_path, target_path, settings)
         if pair_key is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid source_path or target_path")
 
@@ -135,7 +141,7 @@ async def list_validation_history(
         ) from exc
 
     return ValidationHistoryListResponse(
-        items=[_summary_from_run(r) for r in runs],
+        items=[_summary_from_run(r, settings) for r in runs],
         total=total,
         file_pair_key=pair_key,
     )
@@ -237,7 +243,7 @@ async def get_validation_history_run(
 
     if run is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown run_id")
-    return _detail_from_run(run)
+    return _detail_from_run(run, settings)
 
 
 @router.get(
@@ -339,7 +345,8 @@ async def delete_validation_history(
             if all_history:
                 count = await ValidationRunRepository.delete_all_runs(session)
             else:
-                count = await ValidationRunRepository.delete_runs_by_file_pair(session, source_path, target_path)
+                pair_key = compute_file_pair_key_for_settings(source_path, target_path, settings)
+                count = await ValidationRunRepository.delete_runs_by_file_pair_key(session, pair_key)
             
             if not all_history and count == 0:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No history found for the specified file pair")
@@ -382,16 +389,20 @@ async def save_validation_draft(
             from pegasus.models import ValidationRun
             from pegasus.models.enums import ValidationRunStatus
             
-            src = str(source_path)
-            tgt = str(target_path)
-            pair_key = compute_file_pair_key(src, tgt) if src and tgt else None
+            src_display = to_display_path(source_path, settings)
+            tgt_display = to_display_path(target_path, settings)
+            pair_key = compute_file_pair_key_for_settings(
+                str(source_path),
+                str(target_path),
+                settings,
+            )
             
             run = ValidationRun(
                 status=ValidationRunStatus.PENDING,
                 source_filename=source_path.name,
                 target_filename=target_path.name,
-                source_path=src,
-                target_path=tgt,
+                source_path=src_display,
+                target_path=tgt_display,
                 file_pair_key=pair_key,
                 uid_column=body.uid_column.strip(),
                 delimiter=normalize_delimiter_for_storage(body.delimiter),
@@ -402,7 +413,7 @@ async def save_validation_draft(
             session.add(run)
             await session.commit()
             await session.refresh(run)
-            return _detail_from_run(run)
+            return _detail_from_run(run, settings)
     except Exception as exc:
         logger.exception("Failed to save draft mapping: %s", exc)
         raise HTTPException(
