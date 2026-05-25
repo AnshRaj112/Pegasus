@@ -55,7 +55,7 @@ from pegasus.schemas.validation import (
     build_mismatch_counts,
 )
 from pegasus.services.validation_job_queue import get_validation_queue
-from pegasus.services.exceptions import ValidationBadRequestError
+from pegasus.services.exceptions import ValidationBadRequestError, format_validation_job_error
 from pegasus.services.validation_service import ValidationRunDurations, ValidationRunResult
 from pegasus.validation.comparators.models import MismatchReport, MismatchType, empty_mismatch_frame
 from pegasus.validation.delimiter_tokens import (
@@ -740,7 +740,9 @@ async def validate_csv_files(
         if run_id is not None:
             try:
                 async with AsyncSessionLocal() as session:
-                    await ValidationRunRepository.mark_failed(session, run_id, detail=repr(exc))
+                    await ValidationRunRepository.mark_failed(
+                        session, run_id, detail=format_validation_job_error(exc)
+                    )
                     await session.commit()
             except Exception as persist_exc:
                 logger.error("Failed to record validation failure in database: %s", persist_exc)

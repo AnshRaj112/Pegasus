@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from pegasus.core.config import Settings
+from pegasus.services.exceptions import format_validation_job_error
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ class PoolValidationHandle:
     def failure_detail(self) -> str:
         exc = self._fut.exception()
         if exc is not None:
-            return repr(exc)
+            return format_validation_job_error(exc)
         return ""
 
 

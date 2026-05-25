@@ -152,6 +152,33 @@ def test_external_sort_merge(tmp_path: Path) -> None:
     assert report.summary.get(MismatchType.VALUE_MISMATCH.value, 0) == 1
 
 
+def test_multichar_hash_partition_header_only(tmp_path: Path) -> None:
+    src = tmp_path / "s.csv"
+    tgt = tmp_path / "t.csv"
+    src.write_text("uid||v\n", encoding="utf-8")
+    tgt.write_text("uid||v\n", encoding="utf-8")
+
+    reader = PolarsCSVReader(default_batch_size=1024)
+    cfg = ReconciliationRuntimeConfig(
+        strategy=ReconciliationStrategy.HASH_PARTITION,
+        chunk_rows=1024,
+        partition_buckets=4,
+        external_memory_threshold_bytes=0,
+    ).with_overrides(stream_mismatches=False)
+    coord = ReconciliationCoordinator(reader=reader)
+    report, sr, tr, strat = coord.run_multichar_hash_partition_csv_pair(
+        source_path=src,
+        target_path=tgt,
+        uid_column="uid",
+        delimiter="||",
+        compare_columns=["v"],
+        cfg=cfg,
+    )
+    assert strat == ReconciliationStrategy.HASH_PARTITION
+    assert sr == 0 and tr == 0
+    assert report.mismatches.is_empty()
+
+
 def test_multichar_hash_partition_streaming(tmp_path: Path) -> None:
     src = tmp_path / "s.csv"
     tgt = tmp_path / "t.csv"

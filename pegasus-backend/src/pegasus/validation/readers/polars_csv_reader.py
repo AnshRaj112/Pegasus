@@ -442,6 +442,9 @@ class PolarsCSVReader(CSVReader):
                 if rename_map:
                     batch = batch.rename(rename_map)
                 yield batch
+        except pl_exc.NoDataError:
+            # Header-only files or skip_rows past EOF — treat as zero batches, not a parse failure.
+            logger.info("CSV has no data rows for batched read path=%s", resolved.name)
         except pl_exc.PolarsError as exc:
             logger.exception("Polars failed during collect_batches for %s", resolved)
             raise CSVParseError(f"Failed while reading CSV batches: {resolved}") from exc

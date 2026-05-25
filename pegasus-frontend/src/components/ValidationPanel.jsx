@@ -3,6 +3,7 @@ import { Modal } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import LocalPathBrowser from './LocalPathBrowser'
 import ParallelValidationResourceForm from './ParallelValidationResourceForm'
+import { formatJobError } from '../api/formatError.js'
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
 const pollTimeoutRaw = Number(import.meta.env.VITE_VALIDATION_POLL_TIMEOUT_MS ?? 0)
@@ -63,7 +64,9 @@ async function pollValidationJob(pollPath, { timeoutMs = 0, intervalMs = 400, on
     }
     if (typeof onPoll === 'function') onPoll(payload)
     if (payload.status === 'completed' && payload.result) return normalizeValidateResult(payload.result)
-    if (payload.status === 'failed') throw new Error(payload.error || 'Validation job failed')
+    if (payload.status === 'failed') {
+      throw new Error(formatJobError(payload.message || payload.error))
+    }
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }
   throw new Error('Timed out waiting for validation job to finish')
@@ -296,7 +299,7 @@ export function ValidationPanel() {
       }
     } catch (err) {
       setPhase('error')
-      setErrorMessage(err instanceof Error ? err.message : String(err))
+      setErrorMessage(formatJobError(err instanceof Error ? err.message : String(err)))
     }
   }
 

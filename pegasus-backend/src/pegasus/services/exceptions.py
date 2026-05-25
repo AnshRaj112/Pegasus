@@ -11,3 +11,16 @@ class ValidationBadRequestError(ValidationServiceError):
 
 class ValidationUnprocessableError(ValidationServiceError):
     """Frames cannot be compared as requested (HTTP 422)."""
+
+
+def format_validation_job_error(exc: BaseException) -> str:
+    """Return a short, user-facing message for failed async validation jobs."""
+    if isinstance(exc, ValidationServiceError):
+        msg = str(exc).strip()
+        return msg or exc.__class__.__name__
+    if exc.args:
+        first = exc.args[0]
+        if isinstance(first, str) and first.strip():
+            return first.strip()
+    text = str(exc).strip()
+    return text or type(exc).__name__

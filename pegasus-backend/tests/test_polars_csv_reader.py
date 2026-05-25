@@ -98,3 +98,18 @@ def test_iter_batches_forces_string_schema_for_stability(tmp_path):
     assert sum(batch.height for batch in batches) == 3
     assert batches[-1].schema["c19"] == pl.String
     assert batches[-1].select("c19").to_series().to_list()[-1] == "K"
+
+
+def test_iter_batches_header_only_after_skip_rows_yields_nothing(tmp_path) -> None:
+    """Multichar spill uses skip_rows=1; header-only files must not raise NoDataError."""
+    csv_path = tmp_path / "header.csv"
+    _write_csv(csv_path, "id||name\n")
+
+    reader = PolarsCSVReader(default_batch_size=1024)
+    batches = list(
+        reader.iter_batches(
+            csv_path,
+            read_options={"separator": "\x1f", "has_header": False, "skip_rows": 1},
+        )
+    )
+    assert batches == []

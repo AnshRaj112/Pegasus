@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { formatJobError } from '../../api/formatError.js'
 import StepIndicator    from './StepIndicator'
 import Step1_DataSource from './Step1_DataSource'
 import Step2_FilePicker from './Step2_FilePicker'
@@ -103,7 +104,9 @@ async function pollJob(pollPath, { timeoutMs = 0, intervalMs = 400, onPoll } = {
     if (!res.ok) throw new Error(formatDetail(payload.detail) || `${res.status} ${res.statusText}`)
     if (typeof onPoll === 'function') onPoll(payload)
     if (payload.status === 'completed' && payload.result) return normalizeResult(payload.result)
-    if (payload.status === 'failed') throw new Error(payload.error || 'Validation job failed')
+    if (payload.status === 'failed') {
+      throw new Error(formatJobError(payload.message || payload.error))
+    }
     await new Promise(r => setTimeout(r, intervalMs))
   }
   throw new Error('Timed out waiting for validation job')
@@ -911,7 +914,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       }
       setResult(final); setPhase('success')
     } catch (err) {
-      setPhase('error'); setErrorMsg(err instanceof Error ? err.message : String(err))
+      setPhase('error')
+      setErrorMsg(formatJobError(err instanceof Error ? err.message : String(err)))
     } finally { setIsRunning(false) }
   }
 
