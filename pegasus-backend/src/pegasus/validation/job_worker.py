@@ -7,13 +7,14 @@ import signal
 import sys
 import time
 import traceback
+import shutil
 from pathlib import Path
 from typing import Any
 
 from pegasus.core.config import get_settings
 from pegasus.core.json_util import dumps_bytes, loads_str
 from pegasus.schemas.validation import ColumnMapping
-from pegasus.services.validation_service import ValidationService
+from pegasus.services.validation_service import ValidationRunResult, ValidationService
 from pegasus.validation.reconciliation.memory_monitor import MemoryMonitor
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,41 @@ def _write_json(path: Path, obj: object, *, indent: bool = False) -> None:
 
 def _load_json(path: Path) -> dict[str, object]:
     return loads_str(path.read_text(encoding="utf-8"))
+
+
+def _resolve_job_mismatch_artifact(
+    job_dir: Path,
+    result: ValidationRunResult,
+    artifact: Path | None,
+) -> Path | None:
+    """Ensure mismatch rows are available under *job_dir* for API poll / detailed report.
+
+    When ``validation_stream_mismatches_to_disk`` is false, reconciliation keeps mismatches
+    in a Polars frame only; without this export the completed-job poll sees counts but no samples.
+    """
+    export_path = job_dir / "mismatches.ndjson"
+
+    if artifact is not None and artifact.is_file():
+        try:
+            artifact.resolve().relative_to(job_dir.resolve())
+        except ValueError:
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(artifact, export_path)
+            return export_path
+        return artifact
+
+    mismatches = result.report.mismatches
+    if mismatches.is_empty():
+        return None
+
+    export_path.parent.mkdir(parents=True, exist_ok=True)
+    mismatches.write_ndjson(export_path)
+    logger.info(
+        "Exported in-memory mismatch report to %s rows=%d",
+        export_path,
+        mismatches.height,
+    )
+    return export_path
 
 
 def _cleanup_partial(job_dir: Path) -> None:
@@ -230,13 +266,23 @@ def run_job_directory(job_dir: Path) -> int:
         )
         
         artifact = result.mismatch_artifact_path or result.report.mismatch_artifact_path
+        artifact = _resolve_job_mismatch_artifact(job_dir, result, artifact)
+        artifact_rel = None
+        artifact_abs = None
+        if artifact is not None and artifact.is_file():
+            artifact_abs = str(artifact)
+            try:
+                artifact_rel = str(artifact.relative_to(job_dir))
+            except ValueError:
+                artifact_rel = None
         out = {
             "source_row_count": result.source_row_count,
             "target_row_count": result.target_row_count,
             "compared_column_count": result.compared_column_count,
             "compared_columns": result.compared_columns,
             "summary": dict(result.report.summary),
-            "mismatch_artifact_rel": artifact.name if artifact and artifact.is_file() else None,
+            "mismatch_artifact_rel": artifact_rel,
+            "mismatch_artifact_path": artifact_abs,
             "mapping_format_checks": result.mapping_format_checks,
             "footer_validation": result.footer_validation,
             "durations": {

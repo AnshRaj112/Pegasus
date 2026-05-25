@@ -530,8 +530,20 @@ def _run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.U
         MismatchType.EXTRA_IN_TARGET.value: int(summary_raw.get(MismatchType.EXTRA_IN_TARGET.value, 0)),
         MismatchType.VALUE_MISMATCH.value: int(summary_raw.get(MismatchType.VALUE_MISMATCH.value, 0)),
     }
-    rel = res.get("mismatch_artifact_rel")
-    apath = (job_dir / str(rel)) if rel else None
+    apath = None
+    artifact_raw = res.get("mismatch_artifact_path")
+    if isinstance(artifact_raw, str) and artifact_raw.strip():
+        cand = Path(artifact_raw.strip()).expanduser()
+        if not cand.is_absolute():
+            cand = job_dir / cand
+        if cand.is_file():
+            apath = cand
+    if apath is None:
+        rel = res.get("mismatch_artifact_rel")
+        if isinstance(rel, str) and rel.strip():
+            cand = job_dir / rel.strip()
+            if cand.is_file():
+                apath = cand
     report = MismatchReport(mismatches=empty_mismatch_frame(), summary=summary, mismatch_artifact_path=apath)
     format_checks_raw = res.get("mapping_format_checks")
     footer_raw = res.get("footer_validation")

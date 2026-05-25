@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import io
 import time
+import uuid
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from pegasus.api.v1.validation import _run_result_from_job_dir
 from pegasus.core.config import get_settings
 from pegasus.main import create_app
 from pegasus.services.validation_job_queue import reset_validation_queue
@@ -76,6 +79,35 @@ def test_validate_happy_path(client: TestClient) -> None:
         assert body.get("run_id") is not None
     else:
         assert body.get("run_id") is None
+
+
+def test_validate_poll_returns_mismatch_samples_when_not_streamed_to_disk(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In-memory mismatch collector must still export NDJSON for the detailed report."""
+    monkeypatch.setenv("PEGASUS_VALIDATION_STREAM_MISMATCHES_TO_DISK", "false")
+    get_settings.cache_clear()
+
+    lines_s = ["id,name", *[f"{i},src{i}" for i in range(1, 11)]]
+    lines_t = [
+        "id,name",
+        *[f"{i},tgt{i}" if i in (2, 5, 8) else f"{i},src{i}" for i in range(1, 11)],
+    ]
+    source = io.BytesIO(("\n".join(lines_s) + "\n").encode())
+    target = io.BytesIO(("\n".join(lines_t) + "\n").encode())
+    r = client.post(
+        "/api/v1/validate",
+        files={
+            "source_file": ("s.csv", source, "text/csv"),
+            "target_file": ("t.csv", target, "text/csv"),
+        },
+        data={"uid_column": "id", "delimiter": ","},
+    )
+    assert r.status_code == 202, r.text
+    body = _poll_completed(client, r.json()["poll_url"])
+    assert body["mismatch_counts"]["value_mismatch"] == 3
+    assert len(body["mismatch_sample_groups"]["value_mismatch"]) == 3
 
 
 def test_validate_missing_uid_column(client: TestClient) -> None:
@@ -207,3 +239,63 @@ def test_validate_auto_detects_multichar_delimiter(client: TestClient) -> None:
     assert r.status_code == 202, r.text
     body = _poll_completed(client, r.json()["poll_url"])
     assert body["mismatch_counts"]["value_mismatch"] == 1
+
+
+def test_run_result_resolves_absolute_artifact_path(tmp_path: Path) -> None:
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    run_id = uuid.uuid4()
+    (job_dir / "meta.json").write_text('{"run_id": "%s"}' % run_id, encoding="utf-8")
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    artifact = outside / "mismatches.ndjson"
+    artifact.write_text('{"uid":"1"}\n', encoding="utf-8")
+
+    (job_dir / "result.json").write_text(
+        (
+            '{'
+            '"source_row_count": 2,'
+            '"target_row_count": 2,'
+            '"compared_column_count": 1,'
+            '"compared_columns": ["name"],' 
+            '"summary": {"missing_in_target": 1, "extra_in_target": 0, "value_mismatch": 0},'
+            '"mismatch_artifact_path": "%s"'
+            '}'
+        )
+        % str(artifact),
+        encoding="utf-8",
+    )
+
+    vr, rid, _meta = _run_result_from_job_dir(job_dir)
+    assert rid == run_id
+    assert vr.mismatch_artifact_path == artifact
+    assert vr.report.mismatch_artifact_path == artifact
+
+
+def test_run_result_resolves_relative_artifact_path(tmp_path: Path) -> None:
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    run_id = uuid.uuid4()
+    (job_dir / "meta.json").write_text('{"run_id": "%s"}' % run_id, encoding="utf-8")
+
+    artifact = job_dir / "mismatches.ndjson"
+    artifact.write_text('{"uid":"1"}\n', encoding="utf-8")
+    (job_dir / "result.json").write_text(
+        (
+            '{'
+            '"source_row_count": 2,'
+            '"target_row_count": 2,'
+            '"compared_column_count": 1,'
+            '"compared_columns": ["name"],' 
+            '"summary": {"missing_in_target": 1, "extra_in_target": 0, "value_mismatch": 0},'
+            '"mismatch_artifact_rel": "mismatches.ndjson"'
+            '}'
+        ),
+        encoding="utf-8",
+    )
+
+    vr, rid, _meta = _run_result_from_job_dir(job_dir)
+    assert rid == run_id
+    assert vr.mismatch_artifact_path == artifact
+    assert vr.report.mismatch_artifact_path == artifact

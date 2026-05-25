@@ -30,10 +30,21 @@ function formatDetail(detail) {
   return JSON.stringify(detail)
 }
 
+function flattenMismatchSampleGroups(groups) {
+  if (!groups) return []
+  return [
+    ...(groups.missing_in_target ?? []),
+    ...(groups.extra_in_target ?? []),
+    ...(groups.value_mismatch ?? []),
+  ]
+}
+
 function normalizeResult(data) {
-  if (!data || data.mismatch_samples?.length || !data.mismatch_sample_groups) return data
-  const g = data.mismatch_sample_groups
-  return { ...data, mismatch_samples: [...(g.missing_in_target ?? []), ...(g.extra_in_target ?? []), ...(g.value_mismatch ?? [])] }
+  if (!data) return data
+  if ((data.mismatch_samples?.length ?? 0) > 0) return data
+  const flattened = flattenMismatchSampleGroups(data.mismatch_sample_groups)
+  if (flattened.length === 0) return data
+  return { ...data, mismatch_samples: flattened }
 }
 
 const DEFAULT_CLOUD_CONFIG = {
