@@ -10,4 +10,4 @@ services:
       # Example: shared drive or paths outside your home directory
       - /mnt/shared-csv:/mnt/shared-csv:ro
       # Example: project test data at a fixed in-container alias (requires path remap in .env.backend)
-      # - ../test-data:/data/pegasus:ro
+      # - ./test-data:/data/pegasus:ro

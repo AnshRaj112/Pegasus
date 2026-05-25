@@ -541,37 +541,36 @@ pytest --cov=pegasus tests/
 
 ## Docker Support
 
-Create a backend `.env` file first if you do not already have one:
-```bash
-cp .env.example .env.backend
-# edit .env.backend and set PEGASUS_DATABASE_URL
-```
-
-Start the backend with Docker Compose so the container reads its configuration from `.env`:
-```bash
-sudo docker compose up --build
-```
-
-**Local path validation in Docker:** the default `docker-compose.yml` bind-mounts your home directory at the same path (`$HOME:$HOME`). In the UI, use normal absolute paths (e.g. `/home/you/Pegasus/test-data/source.csv`) — anywhere under your home directory works.
-
-Paths **outside** `$HOME` (network drives, `/mnt/...`) are not visible until you add a read-only volume, for example:
+Docker Compose lives at the **repository root** and runs the backend plus the frontend UI together.
 
 ```bash
-cp docker-compose.override.example.yml docker-compose.override.yml
-# edit docker-compose.override.yml, then:
+# from Pegasus/ (repo root)
+cp pegasus-backend/.env.example pegasus-backend/.env.backend
+# edit pegasus-backend/.env.backend
+
 docker compose up --build
+# or: ./restart-docker.sh
 ```
 
-If you mount a host folder at a *different* path inside the container (e.g. `../test-data:/data/pegasus`), set both `PEGASUS_VALIDATION_LOCAL_PATH_HOST_PREFIX` and `PEGASUS_VALIDATION_LOCAL_PATH_CONTAINER_PREFIX` in `.env.backend` so the UI shows host paths while the API opens files under the mount.
+| Service | URL |
+|---------|-----|
+| UI (nginx proxies `/api` → backend) | http://127.0.0.1:8080 (set `PEGASUS_UI_PORT=5173` if Vite is not running) |
+| API (direct) | http://127.0.0.1:8000 |
 
-To validate from **any** path without mount configuration, run the API on the host instead of Docker (`uvicorn pegasus.main:app` with `PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS=true`).
+**Local path validation in Docker:** root `docker-compose.yml` bind-mounts `$HOME:$HOME`. In the UI, use normal absolute paths (e.g. `/home/you/Pegasus/test-data/source.csv`).
 
-If you prefer `docker run`, mount home and pass the env file:
+Paths **outside** `$HOME` need an extra read-only volume in `docker-compose.override.yml` (see `docker-compose.override.example.yml` at the repo root).
+
+If you mount a host folder at a *different* path inside the container (e.g. `./test-data:/data/pegasus`), set `PEGASUS_VALIDATION_LOCAL_PATH_HOST_PREFIX` and `PEGASUS_VALIDATION_LOCAL_PATH_CONTAINER_PREFIX` in `.env.backend`.
+
+**Backend image only** (from this directory):
+
 ```bash
 docker build -t pegasus-backend .
 docker run --env-file .env.backend -p 8000:8000 \
   -v "$HOME:$HOME:ro" \
-  -e PEGASUS_VALIDATION_LOCAL_PATH_DEFAULT_BROWSE="$HOME" \
+  -e PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS=true \
+  -e PEGASUS_VALIDATION_LOCAL_PATH_DEFAULT_BROWSE="$HOME/Pegasus/test-data" \
   pegasus-backend
 ```
 

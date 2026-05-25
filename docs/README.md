@@ -416,26 +416,25 @@ pytest --cov=pegasus tests/
 
 ## 🐳 Containerized Setup (Docker)
 
-If you'd like to containerize and run the backend inside Docker:
+Run **backend + frontend** from the repository root:
 
-### 1. Create a backend `.env` file
-From the `pegasus-backend/` directory:
+### 1. Create a backend env file
 ```bash
-cp .env.example .env.backend
-# edit .env.backend and set PEGASUS_DATABASE_URL
+cp pegasus-backend/.env.example pegasus-backend/.env.backend
+# edit pegasus-backend/.env.backend (database, encryption key, etc.)
 ```
 
-### 2. Start the Container
-Use Docker Compose so the container reads configuration from `.env`:
+### 2. Start both services
 ```bash
 docker compose up --build
 ```
 
-If you want to use `docker run` instead, keep the database URL in `.env` and pass the file to Docker:
-```bash
-docker build -t pegasus-backend .
-docker run -d -p 8000:8000 --env-file .env.backend --name pegasus_api pegasus-backend
-```
+- **UI:** http://127.0.0.1:8080 (nginx proxies `/api` to the backend; port 8080 avoids clashing with local Vite on 5173)
+- **API:** http://127.0.0.1:8000
+
+Optional helper: `./restart-docker.sh` from the repo root.
+
+For extra host directories (outside `$HOME`), copy `docker-compose.override.example.yml` to `docker-compose.override.yml` and add volume mounts.
 
 ---
 
