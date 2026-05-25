@@ -620,7 +620,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   useEffect(() => {
     const hasSource = isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
     const hasTarget = isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
-    if (step !== 3 || !hasSource || !hasTarget || fileFormat === 'fixed-width') return
+    if (step !== 3 || !hasSource || !hasTarget || fileFormat === 'fixed-width' || fileFormat === 'json') return
 
     const controller = new AbortController()
 
@@ -748,7 +748,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   useEffect(() => {
     const hasSource = isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
     const hasTarget = isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
-    if (step !== 3 || !hasSource || !hasTarget || fileFormat === 'fixed-width') return
+    if (step !== 3 || !hasSource || !hasTarget || fileFormat === 'fixed-width' || fileFormat === 'json') return
     if (!validateHeaderFormats && !validateFooters) {
       setFormatChecks([])
       setFooterValidation(null)
@@ -842,6 +842,12 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           targetDateEnd,
           targetDateFormat,
         }),
+      } : fileFormat === 'json' ? {
+        ...sourcePayload,
+        ...targetPayload,
+        file_format: 'json',
+        delimiter: 'json',
+        uid_column: 'document',
       } : {
         ...sourcePayload,
         ...targetPayload,
@@ -934,7 +940,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const showPickTarget = step === 2 && subPhase === 'pick-target'
   const showConfigure  = step === 3
   const showReview     = step === 4
-  const isValidForRun  = fileFormat === 'fixed-width'
+  const isValidForRun  = fileFormat === 'json'
+    ? (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
+      && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig))
+    : fileFormat === 'fixed-width'
     ? (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
       && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
       && fwColumns.length > 0
@@ -1080,7 +1089,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               </p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
               {/* CSV Option */}
               <button
                 onClick={() => { setFileFormat('csv'); setStep(2); setSubPhase('type-select') }}
@@ -1174,6 +1183,53 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                   </p>
                 </div>
               </button>
+
+              <button
+                onClick={() => { setFileFormat('json'); setStep(2); setSubPhase('type-select') }}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: 16,
+                  padding: 24,
+                  borderRadius: 12,
+                  border: '1px solid var(--border-1)',
+                  background: 'var(--surface-1)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = 'var(--emerald, #10b981)'
+                  e.currentTarget.style.background = 'rgba(16, 185, 129, 0.05)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = 'var(--border-1)'
+                  e.currentTarget.style.background = 'var(--surface-1)'
+                }}
+              >
+                <div style={{
+                  width: 42, height: 42,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: 10,
+                  background: 'var(--emerald, #10b981)',
+                  color: '#fff',
+                }}>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <path d="M5 4h10v12H5V4z" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M7 8h6M7 11h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-1)', marginBottom: 6 }}>
+                    JSON Document Validation
+                  </h3>
+                  <p style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.4, margin: 0 }}>
+                    Compare two JSON files as whole documents. Key order and array element order are ignored
+                    (canonical sort, like <code>json.dumps(..., sort_keys=True)</code>).
+                  </p>
+                </div>
+              </button>
             </div>
           </div>
         )}
@@ -1232,7 +1288,26 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         {/* Step 2: Configure */}
         {showConfigure && (
           <>
-            {fileFormat === 'csv' ? (
+            {fileFormat === 'json' ? (
+              <div style={{
+                padding: 20,
+                borderRadius: 12,
+                border: '1px solid var(--border-1)',
+                background: 'var(--surface-1)',
+              }}>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-1)', marginBottom: 8 }}>
+                  JSON semantic comparison
+                </h3>
+                <p style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5, margin: 0 }}>
+                  Source: <code>{sourceDisplay}</code><br />
+                  Target: <code>{targetDisplay}</code>
+                </p>
+                <p style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5, marginTop: 12, marginBottom: 0 }}>
+                  Objects are compared with sorted keys; arrays are compared as sorted multisets of elements.
+                  No UID column or delimiter is required.
+                </p>
+              </div>
+            ) : fileFormat === 'csv' ? (
               <Step3_Configure
                 sourcePath={sourceDisplay}
                 targetPath={targetDisplay}
@@ -1454,8 +1529,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                   <StatCard label="Match" value={result.summary?.is_match ? 'Yes' : 'No'} accent={result.summary?.is_match ? 'var(--success)' : 'var(--danger)'} />
-                  <StatCard label={fileFormat === 'fixed-width' ? 'Lines compared' : 'Source rows'} value={result.summary?.source_row_count ?? '—'} />
-                  <StatCard label={fileFormat === 'fixed-width' ? 'Target lines' : 'Target rows'} value={result.summary?.target_row_count ?? '—'} />
+                  <StatCard label={fileFormat === 'fixed-width' ? 'Lines compared' : fileFormat === 'json' ? 'Documents' : 'Source rows'} value={result.summary?.source_row_count ?? '—'} />
+                  <StatCard label={fileFormat === 'fixed-width' ? 'Target lines' : fileFormat === 'json' ? 'Compared' : 'Target rows'} value={result.summary?.target_row_count ?? '—'} />
                   <StatCard label="Mismatches" value={result.summary?.total_mismatch_records ?? '—'} accent={result.summary?.total_mismatch_records > 0 ? 'var(--danger)' : undefined} />
                 </div>
                 <button

@@ -123,6 +123,7 @@ export function ValidationPanel() {
   const navigate = useNavigate()
   const [sourcePath, setSourcePath] = useState('')
   const [targetPath, setTargetPath] = useState('')
+  const [fileFormat, setFileFormat] = useState('csv')
   const [uidColumn, setUidColumn] = useState('id')
   const [delimiter, setDelimiter] = useState('auto')
   const [phase, setPhase] = useState('idle')
@@ -220,12 +221,23 @@ export function ValidationPanel() {
       const res = await fetch(absoluteApiUrl('/api/v1/validate/local'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_path: sourcePath.trim(),
-          target_path: targetPath.trim(),
-          uid_column: uidColumn.trim(),
-          delimiter: delimiter.trim() || 'auto',
-        }),
+        body: JSON.stringify(
+          fileFormat === 'json'
+            ? {
+                source_path: sourcePath.trim(),
+                target_path: targetPath.trim(),
+                file_format: 'json',
+                delimiter: 'json',
+                uid_column: 'document',
+              }
+            : {
+                source_path: sourcePath.trim(),
+                target_path: targetPath.trim(),
+                uid_column: uidColumn.trim(),
+                delimiter: delimiter.trim() || 'auto',
+                file_format: 'csv',
+              },
+        ),
       })
 
       const raw = await res.text()
@@ -284,15 +296,43 @@ export function ValidationPanel() {
     <div className="space-y-8">
       <section className="rounded-2xl border border-[#F1F1F1] border-l-4 border-l-[#EB4C4C] bg-white p-6 shadow-[0_12px_40px_rgba(235,76,76,0.10)] sm:p-8">
         <p className="mb-5 text-center text-sm font-medium text-slate-600 sm:text-base">
-          Select source and target CSVs on the server to run comparison.
+          Select source and target files on the server to run comparison.
         </p>
 
         <form className="space-y-6" onSubmit={handleOpenParallelValidation}>
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-slate-700">File format</span>
+            <select
+              value={fileFormat}
+              disabled={running}
+              onChange={(ev) => setFileFormat(ev.target.value)}
+              className="w-full max-w-xs rounded-lg border border-[#F1F1F1] bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <option value="csv">CSV / delimited</option>
+              <option value="json">JSON document</option>
+            </select>
+          </label>
+
           <div className="space-y-4">
-            <LocalPathBrowser label="Source CSV (expected)" value={sourcePath} onChange={setSourcePath} disabled={running} />
-            <LocalPathBrowser label="Target CSV (actual)" value={targetPath} onChange={setTargetPath} disabled={running} />
+            <LocalPathBrowser
+              label={fileFormat === 'json' ? 'Source JSON (expected)' : 'Source CSV (expected)'}
+              value={sourcePath}
+              onChange={setSourcePath}
+              disabled={running}
+            />
+            <LocalPathBrowser
+              label={fileFormat === 'json' ? 'Target JSON (actual)' : 'Target CSV (actual)'}
+              value={targetPath}
+              onChange={setTargetPath}
+              disabled={running}
+            />
           </div>
 
+          {fileFormat === 'json' ? (
+            <p className="text-xs text-slate-500">
+              JSON files are compared as whole documents with sorted keys and sorted array elements (order-insensitive).
+            </p>
+          ) : (
           <div className="grid gap-4 md:grid-cols-[1fr_240px]">
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-slate-700">UID column</span>
@@ -324,10 +364,16 @@ export function ValidationPanel() {
               </span>
             </label>
           </div>
+          )}
 
           <button
             type="submit"
-            disabled={running || !uidColumn.trim() || !sourcePath.trim() || !targetPath.trim()}
+            disabled={
+              running
+              || !sourcePath.trim()
+              || !targetPath.trim()
+              || (fileFormat !== 'json' && !uidColumn.trim())
+            }
             className="inline-flex w-full items-center justify-center gap-3 rounded-xl bg-[#EB4C4C] px-5 py-4 text-base font-semibold text-[#FFFDEF] shadow-[0_12px_30px_rgba(235,76,76,0.28)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {running ? (

@@ -31,7 +31,7 @@ from pegasus.services.exceptions import (
     ValidationUnprocessableError,
 )
 from pegasus.validation.comparators.exceptions import UIDComparisonError
-from pegasus.validation.comparators.models import MismatchReport
+from pegasus.validation.comparators.models import MismatchReport, MismatchType, empty_mismatch_frame
 from pegasus.validation.compare_rules import build_rules_by_source_column
 from pegasus.validation.comparators.uid_based import UIDBasedComparator
 from pegasus.validation.readers.exceptions import (
@@ -1049,5 +1049,70 @@ class ValidationService:
             target_row_count=target_row_count,
             compared_column_count=len(compared_columns),
             compared_columns=compared_columns,
+            mismatch_artifact_path=artifact_path,
+        )
+
+    def validate_json_pair_sync(
+        self,
+        source_path: Path,
+        target_path: Path,
+        *,
+        artifact_export_parent: Path | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> ValidationRunResult:
+        """Compare two JSON files with order-insensitive canonical equality."""
+        import json as _json
+
+        from pegasus.validation.json_compare import (
+            collect_json_mismatches,
+            compare_json_documents,
+            load_json_file,
+        )
+
+        source_path = Path(source_path).resolve()
+        target_path = Path(target_path).resolve()
+        if not source_path.is_file():
+            raise ValidationBadRequestError(f"Source file not found: {source_path}")
+        if not target_path.is_file():
+            raise ValidationBadRequestError(f"Target file not found: {target_path}")
+
+        if progress_callback is not None:
+            progress_callback({
+                "phase": "validating",
+                "message": "Loading and comparing JSON documents",
+                "percent": 10,
+            })
+
+        source_doc = load_json_file(source_path)
+        target_doc = load_json_file(target_path)
+        is_match, _src_canon, _tgt_canon = compare_json_documents(source_doc, target_doc)
+        summary, mismatch_rows = collect_json_mismatches(source_doc, target_doc)
+
+        artifact_path: Path | None = None
+        if mismatch_rows and artifact_export_parent is not None:
+            artifact_export_parent.mkdir(parents=True, exist_ok=True)
+            artifact_path = artifact_export_parent / "mismatches.ndjson"
+            with artifact_path.open("w", encoding="utf-8") as handle:
+                for row in mismatch_rows:
+                    handle.write(_json.dumps(row) + "\n")
+        report = MismatchReport(
+            mismatches=empty_mismatch_frame(),
+            summary=summary,
+            mismatch_artifact_path=artifact_path,
+        )
+
+        if progress_callback is not None:
+            progress_callback({
+                "phase": "validating",
+                "message": "JSON comparison complete",
+                "percent": 100,
+            })
+
+        return ValidationRunResult(
+            report=report,
+            source_row_count=1,
+            target_row_count=1,
+            compared_column_count=1,
+            compared_columns=["json"],
             mismatch_artifact_path=artifact_path,
         )

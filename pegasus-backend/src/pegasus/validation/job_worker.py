@@ -93,7 +93,7 @@ def run_job_directory(job_dir: Path) -> int:
         tgt = job_dir / "target.csv"
 
     if not src.is_file() or not tgt.is_file():
-        return _fail("CSV inputs not found for validation job")
+        return _fail("Validation input files not found")
 
     monitor: MemoryMonitor | None = None
     if mem_iv > 0:
@@ -145,8 +145,12 @@ def run_job_directory(job_dir: Path) -> int:
                 },
             )
 
-        from pegasus.validation.fixed_width_meta import resolve_fixed_width_config
+        from pegasus.validation.fixed_width_meta import is_json_run, resolve_fixed_width_config
 
+        json_run = is_json_run(
+            file_format=str(meta.get("file_format") or "csv"),
+            delimiter=str(meta.get("delimiter") or ""),
+        )
         fixed_width_config = resolve_fixed_width_config(
             file_format=str(meta.get("file_format") or "csv"),
             delimiter=str(meta.get("delimiter") or ""),
@@ -160,7 +164,23 @@ def run_job_directory(job_dir: Path) -> int:
         if resource_policy is not None and not isinstance(resource_policy, dict):
             resource_policy = None
 
-        if fixed_width_config is not None:
+        if json_run:
+            _write_json(
+                status_path,
+                {
+                    "status": "running",
+                    "phase": "validating",
+                    "message": "Comparing JSON documents",
+                    "progress": {"started_at_epoch_s": start},
+                },
+            )
+            result = service.validate_json_pair_sync(
+                src,
+                tgt,
+                artifact_export_parent=job_dir,
+                progress_callback=_progress_cb,
+            )
+        elif fixed_width_config is not None:
             _write_json(
                 status_path,
                 {
