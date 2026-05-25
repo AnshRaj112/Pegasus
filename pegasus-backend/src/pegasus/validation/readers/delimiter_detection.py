@@ -60,6 +60,7 @@ def resolve_shared_auto_delimiter(source_path: Path, target_path: Path) -> Delim
         "|",
         "||",
         "::",
+        "xx",
     ):
         if d not in candidates:
             candidates.append(d)
@@ -166,23 +167,58 @@ def detect_delimiter(path: Path) -> DelimiterDetectionResult:
     return DelimiterDetectionResult(delimiter=single, strategy="heuristic-single-char")
 
 
+def _repeated_substring_candidates(
+    header: str,
+    *,
+    min_len: int = 2,
+    max_len: int = 8,
+    min_occurrences: int = 2,
+) -> list[str]:
+    """Substrings that repeat in the header (covers alphabetic delimiters like ``xx``)."""
+    if len(header) < min_len:
+        return []
+    counts: Counter[str] = Counter()
+    upper = min(max_len, len(header))
+    for length in range(min_len, upper + 1):
+        for start in range(len(header) - length + 1):
+            counts[header[start : start + length]] += 1
+    return [token for token, freq in counts.items() if freq >= min_occurrences]
+
+
+def _multi_char_candidates(header: str) -> list[str]:
+    """Build delimiter candidates for multi-character detection."""
+    # Symbol-heavy tokens: "||", "::", tab combinations, etc.
+    symbolic = re.findall(r"[^A-Za-z0-9_\"']{2,}", header)
+    repeated = _repeated_substring_candidates(header)
+    merged: list[str] = []
+    for token in (*symbolic, *repeated):
+        if not token or token in merged:
+            continue
+        merged.append(token)
+    return sorted(merged, key=len, reverse=True)
+
+
+def _score_delimiter_candidate(lines: list[str], cand: str) -> tuple[int, float, float, str] | None:
+    counts = [line.count(cand) for line in lines]
+    active = [c for c in counts if c > 0]
+    if len(active) < max(2, len(lines) // 3):
+        return None
+    fields = [c + 1 for c in active]
+    variance = statistics.pvariance(fields) if len(fields) > 1 else 0.0
+    return (len(active), -variance, sum(fields) / len(fields), cand)
+
+
 def _detect_multi_char_delimiter(lines: list[str]) -> str | None:
     header = lines[0]
-    # Candidate tokens between potential fields, e.g. "||", "::", "\t|"
-    raw = re.findall(r"[^A-Za-z0-9_\"']{2,}", header)
-    candidates = sorted({tok for tok in raw if tok.strip()}, key=len, reverse=True)
+    candidates = _multi_char_candidates(header)
     if not candidates:
         return None
 
     scored: list[tuple[int, float, float, str]] = []
     for cand in candidates:
-        counts = [line.count(cand) for line in lines]
-        active = [c for c in counts if c > 0]
-        if len(active) < max(2, len(lines) // 3):
-            continue
-        fields = [c + 1 for c in active]
-        variance = statistics.pvariance(fields) if len(fields) > 1 else 0.0
-        scored.append((len(active), -variance, sum(fields) / len(fields), cand))
+        row = _score_delimiter_candidate(lines, cand)
+        if row is not None:
+            scored.append(row)
     if not scored:
         return None
     scored.sort(reverse=True)
