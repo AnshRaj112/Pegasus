@@ -14,6 +14,7 @@ from typing import Any
 from pegasus.core.config import get_settings
 from pegasus.core.json_util import dumps_bytes, loads_str
 from pegasus.schemas.validation import ColumnMapping
+from pegasus.services.exceptions import format_validation_job_error
 from pegasus.services.validation_service import ValidationRunResult, ValidationService
 from pegasus.validation.reconciliation.memory_monitor import MemoryMonitor
 
@@ -311,14 +312,15 @@ def run_job_directory(job_dir: Path) -> int:
         )
         return 0
     except Exception as exc:
-        logger.exception("validation job failed: %s", exc)
+        err_msg = format_validation_job_error(exc)
+        logger.exception("validation job failed: %s", err_msg)
         _write_json(
             status_path,
             {
                 "status": "failed",
                 "phase": "failed",
-                "message": "Validation worker raised an exception",
-                "error": repr(exc),
+                "message": err_msg,
+                "error": err_msg,
                 "traceback": traceback.format_exc(),
                 "progress": {"failed_at_epoch_s": time.time()},
             },

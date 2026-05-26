@@ -1,0 +1,13 @@
+# Copy to docker-compose.override.yml to expose extra host directories to the API.
+# Compose merges this file automatically when present.
+#
+#   cp docker-compose.override.example.yml docker-compose.override.yml
+#   # edit volumes, then: docker compose up --build
+
+services:
+  backend:
+    volumes:
+      # Example: shared drive or paths outside your home directory
+      - /mnt/shared-csv:/mnt/shared-csv:ro
+      # Example: project test data at a fixed in-container alias (requires path remap in .env.backend)
+      # - ./test-data:/data/pegasus:ro

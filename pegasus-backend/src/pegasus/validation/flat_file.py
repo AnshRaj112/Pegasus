@@ -197,6 +197,28 @@ def field_count(line: str, delimiter: str, *, quote_char: str = '"') -> int:
     return len(split_line(line, delimiter, quote_char=quote_char))
 
 
+def csv_has_data_rows(path: Path | str, *, encoding: str = "utf-8") -> bool:
+    """Return whether a CSV has any data rows when the first line is treated as a header.
+
+    Zero-byte files, whitespace-only files, and header-only files (no non-blank lines
+    after the first) return ``False``.
+    """
+    resolved = Path(path)
+    try:
+        if resolved.stat().st_size == 0:
+            return False
+    except OSError:
+        return False
+    with resolved.open("r", encoding=encoding, errors="replace", newline="") as handle:
+        handle.readline()
+        while True:
+            line = handle.readline()
+            if not line:
+                return False
+            if line.strip():
+                return True
+
+
 def parse_lines(
     lines: Iterable[str],
     delimiter: str,

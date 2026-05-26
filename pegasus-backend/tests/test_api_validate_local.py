@@ -74,6 +74,95 @@ def test_validate_local_disabled_by_default(monkeypatch: pytest.MonkeyPatch, tmp
         assert r.status_code == 403
 
 
+def _poll_failed(client: TestClient, poll_url: str, *, timeout_sec: float = 30.0) -> str:
+    import time
+
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        gr = client.get(poll_url)
+        assert gr.status_code == 200, gr.text
+        if not gr.content:
+            time.sleep(0.05)
+            continue
+        try:
+            payload = gr.json()
+        except Exception:
+            time.sleep(0.05)
+            continue
+        if payload.get("status") == "failed":
+            return str(payload.get("error") or "")
+        if payload.get("status") == "completed":
+            raise AssertionError("expected failed job")
+        time.sleep(0.05)
+    raise AssertionError("timeout")
+
+
+def test_validate_local_empty_csv_pair(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_text("id,name\n", encoding="utf-8")
+        tgt.write_text("id,name\n", encoding="utf-8")
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": ",",
+            },
+        )
+        assert r.status_code == 202, r.text
+        err = _poll_failed(client, r.json()["poll_url"])
+        assert "empty" in err.lower() and "data rows" in err.lower()
+
+
+def test_validate_local_empty_csv_pair_multichar(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_text("id||name\n", encoding="utf-8")
+        tgt.write_text("id||name\n", encoding="utf-8")
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": "||",
+            },
+        )
+        assert r.status_code == 202, r.text
+        err = _poll_failed(client, r.json()["poll_url"])
+        assert "empty" in err.lower() and "data rows" in err.lower()
+
+
+def test_validate_local_zero_byte_csv_pair(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_bytes(b"")
+        tgt.write_bytes(b"")
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": ",",
+            },
+        )
+        assert r.status_code == 202, r.text
+        err = _poll_failed(client, r.json()["poll_url"])
+        assert "empty" in err.lower() and "data rows" in err.lower()
+
+
 def test_validate_local_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
     get_settings.cache_clear()

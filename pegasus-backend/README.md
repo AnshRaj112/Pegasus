@@ -541,14 +541,37 @@ pytest --cov=pegasus tests/
 
 ## Docker Support
 
-Build the Docker image:
+Docker Compose lives at the **repository root** and runs the backend plus the frontend UI together.
+
 ```bash
-docker build -t pegasus-backend .
+# from Pegasus/ (repo root)
+cp pegasus-backend/.env.example pegasus-backend/.env.backend
+# edit pegasus-backend/.env.backend
+
+docker compose up --build
+# or: ./restart-docker.sh
 ```
 
-Run the container:
+| Service | URL |
+|---------|-----|
+| UI (nginx proxies `/api` → backend) | http://127.0.0.1:8080 (set `PEGASUS_UI_PORT=5173` if Vite is not running) |
+| API (direct) | http://127.0.0.1:8000 |
+
+**Local path validation in Docker:** root `docker-compose.yml` bind-mounts `$HOME:$HOME`. In the UI, use normal absolute paths (e.g. `/home/you/Pegasus/test-data/source.csv`).
+
+Paths **outside** `$HOME` need an extra read-only volume in `docker-compose.override.yml` (see `docker-compose.override.example.yml` at the repo root).
+
+If you mount a host folder at a *different* path inside the container (e.g. `./test-data:/data/pegasus`), set `PEGASUS_VALIDATION_LOCAL_PATH_HOST_PREFIX` and `PEGASUS_VALIDATION_LOCAL_PATH_CONTAINER_PREFIX` in `.env.backend`.
+
+**Backend image only** (from this directory):
+
 ```bash
-docker run -p 8000:8000 -e PEGASUS_DATABASE_URL=postgresql+asyncpg://postgres:your_secure_password@10.200.104.98:5432/postgres pegasus-backend
+docker build -t pegasus-backend .
+docker run --env-file .env.backend -p 8000:8000 \
+  -v "$HOME:$HOME:ro" \
+  -e PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS=true \
+  -e PEGASUS_VALIDATION_LOCAL_PATH_DEFAULT_BROWSE="$HOME/Pegasus/test-data" \
+  pegasus-backend
 ```
 
 ## Tech Stack

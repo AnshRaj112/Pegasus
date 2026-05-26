@@ -35,6 +35,7 @@ class ValidationRunRepository:
         delimiter: str,
         source_path: str | None = None,
         target_path: str | None = None,
+        file_pair_key: str | None = None,
         column_mappings: list[dict[str, Any]] | None = None,
         validate_header_formats: bool = False,
         validate_footers: bool = False,
@@ -43,7 +44,9 @@ class ValidationRunRepository:
         now = datetime.now(UTC)
         src = (source_path or source_filename or "").strip() or None
         tgt = (target_path or target_filename or "").strip() or None
-        pair_key = compute_file_pair_key(src, tgt) if src and tgt else None
+        pair_key = file_pair_key
+        if pair_key is None and src and tgt:
+            pair_key = compute_file_pair_key(src, tgt)
         run = ValidationRun(
             status=ValidationRunStatus.RUNNING,
             source_filename=source_filename,
@@ -366,13 +369,11 @@ class ValidationRunRepository:
         return True
 
     @staticmethod
-    async def delete_runs_by_file_pair(
+    async def delete_runs_by_file_pair_key(
         session: AsyncSession,
-        source_path: str,
-        target_path: str,
+        pair_key: str | None,
     ) -> int:
-        """Delete all validation runs for a specific source and target file pair."""
-        pair_key = compute_file_pair_key(source_path, target_path)
+        """Delete all validation runs sharing a precomputed ``file_pair_key``."""
         if not pair_key:
             return 0
         stmt = select(ValidationRun).where(ValidationRun.file_pair_key == pair_key)
@@ -383,6 +384,16 @@ class ValidationRunRepository:
             await session.delete(run)
         await session.flush()
         return count
+
+    @staticmethod
+    async def delete_runs_by_file_pair(
+        session: AsyncSession,
+        source_path: str,
+        target_path: str,
+    ) -> int:
+        """Delete all validation runs for a specific source and target file pair."""
+        pair_key = compute_file_pair_key(source_path, target_path)
+        return await ValidationRunRepository.delete_runs_by_file_pair_key(session, pair_key)
 
     @staticmethod
     async def delete_all_runs(session: AsyncSession) -> int:

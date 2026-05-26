@@ -408,6 +408,25 @@ class LocalBrowseRootsResponse(BaseModel):
     roots: list[LocalBrowseRootInfo] = Field(default_factory=list)
 
 
+class LocalPathBrowseConfigResponse(BaseModel):
+    """Server-local path picker defaults (host/container remap for Docker)."""
+
+    default_browse_path: str = Field(
+        description="Directory used when browse is opened without a path (display form)",
+    )
+    path_remap_enabled: bool = Field(
+        description="True when host and container path prefixes are configured",
+    )
+    host_path_prefix: str | None = Field(
+        default=None,
+        description="Host-side path prefix shown in the UI when remap is enabled",
+    )
+    container_path_prefix: str | None = Field(
+        default=None,
+        description="In-container mount path paired with host_path_prefix",
+    )
+
+
 class ValidationDurations(BaseModel):
     """Upload, validation, and total wall-clock seconds for a completed job."""
 

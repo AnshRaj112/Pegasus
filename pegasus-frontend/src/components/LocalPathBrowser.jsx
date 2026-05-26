@@ -1,4 +1,5 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { fetchLocalBrowseConfig } from '../api/validationHistory'
 import { FolderOutlined, FileOutlined, ArrowUpOutlined, FolderOpenOutlined, LoadingOutlined } from '@ant-design/icons'
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
@@ -42,6 +43,25 @@ export default function LocalPathBrowser({ label, value, onChange, disabled }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [hasListed, setHasListed] = useState(false)
+  const [browseHint, setBrowseHint] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    fetchLocalBrowseConfig()
+      .then((cfg) => {
+        if (cancelled) return
+        if (cfg?.default_browse_path) {
+          setFolderInput((prev) => (prev.trim() ? prev : cfg.default_browse_path))
+        }
+        if (cfg?.path_remap_enabled && cfg.host_path_prefix && cfg.container_path_prefix) {
+          setBrowseHint(
+            `Docker: files are read at ${cfg.container_path_prefix}; paths shown use ${cfg.host_path_prefix}.`,
+          )
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   const loadDirectory = useCallback(async (dirPath) => {
     setLoading(true)
@@ -133,7 +153,7 @@ export default function LocalPathBrowser({ label, value, onChange, disabled }) {
                   handleOpenFolder()
                 }
               }}
-              placeholder="/home/ansh.raj/Pegasus/test-data"
+              placeholder="Server folder path (e.g. /home/you/Pegasus/test-data)"
               className="w-full rounded-xl border-2 border-[#E8E8E8] bg-white px-4 py-3 font-mono text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-60"
             />
             <button
@@ -155,6 +175,9 @@ export default function LocalPathBrowser({ label, value, onChange, disabled }) {
               )}
             </button>
 
+            {browseHint ? (
+              <p className="mt-3 text-xs text-slate-500 leading-relaxed">{browseHint}</p>
+            ) : null}
             {error ? (
               <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                 <p className="font-semibold">Error</p>

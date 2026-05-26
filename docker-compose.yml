@@ -1,0 +1,58 @@
+# Run backend + frontend together from the repo root:
+#   docker compose up --build
+#
+# UI:  http://127.0.0.1:8080  (nginx proxies /api → backend; override with PEGASUS_UI_PORT)
+# API: http://127.0.0.1:8000  (direct access, optional)
+#
+# Copy docker-compose.override.example.yml → docker-compose.override.yml for extra volume mounts.
+
+services:
+  backend:
+    build:
+      context: ./pegasus-backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./pegasus-backend/.env.backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Bind-mount home at the same path so local-path validation uses normal host paths in the UI.
+      - ${HOME}:${HOME}:ro
+    environment:
+      PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS: "true"
+      PEGASUS_VALIDATION_LOCAL_PATH_HOST_PREFIX: ""
+      PEGASUS_VALIDATION_LOCAL_PATH_CONTAINER_PREFIX: ""
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    networks:
+      - pegasus
+
+  frontend:
+    build:
+      context: ./pegasus-frontend
+      dockerfile: Dockerfile
+      args:
+        # Empty → browser calls same-origin /api/... through nginx (no CORS setup required).
+        VITE_API_BASE: ""
+    ports:
+      # Default 8080 avoids clashing with local Vite on 5173. Set PEGASUS_UI_PORT=5173 if Vite is stopped.
+      - "${PEGASUS_UI_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - pegasus
+
+networks:
+  pegasus:
+    driver: bridge

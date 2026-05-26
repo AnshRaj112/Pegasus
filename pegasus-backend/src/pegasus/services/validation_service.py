@@ -55,6 +55,7 @@ from pegasus.validation.reconciliation.coordinator import (
 from pegasus.validation.reconciliation.exceptions import ReconciliationError, ReconciliationStrategyError
 from pegasus.validation.mapping_analyze import analyze_column_mappings
 from pegasus.validation.reconciliation.partition_manager import multichar_csv_header_frame
+from pegasus.validation.flat_file import csv_has_data_rows
 from pegasus.validation.fixed_width_dates import normalize_strptime_format, parse_fixed_width_date
 from pegasus.validation.fixed_width_layout import preview_fixed_width_layout
 from pegasus.validation.fixed_width_matching import fuzzy_pair_by_join_key
@@ -317,6 +318,8 @@ class ValidationService:
                 footer_trailing_rows=footer_trailing_rows,
             )
 
+        self._raise_if_csv_pair_has_no_data(source_path, target_path)
+
         reader = PolarsCSVReader(default_batch_size=rcfg.chunk_rows)
         try:
             reader.validate_file(source_path)
@@ -383,6 +386,10 @@ class ValidationService:
                 raise ValidationUnprocessableError(str(exc)) from exc
             except ReconciliationError as exc:
                 logger.warning("Multichar streaming validation failed: %s", exc)
+                if not csv_has_data_rows(source_path) and not csv_has_data_rows(target_path):
+                    raise ValidationBadRequestError(
+                        "Both source and target files are empty (no data rows)."
+                    ) from exc
                 raise ValidationBadRequestError(str(exc)) from exc
 
             n_mismatch = report.mismatches.height if report.mismatch_artifact_path is None else sum(
@@ -637,6 +644,16 @@ class ValidationService:
     @staticmethod
     def _normalize_column_name(name: str) -> str:
         return re.sub(r"\s+", "", name.strip().casefold())
+
+    @staticmethod
+    def _raise_if_csv_pair_has_no_data(source_path: Path, target_path: Path) -> None:
+        """Reject validation when both CSVs lack data rows (empty or header-only)."""
+        src_has_data = csv_has_data_rows(source_path)
+        tgt_has_data = csv_has_data_rows(target_path)
+        if not src_has_data and not tgt_has_data:
+            raise ValidationBadRequestError(
+                "Both source and target files are empty (no data rows)."
+            )
 
     def _resolve_delimiter(
         self,

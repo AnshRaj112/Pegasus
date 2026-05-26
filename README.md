@@ -542,19 +542,27 @@ ALLOWED_ORIGINS=["http://localhost:5173"]
 
 ## Docker Support
 
-### Build Backend Docker Image
+Run **backend and frontend together** from the repository root:
 
 ```bash
-cd pegasus-backend
-docker build -t pegasus-backend .
+cp pegasus-backend/.env.example pegasus-backend/.env.backend
+# edit pegasus-backend/.env.backend (database, encryption key, etc.)
+
+docker compose up --build
+# or: ./restart-docker.sh
 ```
 
-### Run Backend Container
+| Service | URL |
+|---------|-----|
+| UI (nginx proxies `/api` → backend) | http://127.0.0.1:8080 (set `PEGASUS_UI_PORT=5173` if Vite is not running) |
+| API (direct) | http://127.0.0.1:8000 |
+
+**Local path validation:** `docker-compose.yml` bind-mounts `$HOME` at the same path inside the container. Use normal absolute paths in the file picker (e.g. `$HOME/Pegasus/test-data/validation_source.csv`). For paths outside `$HOME`, copy `docker-compose.override.example.yml` to `docker-compose.override.yml` and add read-only volume mounts.
+
+**Backend only** (no UI container):
 
 ```bash
-docker run -p 8000:8000 \
-  -e PEGASUS_DATABASE_URL=postgresql+asyncpg://postgres:your_secure_password@10.200.104.98:5432/postgres \
-  pegasus-backend
+docker compose up --build backend
 ```
 
 ## Additional Resources

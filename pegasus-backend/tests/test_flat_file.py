@@ -11,6 +11,7 @@ from pegasus.validation.flat_file import (
     ColumnSchema,
     ColumnType,
     EmptyDelimiterError,
+    csv_has_data_rows,
     normalize_delimiter,
     parse_and_validate,
     parse_file,
@@ -250,3 +251,19 @@ def test_datetime_parsed_in_schema() -> None:
     assert validate_schema(result, schema) == []
     parsed = datetime.strptime(result.rows[0][0], "%Y-%m-%d")
     assert parsed.year == 2020
+
+
+@pytest.mark.parametrize(
+    "content,expected",
+    [
+        ("", False),
+        ("\n\n", False),
+        ("uid,v\n", False),
+        ("uid,v\n\n", False),
+        ("uid,v\n1,a\n", True),
+    ],
+)
+def test_csv_has_data_rows(tmp_path: Path, content: str, expected: bool) -> None:
+    path = tmp_path / "f.csv"
+    path.write_text(content, encoding="utf-8")
+    assert csv_has_data_rows(path) is expected

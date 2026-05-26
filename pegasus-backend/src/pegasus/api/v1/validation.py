@@ -20,6 +20,14 @@ from fastapi import APIRouter, Body, File, Form, HTTPException, Query, UploadFil
 from pegasus.api.deps import AppSettings, ValidationServiceDep
 from pegasus.core.config import Settings
 from pegasus.core.database import AsyncSessionLocal
+from pegasus.core.local_paths import (
+    compute_file_pair_key_for_settings,
+    default_browse_path,
+    default_browse_path_for_ui,
+    local_path_remap,
+    resolve_local_path_on_disk,
+    to_display_path,
+)
 from pegasus.core.json_util import dumps_bytes, loads_str
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
@@ -29,6 +37,7 @@ from pegasus.schemas.validation import (
     GoogleCloudStorageConfig,
     LocalBrowseEntry,
     LocalBrowseResponse,
+    LocalPathBrowseConfigResponse,
     FixedWidthLayoutPreviewResponse,
     LocalColumnPreviewResponse,
     LocalPathValidateRequest,
@@ -46,7 +55,7 @@ from pegasus.schemas.validation import (
     build_mismatch_counts,
 )
 from pegasus.services.validation_job_queue import get_validation_queue
-from pegasus.services.exceptions import ValidationBadRequestError
+from pegasus.services.exceptions import ValidationBadRequestError, format_validation_job_error
 from pegasus.services.validation_service import ValidationRunDurations, ValidationRunResult
 from pegasus.validation.comparators.models import MismatchReport, MismatchType, empty_mismatch_frame
 from pegasus.validation.delimiter_tokens import (
@@ -117,7 +126,6 @@ def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
 
 
 _LOCAL_BROWSE_MAX_ENTRIES = 5000
-_LOCAL_BROWSE_DEFAULT_DIR = Path("/")
 
 
 def _require_local_path_access(settings: Settings) -> None:
@@ -131,14 +139,7 @@ def _require_local_path_access(settings: Settings) -> None:
 def resolve_local_csv_path(raw: str, settings: Settings) -> Path:
     """Resolve *raw* to an absolute file path on the server (when local paths are enabled)."""
     _require_local_path_access(settings)
-    path = Path(raw.strip()).expanduser()
-    try:
-        resolved = path.resolve(strict=True)
-    except FileNotFoundError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Path not found: {raw!r}") from exc
-    if not resolved.is_file():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Not a regular file: {resolved}")
-    return resolved
+    return resolve_local_path_on_disk(raw, settings, must_be_file=True)
 
 
 @dataclass(slots=True)
@@ -242,20 +243,17 @@ def resolve_validation_input(
             detail=f"{label.capitalize()} path or cloud reference is required",
         )
     resolved = resolve_local_csv_path(path, settings)
-    return ResolvedValidationInput(path=resolved, cleanup_path=None, display_name=str(resolved))
+    return ResolvedValidationInput(
+        path=resolved,
+        cleanup_path=None,
+        display_name=Path(to_display_path(resolved, settings)).name or resolved.name,
+    )
 
 
 def resolve_local_dir_for_browse(raw: str, settings: Settings) -> Path:
     """Resolve *raw* to an absolute directory (for GET /validate/local/browse)."""
     _require_local_path_access(settings)
-    path = Path(raw.strip()).expanduser()
-    try:
-        resolved = path.resolve(strict=True)
-    except FileNotFoundError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Path not found: {raw!r}") from exc
-    if not resolved.is_dir():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Not a directory: {resolved}")
-    return resolved
+    return resolve_local_path_on_disk(raw, settings, must_be_dir=True)
 
 
 def _browse_parent_path(current: Path) -> Path | None:
@@ -265,7 +263,7 @@ def _browse_parent_path(current: Path) -> Path | None:
     return parent
 
 
-def build_local_browse_response(directory: Path) -> LocalBrowseResponse:
+def build_local_browse_response(directory: Path, settings: Settings) -> LocalBrowseResponse:
     """List *directory* (already resolved)."""
     parent = _browse_parent_path(directory)
     rows: list[tuple[bool, str, Path, str]] = []
@@ -293,10 +291,17 @@ def build_local_browse_response(directory: Path) -> LocalBrowseResponse:
         truncated = True
         rows = rows[:_LOCAL_BROWSE_MAX_ENTRIES]
 
-    entries = [LocalBrowseEntry(name=display_name, path=str(p), is_dir=p.is_dir()) for _, _, p, display_name in rows]
+    entries = [
+        LocalBrowseEntry(
+            name=display_name,
+            path=to_display_path(p, settings),
+            is_dir=p.is_dir(),
+        )
+        for _, _, p, display_name in rows
+    ]
     return LocalBrowseResponse(
-        path=str(directory),
-        parent_path=str(parent) if parent is not None else None,
+        path=to_display_path(directory, settings),
+        parent_path=to_display_path(parent, settings) if parent is not None else None,
         entries=entries,
         truncated=truncated,
     )
@@ -735,7 +740,9 @@ async def validate_csv_files(
         if run_id is not None:
             try:
                 async with AsyncSessionLocal() as session:
-                    await ValidationRunRepository.mark_failed(session, run_id, detail=repr(exc))
+                    await ValidationRunRepository.mark_failed(
+                        session, run_id, detail=format_validation_job_error(exc)
+                    )
                     await session.commit()
             except Exception as persist_exc:
                 logger.error("Failed to record validation failure in database: %s", persist_exc)
@@ -834,8 +841,13 @@ async def validate_csv_local_paths(
                     session,
                     source_filename=source_input.display_name,
                     target_filename=target_input.display_name,
-                    source_path=str(source_input.path),
-                    target_path=str(target_input.path),
+                    source_path=to_display_path(source_input.path, settings),
+                    target_path=to_display_path(target_input.path, settings),
+                    file_pair_key=compute_file_pair_key_for_settings(
+                        str(source_input.path),
+                        str(target_input.path),
+                        settings,
+                    ),
                     uid_column=run_uid_column,
                     delimiter=run_delimiter,
                     column_mappings=[m.model_dump() for m in body.column_mappings],
@@ -1025,6 +1037,23 @@ async def preview_local_csv_columns_body(
                     logger.warning("Failed to remove temp cloud input %s: %s", p, exc)
 
 @router.get(
+    "/validate/local/browse/config",
+    response_model=LocalPathBrowseConfigResponse,
+    summary="Default browse directory and Docker path remap settings for the file picker",
+    responses={403: {"description": "Local path validation disabled"}},
+)
+async def get_local_browse_config(settings: AppSettings) -> LocalPathBrowseConfigResponse:
+    _require_local_path_access(settings)
+    remap = local_path_remap(settings)
+    return LocalPathBrowseConfigResponse(
+        default_browse_path=default_browse_path_for_ui(settings),
+        path_remap_enabled=remap is not None,
+        host_path_prefix=remap[0] if remap else None,
+        container_path_prefix=remap[1] if remap else None,
+    )
+
+
+@router.get(
     "/validate/local/browse",
     response_model=LocalBrowseResponse,
     summary="List files and folders under a server directory (local-path picker)",
@@ -1042,9 +1071,9 @@ async def browse_local_directory(
 ) -> LocalBrowseResponse:
     """Directory listing for picking ``source_path`` / ``target_path`` via the UI file browser."""
     _require_local_path_access(settings)
-    raw = (path or "").strip() or str(_LOCAL_BROWSE_DEFAULT_DIR)
+    raw = (path or "").strip() or default_browse_path(settings)
     directory = resolve_local_dir_for_browse(raw, settings)
-    return build_local_browse_response(directory)
+    return build_local_browse_response(directory, settings)
 
 
 @router.get(

@@ -11,6 +11,7 @@ import pandas as pd
 import polars as pl
 import polars.exceptions as pl_exc
 
+from pegasus.validation.flat_file import csv_has_data_rows
 from pegasus.validation.readers.polars_csv_reader import PolarsCSVReader
 
 from .exceptions import ReconciliationError
@@ -204,6 +205,16 @@ def spill_multichar_csv_via_polars(
             "Vectorized multichar spill side=%s delimiter=%r columns=%d path=%s",
             side, delimiter, n_cols, csv_path,
         )
+
+        if not csv_has_data_rows(csv_path):
+            m.on_phase_end("vectorized_multichar_spill", side=side, rows=0)
+            logger.info(
+                "Vectorized multichar spill complete (header-only) side=%s buckets=%d sub=%d rows=0",
+                side,
+                buckets,
+                sub_partition_buckets,
+            )
+            return 0
 
         # 2. Iterate batches — read raw lines (1 column per row) using a dummy separator
         reader = PolarsCSVReader(default_batch_size=chunk_rows)
