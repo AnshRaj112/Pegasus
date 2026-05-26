@@ -98,7 +98,7 @@ export default function DetailedReport() {
             {/* Summary Cards */}
             <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-xl bg-white border border-slate-200 p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Total Entries</p>
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Total Wrong Entries</p>
                 <p className="mt-2 text-3xl font-bold text-slate-900">{filterUid ? visibleTotalAll : totalAll}</p>
               </div>
               <div className="rounded-xl bg-white border border-slate-200 p-4 shadow-sm">

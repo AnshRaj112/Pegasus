@@ -31,13 +31,60 @@ export default function Step3_Configure({
   footerValidation = null,
 }) {
   const activeMappings = mappings
-  const mapped = activeMappings.filter(m => m.targetCol).length
+  const mapped = activeMappings.filter(m => m.targetCol || (Array.isArray(m.targetCols) && m.targetCols.length > 0)).length
   const unmapped = Math.max(compareColumns.length - mapped, 0)
-  const usedTargets = new Set(activeMappings.filter(m => m.targetCol).map(m => m.targetCol))
-  const uidRow = uidColumn ? { id: '__uid__', sourceCol: uidColumn, targetCol: uidColumn } : null
+  const usedTargets = new Set(
+    activeMappings.flatMap(m => [
+      ...(m.targetCol ? [m.targetCol] : []),
+      ...(Array.isArray(m.targetCols) ? m.targetCols : []),
+    ]),
+  )
+  const uidRow = uidColumn ? { id: '__uid__', sourceCol: uidColumn, targetCol: uidColumn, targetCols: [uidColumn] } : null
+  const [pendingAdditionalTargets, setPendingAdditionalTargets] = useState({})
 
   function handleTargetChange(id, val) {
-    onMappingChange(activeMappings.map(m => (m.id === id ? { ...m, targetCol: val } : m)))
+    onMappingChange(activeMappings.map(m => {
+      if (m.id !== id) return m
+      const nextTarget = String(val || '').trim()
+      const currentTargets = Array.isArray(m.targetCols) ? m.targetCols.filter(Boolean) : []
+      const nextTargets = nextTarget
+        ? [nextTarget, ...currentTargets.filter(col => col !== nextTarget)]
+        : []
+      return { ...m, targetCol: nextTarget, targetCols: nextTargets }
+    }))
+  }
+
+  function handleAdditionalTargetChange(id, val) {
+    const nextTarget = String(val || '').trim()
+    if (!nextTarget) return
+    onMappingChange(activeMappings.map(m => {
+      if (m.id !== id) return m
+      const currentTargets = Array.isArray(m.targetCols) ? m.targetCols.filter(Boolean) : []
+      if (currentTargets.includes(nextTarget)) return m
+      const primary = m.targetCol || currentTargets[0] || nextTarget
+      const nextTargets = [primary, ...currentTargets.filter(col => col !== primary && col !== nextTarget), nextTarget]
+      return { ...m, targetCol: primary, targetCols: nextTargets }
+    }))
+    setPendingAdditionalTargets(prev => ({ ...prev, [id]: '' }))
+  }
+
+  function handleTargetRemoval(id, targetToRemove) {
+    onMappingChange(activeMappings.map(m => {
+      if (m.id !== id) return m
+      const currentTargets = Array.isArray(m.targetCols) ? m.targetCols.filter(Boolean) : []
+      const nextTargets = currentTargets.filter(col => col !== targetToRemove)
+      if (nextTargets.length === 0) {
+        return { ...m, targetCol: '', targetCols: [] }
+      }
+      const nextPrimary = m.targetCol === targetToRemove ? nextTargets[0] : m.targetCol
+      return {
+        ...m,
+        targetCol: nextPrimary,
+        targetCols: nextPrimary
+          ? [nextPrimary, ...nextTargets.filter(col => col !== nextPrimary)]
+          : nextTargets,
+      }
+    }))
   }
 
   const [openRule, setOpenRule] = useState(null)
@@ -63,6 +110,9 @@ export default function Step3_Configure({
         <p style={{ fontSize: 13, color: 'var(--text-3)', maxWidth: 760 }}>
           Map columns as usual. Use the rule icon beside source or target when that field needs custom matching
           (e.g. strip <code style={{ fontFamily: 'monospace' }}>+91</code> on source phone numbers).
+        </p>
+        <p style={{ fontSize: 12, color: 'var(--text-4)', maxWidth: 820, marginTop: 8 }}>
+          A source column can keep extra target columns in the UI for grouped fields like first name + last name. The primary target still drives the current validation payload.
         </p>
       </div>
 
@@ -286,11 +336,16 @@ export default function Step3_Configure({
             </div>
           )}
           {activeMappings.length > 0 ? activeMappings.map((m, idx) => {
-            const isMapped = !!m.targetCol
+            const currentTargets = Array.isArray(m.targetCols) && m.targetCols.length > 0
+              ? m.targetCols
+              : (m.targetCol ? [m.targetCol] : [])
+            const additionalTargets = currentTargets.filter(col => col !== m.targetCol)
+            const isMapped = currentTargets.length > 0
             const formatCheck = validateHeaderFormats && isMapped ? formatCheckBySource.get(m.sourceCol) : null
             const formatWarn = formatCheck && formatCheck.compatible === false
             const hasCustomRule = mappingHasCustomRule(m)
             const ruleOpen = openRule?.rowId === m.id
+            const availableAdditionalTargets = targetColumns.filter(col => !currentTargets.includes(col) && !(usedTargets.has(col) && col !== m.targetCol))
             return (
               <div
                 key={m.id}
@@ -366,6 +421,52 @@ export default function Step3_Configure({
                       </span>
                     )}
                   </div>
+                  {isMapped && (
+                    <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-4)' }}>
+                        Additional targets
+                      </span>
+                      {additionalTargets.length > 0 ? additionalTargets.map(col => (
+                        <span
+                          key={`${m.id}-${col}`}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            padding: '3px 8px', borderRadius: 999,
+                            background: 'var(--surface-2)', border: '1px solid var(--border-1)',
+                            fontSize: 11, color: 'var(--text-2)', fontFamily: 'Geist Mono, monospace',
+                          }}
+                        >
+                          {col}
+                          <button
+                            type="button"
+                            onClick={() => handleTargetRemoval(m.id, col)}
+                            style={{
+                              border: 'none', background: 'transparent', cursor: 'pointer',
+                              color: 'var(--text-4)', padding: 0, fontSize: 12, lineHeight: 1,
+                            }}
+                            aria-label={`Remove ${col} from ${m.sourceCol}`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      )) : (
+                        <span style={{ fontSize: 11, color: 'var(--text-4)' }}>None yet</span>
+                      )}
+                      {availableAdditionalTargets.length > 0 && (
+                        <select
+                          value={pendingAdditionalTargets[m.id] || ''}
+                          onChange={e => handleAdditionalTargetChange(m.id, e.target.value)}
+                          className="input input-mono"
+                          style={{ height: 28, fontSize: 11, width: 'auto', minWidth: 180, paddingRight: 28 }}
+                        >
+                          <option value="">Add another target…</option>
+                          {availableAdditionalTargets.map(c => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
                   {!isMapped && (
                     <div style={{ marginTop: 4, fontSize: 11, color: 'var(--danger)' }}>
                       Pick a target column to compare.
