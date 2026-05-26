@@ -9,6 +9,7 @@ inside values—e.g. ``"Pune, Maharashtra, 123456"`` or names like
 from __future__ import annotations
 
 import codecs
+import csv
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -110,30 +111,62 @@ def normalize_delimiter(token: str) -> str:
 
 
 def _split_line_respecting_quotes(line: str, delimiter: str, quote_char: str) -> list[str]:
-    """Split *line* on *delimiter* only outside *quote_char* regions (RFC 4180)."""
+    """Split *line* on *delimiter* only outside RFC 4180 quoted fields.
+
+    Opening *quote_char* starts a quoted field only at a field boundary. A quote
+    in the middle of an otherwise unquoted field is kept literally (e.g. ``b"``).
+    Inside quoted fields, ``""`` is an escaped literal quote.
+    """
     fields: list[str] = []
     buf: list[str] = []
-    in_quotes = False
     i = 0
     dlen = len(delimiter)
-    while i < len(line):
-        ch = line[i]
-        if ch == quote_char:
-            if in_quotes and i + 1 < len(line) and line[i + 1] == quote_char:
-                buf.append(quote_char)
-                i += 2
-                continue
-            in_quotes = not in_quotes
+    n = len(line)
+
+    while True:
+        if i >= n:
+            if buf or fields:
+                fields.append("".join(buf))
+            break
+        if line[i] == quote_char:
             i += 1
-            continue
-        if not in_quotes and dlen > 0 and line[i : i + dlen] == delimiter:
+            while i < n:
+                ch = line[i]
+                if ch == quote_char:
+                    if i + 1 < n and line[i + 1] == quote_char:
+                        buf.append(quote_char)
+                        i += 2
+                    elif i + 1 < n and line[i + 1 : i + 1 + dlen] == delimiter:
+                        i += 1
+                        break
+                    elif i + 1 >= n:
+                        i += 1
+                        break
+                    else:
+                        buf.append(quote_char)
+                        i += 1
+                else:
+                    buf.append(ch)
+                    i += 1
             fields.append("".join(buf))
             buf.clear()
-            i += dlen
+            if i < n and line[i : i + dlen] == delimiter:
+                i += dlen
+            if i >= n:
+                break
             continue
-        buf.append(ch)
-        i += 1
-    fields.append("".join(buf))
+        while i < n:
+            if line[i : i + dlen] == delimiter:
+                fields.append("".join(buf))
+                buf.clear()
+                i += dlen
+                break
+            buf.append(line[i])
+            i += 1
+        else:
+            fields.append("".join(buf))
+            buf.clear()
+            break
     return fields
 
 
@@ -144,31 +177,51 @@ def replace_outside_quotes(
     *,
     quote_char: str = '"',
 ) -> str:
-    """Replace *old* with *new* only in portions of *text* that are outside quotes."""
+    """Replace *old* with *new* only outside RFC 4180 quoted fields."""
     if not old:
         return text
     out: list[str] = []
-    in_quotes = False
     i = 0
     olen = len(old)
-    while i < len(text):
-        ch = text[i]
-        if ch == quote_char:
-            if in_quotes and i + 1 < len(text) and text[i + 1] == quote_char:
-                out.append(quote_char)
-                out.append(quote_char)
-                i += 2
-                continue
-            in_quotes = not in_quotes
-            out.append(ch)
+    n = len(text)
+    at_field_start = True
+
+    while i < n:
+        if at_field_start and text[i] == quote_char:
+            out.append(quote_char)
             i += 1
+            at_field_start = False
+            while i < n:
+                ch = text[i]
+                if ch == quote_char:
+                    if i + 1 < n and text[i + 1] == quote_char:
+                        out.append(quote_char)
+                        out.append(quote_char)
+                        i += 2
+                    elif i + 1 < n and text[i + 1 : i + 1 + olen] == old:
+                        out.append(quote_char)
+                        i += 1
+                        break
+                    elif i + 1 >= n:
+                        out.append(quote_char)
+                        i += 1
+                        break
+                    else:
+                        out.append(quote_char)
+                        i += 1
+                else:
+                    out.append(ch)
+                    i += 1
+            at_field_start = True
             continue
-        if not in_quotes and text[i : i + olen] == old:
+        if text[i : i + olen] == old:
             out.append(new)
             i += olen
-            continue
-        out.append(ch)
-        i += 1
+            at_field_start = True
+        else:
+            out.append(text[i])
+            i += 1
+            at_field_start = False
     return "".join(out)
 
 
@@ -183,12 +236,28 @@ def split_line(
 
     When *respect_quotes* is true (default), delimiters inside double-quoted
     fields are ignored. Escaped quotes (``""``) become a single quote in the value.
+
+    Single-character delimiters use the stdlib :mod:`csv` parser (same rules as
+    pandas ``read_csv``). Multi-character delimiters use the built-in RFC-style
+    state machine in :func:`_split_line_respecting_quotes`.
     """
     if not delimiter:
         raise EmptyDelimiterError("Delimiter must not be empty")
     physical = line.rstrip("\r\n")
     if not respect_quotes or quote_char not in physical:
         return physical.split(delimiter)
+    if len(delimiter) == 1 and quote_char == '"':
+        try:
+            return next(
+                csv.reader(
+                    [physical],
+                    delimiter=delimiter,
+                    quotechar=quote_char,
+                    doublequote=True,
+                )
+            )
+        except csv.Error:
+            return _split_line_respecting_quotes(physical, delimiter, quote_char)
     return _split_line_respecting_quotes(physical, delimiter, quote_char)
 
 
