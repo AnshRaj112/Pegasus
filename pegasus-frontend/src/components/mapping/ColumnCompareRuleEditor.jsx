@@ -4,6 +4,7 @@ import { clearCompareRule } from './columnMapping'
 
 const COMPARE_MODES = [
   { value: 'auto', label: 'Default (auto)' },
+  { value: 'custom', label: 'Custom expression' },
   { value: 'date', label: 'Date — calendar match' },
   { value: 'phone', label: 'Phone — digits only' },
   { value: 'digits', label: 'Digits only' },
@@ -19,6 +20,8 @@ export default function ColumnCompareRuleEditor({
 }) {
   const panelRef = useRef(null)
   const [position, setPosition] = useState({ top: 0, left: 0 })
+  const [customExpressionDraft, setCustomExpressionDraft] = useState(row.customExpression || '')
+  const [customExpressionSaved, setCustomExpressionSaved] = useState(false)
 
   useLayoutEffect(() => {
     if (!anchorEl) return
@@ -57,8 +60,18 @@ export default function ColumnCompareRuleEditor({
     }
   }, [rowId, onClose])
 
+  useEffect(() => {
+    setCustomExpressionDraft(row.customExpression || '')
+    setCustomExpressionSaved(false)
+  }, [row.customExpression, row.compareMode, rowId])
+
   function patch(fields) {
     onChange({ ...row, ...fields })
+  }
+
+  function handleSaveCustomExpression() {
+    patch({ customExpression: customExpressionDraft.trim() })
+    setCustomExpressionSaved(true)
   }
 
   const panel = (
@@ -103,7 +116,7 @@ export default function ColumnCompareRuleEditor({
       </div>
 
       <p style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 10, lineHeight: 1.45 }}>
-        Applies to this column pair only. Other columns use default matching.
+        Applies to this column pair only. Use the transform fields below to remove or add text on either side before validation.
       </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
@@ -140,6 +153,48 @@ export default function ColumnCompareRuleEditor({
           ))}
         </select>
       </label>
+
+      {row.compareMode === 'custom' && (
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ display: 'block', marginBottom: 4 }}>
+            <span style={{ display: 'block', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-4)', marginBottom: 4 }}>
+              Custom expression
+            </span>
+            <input
+              type="text"
+              value={customExpressionDraft}
+              onChange={e => {
+                setCustomExpressionDraft(e.target.value)
+                setCustomExpressionSaved(false)
+              }}
+              className="input input-mono"
+              placeholder="Enter the expression"
+              style={{ width: '100%', height: 30, fontSize: 12 }}
+            />
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {customExpressionSaved && (
+                <span style={{ fontSize: 11, color: 'var(--success)', fontWeight: 600 }}>
+                  Saved the expression.
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ height: 28, padding: '0 10px', fontSize: 11, marginLeft: 'auto' }}
+              onClick={handleSaveCustomExpression}
+              disabled={!customExpressionDraft.trim()}
+            >
+              Save expression
+            </button>
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-4)', lineHeight: 1.45 }}>
+            Use this field to describe the custom removal or addition you want to apply for this mapping.
+          </div>
+        </div>
+      )}
 
       {row.compareMode === 'date' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
@@ -188,7 +243,7 @@ export default function ColumnCompareRuleEditor({
 
       <details style={{ marginBottom: 8 }}>
         <summary style={{ fontSize: 11, color: 'var(--text-3)', cursor: 'pointer', userSelect: 'none' }}>
-          Advanced regex
+          Source transform
         </summary>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
           <input
@@ -207,6 +262,36 @@ export default function ColumnCompareRuleEditor({
             className="input input-mono"
             style={{ height: 28, fontSize: 11 }}
           />
+          <div style={{ fontSize: 10, color: 'var(--text-4)', lineHeight: 1.45 }}>
+            Example: pattern <span style={{ fontFamily: 'Geist Mono, monospace' }}>^</span> with replacement <span style={{ fontFamily: 'Geist Mono, monospace' }}>Mr. </span> adds text at the start. Pattern <span style={{ fontFamily: 'Geist Mono, monospace' }}>\s+</span> with replacement <span style={{ fontFamily: 'Geist Mono, monospace' }}>{' '}</span> normalizes whitespace.
+          </div>
+        </div>
+      </details>
+
+      <details style={{ marginBottom: 8 }}>
+        <summary style={{ fontSize: 11, color: 'var(--text-3)', cursor: 'pointer', userSelect: 'none' }}>
+          Target transform
+        </summary>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+          <input
+            type="text"
+            placeholder="Target regex pattern"
+            value={row.targetRegexPattern || ''}
+            onChange={e => patch({ targetRegexPattern: e.target.value })}
+            className="input input-mono"
+            style={{ height: 28, fontSize: 11 }}
+          />
+          <input
+            type="text"
+            placeholder="Target replacement (use ^ or $ to add text)"
+            value={row.targetRegexReplacement || ''}
+            onChange={e => patch({ targetRegexReplacement: e.target.value })}
+            className="input input-mono"
+            style={{ height: 28, fontSize: 11 }}
+          />
+          <div style={{ fontSize: 10, color: 'var(--text-4)', lineHeight: 1.45 }}>
+            Use this when the target needs cleanup or enrichment before comparison, such as removing separators or adding a fixed prefix.
+          </div>
         </div>
       </details>
 
