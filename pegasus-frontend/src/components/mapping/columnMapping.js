@@ -4,6 +4,7 @@ export function normalizeColumnName(name) {
 
 const DEFAULT_COMPARE = {
   compareMode: 'auto',
+  customExpression: '',
   sourceDateFormat: '',
   targetDateFormat: '',
   sourceStripPrefix: '',
@@ -21,14 +22,26 @@ export function buildMappingRows(sourceColumns, targetColumns, previousRows = []
   return sourceColumns.map((sourceCol, index) => {
     const previous = previousBySource.get(sourceCol)
     const previousTarget = previous?.targetCol && targetColumns.includes(previous.targetCol) ? previous.targetCol : ''
+    const previousTargets = Array.isArray(previous?.targetCols)
+      ? previous.targetCols.filter(col => targetColumns.includes(col))
+      : []
     const autoTarget = autoBySource.get(sourceCol) ?? ''
+    const initialTargets = previousTarget
+      ? [previousTarget, ...previousTargets.filter(col => col !== previousTarget)]
+      : previousTargets.length > 0
+      ? previousTargets
+      : autoTarget
+      ? [autoTarget]
+      : []
 
     return {
       id: sourceCol,
       sourceCol,
-      targetCol: previousTarget || autoTarget,
+      targetCol: initialTargets[0] ?? '',
+      targetCols: initialTargets,
       color: previous?.color ?? ROW_COLORS[index % ROW_COLORS.length],
       compareMode: previous?.compareMode ?? DEFAULT_COMPARE.compareMode,
+      customExpression: previous?.customExpression ?? '',
       sourceDateFormat: previous?.sourceDateFormat ?? '',
       targetDateFormat: previous?.targetDateFormat ?? '',
       sourceStripPrefix: previous?.sourceStripPrefix ?? '',
@@ -54,8 +67,16 @@ export function toColumnMappingPayload(rows) {
         source_column: row.sourceCol,
         target_column: row.targetCol,
       }
+      const additionalTargets = Array.isArray(row.targetCols)
+        ? row.targetCols.map(col => String(col ?? '').trim()).filter(Boolean)
+        : []
+      if (additionalTargets.length > 0) {
+        payload.target_columns = additionalTargets
+      }
       const mode = String(row.compareMode || 'auto').trim() || 'auto'
       if (mode !== 'auto') payload.compare_mode = mode
+      const customExpression = optionalField(row.customExpression)
+      if (customExpression) payload.custom_expression = customExpression
       const srcFmt = optionalField(row.sourceDateFormat)
       const tgtFmt = optionalField(row.targetDateFormat)
       const srcPrefix = optionalField(row.sourceStripPrefix)
@@ -79,10 +100,18 @@ export function toColumnMappingPayload(rows) {
 }
 
 export function mappingRowFromApi(mapping) {
+  const targetColumns = Array.isArray(mapping.target_columns)
+    ? mapping.target_columns.map(col => String(col ?? '').trim()).filter(Boolean)
+    : []
+  const primaryTarget = String(mapping.target_column ?? '').trim()
   return {
     sourceCol: mapping.source_column,
-    targetCol: mapping.target_column,
+    targetCol: primaryTarget,
+    targetCols: primaryTarget
+      ? [primaryTarget, ...targetColumns.filter(col => col !== primaryTarget)]
+      : targetColumns,
     compareMode: mapping.compare_mode || 'auto',
+    customExpression: mapping.custom_expression || '',
     sourceDateFormat: mapping.source_date_format || '',
     targetDateFormat: mapping.target_date_format || '',
     sourceStripPrefix: mapping.source_strip_prefix || '',
@@ -95,7 +124,7 @@ export function mappingRowFromApi(mapping) {
 }
 
 export function countMappedRows(rows) {
-  return rows.filter(row => row.targetCol).length
+  return rows.filter(row => row.targetCol || (Array.isArray(row.targetCols) && row.targetCols.length > 0)).length
 }
 
 export function mappingHasCustomRule(row) {
@@ -103,6 +132,8 @@ export function mappingHasCustomRule(row) {
   const mode = String(row.compareMode || 'auto').trim() || 'auto'
   if (mode !== 'auto') return true
   return Boolean(
+    row.customExpression?.trim()
+    ||
     row.sourceDateFormat?.trim()
     || row.targetDateFormat?.trim()
     || row.sourceStripPrefix?.trim()
