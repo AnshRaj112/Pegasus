@@ -812,6 +812,58 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     loadUnitConfig(unitId)
   }
 
+  const activeUnitIndex = validationUnits.findIndex(u => u.unitId === activeUnitId)
+  const sequentialBatchMapping = isBatchMode && validationUnits.length > 1
+
+  function isCurrentPairMappingValid() {
+    if (fileFormat === 'json') return true
+    if (fileFormat === 'fixed-width') {
+      return fwColumns.length > 0 && !!fwJoinColumn && !!sourceDateFormat.trim() && !!targetDateFormat.trim()
+    }
+    return !!uidColumn.trim() && mappings.some(row => String(row.targetCol || '').trim())
+  }
+
+  function isUnitMappingConfigured(unitId) {
+    if (unitId === activeUnitId) return isCurrentPairMappingValid()
+    const cfg = unitConfigs[unitId]
+    if (!cfg) return false
+    if (fileFormat === 'json') return true
+    if (fileFormat === 'fixed-width') {
+      return (cfg.fwColumns?.length ?? 0) > 0 && !!cfg.fwJoinColumn
+    }
+    const uid = String(cfg.uidColumn || '').trim()
+    const rows = Array.isArray(cfg.mappings) ? cfg.mappings : []
+    return !!uid && rows.some(row => String(row.targetCol || '').trim())
+  }
+
+  function goToPairAtIndex(index) {
+    if (index < 0 || index >= validationUnits.length) return
+    persistActiveUnitConfig()
+    const unit = validationUnits[index]
+    setActiveUnitId(unit.unitId)
+    loadUnitConfig(unit.unitId)
+  }
+
+  function handleConfigureContinue() {
+    if (sequentialBatchMapping && !isCurrentPairMappingValid()) return
+    persistActiveUnitConfig()
+    if (sequentialBatchMapping && activeUnitIndex >= 0 && activeUnitIndex < validationUnits.length - 1) {
+      goToPairAtIndex(activeUnitIndex + 1)
+      return
+    }
+    setStep(4)
+  }
+
+  function handleConfigureBack() {
+    persistActiveUnitConfig()
+    if (sequentialBatchMapping && activeUnitIndex > 0) {
+      goToPairAtIndex(activeUnitIndex - 1)
+      return
+    }
+    setStep(2)
+    setSubPhase(inputLayout === 'folder' ? 'file-pairing' : 'pick-target')
+  }
+
   function parseSelection(selection) {
     if (typeof selection === 'string') return { kind: 'file', path: selection }
     if (selection && typeof selection === 'object') return selection
@@ -1019,7 +1071,9 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   function handlePairingComplete(pairs) {
     const units = unitsFromPairs(pairs)
     setValidationUnits(units)
+    setUnitConfigs({})
     setActiveUnitId(units[0]?.unitId || null)
+    if (units[0]?.unitId) loadUnitConfig(units[0].unitId)
     setStep(3)
   }
 
@@ -1491,8 +1545,12 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const showFilePairing = step === 2 && subPhase === 'file-pairing'
   const showConfigure  = step === 3
   const showReview     = step === 4
+  const allBatchUnitsConfigured = sequentialBatchMapping
+    ? validationUnits.every(u => isUnitMappingConfigured(u.unitId))
+    : true
+
   const isValidForRun  = isBatchMode
-    ? validationUnits.length > 0 && (fileFormat === 'json'
+    ? validationUnits.length > 0 && allBatchUnitsConfigured && (fileFormat === 'json'
       ? true
       : fileFormat === 'fixed-width'
         ? fwColumns.length > 0 && !!fwJoinColumn
@@ -1902,22 +1960,96 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         {/* Step 2: Configure */}
         {showConfigure && (
           <>
-            {isBatchMode && validationUnits.length > 1 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
-                {validationUnits.map(unit => (
-                  <button
-                    key={unit.unitId}
-                    type="button"
-                    onClick={() => switchActiveUnit(unit.unitId)}
-                    className={activeUnitId === unit.unitId ? 'btn btn-primary' : 'btn btn-secondary'}
-                    style={{ height: 30, fontSize: 12 }}
-                  >
-                    {unit.label || unit.sourcePaths[0]?.split('/').pop() || unit.unitId.slice(0, 8)}
-                  </button>
-                ))}
+            {sequentialBatchMapping && (
+              <div style={{
+                marginBottom: 20,
+                padding: '14px 16px',
+                borderRadius: 10,
+                border: '1px solid var(--border-1)',
+                background: 'var(--surface-2)',
+              }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  marginBottom: 12,
+                }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)' }}>
+                      Column mapping — file pair {activeUnitIndex + 1} of {validationUnits.length}
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', marginTop: 4 }}>
+                      {activeUnit?.sourcePaths?.[0]?.split('/').pop() ?? 'Source'}
+                      {' → '}
+                      {activeUnit?.targetPaths?.[0]?.split('/').pop() ?? 'Target'}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
+                    {validationUnits.filter(u => isUnitMappingConfigured(u.unitId)).length} / {validationUnits.length} mapped
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {validationUnits.map((unit, index) => {
+                    const isActive = unit.unitId === activeUnitId
+                    const isDone = isUnitMappingConfigured(unit.unitId)
+                    const srcName = unit.sourcePaths[0]?.split('/').pop() || 'source'
+                    const tgtName = unit.targetPaths[0]?.split('/').pop() || 'target'
+                    return (
+                      <button
+                        key={unit.unitId}
+                        type="button"
+                        onClick={() => goToPairAtIndex(index)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          width: '100%',
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          border: isActive ? '1px solid var(--accent-border)' : '1px solid var(--border-1)',
+                          background: isActive ? 'var(--accent-muted)' : 'var(--surface-1)',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        <span style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: '50%',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          flexShrink: 0,
+                          background: isDone ? 'var(--success-muted)' : isActive ? 'var(--accent)' : 'var(--surface-3)',
+                          color: isDone ? 'var(--success)' : isActive ? '#fff' : 'var(--text-4)',
+                          border: isDone ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border-2)',
+                        }}>
+                          {isDone ? '✓' : index + 1}
+                        </span>
+                        <span style={{ flex: 1, fontSize: 12, color: 'var(--text-2)' }}>
+                          <span style={{ fontFamily: 'Geist Mono, monospace', color: 'var(--text-1)' }}>{srcName}</span>
+                          {' → '}
+                          <span style={{ fontFamily: 'Geist Mono, monospace', color: 'var(--text-1)' }}>{tgtName}</span>
+                        </span>
+                        {isActive && (
+                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase' }}>
+                            Current
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 10, marginBottom: 0 }}>
+                  Map columns for this pair, then continue to the next file. You can return to earlier pairs from the list above.
+                </p>
               </div>
             )}
-            {isBatchMode && activeUnit && (
+            {isBatchMode && activeUnit && !sequentialBatchMapping && (
               <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
                 Source: {activeUnit.sourcePaths.map(p => p.split('/').pop()).join(', ')}
                 {' → '}
@@ -2013,23 +2145,26 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 setTargetDateFormat={setTargetDateFormat}
               />
             )}
-            <div style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <button
                 type="button"
-                onClick={() => { setStep(2); setSubPhase('pick-target') }}
+                onClick={handleConfigureBack}
                 className="btn btn-ghost"
               >
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                   <path d="M9 6H3M5.5 3.5L3 6l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
-                Back
+                {sequentialBatchMapping && activeUnitIndex > 0 ? 'Previous pair' : 'Back'}
               </button>
               <button
                 type="button"
-                onClick={() => { persistActiveUnitConfig(); setStep(4) }}
+                onClick={handleConfigureContinue}
+                disabled={sequentialBatchMapping && !isCurrentPairMappingValid()}
                 className="btn btn-primary"
               >
-                Review & Save
+                {sequentialBatchMapping && activeUnitIndex >= 0 && activeUnitIndex < validationUnits.length - 1
+                  ? `Save & next pair (${activeUnitIndex + 2} of ${validationUnits.length})`
+                  : 'Review & run'}
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                   <path d="M3 6h6M6.5 3.5L9 6l-2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
