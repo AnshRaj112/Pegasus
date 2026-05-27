@@ -9,6 +9,8 @@ import ActionBar        from './ActionBar'
 import ParallelValidationModal from '../ParallelValidationModal'
 import { buildMappingRows, mappingRowFromApi, toColumnMappingPayload } from './columnMapping'
 import { buildAnalyzePayload, formatCheckBySource } from './mappingAnalyze'
+import MappingColumnPreview from './MappingColumnPreview'
+import ResolvedDelimiterNotice from './ResolvedDelimiterNotice'
 import { saveValidationDraft } from '../../api/validationHistory'
 
 
@@ -54,6 +56,18 @@ const DEFAULT_CLOUD_CONFIG = {
   objectName: '',
   credentialsJson: '',
   projectId: '',
+}
+
+function pickDefaultUidColumn(columns, hasHeader) {
+  if (!Array.isArray(columns) || columns.length === 0) return ''
+  if (hasHeader) {
+    for (const name of ['id', 'uid', 'line', 'key', 'code']) {
+      if (columns.includes(name)) return name
+    }
+  } else if (columns.includes('column_1')) {
+    return 'column_1'
+  }
+  return columns[0]
 }
 
 function describeStorageInput(storageType, path, cloudConfig) {
@@ -500,6 +514,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [mappings, setMappings]   = useState([])
   const [uidColumn, setUidColumn] = useState('id')
   const [delimiter, setDelimiter] = useState('auto')
+  const [hasHeader, setHasHeader] = useState(true)
 
   const [columnPreview, setColumnPreview] = useState({
     sourceColumns: [],
@@ -509,6 +524,9 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     unmatchedSourceColumns: [],
     unmatchedTargetColumns: [],
     delimiter: 'auto',
+    sourceSamples: {},
+    targetSamples: {},
+    sampleRowCount: 6,
   })
 
   const [columnPreviewLoading, setColumnPreviewLoading] = useState(false)
@@ -564,6 +582,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       setFileFormat('csv')
       setUidColumn(detail.uid_column || 'id')
       setDelimiter(detail.delimiter || 'auto')
+      setHasHeader(detail.has_header !== false)
     }
 
     // Load previews
@@ -576,7 +595,15 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         unmatchedSourceColumns: preview.unmatched_source_columns || [],
         unmatchedTargetColumns: preview.unmatched_target_columns || [],
         delimiter: preview.delimiter || 'auto',
+        sourceSamples: preview.source_samples || {},
+        targetSamples: preview.target_samples || {},
+        sampleRowCount: preview.sample_row_count || 6,
       })
+      if (typeof preview.inferred_has_header === 'boolean') {
+        setHasHeader(preview.inferred_has_header)
+      } else if (typeof preview.has_header === 'boolean') {
+        setHasHeader(preview.has_header)
+      }
       setColumnPreviewError('')
     } else if (error) {
       setColumnPreviewError(error)
@@ -663,6 +690,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
             ...buildStoragePayload('target', targetStorageType, targetPath, targetCloudConfig),
             uid_column: uidColumn.trim(),
             delimiter: delimiter.trim() || 'auto',
+            has_header: hasHeader,
           }),
         })
         const raw = await res.text()
@@ -671,6 +699,11 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           try { data = JSON.parse(raw) } catch { throw new Error(raw.trim().slice(0, 500)) }
         }
         if (!res.ok) throw new Error(formatDetail(data.detail) || `${res.status} ${res.statusText}`)
+
+        if (typeof data.inferred_has_header === 'boolean' && data.inferred_has_header !== hasHeader) {
+          setHasHeader(data.inferred_has_header)
+          return
+        }
 
         const sourceColumns = Array.isArray(data.source_columns) ? data.source_columns : []
         const targetColumns = Array.isArray(data.target_columns) ? data.target_columns : []
@@ -684,8 +717,21 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           unmatchedSourceColumns: Array.isArray(data.unmatched_source_columns) ? data.unmatched_source_columns : [],
           unmatchedTargetColumns: Array.isArray(data.unmatched_target_columns) ? data.unmatched_target_columns : [],
           delimiter: data.delimiter || delimiter,
+          sourceSamples: data.source_samples && typeof data.source_samples === 'object' ? data.source_samples : {},
+          targetSamples: data.target_samples && typeof data.target_samples === 'object' ? data.target_samples : {},
+          sampleRowCount: Number(data.sample_row_count) || 6,
         })
-        setMappings(prev => buildMappingRows(compareColumns, targetColumns.filter(col => col !== uidColumn.trim()), prev, autoMappings))
+        let effectiveUid = uidColumn.trim()
+        if (!effectiveUid || !sourceColumns.includes(effectiveUid)) {
+          effectiveUid = pickDefaultUidColumn(sourceColumns, hasHeader)
+          if (effectiveUid) setUidColumn(effectiveUid)
+        }
+        setMappings(prev => buildMappingRows(
+          compareColumns,
+          targetColumns.filter(col => col !== effectiveUid),
+          prev,
+          autoMappings,
+        ))
       } catch (err) {
         if (err?.name !== 'AbortError') {
           setColumnPreviewError(err instanceof Error ? err.message : String(err))
@@ -697,6 +743,9 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
             unmatchedSourceColumns: [],
             unmatchedTargetColumns: [],
             delimiter,
+            sourceSamples: {},
+            targetSamples: {},
+            sampleRowCount: 6,
           })
           setMappings([])
         }
@@ -717,6 +766,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     targetCloudConfig,
     uidColumn,
     delimiter,
+    hasHeader,
     fileFormat,
   ])
 
@@ -805,6 +855,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
             validateHeaderFormats,
             validateFooters,
             footerTrailingRows,
+            hasHeader,
           })),
         })
         const raw = await res.text()
@@ -844,6 +895,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     validateHeaderFormats,
     validateFooters,
     footerTrailingRows,
+    hasHeader,
     fileFormat,
   ])
 
@@ -884,6 +936,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         validate_header_formats: validateHeaderFormats,
         validate_footers: validateFooters,
         footer_trailing_rows: footerTrailingRows,
+        has_header: hasHeader,
         file_format: 'csv'
       };
 
@@ -1350,6 +1403,17 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 onMappingChange={setMappings}
                 uidColumn={uidColumn}
                 onUidColumnChange={setUidColumn}
+                hasHeader={hasHeader}
+                onHasHeaderChange={checked => {
+                  setHasHeader(checked)
+                  setUidColumn(checked ? 'id' : 'column_1')
+                }}
+                sourceSamples={columnPreview.sourceSamples}
+                targetSamples={columnPreview.targetSamples}
+                sampleRowCount={columnPreview.sampleRowCount}
+                delimiter={delimiter}
+                resolvedDelimiter={columnPreview.delimiter}
+                onDelimiterChange={setDelimiter}
                 validateHeaderFormats={validateHeaderFormats}
                 onValidateHeaderFormatsChange={setValidateHeaderFormats}
                 validateFooters={validateFooters}
@@ -1463,7 +1527,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 fontSize: 12, color: 'var(--text-3)', marginBottom: 12, flexWrap: 'wrap',
               }}>
                 <span>UID: <strong style={{ color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace' }}>{uidColumn || '—'}</strong></span>
-                <span>Delimiter: <strong style={{ color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace' }}>{delimiter}</strong></span>
+                <span>Delimiter: <strong style={{ color: 'var(--text-1)', fontFamily: 'Geist Mono, monospace' }}>{columnPreview.delimiter || delimiter}</strong></span>
+                <span>Header row: <strong style={{ color: 'var(--text-1)' }}>{hasHeader ? 'yes' : 'no (positional)'}</strong></span>
                 <span>Columns mapped: <strong style={{ color: 'var(--text-1)' }}>{mappings.filter(m => m.targetCol).length} / {mappings.length || '—'}</strong></span>
               </div>
             ) : (
@@ -1479,14 +1544,31 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               </div>
             )}
 
-            {/* Delimiter field */}
+            {fileFormat === 'csv' && (
+              <ResolvedDelimiterNotice
+                requestedDelimiter={delimiter}
+                resolvedDelimiter={columnPreview.delimiter}
+              />
+            )}
+
+            {fileFormat === 'csv' && uidColumn.trim() && (
+              <MappingColumnPreview
+                uidColumn={uidColumn}
+                hasHeader={hasHeader}
+                mappings={mappings}
+                sourceSamples={columnPreview.sourceSamples}
+                targetSamples={columnPreview.targetSamples}
+                sampleRowCount={columnPreview.sampleRowCount}
+              />
+            )}
+
             {fileFormat === 'csv' && (
               <div style={{ marginBottom: 16 }}>
                 <label style={{ display: 'block' }}>
                   <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 5 }}>
-                    CSV Delimiter
+                    Override delimiter (optional)
                   </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <input
                       type="text"
                       value={delimiter}
@@ -1496,7 +1578,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                       style={{ maxWidth: 160 }}
                     />
                     <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                      Supports <code style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11 }}>tab</code>, <code style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11 }}>|</code>, <code style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11 }}>::</code>
+                      Change only if the detected delimiter above is wrong; column preview will refresh.
                     </span>
                   </div>
                 </label>

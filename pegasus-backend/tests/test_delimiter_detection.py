@@ -94,18 +94,21 @@ def test_preview_local_columns_validation_fixtures_four_columns(
             params={
                 "source_path": str(source),
                 "target_path": str(target),
-                "uid_column": "id",
+                "uid_column": "column_1",
                 "delimiter": "auto",
+                "has_header": "false",
             },
         )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["delimiter"] == "xx"
-    assert body["source_columns"] == ["id", "sku", "amount", "region"]
-    assert body["target_columns"] == ["id", "sku", "amount", "region"]
-    assert body["compare_columns"] == ["sku", "amount", "region"]
+    assert body["has_header"] is False
+    assert body["inferred_has_header"] is False
+    assert body["source_columns"] == ["column_1", "column_2", "column_3", "column_4"]
+    assert body["target_columns"] == ["column_1", "column_2", "column_3", "column_4"]
+    assert body["compare_columns"] == ["column_2", "column_3", "column_4"]
     assert body["auto_mappings"] == [
-        {"source_column": "sku", "target_column": "sku"},
-        {"source_column": "amount", "target_column": "amount"},
-        {"source_column": "region", "target_column": "region"},
+        {"source_column": "column_2", "target_column": "column_2"},
+        {"source_column": "column_3", "target_column": "column_3"},
+        {"source_column": "column_4", "target_column": "column_4"},
     ]

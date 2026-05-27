@@ -74,6 +74,7 @@ def merge_sorted_csv_streams(
     batch_rows: int,
     metrics: ReconciliationMetrics | None = None,
     omit_row_detail: bool = False,
+    has_header: bool = True,
 ) -> tuple[int, int]:
     """Two-pointer merge for **globally sorted** UTF-8 CSV inputs (``window=0`` semantics)."""
     m = metrics or NoOpReconciliationMetrics()
@@ -82,7 +83,7 @@ def merge_sorted_csv_streams(
     # Use Polars to read both sorted CSVs and join them
     read_opts: dict[str, object] = {
         "separator": delimiter,
-        "has_header": True,
+        "has_header": has_header,
         "encoding": "utf8-lossy",
     }
     

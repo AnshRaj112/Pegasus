@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import ColumnCompareRuleEditor from './ColumnCompareRuleEditor'
 import CompareRuleIconButton from './CompareRuleIconButton'
+import MappingColumnPreview from './MappingColumnPreview'
+import ResolvedDelimiterNotice from './ResolvedDelimiterNotice'
 import { mappingHasCustomRule } from './columnMapping'
 
 const MAPPING_GRID = 'minmax(0, 1fr) 28px minmax(0, 1fr) 32px'
@@ -19,6 +21,14 @@ export default function Step3_Configure({
   onMappingChange,
   uidColumn,
   onUidColumnChange,
+  hasHeader = true,
+  onHasHeaderChange,
+  sourceSamples = {},
+  targetSamples = {},
+  sampleRowCount = 6,
+  delimiter = 'auto',
+  resolvedDelimiter = '',
+  onDelimiterChange,
   validateHeaderFormats = false,
   onValidateHeaderFormatsChange,
   validateFooters = false,
@@ -108,11 +118,13 @@ export default function Step3_Configure({
           Configure column mapping
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-3)', maxWidth: 760 }}>
-          Map columns as usual. Use the rule icon beside source or target when that field needs custom matching
-          (e.g. strip <code style={{ fontFamily: 'monospace' }}>+91</code> on source phone numbers).
+          {hasHeader
+            ? 'Map source columns to target columns by name. Columns with the same name in both files are linked automatically.'
+            : 'No header row: columns use positional names (column_1, column_2, …). Map each field manually and choose which column is the UID.'}
         </p>
         <p style={{ fontSize: 12, color: 'var(--text-4)', maxWidth: 820, marginTop: 8 }}>
-          A source column can keep extra target columns in the UI for grouped fields like first name + last name. The primary target still drives the current validation payload.
+          Use the rule icon for custom matching (e.g. strip <code style={{ fontFamily: 'monospace' }}>+91</code>).
+          Extra target columns can be added for grouped fields like first + last name.
         </p>
       </div>
 
@@ -142,6 +154,35 @@ export default function Step3_Configure({
         </div>
       )}
 
+      {!previewLoading && !previewError && (
+        <ResolvedDelimiterNotice
+          requestedDelimiter={delimiter}
+          resolvedDelimiter={resolvedDelimiter}
+          compact
+        />
+      )}
+
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ display: 'block' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 5 }}>
+            CSV delimiter
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              value={delimiter}
+              onChange={e => onDelimiterChange?.(e.target.value)}
+              placeholder="auto"
+              className="input input-mono"
+              style={{ maxWidth: 160, height: 32, fontSize: 12 }}
+            />
+            <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+              Use <code style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11 }}>auto</code> to detect, or enter <code style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11 }}>tab</code>, <code style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11 }}>|</code>, <code style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11 }}>xx</code>, etc.
+            </span>
+          </div>
+        </label>
+      </div>
+
       <div style={{
         display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16,
         padding: '12px 14px', borderRadius: 10,
@@ -169,6 +210,17 @@ export default function Step3_Configure({
         background: 'var(--surface-1)', border: '1px solid var(--border-1)',
         flexWrap: 'wrap',
       }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={hasHeader}
+            onChange={e => onHasHeaderChange?.(e.target.checked)}
+          />
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>
+            First row is a header
+          </span>
+        </label>
+
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto' }}>
           <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)', letterSpacing: '-0.01em' }}>
             Join key (UID)
@@ -501,6 +553,19 @@ export default function Step3_Configure({
             </div>
           )}
         </div>
+
+        {!previewLoading && uidColumn && (
+          <div style={{ marginTop: 14 }}>
+            <MappingColumnPreview
+              uidColumn={uidColumn}
+              hasHeader={hasHeader}
+              mappings={activeMappings}
+              sourceSamples={sourceSamples}
+              targetSamples={targetSamples}
+              sampleRowCount={sampleRowCount}
+            />
+          </div>
+        )}
 
         {openRuleRow && openRule?.anchorEl && (
           <ColumnCompareRuleEditor

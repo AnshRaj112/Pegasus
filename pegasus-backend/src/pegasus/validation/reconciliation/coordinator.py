@@ -355,13 +355,14 @@ class ReconciliationCoordinator:
                         spill_multichar_csv_via_polars,
                         source_path,
                         workspace=workspace,
-                            side="source",
+                        side="source",
                         uid_column=uid_column,
                         delimiter=delimiter,
                         buckets=cfg.partition_buckets,
                         chunk_rows=cfg.chunk_rows,
                         metrics=self._metrics,
                         sub_partition_buckets=cfg.sub_partition_buckets,
+                        has_header=cfg.has_header,
                     )
                     fut_tgt = pool.submit(
                         spill_multichar_csv_via_polars,
@@ -374,6 +375,7 @@ class ReconciliationCoordinator:
                         chunk_rows=cfg.chunk_rows,
                         metrics=self._metrics,
                         sub_partition_buckets=cfg.sub_partition_buckets,
+                        has_header=cfg.has_header,
                     )
                     src_rows = fut_src.result()
                     tgt_rows = fut_tgt.result()
@@ -388,6 +390,7 @@ class ReconciliationCoordinator:
                     chunk_rows=cfg.chunk_rows,
                     metrics=self._metrics,
                     sub_partition_buckets=cfg.sub_partition_buckets,
+                    has_header=cfg.has_header,
                 )
                 tgt_rows = spill_multichar_csv_via_polars(
                     target_path,
@@ -399,6 +402,7 @@ class ReconciliationCoordinator:
                     chunk_rows=cfg.chunk_rows,
                     metrics=self._metrics,
                     sub_partition_buckets=cfg.sub_partition_buckets,
+                    has_header=cfg.has_header,
                 )
 
             _compare_spilled_hash_partitions(
@@ -516,6 +520,7 @@ class ReconciliationCoordinator:
                     batch_rows=cfg.chunk_rows,
                     metrics=self._metrics,
                     omit_row_detail=getattr(collector, "omit_row_detail", False),
+                    has_header=cfg.has_header,
                 )
                 report = collector.finish()
                 report = _persist_mismatch_artifact_outside_workspace(workspace, cfg, report)
@@ -557,6 +562,7 @@ class ReconciliationCoordinator:
             uid_column=uid_column,
             delimiter=delimiter,
             chunk_rows=cfg.chunk_rows,
+            has_header=cfg.has_header,
         )
         tgt_sorted = sort_engine.materialize_sorted_parquet(
             target_path,
@@ -565,6 +571,7 @@ class ReconciliationCoordinator:
             uid_column=uid_column,
             delimiter=delimiter,
             chunk_rows=cfg.chunk_rows,
+            has_header=cfg.has_header,
         )
         src_rows, tgt_rows = merge_sorted_parquet_streams(
             source_path=src_sorted,
@@ -613,6 +620,7 @@ class ReconciliationCoordinator:
                 uid_column=uid_column,
                 delimiter=delimiter,
                 chunk_rows=cfg.chunk_rows,
+                has_header=cfg.has_header,
             )
 
         if cfg.parallel_spill_sides:

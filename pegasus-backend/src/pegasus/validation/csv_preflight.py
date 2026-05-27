@@ -54,6 +54,7 @@ def _preflight_single_char(
     *,
     label: str,
     max_rows_to_scan: int,
+    has_header: bool,
 ) -> None:
     errors: list[str] = []
     row_number = 0
@@ -65,21 +66,25 @@ def _preflight_single_char(
             reader = csv.reader(handle, delimiter=delimiter, doublequote=True)
             for row in reader:
                 row_number += 1
-                if row_number > max_rows_to_scan + 1:
+                if row_number > max_rows_to_scan + (1 if has_header else 0):
                     break
 
                 if row_number == 1:
-                    header_names = [c.strip() for c in row]
-                    if not any(header_names):
-                        raise CsvPreflightError(f"{label}: missing or empty header row.")
-                    expected_cols = len(header_names)
-                    dupes = [name for name in header_names if header_names.count(name) > 1]
-                    if dupes:
-                        unique_dupes = sorted(set(dupes))
-                        errors.append(
-                            f"{label}: duplicate header name(s): {', '.join(unique_dupes)!r}."
-                        )
-                    continue
+                    if has_header:
+                        header_names = [c.strip() for c in row]
+                        if not any(header_names):
+                            raise CsvPreflightError(f"{label}: missing or empty header row.")
+                        expected_cols = len(header_names)
+                        dupes = [name for name in header_names if header_names.count(name) > 1]
+                        if dupes:
+                            unique_dupes = sorted(set(dupes))
+                            errors.append(
+                                f"{label}: duplicate header name(s): {', '.join(unique_dupes)!r}."
+                            )
+                        continue
+                    expected_cols = len(row)
+                    if expected_cols < 1:
+                        raise CsvPreflightError(f"{label}: first row has no fields.")
 
                 if not row or (len(row) == 1 and row[0] == ""):
                     errors.append(f"{label}: row {row_number} is empty.")
@@ -115,6 +120,7 @@ def _preflight_multichar(
     *,
     label: str,
     max_rows_to_scan: int,
+    has_header: bool,
 ) -> None:
     from pegasus.validation.flat_file import split_physical_lines
 
@@ -131,12 +137,22 @@ def _preflight_multichar(
         raise CsvPreflightError(f"{label}: file is empty.")
 
     errors: list[str] = []
-    headers = [c.strip() for c in split_line(lines[0], delimiter)]
-    if not headers or headers == [""]:
-        raise CsvPreflightError(f"{label}: missing or empty header row.")
-    expected = len(headers)
+    first_fields = split_line(lines[0], delimiter)
+    if has_header:
+        headers = [c.strip() for c in first_fields]
+        if not headers or headers == [""]:
+            raise CsvPreflightError(f"{label}: missing or empty header row.")
+        expected = len(headers)
+        data_lines = lines[1:]
+        start_row = 2
+    else:
+        expected = len(first_fields)
+        if expected < 1:
+            raise CsvPreflightError(f"{label}: first row has no fields.")
+        data_lines = lines
+        start_row = 1
 
-    for idx, line in enumerate(lines[1:], start=2):
+    for idx, line in enumerate(data_lines, start=start_row):
         if idx > max_rows_to_scan + 1:
             break
         if not line.strip():
@@ -162,6 +178,7 @@ def preflight_csv_structure(
     *,
     label: str | None = None,
     max_rows_to_scan: int = _DEFAULT_MAX_ROWS_TO_SCAN,
+    has_header: bool = True,
 ) -> None:
     """Validate basic CSV structure; raise :class:`CsvPreflightError` on failure."""
     resolved = Path(path)
@@ -179,6 +196,7 @@ def preflight_csv_structure(
             delimiter,
             label=tag,
             max_rows_to_scan=max_rows_to_scan,
+            has_header=has_header,
         )
     else:
         _preflight_multichar(
@@ -186,6 +204,7 @@ def preflight_csv_structure(
             delimiter,
             label=tag,
             max_rows_to_scan=max_rows_to_scan,
+            has_header=has_header,
         )
 
     logger.debug("CSV preflight passed path=%s delimiter=%r", resolved.name, delimiter)

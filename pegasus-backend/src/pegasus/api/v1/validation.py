@@ -882,6 +882,7 @@ async def validate_csv_local_paths(
         "validate_header_formats": body.validate_header_formats,
         "validate_footers": body.validate_footers,
         "footer_trailing_rows": body.footer_trailing_rows,
+        "has_header": body.has_header,
         "memory_log_interval_seconds": settings.validation_memory_log_interval_seconds,
         "run_id": str(run_id) if run_id else None,
         "source_path": str(source_input.path),
@@ -936,6 +937,7 @@ async def analyze_local_mappings(
             validate_header_formats=body.validate_header_formats,
             validate_footers=body.validate_footers,
             footer_trailing_rows=body.footer_trailing_rows,
+            has_header=body.has_header,
         )
         return MappingAnalyzeResponse(
             format_checks=[ColumnMappingFormatCheck.model_validate(c) for c in analysis.get("format_checks", [])],
@@ -992,6 +994,7 @@ async def preview_local_csv_columns(
     target_path: Annotated[str, Query(description="Absolute target CSV path")],
     uid_column: Annotated[str, Query(description="Join key column to exclude from compare mapping")] = "id",
     delimiter: Annotated[str, Query(description="Field separator or auto")] = "auto",
+    has_header: Annotated[bool, Query(description="Whether the first row contains column names")] = True,
 ) -> LocalColumnPreviewResponse:
     source = resolve_local_csv_path(source_path, settings)
     target = resolve_local_csv_path(target_path, settings)
@@ -1000,6 +1003,7 @@ async def preview_local_csv_columns(
         target_path=target,
         uid_column=uid_column,
         delimiter=delimiter,
+        has_header=has_header,
     )
     return LocalColumnPreviewResponse(**preview)
 
@@ -1026,6 +1030,7 @@ async def preview_local_csv_columns_body(
             target_path=target_input.path,
             uid_column=body.uid_column,
             delimiter=body.delimiter,
+            has_header=body.has_header,
         )
         return LocalColumnPreviewResponse(**preview)
     finally:

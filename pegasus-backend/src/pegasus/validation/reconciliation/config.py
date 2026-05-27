@@ -108,6 +108,10 @@ class ReconciliationRuntimeConfig(BaseModel):
         ge=1,
         description="Maximum number of parallel workers for partition comparison. If None, uses CPU count.",
     )
+    has_header: bool = Field(
+        default=True,
+        description="When false, CSV files have no header row (columns are column_1, column_2, …).",
+    )
 
     def with_overrides(self, **kwargs: Any) -> ReconciliationRuntimeConfig:
         """Return a copy with merged fields (convenience for tests)."""

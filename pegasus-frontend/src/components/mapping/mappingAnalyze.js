@@ -42,6 +42,7 @@ export function buildAnalyzePayload({
   validateHeaderFormats,
   validateFooters,
   footerTrailingRows,
+  hasHeader = true,
 }) {
   return {
     ...buildStoragePayload('source', { storageType: sourceStorageType, path: sourcePath, cloudConfig: sourceCloudConfig }),
@@ -54,5 +55,6 @@ export function buildAnalyzePayload({
     validate_header_formats: validateHeaderFormats,
     validate_footers: validateFooters,
     footer_trailing_rows: footerTrailingRows,
+    has_header: hasHeader,
   }
 }

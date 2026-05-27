@@ -203,6 +203,13 @@ class LocalPathValidateRequest(BaseModel):
         le=10,
         description="Number of trailing physical rows to treat as footer when validate_footers is true.",
     )
+    has_header: bool = Field(
+        default=True,
+        description=(
+            "When false, the first row is data and columns are named column_1, column_2, … "
+            "for mapping and UID selection."
+        ),
+    )
     file_format: str = Field(
         default="csv",
         description="File format type: 'csv', 'fixed-width', or 'json'",
@@ -337,6 +344,10 @@ class MappingAnalyzeRequest(BaseModel):
     validate_header_formats: bool = False
     validate_footers: bool = False
     footer_trailing_rows: int = Field(default=1, ge=0, le=10)
+    has_header: bool = Field(
+        default=True,
+        description="When false, files have no header row (columns are column_1, column_2, …).",
+    )
 
     @model_validator(mode="after")
     def _validate_storage_inputs(self) -> "MappingAnalyzeRequest":
@@ -397,6 +408,28 @@ class LocalColumnPreviewResponse(BaseModel):
         description="Target columns with no automatic source match",
     )
     delimiter: str = Field(description="Resolved delimiter used to read the headers")
+    has_header: bool = Field(
+        default=True,
+        description="Whether the first row was treated as column names",
+    )
+    inferred_has_header: bool | None = Field(
+        default=None,
+        description="Heuristic guess from the first physical row (both files must look like headers)",
+    )
+    source_samples: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="First sample rows per source column (string values) for mapping preview",
+    )
+    target_samples: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="First sample rows per target column (string values) for mapping preview",
+    )
+    sample_row_count: int = Field(
+        default=6,
+        ge=1,
+        le=20,
+        description="Number of data rows included in source_samples / target_samples",
+    )
 
 
 class LocalBrowseRootInfo(BaseModel):

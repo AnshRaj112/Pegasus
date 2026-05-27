@@ -85,6 +85,7 @@ class PartitionManager:
         uid_column: str,
         delimiter: str,
         chunk_rows: int,
+        has_header: bool = True,
     ) -> int:
         """Write partitioned Parquet shards; return total rows written."""
         root = self._workspace / "partitions" / side
@@ -110,12 +111,13 @@ class PartitionManager:
                 chunk_rows=chunk_rows,
                 metrics=self._metrics,
                 sub_partition_buckets=self._sub_buckets,
+                has_header=has_header,
             )
 
         read_opts: dict[str, object] = {
             "separator": delimiter,
             "encoding": "utf-8",
-            "has_header": True,
+            "has_header": has_header,
         }
         total_rows = 0
         self._metrics.on_phase_start("hash_partition_spill", side=side, path=str(csv_path))
@@ -166,6 +168,7 @@ def spill_multichar_csv_via_polars(
     chunk_rows: int,
     metrics: ReconciliationMetrics | None = None,
     sub_partition_buckets: int = 1,
+    has_header: bool = True,
 ) -> int:
     """Stream and partition a multi-character delimiter CSV using vectorized Polars string ops.
 
@@ -188,25 +191,33 @@ def spill_multichar_csv_via_polars(
     m.on_phase_start("vectorized_multichar_spill", side=side, path=str(csv_path))
 
     try:
-        # 1. Read the header line to discover column names
-        with open(csv_path, "r", encoding="utf-8") as f:
-            raw_header = f.readline().rstrip("\n\r")
-
+        from pegasus.validation.csv_header import synthetic_column_names
         from pegasus.validation.flat_file import replace_outside_quotes, split_line
 
-        header_fields = split_line(raw_header, delimiter)
-        columns = [c.strip() for c in header_fields]
+        # 1. Discover column names (header row or synthetic positional names)
+        with open(csv_path, "r", encoding="utf-8") as f:
+            raw_first = f.readline().rstrip("\n\r")
+
+        first_fields = split_line(raw_first, delimiter)
+        if has_header:
+            columns = [c.strip() for c in first_fields]
+        else:
+            columns = synthetic_column_names(len(first_fields))
         n_cols = len(columns)
 
         if n_cols == 0:
             raise ReconciliationError(f"CSV has no columns after splitting header with delimiter {delimiter!r}")
 
         logger.info(
-            "Vectorized multichar spill side=%s delimiter=%r columns=%d path=%s",
-            side, delimiter, n_cols, csv_path,
+            "Vectorized multichar spill side=%s delimiter=%r columns=%d path=%s has_header=%s",
+            side,
+            delimiter,
+            n_cols,
+            csv_path,
+            has_header,
         )
 
-        if not csv_has_data_rows(csv_path):
+        if has_header and not csv_has_data_rows(csv_path):
             m.on_phase_end("vectorized_multichar_spill", side=side, rows=0)
             logger.info(
                 "Vectorized multichar spill complete (header-only) side=%s buckets=%d sub=%d rows=0",
@@ -218,7 +229,11 @@ def spill_multichar_csv_via_polars(
 
         # 2. Iterate batches — read raw lines (1 column per row) using a dummy separator
         reader = PolarsCSVReader(default_batch_size=chunk_rows)
-        read_opts = {"separator": _UNIT_SEP, "has_header": False, "skip_rows": 1}
+        read_opts = {
+            "separator": _UNIT_SEP,
+            "has_header": False,
+            "skip_rows": 1 if has_header else 0,
+        }
 
         for batch in reader.iter_batches(csv_path, batch_size=chunk_rows, read_options=read_opts):
             # batch has 1 column containing the whole line
@@ -290,25 +305,40 @@ def spill_multichar_csv_via_polars(
     return total_rows
 
 
-def multichar_csv_header_frame(csv_path: Path, *, delimiter: str) -> pl.DataFrame:
-    """Return a zero-row Polars frame whose schema matches the CSV header (pandas ``nrows=0``)."""
-    sep = re.escape(delimiter)
+def multichar_csv_header_frame(
+    csv_path: Path,
+    *,
+    delimiter: str,
+    has_header: bool = True,
+) -> pl.DataFrame:
+    """Return a zero-row Polars frame whose schema matches the CSV columns."""
+    from pegasus.validation.csv_header import count_fields_first_row, synthetic_column_names
+
+    if has_header:
+        sep = re.escape(delimiter)
+        try:
+            pdf = pd.read_csv(
+                csv_path,
+                sep=sep,
+                engine="python",
+                encoding="utf-8",
+                nrows=0,
+                quotechar='"',
+                doublequote=True,
+            )
+        except Exception as exc:
+            raise ReconciliationError(f"Cannot read CSV header for multichar path: {csv_path}") from exc
+        if pdf.columns.empty:
+            raise ReconciliationError(f"CSV has no columns: {csv_path}")
+        frame = pl.from_pandas(pdf, include_index=False)
+        rename_map = {col: col.strip() for col in frame.columns if col != col.strip()}
+        if rename_map:
+            frame = frame.rename(rename_map)
+        return frame
+
     try:
-        pdf = pd.read_csv(
-            csv_path,
-            sep=sep,
-            engine="python",
-            encoding="utf-8",
-            nrows=0,
-            quotechar='"',
-            doublequote=True,
-        )
-    except Exception as exc:
-        raise ReconciliationError(f"Cannot read CSV header for multichar path: {csv_path}") from exc
-    if pdf.columns.empty:
-        raise ReconciliationError(f"CSV has no columns: {csv_path}")
-    frame = pl.from_pandas(pdf, include_index=False)
-    rename_map = {col: col.strip() for col in frame.columns if col != col.strip()}
-    if rename_map:
-        frame = frame.rename(rename_map)
-    return frame
+        n_cols = count_fields_first_row(csv_path, delimiter)
+    except ValueError as exc:
+        raise ReconciliationError(f"CSV has no columns: {csv_path}") from exc
+    names = synthetic_column_names(n_cols)
+    return pl.DataFrame(schema={name: pl.String for name in names})

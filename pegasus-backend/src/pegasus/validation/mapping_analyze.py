@@ -15,7 +15,13 @@ from pegasus.validation.format_profiles import check_mapping_format
 from pegasus.validation.readers.delimiter_detection import polars_supports_csv_delimiter
 
 
-def _read_sample_frame(path: Path, *, delimiter: str, sample_rows: int) -> pl.DataFrame:
+def _read_sample_frame(
+    path: Path,
+    *,
+    delimiter: str,
+    sample_rows: int,
+    has_header: bool = True,
+) -> pl.DataFrame:
     if not polars_supports_csv_delimiter(delimiter):
         pdf = pd.read_csv(
             path,
@@ -23,14 +29,18 @@ def _read_sample_frame(path: Path, *, delimiter: str, sample_rows: int) -> pl.Da
             engine="python",
             encoding="utf-8",
             nrows=sample_rows,
+            header=0 if has_header else None,
             quotechar='"',
             doublequote=True,
         )
+        if not has_header:
+            pdf.columns = [f"column_{index}" for index in range(1, len(pdf.columns) + 1)]
         return pl.from_pandas(pdf, include_index=False)
     return pl.read_csv(
         path,
         separator=delimiter,
         n_rows=sample_rows,
+        has_header=has_header,
         infer_schema_length=min(sample_rows, 10_000),
         ignore_errors=True,
     )
@@ -42,12 +52,18 @@ def sample_column_values(
     delimiter: str,
     columns: list[str],
     sample_rows: int = 500,
+    has_header: bool = True,
 ) -> dict[str, list[str]]:
     """Read up to *sample_rows* of data and return string values per requested column."""
     if not columns:
         return {}
 
-    frame = _read_sample_frame(path, delimiter=delimiter, sample_rows=sample_rows)
+    frame = _read_sample_frame(
+        path,
+        delimiter=delimiter,
+        sample_rows=sample_rows,
+        has_header=has_header,
+    )
 
     out: dict[str, list[str]] = {}
     for col in columns:
@@ -69,6 +85,7 @@ def analyze_column_mappings(
     validate_footers: bool,
     footer_trailing_rows: int,
     sample_rows: int = 500,
+    has_header: bool = True,
 ) -> dict[str, Any]:
     """Run optional header-format and footer checks."""
     result: dict[str, Any] = {
@@ -80,10 +97,18 @@ def analyze_column_mappings(
         source_cols = [m.source_column for m in column_mappings]
         target_cols = [m.target_column for m in column_mappings]
         src_samples = sample_column_values(
-            source_path, delimiter=delimiter, columns=source_cols, sample_rows=sample_rows
+            source_path,
+            delimiter=delimiter,
+            columns=source_cols,
+            sample_rows=sample_rows,
+            has_header=has_header,
         )
         tgt_samples = sample_column_values(
-            target_path, delimiter=delimiter, columns=target_cols, sample_rows=sample_rows
+            target_path,
+            delimiter=delimiter,
+            columns=target_cols,
+            sample_rows=sample_rows,
+            has_header=has_header,
         )
         checks: list[dict[str, Any]] = []
         for mapping in column_mappings:

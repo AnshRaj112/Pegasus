@@ -53,7 +53,8 @@ from pegasus.validation.reconciliation.coordinator import (
     auto_external_enabled,
 )
 from pegasus.validation.reconciliation.exceptions import ReconciliationError, ReconciliationStrategyError
-from pegasus.validation.mapping_analyze import analyze_column_mappings
+from pegasus.validation.csv_header import infer_csv_has_header
+from pegasus.validation.mapping_analyze import analyze_column_mappings, sample_column_values
 from pegasus.validation.reconciliation.partition_manager import multichar_csv_header_frame
 from pegasus.validation.csv_preflight import CsvPreflightError, preflight_csv_structure
 from pegasus.validation.flat_file import csv_has_data_rows
@@ -62,6 +63,8 @@ from pegasus.validation.fixed_width_layout import preview_fixed_width_layout
 from pegasus.validation.fixed_width_matching import fuzzy_pair_by_join_key
 
 logger = logging.getLogger(__name__)
+
+_MAPPING_PREVIEW_SAMPLE_ROWS = 6
 
 
 @dataclass(slots=True)
@@ -176,6 +179,7 @@ class ValidationService:
         validate_header_formats: bool = False,
         validate_footers: bool = False,
         footer_trailing_rows: int = 1,
+        has_header: bool = True,
     ) -> ValidationRunResult:
         """Run validation off the event loop so Polars work does not block asyncio."""
         return await asyncio.to_thread(
@@ -190,6 +194,7 @@ class ValidationService:
             validate_header_formats,
             validate_footers,
             footer_trailing_rows,
+            has_header,
         )
 
     def analyze_local_mappings(
@@ -203,6 +208,7 @@ class ValidationService:
         validate_header_formats: bool,
         validate_footers: bool,
         footer_trailing_rows: int,
+        has_header: bool = True,
     ) -> dict[str, Any]:
         """Run optional format/footer checks for the mapping wizard."""
         delim = self._resolve_delimiter(
@@ -218,6 +224,7 @@ class ValidationService:
             validate_header_formats=validate_header_formats,
             validate_footers=validate_footers,
             footer_trailing_rows=footer_trailing_rows,
+            has_header=has_header,
         )
         analysis["delimiter"] = delim
         return analysis
@@ -241,6 +248,7 @@ class ValidationService:
         target_path: Path,
         uid_column: str,
         delimiter: str,
+        has_header: bool = True,
     ) -> dict[str, Any]:
         """Return source/target headers and exact-name mapping suggestions for the UI."""
         uid = uid_column.strip()
@@ -249,14 +257,32 @@ class ValidationService:
             target_path=target_path,
             delimiter=delimiter,
         )
-        self._preflight_csv_pair(source_path, target_path, delim)
-        source_columns = self._read_column_names(source_path, delim)
-        target_columns = self._read_column_names(target_path, delim)
+        inferred_has_header = infer_csv_has_header(source_path, delim) and infer_csv_has_header(
+            target_path, delim
+        )
+        self._preflight_csv_pair(source_path, target_path, delim, has_header=has_header)
+        source_columns = self._read_column_names(source_path, delim, has_header=has_header)
+        target_columns = self._read_column_names(target_path, delim, has_header=has_header)
         compare_columns = [c for c in source_columns if c != uid]
         compare_targets = [c for c in target_columns if c != uid]
         auto_mappings = self._auto_map_columns(compare_columns, compare_targets)
         matched_sources = {m["source_column"] for m in auto_mappings}
         matched_targets = {m["target_column"] for m in auto_mappings}
+        sample_rows = _MAPPING_PREVIEW_SAMPLE_ROWS
+        source_samples = sample_column_values(
+            source_path,
+            delimiter=delim,
+            columns=source_columns,
+            sample_rows=sample_rows,
+            has_header=has_header,
+        )
+        target_samples = sample_column_values(
+            target_path,
+            delimiter=delim,
+            columns=target_columns,
+            sample_rows=sample_rows,
+            has_header=has_header,
+        )
         return {
             "source_columns": source_columns,
             "target_columns": target_columns,
@@ -265,6 +291,11 @@ class ValidationService:
             "unmatched_source_columns": [c for c in source_columns if c not in matched_sources],
             "unmatched_target_columns": [c for c in target_columns if c not in matched_targets],
             "delimiter": delim,
+            "has_header": has_header,
+            "inferred_has_header": inferred_has_header,
+            "source_samples": source_samples,
+            "target_samples": target_samples,
+            "sample_row_count": sample_rows,
         }
 
     def _validate_csv_pair_sync(
@@ -279,6 +310,7 @@ class ValidationService:
         validate_header_formats: bool = False,
         validate_footers: bool = False,
         footer_trailing_rows: int = 1,
+        has_header: bool = True,
         resource_policy: dict[str, object] | None = None,
     ) -> ValidationRunResult:
         uid = uid_column.strip()
@@ -301,13 +333,22 @@ class ValidationService:
             target_path=target_path,
             delimiter=delimiter,
         )
+        rcfg = rcfg.model_copy(update={"has_header": has_header})
 
         mapping_analysis: dict[str, Any] | None = None
         if validate_header_formats or validate_footers:
             mappings = column_mappings or []
             if validate_header_formats and not mappings:
-                compare_src = [c for c in self._read_column_names(source_path, delim) if c != uid]
-                compare_tgt = [c for c in self._read_column_names(target_path, delim) if c != uid]
+                compare_src = [
+                    c
+                    for c in self._read_column_names(source_path, delim, has_header=has_header)
+                    if c != uid
+                ]
+                compare_tgt = [
+                    c
+                    for c in self._read_column_names(target_path, delim, has_header=has_header)
+                    if c != uid
+                ]
                 auto = self._auto_map_columns(compare_src, compare_tgt)
                 mappings = [ColumnMapping.model_validate(m) for m in auto]
             mapping_analysis = analyze_column_mappings(
@@ -318,6 +359,7 @@ class ValidationService:
                 validate_header_formats=validate_header_formats,
                 validate_footers=validate_footers,
                 footer_trailing_rows=footer_trailing_rows,
+                has_header=has_header,
             )
 
         self._raise_if_csv_pair_has_no_data(source_path, target_path)
@@ -331,7 +373,7 @@ class ValidationService:
         except CSVValidationError as exc:
             raise ValidationBadRequestError(str(exc)) from exc
 
-        self._preflight_csv_pair(source_path, target_path, delim)
+        self._preflight_csv_pair(source_path, target_path, delim, has_header=has_header)
 
         log_swap_pressure_warning(logger)
 
@@ -347,8 +389,12 @@ class ValidationService:
 
         if use_multichar_streaming:
             try:
-                src_head = multichar_csv_header_frame(source_path, delimiter=delim)
-                tgt_head = multichar_csv_header_frame(target_path, delimiter=delim)
+                src_head = multichar_csv_header_frame(
+                    source_path, delimiter=delim, has_header=has_header
+                )
+                tgt_head = multichar_csv_header_frame(
+                    target_path, delimiter=delim, has_header=has_header
+                )
             except ReconciliationError as exc:
                 raise ValidationBadRequestError(str(exc)) from exc
 
@@ -425,8 +471,12 @@ class ValidationService:
 
         if want_external:
             try:
-                schema_s = reader.detect_schema(source_path, delimiter=delim, encoding="utf-8")
-                schema_t = reader.detect_schema(target_path, delimiter=delim, encoding="utf-8")
+                schema_s = reader.detect_schema(
+                    source_path, delimiter=delim, encoding="utf-8", has_header=has_header
+                )
+                schema_t = reader.detect_schema(
+                    target_path, delimiter=delim, encoding="utf-8", has_header=has_header
+                )
             except CSVParseError as exc:
                 logger.warning("CSV schema probe failed during validation: %s", exc)
                 raise ValidationBadRequestError(f"Could not parse CSV: {exc}") from exc
@@ -509,8 +559,8 @@ class ValidationService:
             delim,
         )
         try:
-            source_df = self._read_dataframe(reader, source_path, delim)
-            target_df = self._read_dataframe(reader, target_path, delim)
+            source_df = self._read_dataframe(reader, source_path, delim, has_header=has_header)
+            target_df = self._read_dataframe(reader, target_path, delim, has_header=has_header)
         except CSVParseError as exc:
             logger.warning("CSV parse failed during validation: %s", exc)
             raise ValidationBadRequestError(f"Could not parse CSV: {exc}") from exc
@@ -628,12 +678,17 @@ class ValidationService:
             footer_validation=mapping_analysis.get("footer_validation"),
         )
 
-    def _read_column_names(self, path: Path, delimiter: str) -> list[str]:
+    def _read_column_names(self, path: Path, delimiter: str, *, has_header: bool = True) -> list[str]:
         if not polars_supports_csv_delimiter(delimiter):
-            frame = multichar_csv_header_frame(path, delimiter=delimiter)
+            frame = multichar_csv_header_frame(path, delimiter=delimiter, has_header=has_header)
             return [c.strip() for c in frame.columns]
         reader = PolarsCSVReader(default_batch_size=512)
-        schema = reader.detect_schema(path, delimiter=delimiter, encoding="utf-8")
+        schema = reader.detect_schema(
+            path,
+            delimiter=delimiter,
+            encoding="utf-8",
+            has_header=has_header,
+        )
         return list(schema.keys())
 
     def _auto_map_columns(self, source_columns: list[str], target_columns: list[str]) -> list[dict[str, str]]:
@@ -721,10 +776,16 @@ class ValidationService:
             )
 
     @staticmethod
-    def _preflight_csv_pair(source_path: Path, target_path: Path, delimiter: str) -> None:
+    def _preflight_csv_pair(
+        source_path: Path,
+        target_path: Path,
+        delimiter: str,
+        *,
+        has_header: bool = True,
+    ) -> None:
         for path, tag in ((source_path, "source"), (target_path, "target")):
             try:
-                preflight_csv_structure(path, delimiter, label=tag)
+                preflight_csv_structure(path, delimiter, label=tag, has_header=has_header)
             except CsvPreflightError as exc:
                 raise ValidationBadRequestError(str(exc)) from exc
 
@@ -752,13 +813,21 @@ class ValidationService:
             return token
         return token
 
-    def _read_dataframe(self, reader: PolarsCSVReader, path: Path, delimiter: str) -> pl.DataFrame:
+    def _read_dataframe(
+        self,
+        reader: PolarsCSVReader,
+        path: Path,
+        delimiter: str,
+        *,
+        has_header: bool = True,
+    ) -> pl.DataFrame:
         if polars_supports_csv_delimiter(delimiter):
             return reader.read_file(
                 path,
                 delimiter=delimiter,
                 encoding="utf-8",
                 use_streaming_engine=True,
+                has_header=has_header,
             )
 
         # Polars only accepts single-byte separators; use pandas for multi-char / emoji / etc.
@@ -769,11 +838,15 @@ class ValidationService:
                 sep=re.escape(delimiter),
                 engine="python",
                 encoding="utf-8",
+                header=0 if has_header else None,
                 quotechar='"',
                 doublequote=True,
             )
         except Exception as exc:
             raise CSVParseError(f"Failed pandas fallback parse for {path.name}: {exc}") from exc
+
+        if not has_header:
+            pdf.columns = [f"column_{index}" for index in range(1, len(pdf.columns) + 1)]
 
         df = pl.from_pandas(pdf, include_index=False)
         rename_map = {col: col.strip() for col in df.columns if col != col.strip()}

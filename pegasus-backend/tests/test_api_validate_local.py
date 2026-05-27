@@ -526,3 +526,60 @@ def test_validate_local_fixed_width_complete(monkeypatch: pytest.MonkeyPatch, tm
         assert body["summary"]["compared_column_count"] == 3
         assert set(body["compared_columns"]) == {"TxDate", "Quantity", "Status"}
         assert body["mismatch_counts"]["value_mismatch"] == 2
+
+
+def test_preview_headerless_csv_uses_positional_columns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_text("101,alice,30\n102,bob,25\n103,cara,28\n", encoding="utf-8")
+        tgt.write_text("101,alice,30\n102,bob,26\n103,cara,28\n", encoding="utf-8")
+        r = client.get(
+            "/api/v1/validate/local/columns",
+            params={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "column_1",
+                "delimiter": ",",
+                "has_header": "false",
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["has_header"] is False
+        assert body["source_columns"] == ["column_1", "column_2", "column_3"]
+        assert body["target_columns"] == ["column_1", "column_2", "column_3"]
+        assert body["source_samples"]["column_1"][:3] == ["101", "102", "103"]
+        assert body["source_samples"]["column_2"][:2] == ["alice", "bob"]
+        assert body["target_samples"]["column_3"][-1] == "28"
+
+
+def test_validate_headerless_csv_with_explicit_mapping(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_text("101,alice\n102,bob\n", encoding="utf-8")
+        tgt.write_text("101,alice\n102,robert\n", encoding="utf-8")
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "column_1",
+                "delimiter": ",",
+                "has_header": False,
+                "column_mappings": [{"source_column": "column_2", "target_column": "column_2"}],
+            },
+        )
+        assert r.status_code == 202, r.text
+        body = _poll_completed(client, r.json()["poll_url"])
+        assert body["summary"]["is_match"] is False
+        assert body["mismatch_counts"]["value_mismatch"] == 1

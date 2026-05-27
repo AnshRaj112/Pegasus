@@ -40,6 +40,7 @@ class ExternalMergeSortEngine:
         uid_column: str,
         delimiter: str,
         chunk_rows: int,
+        has_header: bool = True,
     ) -> Path:
         """Return path to a single sorted Parquet file under *workspace*.
 
@@ -53,7 +54,7 @@ class ExternalMergeSortEngine:
         read_opts: dict[str, object] = {
             "separator": delimiter,
             "encoding": "utf-8",
-            "has_header": True,
+            "has_header": has_header,
         }
         out_path = workspace / f"{side}_sorted.parquet"
 
@@ -80,7 +81,12 @@ class ExternalMergeSortEngine:
         paths = sorted(runs_dir.glob("*.parquet"))
         if not paths:
             # Header-only or empty body: infer at least uid column exists via schema probe.
-            schema = self._reader.detect_schema(csv_path, delimiter=delimiter, encoding="utf-8")
+            schema = self._reader.detect_schema(
+                csv_path,
+                delimiter=delimiter,
+                encoding="utf-8",
+                has_header=has_header,
+            )
             if uid_column not in schema:
                 raise ReconciliationError(f"uid_column {uid_column!r} not present in CSV schema")
             empty = pl.DataFrame(schema={c: schema[c] for c in schema})
