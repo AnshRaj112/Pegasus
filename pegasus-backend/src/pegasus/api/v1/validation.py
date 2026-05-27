@@ -32,9 +32,15 @@ from pegasus.core.json_util import dumps_bytes, loads_str
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.schemas.validation import (
+    BatchFailureMode,
+    BatchUnitResult,
+    BatchValidateResponse,
+    BatchValidateSummary,
     ColumnMappingFormatCheck,
+    FilePairMatch,
     FooterValidationResult,
     GoogleCloudStorageConfig,
+    LocalBatchValidateRequest,
     LocalBrowseEntry,
     LocalBrowseResponse,
     LocalPathBrowseConfigResponse,
@@ -43,6 +49,12 @@ from pegasus.schemas.validation import (
     LocalPathValidateRequest,
     MappingAnalyzeRequest,
     MappingAnalyzeResponse,
+    MatchFilePairsRequest,
+    MatchFilePairsResponse,
+    CloudBrowseRequest,
+    CloudBrowseResponse,
+    CloudBrowseEntry,
+    CloudMatchFilePairsRequest,
     MismatchSampleGroups,
     MismatchSampleRow,
     QueueStatusResponse,
@@ -68,6 +80,8 @@ from pegasus.validation.fixed_width_meta import (
     is_fixed_width_run,
     is_json_run,
 )
+from pegasus.validation.file_pairing import auto_match_files_by_name, list_files_in_directory
+from pegasus.validation.gcs_browse import browse_gcs_prefix, list_gcs_files_under_prefix
 
 from .mismatch_sample import (
     build_grouped_mismatch_samples,
@@ -566,6 +580,127 @@ def _run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.U
     return vr, run_uuid, meta
 
 
+def _validate_response_from_unit_json(
+    *,
+    settings: Settings,
+    job_dir: Path,
+    unit_id: str,
+    res: dict[str, object],
+) -> ValidateResponse:
+    """Build a ValidateResponse from a unit's stored result dict."""
+    summary_raw = res.get("summary") or {}
+    summary = {
+        MismatchType.MISSING_IN_TARGET.value: int(summary_raw.get(MismatchType.MISSING_IN_TARGET.value, 0)),
+        MismatchType.EXTRA_IN_TARGET.value: int(summary_raw.get(MismatchType.EXTRA_IN_TARGET.value, 0)),
+        MismatchType.VALUE_MISMATCH.value: int(summary_raw.get(MismatchType.VALUE_MISMATCH.value, 0)),
+    }
+    apath = None
+    artifact_raw = res.get("mismatch_artifact_path")
+    if isinstance(artifact_raw, str) and artifact_raw.strip():
+        cand = Path(artifact_raw.strip()).expanduser()
+        if not cand.is_absolute():
+            cand = job_dir / "units" / unit_id / cand
+        if cand.is_file():
+            apath = cand
+    if apath is None:
+        rel = res.get("mismatch_artifact_rel")
+        if isinstance(rel, str) and rel.strip():
+            cand = job_dir / "units" / unit_id / rel.strip()
+            if cand.is_file():
+                apath = cand
+    report = MismatchReport(mismatches=empty_mismatch_frame(), summary=summary, mismatch_artifact_path=apath)
+    format_checks_raw = res.get("mapping_format_checks")
+    footer_raw = res.get("footer_validation")
+    vr = ValidationRunResult(
+        report=report,
+        source_row_count=int(res["source_row_count"]),
+        target_row_count=int(res["target_row_count"]),
+        compared_column_count=int(res["compared_column_count"]),
+        compared_columns=list(res.get("compared_columns") or []),
+        mismatch_artifact_path=apath,
+        mapping_format_checks=list(format_checks_raw) if format_checks_raw else None,
+        footer_validation=dict(footer_raw) if isinstance(footer_raw, dict) else None,
+        durations=None,
+    )
+    return _build_validate_response(settings=settings, run_result=vr, run_id=None)
+
+
+def _build_batch_job_detail(
+    *,
+    settings: Settings,
+    job_dir: Path,
+    status_val: str,
+    phase: str | None,
+    message: str | None,
+    progress: dict[str, object],
+    error: str | None = None,
+) -> ValidationJobDetailResponse:
+    batch_path = job_dir / "batch_result.json"
+    raw = loads_str(batch_path.read_text(encoding="utf-8"))
+    summary_raw = raw.get("summary") or {}
+    units_out: list[BatchUnitResult] = []
+    for unit in list(raw.get("units") or []):
+        if not isinstance(unit, dict):
+            continue
+        unit_id = str(unit.get("unit_id") or "")
+        result_payload = None
+        unit_result = unit.get("result")
+        if isinstance(unit_result, dict):
+            result_payload = _validate_response_from_unit_json(
+                settings=settings,
+                job_dir=job_dir,
+                unit_id=unit_id,
+                res=unit_result,
+            )
+        units_out.append(
+            BatchUnitResult(
+                unit_id=unit_id,
+                source_paths=[str(p) for p in list(unit.get("source_paths") or [])],
+                target_paths=[str(p) for p in list(unit.get("target_paths") or [])],
+                status=str(unit.get("status") or "unknown"),
+                error=str(unit.get("error")) if unit.get("error") else None,
+                result=result_payload,
+            )
+        )
+    durations_raw = raw.get("durations")
+    durations = None
+    if isinstance(durations_raw, dict):
+        durations = ValidationDurations(
+            validation_seconds=float(durations_raw["validation_seconds"])
+            if durations_raw.get("validation_seconds") is not None
+            else None,
+            total_seconds=float(durations_raw["total_seconds"])
+            if durations_raw.get("total_seconds") is not None
+            else None,
+        )
+    on_failure_raw = str(raw.get("on_unit_failure") or BatchFailureMode.CONTINUE.value)
+    try:
+        on_failure = BatchFailureMode(on_failure_raw)
+    except ValueError:
+        on_failure = BatchFailureMode.CONTINUE
+    batch_result = BatchValidateResponse(
+        summary=BatchValidateSummary(
+            total_units=int(summary_raw.get("total_units") or 0),
+            completed_units=int(summary_raw.get("completed_units") or 0),
+            failed_units=int(summary_raw.get("failed_units") or 0),
+            skipped_units=int(summary_raw.get("skipped_units") or 0),
+            passed_units=int(summary_raw.get("passed_units") or 0),
+            is_match=bool(summary_raw.get("is_match")),
+        ),
+        units=units_out,
+        on_unit_failure=on_failure,
+        durations=durations,
+    )
+    return ValidationJobDetailResponse(
+        status=status_val,
+        phase=phase,
+        message=message,
+        progress=progress,
+        error=error,
+        batch_result=batch_result,
+    )
+
+
 async def _maybe_persist_completed_job(
     settings: Settings,
     *,
@@ -912,6 +1047,236 @@ async def validate_csv_local_paths(
 
 
 @router.post(
+    "/validate/local/match-pairs",
+    response_model=MatchFilePairsResponse,
+    summary="Auto-match files between two directories by filename",
+    responses={
+        400: {"description": "Invalid directories"},
+        403: {"description": "Local path validation disabled"},
+    },
+)
+async def match_local_file_pairs(
+    settings: AppSettings,
+    body: Annotated[MatchFilePairsRequest, Body()],
+) -> MatchFilePairsResponse:
+    """Suggest 1:1 file pairs from two folders (basename match); unmatched files are listed for manual pairing."""
+    source_dir = resolve_local_dir_for_browse(body.source_directory, settings)
+    target_dir = resolve_local_dir_for_browse(body.target_directory, settings)
+    source_files = list_files_in_directory(
+        source_dir,
+        file_format=body.file_format,
+        recursive=body.recursive,
+    )
+    target_files = list_files_in_directory(
+        target_dir,
+        file_format=body.file_format,
+        recursive=body.recursive,
+    )
+    pairing = auto_match_files_by_name(source_files, target_files)
+    return MatchFilePairsResponse(
+        pairs=[
+            FilePairMatch(
+                unit_id=p.unit_id,
+                source_path=to_display_path(p.source_path, settings),
+                target_path=to_display_path(p.target_path, settings),
+                source_name=p.source_path.name,
+                target_name=p.target_path.name,
+                auto_matched=p.auto_matched,
+            )
+            for p in pairing.pairs
+        ],
+        unmatched_sources=[to_display_path(p, settings) for p in pairing.unmatched_sources],
+        unmatched_targets=[to_display_path(p, settings) for p in pairing.unmatched_targets],
+    )
+
+
+@router.post(
+    "/validate/cloud/browse",
+    response_model=CloudBrowseResponse,
+    summary="Browse GCS bucket prefixes and objects for the cloud file picker",
+)
+async def browse_cloud_prefix(
+    body: Annotated[CloudBrowseRequest, Body()],
+) -> CloudBrowseResponse:
+    """List child prefixes and objects under a bucket prefix (delimiter='/')."""
+    info = _resolve_cloud_credentials(body.credentials_json)
+    try:
+        result = browse_gcs_prefix(
+            bucket=body.bucket,
+            prefix=body.prefix,
+            credentials_info=info,
+            project_id=body.project_id,
+            file_format=body.file_format,
+        )
+    except Exception as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return CloudBrowseResponse(
+        bucket=result.bucket,
+        prefix=result.prefix,
+        parent_prefix=result.parent_prefix,
+        entries=[
+            CloudBrowseEntry(name=e.name, path=e.path, is_dir=e.is_dir) for e in result.entries
+        ],
+        truncated=result.truncated,
+    )
+
+
+@router.post(
+    "/validate/cloud/match-pairs",
+    response_model=MatchFilePairsResponse,
+    summary="Auto-match GCS objects between two prefixes by filename",
+)
+async def match_cloud_file_pairs(
+    body: Annotated[CloudMatchFilePairsRequest, Body()],
+) -> MatchFilePairsResponse:
+    """Suggest 1:1 object pairs from two bucket prefixes (basename match)."""
+    info = _resolve_cloud_credentials(body.credentials_json)
+    try:
+        source_names = list_gcs_files_under_prefix(
+            bucket=body.bucket,
+            prefix=body.source_prefix,
+            credentials_info=info,
+            project_id=body.project_id,
+            file_format=body.file_format,
+            recursive=body.recursive,
+        )
+        target_names = list_gcs_files_under_prefix(
+            bucket=body.bucket,
+            prefix=body.target_prefix,
+            credentials_info=info,
+            project_id=body.project_id,
+            file_format=body.file_format,
+            recursive=body.recursive,
+        )
+    except Exception as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    pairing = auto_match_files_by_name(
+        [Path(n) for n in source_names],
+        [Path(n) for n in target_names],
+    )
+    return MatchFilePairsResponse(
+        pairs=[
+            FilePairMatch(
+                unit_id=p.unit_id,
+                source_path=p.source_path.as_posix(),
+                target_path=p.target_path.as_posix(),
+                source_name=Path(p.source_path).name,
+                target_name=Path(p.target_path).name,
+                auto_matched=p.auto_matched,
+            )
+            for p in pairing.pairs
+        ],
+        unmatched_sources=[p.as_posix() for p in pairing.unmatched_sources],
+        unmatched_targets=[p.as_posix() for p in pairing.unmatched_targets],
+    )
+
+
+@router.post(
+    "/validate/local/batch",
+    response_model=ValidationJobAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue batch validation (folder pairs, merge-then-validate)",
+    responses={
+        400: {"description": "Invalid paths or units"},
+        403: {"description": "Local path validation disabled"},
+    },
+)
+async def validate_local_batch(
+    settings: AppSettings,
+    body: Annotated[LocalBatchValidateRequest, Body()],
+) -> ValidationJobAcceptedResponse:
+    """Queue one or more validation units; each unit may merge multiple source/target files."""
+    file_format, delimiter, _ = coerce_local_validate_fields(
+        file_format=body.file_format,
+        delimiter=body.delimiter,
+        fixed_width_config=None,
+        column_mappings=[],
+    )
+    json_run = is_json_run(file_format=file_format, delimiter=delimiter)
+    fixed_run = is_fixed_width_run(file_format=file_format, delimiter=delimiter)
+
+    job_id = uuid.uuid4()
+    jobs_root = _validation_jobs_root(settings)
+    job_dir = jobs_root / str(job_id)
+    job_dir.mkdir(parents=True, exist_ok=False)
+
+    units_meta: list[dict[str, object]] = []
+    use_cloud = bool(body.cloud_bucket and body.cloud_credentials_json)
+    if use_cloud:
+        _resolve_cloud_credentials(body.cloud_credentials_json)
+
+    for unit in body.units:
+        if use_cloud:
+            source_paths = [p.strip() for p in unit.source_paths if p.strip()]
+            target_paths = [p.strip() for p in unit.target_paths if p.strip()]
+        else:
+            source_paths = [str(resolve_local_csv_path(p, settings)) for p in unit.source_paths]
+            target_paths = [str(resolve_local_csv_path(p, settings)) for p in unit.target_paths]
+        fw_dict = None
+        if fixed_run:
+            if unit.fixed_width_config is None:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail=f"fixed_width_config is required for unit {unit.unit_id}",
+                )
+            fw_dict = unit.fixed_width_config.model_dump()
+        units_meta.append({
+            "unit_id": unit.unit_id.strip(),
+            "source_paths": source_paths,
+            "target_paths": target_paths,
+            "uid_column": (
+                "document"
+                if json_run
+                else "date"
+                if fixed_run
+                else unit.uid_column.strip()
+            ),
+            "column_mappings": [m.model_dump() for m in unit.column_mappings],
+            "fixed_width_config": fw_dict,
+        })
+
+    meta = {
+        "batch": True,
+        "file_format": file_format,
+        "delimiter": (
+            FIXED_WIDTH_DELIMITER
+            if fixed_run
+            else JSON_DELIMITER
+            if json_run
+            else delimiter
+        ),
+        "has_header": body.has_header,
+        "validate_header_formats": body.validate_header_formats,
+        "validate_footers": body.validate_footers,
+        "footer_trailing_rows": body.footer_trailing_rows,
+        "on_unit_failure": body.on_unit_failure.value,
+        "memory_log_interval_seconds": settings.validation_memory_log_interval_seconds,
+        "units": units_meta,
+    }
+    if use_cloud:
+        meta["cloud_bucket"] = body.cloud_bucket.strip()
+        meta["cloud_credentials_json"] = body.cloud_credentials_json
+        meta["cloud_project_id"] = body.cloud_project_id
+    (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
+    _atomic_write_json(job_dir / "status.json", {"status": "queued", "phase": "queued"})
+
+    queue = get_validation_queue(settings)
+    queued_job = queue.enqueue(job_id, job_dir)
+    poll = f"{settings.api_v1_prefix.rstrip('/')}/validate/jobs/{job_id}"
+    queue_stats = queue.stats
+    return ValidationJobAcceptedResponse(
+        job_id=job_id,
+        status="queued",
+        poll_url=poll,
+        queue_position=queued_job.position,
+        queue_pending=queue_stats["pending"],
+        queue_running=queue_stats["running"],
+        max_concurrency=queue_stats["max_concurrency"],
+    )
+
+
+@router.post(
     "/validate/local/analyze",
     response_model=MappingAnalyzeResponse,
     summary="Optional header-format and footer checks for the mapping wizard",
@@ -1112,6 +1477,17 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
                 message = f"Waiting in queue (position {pos + 1} of {queue.pending_count})"
         return ValidationJobDetailResponse(status=status_val, phase=phase, message=message, progress=progress)
     if status_val == "failed":
+        batch_path = job_dir / "batch_result.json"
+        if batch_path.is_file():
+            return _build_batch_job_detail(
+                settings=settings,
+                job_dir=job_dir,
+                status_val=status_val,
+                phase=phase,
+                message=message,
+                progress=progress,
+                error=str(st.get("error") or "failed"),
+            )
         return ValidationJobDetailResponse(
             status="failed",
             phase=phase,
@@ -1126,6 +1502,17 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
             message=message,
             progress=progress,
             error=str(st.get("error") or ""),
+        )
+
+    batch_path = job_dir / "batch_result.json"
+    if batch_path.is_file():
+        return _build_batch_job_detail(
+            settings=settings,
+            job_dir=job_dir,
+            status_val=status_val,
+            phase=phase,
+            message=message,
+            progress=progress,
         )
 
     result_path = job_dir / "result.json"

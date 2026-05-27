@@ -542,6 +542,155 @@ class ValidationJobAcceptedResponse(BaseModel):
     )
 
 
+
+class BatchFailureMode(str, Enum):
+    """How to proceed when one validation unit fails in a batch job."""
+
+    STOP = "stop"
+    CONTINUE = "continue"
+
+
+class ValidationUnitSpec(BaseModel):
+    """One logical source/target comparison (may merge multiple paths per side)."""
+
+    unit_id: str = Field(description="Stable id for UI pairing and per-pair column mapping")
+    source_paths: list[str] = Field(min_length=1, description="One or more source files (merged when >1)")
+    target_paths: list[str] = Field(min_length=1, description="One or more target files (merged when >1)")
+    uid_column: str = Field(default="id", description="Join column for CSV validation")
+    column_mappings: list[ColumnMapping] = Field(default_factory=list)
+    fixed_width_config: FixedWidthConfig | None = Field(
+        default=None,
+        description="Per-pair fixed-width layout when file_format is fixed-width",
+    )
+
+
+class LocalBatchValidateRequest(BaseModel):
+    """JSON body for POST /validate/local/batch."""
+
+    file_format: str = Field(default="csv", description="csv, fixed-width, or json")
+    units: list[ValidationUnitSpec] = Field(min_length=1)
+    on_unit_failure: BatchFailureMode = Field(
+        default=BatchFailureMode.CONTINUE,
+        description="stop after first failed unit, or run all units and report per-pair status",
+    )
+    delimiter: str = Field(default="auto")
+    has_header: bool = Field(default=True)
+    validate_header_formats: bool = Field(default=False)
+    validate_footers: bool = Field(default=False)
+    footer_trailing_rows: int = Field(default=1, ge=0, le=10)
+    cloud_bucket: str | None = Field(
+        default=None,
+        description="When set, unit source_paths/target_paths are object names in this bucket",
+    )
+    cloud_credentials_json: str | None = Field(
+        default=None,
+        description="Service account JSON used with cloud_bucket for batch jobs",
+    )
+    cloud_project_id: str | None = None
+
+
+class MatchFilePairsRequest(BaseModel):
+    """JSON body for POST /validate/local/match-pairs."""
+
+    source_directory: str
+    target_directory: str
+    file_format: str = Field(default="csv", description="Used to filter files by extension")
+    recursive: bool = Field(
+        default=False,
+        description="When true, include files in subdirectories (matched by basename only)",
+    )
+
+
+class CloudBrowseRequest(BaseModel):
+    """JSON body for POST /validate/cloud/browse."""
+
+    bucket: str
+    prefix: str = Field(default="", description="Folder prefix inside the bucket (e.g. data/2024/)")
+    credentials_json: str
+    project_id: str | None = None
+    file_format: str = Field(default="csv")
+
+
+class CloudBrowseEntry(BaseModel):
+    """One prefix or object under a GCS browse listing."""
+
+    name: str
+    path: str = Field(description="Object name or prefix path within the bucket")
+    is_dir: bool
+
+
+class CloudBrowseResponse(BaseModel):
+    """GCS prefix listing for the cloud file picker."""
+
+    bucket: str
+    prefix: str
+    parent_prefix: str | None = None
+    entries: list[CloudBrowseEntry] = Field(default_factory=list)
+    truncated: bool = False
+
+
+class CloudMatchFilePairsRequest(BaseModel):
+    """JSON body for POST /validate/cloud/match-pairs."""
+
+    bucket: str
+    source_prefix: str = ""
+    target_prefix: str = ""
+    credentials_json: str
+    project_id: str | None = None
+    file_format: str = Field(default="csv")
+    recursive: bool = False
+
+
+class FilePairMatch(BaseModel):
+    """One suggested or user-confirmed file pair."""
+
+    unit_id: str
+    source_path: str
+    target_path: str
+    source_name: str
+    target_name: str
+    auto_matched: bool = Field(default=True)
+
+
+class MatchFilePairsResponse(BaseModel):
+    """Auto filename pairing between two directories."""
+
+    pairs: list[FilePairMatch] = Field(default_factory=list)
+    unmatched_sources: list[str] = Field(default_factory=list)
+    unmatched_targets: list[str] = Field(default_factory=list)
+
+
+class BatchUnitResult(BaseModel):
+    """Outcome for one unit in a batch validation job."""
+
+    unit_id: str
+    source_paths: list[str] = Field(default_factory=list)
+    target_paths: list[str] = Field(default_factory=list)
+    status: str = Field(description="completed | failed | skipped")
+    error: str | None = None
+    result: ValidateResponse | None = None
+
+
+class BatchValidateSummary(BaseModel):
+    """Aggregate stats across all units in a batch job."""
+
+    total_units: int = Field(ge=0)
+    completed_units: int = Field(ge=0)
+    failed_units: int = Field(ge=0)
+    skipped_units: int = Field(ge=0)
+    passed_units: int = Field(ge=0, description="Units with zero mismatch records")
+    is_match: bool = Field(description="True when every completed unit has zero mismatches")
+
+
+class BatchValidateResponse(BaseModel):
+    """Final payload for a completed batch validation job."""
+
+    summary: BatchValidateSummary
+    units: list[BatchUnitResult] = Field(default_factory=list)
+    on_unit_failure: BatchFailureMode = BatchFailureMode.CONTINUE
+    durations: ValidationDurations | None = None
+
+
 class ValidationJobDetailResponse(BaseModel):
     """Poll response: while running only *status* is set; when completed *result* contains the API payload."""
 
@@ -551,6 +700,10 @@ class ValidationJobDetailResponse(BaseModel):
     progress: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
     result: ValidateResponse | None = None
+    batch_result: BatchValidateResponse | None = Field(
+        default=None,
+        description="Present when the job was queued via POST /validate/local/batch",
+    )
 
 
 def build_mismatch_counts(summary_dict: dict[str, int]) -> MismatchCounts:

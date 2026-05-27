@@ -113,6 +113,34 @@ def run_job_directory(job_dir: Path) -> int:
         return _fail("job_dir missing meta.json")
 
     meta = _load_json(meta_path)
+    if bool(meta.get("batch")):
+        from pegasus.validation.batch_job_runner import run_batch_job_directory
+
+        get_settings.cache_clear()
+        settings = get_settings()
+        start = time.time()
+
+        def _batch_progress(event: dict[str, Any]) -> None:
+            _write_json(
+                status_path,
+                {
+                    "status": "running",
+                    "phase": str(event.get("phase") or "validating"),
+                    "message": str(event.get("message") or "Running batch validation"),
+                    "progress": {
+                        "started_at_epoch_s": start,
+                        "percent": float(event.get("percent")) if event.get("percent") is not None else None,
+                        **(event.get("progress") if isinstance(event.get("progress"), dict) else {}),
+                    },
+                },
+            )
+
+        return run_batch_job_directory(
+            job_dir,
+            settings=settings,
+            progress_callback=_batch_progress,
+        )
+
     uid_column = str(meta.get("uid_column") or "")
     delimiter = str(meta.get("delimiter") or "auto")
     column_mappings = [ColumnMapping.model_validate(m) for m in list(meta.get("column_mappings") or [])]

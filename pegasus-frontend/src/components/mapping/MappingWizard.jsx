@@ -5,6 +5,8 @@ import StepIndicator    from './StepIndicator'
 import Step1_DataSource from './Step1_DataSource'
 import Step2_FilePicker from './Step2_FilePicker'
 import Step3_Configure  from './Step3_Configure'
+import StepInputLayout from './StepInputLayout'
+import StepFilePairing from './StepFilePairing'
 import ActionBar        from './ActionBar'
 import ParallelValidationModal from '../ParallelValidationModal'
 import { buildMappingRows, mappingRowFromApi, toColumnMappingPayload } from './columnMapping'
@@ -12,6 +14,15 @@ import { buildAnalyzePayload, formatCheckBySource } from './mappingAnalyze'
 import MappingColumnPreview from './MappingColumnPreview'
 import ResolvedDelimiterNotice from './ResolvedDelimiterNotice'
 import { saveValidationDraft } from '../../api/validationHistory'
+import {
+  buildBatchValidatePayload,
+  matchFilePairs,
+  newUnitId,
+  normalizeBatchPollResult,
+  unitFromMerge,
+  unitsFromPairs,
+} from '../../api/batchValidation'
+import { matchCloudFilePairs } from '../../api/cloudBrowse'
 
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
@@ -105,6 +116,29 @@ function isStorageSelectionComplete(storageType, path, cloudConfig) {
     )
   }
   return Boolean(String(path || '').trim())
+}
+
+async function pollJobDetail(pollPath, { timeoutMs = 0, intervalMs = 400, onPoll } = {}) {
+  const url = absoluteApiUrl(pollPath)
+  const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Number.POSITIVE_INFINITY
+  while (Date.now() < deadline) {
+    const res = await fetch(url, { method: 'GET' })
+    const raw = await res.text()
+    let payload = {}
+    if (raw) { try { payload = JSON.parse(raw) } catch { throw new Error(raw.trim().slice(0, 400)) } }
+    if (!res.ok) throw new Error(formatDetail(payload.detail) || `${res.status} ${res.statusText}`)
+    if (typeof onPoll === 'function') onPoll(payload)
+    if (payload.status === 'completed') {
+      if (payload.batch_result) return payload
+      if (payload.result) return { ...payload, result: normalizeResult(payload.result) }
+      return payload
+    }
+    if (payload.status === 'failed') {
+      throw new Error(formatJobError(payload.message || payload.error))
+    }
+    await new Promise(r => setTimeout(r, intervalMs))
+  }
+  throw new Error('Timed out waiting for validation job')
 }
 
 async function pollJob(pollPath, { timeoutMs = 0, intervalMs = 400, onPoll } = {}) {
@@ -550,6 +584,28 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [draftSaveError, setDraftSaveError] = useState('')
   const preserveFixedWidthDatesRef = useRef(false)
 
+  const [inputLayout, setInputLayout] = useState('pair')
+  const [onUnitFailure, setOnUnitFailure] = useState('continue')
+  const [validationUnits, setValidationUnits] = useState([])
+  const [activeUnitId, setActiveUnitId] = useState(null)
+  const [unitConfigs, setUnitConfigs] = useState({})
+  const [batchResult, setBatchResult] = useState(null)
+  const [pairingState, setPairingState] = useState({ pairs: [], unmatchedSources: [], unmatchedTargets: [] })
+  const [sourceFolder, setSourceFolder] = useState('')
+  const [targetFolder, setTargetFolder] = useState('')
+  const [sourceMultiPaths, setSourceMultiPaths] = useState([])
+  const [targetMultiPaths, setTargetMultiPaths] = useState([])
+  const [pairingLoading, setPairingLoading] = useState(false)
+  const [pairingError, setPairingError] = useState('')
+  const [recursiveFolderMatch, setRecursiveFolderMatch] = useState(false)
+  const [sourceCloudPrefix, setSourceCloudPrefix] = useState('')
+  const [targetCloudPrefix, setTargetCloudPrefix] = useState('')
+
+  const isBatchMode = inputLayout !== 'pair'
+  const activeUnit = validationUnits.find(u => u.unitId === activeUnitId) || validationUnits[0] || null
+  const effectiveSourcePath = isBatchMode ? (activeUnit?.sourcePaths?.[0] || '') : sourcePath
+  const effectiveTargetPath = isBatchMode ? (activeUnit?.targetPaths?.[0] || '') : targetPath
+
   useEffect(() => {
     if (!initialMappingData) return
 
@@ -649,30 +705,331 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
 
 
   function handleDataSourceNext(srcType, tgtType) {
-    setSourceStorageType(srcType); setTargetStorageType(tgtType); setStep(2); setSubPhase('pick-source')
+    setSourceStorageType(srcType); setTargetStorageType(tgtType)
+    if (inputLayout === 'folder') setSubPhase('pick-source-folder')
+    else if (inputLayout === 'source-one-target-many') setSubPhase('pick-source')
+    else if (inputLayout === 'source-many-target-one') setSubPhase('pick-source-multi')
+    else setSubPhase('pick-source')
   }
-  function handleSourceSelected(selection) {
-    if (typeof selection === 'string') {
-      setSourcePath(selection)
-    } else if (selection && typeof selection === 'object') {
-      setSourceCloudConfig(selection)
-      setSourcePath('')
+
+  function handleInputLayoutNext(layout) {
+    setInputLayout(layout)
+    setValidationUnits([])
+    setActiveUnitId(null)
+    setUnitConfigs({})
+    setStep(2)
+    setSubPhase('type-select')
+  }
+
+  function persistActiveUnitConfig() {
+    if (!isBatchMode || !activeUnitId) return
+    setUnitConfigs(prev => ({
+      ...prev,
+      [activeUnitId]: {
+        mappings,
+        uidColumn,
+        delimiter,
+        hasHeader,
+        validateHeaderFormats,
+        validateFooters,
+        footerTrailingRows,
+        columnPreview,
+        formatChecks,
+        footerValidation,
+        fwColumns,
+        fwJoinColumn,
+        fwMatchStrategy,
+        fwDateColumn,
+        sourceDateStart,
+        sourceDateEnd,
+        sourceDateFormat,
+        targetDateStart,
+        targetDateEnd,
+        targetDateFormat,
+      },
+    }))
+  }
+
+  function loadUnitConfig(unitId) {
+    const cfg = unitConfigs[unitId]
+    if (!cfg) {
+      setMappings([])
+      setUidColumn('id')
+      setColumnPreview({
+        sourceColumns: [],
+        targetColumns: [],
+        compareColumns: [],
+        autoMappings: [],
+        unmatchedSourceColumns: [],
+        unmatchedTargetColumns: [],
+        delimiter: 'auto',
+        sourceSamples: {},
+        targetSamples: {},
+        sampleRowCount: 6,
+      })
+      setFormatChecks([])
+      setFooterValidation(null)
+      return
     }
-    setSubPhase('pick-target')
+    setMappings(cfg.mappings || [])
+    setUidColumn(cfg.uidColumn || 'id')
+    setDelimiter(cfg.delimiter || 'auto')
+    setHasHeader(cfg.hasHeader !== false)
+    setValidateHeaderFormats(cfg.validateHeaderFormats || false)
+    setValidateFooters(cfg.validateFooters || false)
+    setFooterTrailingRows(cfg.footerTrailingRows || 1)
+    setColumnPreview(cfg.columnPreview || {
+      sourceColumns: [],
+      targetColumns: [],
+      compareColumns: [],
+      autoMappings: [],
+      unmatchedSourceColumns: [],
+      unmatchedTargetColumns: [],
+      delimiter: 'auto',
+      sourceSamples: {},
+      targetSamples: {},
+      sampleRowCount: 6,
+    })
+    setFormatChecks(cfg.formatChecks || [])
+    setFooterValidation(cfg.footerValidation ?? null)
+    if (fileFormat === 'fixed-width') {
+      setFwColumns(cfg.fwColumns || [])
+      setFwJoinColumn(cfg.fwJoinColumn || 'name')
+      setFwMatchStrategy(cfg.fwMatchStrategy || 'fuzzy')
+      setFwDateColumn(cfg.fwDateColumn || 'dob')
+      setSourceDateStart(cfg.sourceDateStart ?? 58)
+      setSourceDateEnd(cfg.sourceDateEnd ?? 68)
+      setSourceDateFormat(cfg.sourceDateFormat || 'dd/mm/yyyy')
+      setTargetDateStart(cfg.targetDateStart ?? 58)
+      setTargetDateEnd(cfg.targetDateEnd ?? 68)
+      setTargetDateFormat(cfg.targetDateFormat || 'yyyy/mm/dd')
+    }
   }
+
+  function switchActiveUnit(unitId) {
+    persistActiveUnitConfig()
+    setActiveUnitId(unitId)
+    loadUnitConfig(unitId)
+  }
+
+  function parseSelection(selection) {
+    if (typeof selection === 'string') return { kind: 'file', path: selection }
+    if (selection && typeof selection === 'object') return selection
+    return null
+  }
+
+  async function runAutoPairing(sourceDir, targetDir) {
+    setPairingLoading(true)
+    setPairingError('')
+    try {
+      const data = await matchFilePairs({
+        sourceDirectory: sourceDir,
+        targetDirectory: targetDir,
+        fileFormat,
+        recursive: recursiveFolderMatch,
+      })
+      setPairingState({
+        pairs: data.pairs || [],
+        unmatchedSources: data.unmatched_sources || [],
+        unmatchedTargets: data.unmatched_targets || [],
+      })
+      setSubPhase('file-pairing')
+    } catch (err) {
+      setPairingError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPairingLoading(false)
+    }
+  }
+
+  async function runAutoPairingCloud(sourcePrefix, targetPrefix) {
+    setPairingLoading(true)
+    setPairingError('')
+    try {
+      const data = await matchCloudFilePairs({
+        bucket: sourceCloudConfig.bucket,
+        sourcePrefix,
+        targetPrefix,
+        credentialsJson: sourceCloudConfig.credentialsJson,
+        projectId: sourceCloudConfig.projectId,
+        fileFormat,
+        recursive: recursiveFolderMatch,
+      })
+      setPairingState({
+        pairs: data.pairs || [],
+        unmatchedSources: data.unmatched_sources || [],
+        unmatchedTargets: data.unmatched_targets || [],
+      })
+      setSubPhase('file-pairing')
+    } catch (err) {
+      setPairingError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPairingLoading(false)
+    }
+  }
+
+  function applyCloudConfig(parsed) {
+    setSourceCloudConfig({
+      provider: 'google-cloud-storage',
+      bucket: parsed.bucket || '',
+      objectName: parsed.objectName || '',
+      credentialsJson: parsed.credentialsJson || '',
+      projectId: parsed.projectId || '',
+    })
+    setTargetCloudConfig({
+      provider: 'google-cloud-storage',
+      bucket: parsed.bucket || '',
+      objectName: '',
+      credentialsJson: parsed.credentialsJson || '',
+      projectId: parsed.projectId || '',
+    })
+  }
+
+  function handleSourceSelected(selection) {
+    const parsed = parseSelection(selection)
+    if (!parsed) return
+    if (parsed.kind === 'cloud') {
+      setSourceCloudConfig({
+        provider: parsed.provider || 'google-cloud-storage',
+        bucket: parsed.bucket || '',
+        objectName: parsed.objectName || '',
+        credentialsJson: parsed.credentialsJson || '',
+        projectId: parsed.projectId || '',
+      })
+      setTargetCloudConfig(prev => ({
+        ...prev,
+        bucket: parsed.bucket || prev.bucket,
+        credentialsJson: parsed.credentialsJson || prev.credentialsJson,
+        projectId: parsed.projectId || prev.projectId,
+      }))
+      setSourcePath('')
+      setSubPhase(inputLayout === 'source-one-target-many' ? 'pick-target-multi' : 'pick-target')
+      return
+    }
+    if (parsed.kind === 'cloud-folder') {
+      applyCloudConfig(parsed)
+      setSourceCloudPrefix(parsed.prefix || '')
+      setSubPhase('pick-target-folder')
+      return
+    }
+    if (parsed.kind === 'cloud-files') {
+      applyCloudConfig(parsed)
+      setSourceMultiPaths(parsed.objectNames || [])
+      setSubPhase('pick-target')
+      return
+    }
+    if (inputLayout === 'folder' && parsed.kind === 'folder') {
+      setSourceFolder(parsed.path)
+      setSubPhase('pick-target-folder')
+      return
+    }
+    if (inputLayout === 'source-many-target-one' && parsed.kind === 'files') {
+      setSourceMultiPaths(parsed.paths || [])
+      setSubPhase('pick-target')
+      return
+    }
+    if (parsed.kind === 'file' || typeof selection === 'string') {
+      setSourcePath(parsed.path || selection)
+    }
+    if (inputLayout === 'source-one-target-many') setSubPhase('pick-target-multi')
+    else setSubPhase('pick-target')
+  }
+
   function handleTargetSelected(selection) {
-    if (typeof selection === 'string') {
-      setTargetPath(selection)
-    } else if (selection && typeof selection === 'object') {
-      setTargetCloudConfig(selection)
+    const parsed = parseSelection(selection)
+    if (!parsed) return
+    if (parsed.kind === 'cloud') {
+      setTargetCloudConfig({
+        provider: parsed.provider || 'google-cloud-storage',
+        bucket: parsed.bucket || '',
+        objectName: parsed.objectName || '',
+        credentialsJson: parsed.credentialsJson || '',
+        projectId: parsed.projectId || '',
+      })
       setTargetPath('')
+      if (inputLayout === 'source-many-target-one' && sourceMultiPaths.length) {
+        const unit = unitFromMerge({
+          sourcePaths: sourceMultiPaths,
+          targetPaths: [parsed.objectName],
+          label: `${sourceMultiPaths.length} sources → ${parsed.objectName}`,
+        })
+        setValidationUnits([unit])
+        setActiveUnitId(unit.unitId)
+      }
+      setStep(3)
+      return
+    }
+    if (parsed.kind === 'cloud-folder') {
+      applyCloudConfig(parsed)
+      setTargetCloudPrefix(parsed.prefix || '')
+      runAutoPairingCloud(sourceCloudPrefix, parsed.prefix || '')
+      return
+    }
+    if (inputLayout === 'source-one-target-many' && parsed.kind === 'cloud-files') {
+      applyCloudConfig(parsed)
+      const srcObject = sourceCloudConfig.objectName?.trim()
+      if (!srcObject) {
+        setPairingError('Select a single source object first')
+        return
+      }
+      const unit = unitFromMerge({
+        sourcePaths: [srcObject],
+        targetPaths: parsed.objectNames || [],
+        label: `${srcObject.split('/').pop()} → ${(parsed.objectNames || []).length} targets`,
+      })
+      setValidationUnits([unit])
+      setActiveUnitId(unit.unitId)
+      setStep(3)
+      return
+    }
+    if (inputLayout === 'folder' && parsed.kind === 'folder') {
+      setTargetFolder(parsed.path)
+      runAutoPairing(sourceFolder, parsed.path)
+      return
+    }
+    if (inputLayout === 'source-one-target-many' && parsed.kind === 'files') {
+      const unit = unitFromMerge({
+        sourcePaths: [sourcePath],
+        targetPaths: parsed.paths || [],
+        label: `${sourcePath.split('/').pop()} → ${parsed.paths.length} targets`,
+      })
+      setValidationUnits([unit])
+      setActiveUnitId(unit.unitId)
+      setStep(3)
+      return
+    }
+    if (inputLayout === 'source-many-target-one' && (parsed.kind === 'file' || typeof selection === 'string')) {
+      const target = parsed.path || selection
+      setTargetPath(target)
+      const unit = unitFromMerge({
+        sourcePaths: sourceMultiPaths,
+        targetPaths: [target],
+        label: `${sourceMultiPaths.length} sources → ${target.split('/').pop()}`,
+      })
+      setValidationUnits([unit])
+      setActiveUnitId(unit.unitId)
+      setStep(3)
+      return
+    }
+    if (parsed.kind === 'file' || typeof selection === 'string') {
+      setTargetPath(parsed.path || selection)
     }
     setStep(3)
   }
 
+  function handlePairingComplete(pairs) {
+    const units = unitsFromPairs(pairs)
+    setValidationUnits(units)
+    setActiveUnitId(units[0]?.unitId || null)
+    setStep(3)
+  }
+
   useEffect(() => {
-    const hasSource = isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
-    const hasTarget = isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
+    const hasSource = isBatchMode
+      ? Boolean(activeUnit?.sourcePaths?.length)
+      : isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
+    const hasTarget = isBatchMode
+      ? Boolean(activeUnit?.targetPaths?.length)
+      : isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
     if (step !== 3 || !hasSource || !hasTarget || fileFormat === 'fixed-width' || fileFormat === 'json') return
 
     const controller = new AbortController()
@@ -685,13 +1042,35 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
-          body: JSON.stringify({
-            ...buildStoragePayload('source', sourceStorageType, sourcePath, sourceCloudConfig),
-            ...buildStoragePayload('target', targetStorageType, targetPath, targetCloudConfig),
-            uid_column: uidColumn.trim(),
-            delimiter: delimiter.trim() || 'auto',
-            has_header: hasHeader,
-          }),
+          body: JSON.stringify(
+            isBatchMode && sourceStorageType === 'cloud' && activeUnit
+              ? {
+                  source_cloud: {
+                    provider: 'google-cloud-storage',
+                    bucket: sourceCloudConfig.bucket,
+                    object_name: activeUnit.sourcePaths[0],
+                    credentials_json: sourceCloudConfig.credentialsJson,
+                    project_id: sourceCloudConfig.projectId || undefined,
+                  },
+                  target_cloud: {
+                    provider: 'google-cloud-storage',
+                    bucket: targetCloudConfig.bucket || sourceCloudConfig.bucket,
+                    object_name: activeUnit.targetPaths[0],
+                    credentials_json: targetCloudConfig.credentialsJson || sourceCloudConfig.credentialsJson,
+                    project_id: targetCloudConfig.projectId || sourceCloudConfig.projectId || undefined,
+                  },
+                  uid_column: uidColumn.trim(),
+                  delimiter: delimiter.trim() || 'auto',
+                  has_header: hasHeader,
+                }
+              : {
+                  source_path: effectiveSourcePath,
+                  target_path: effectiveTargetPath,
+                  uid_column: uidColumn.trim(),
+                  delimiter: delimiter.trim() || 'auto',
+                  has_header: hasHeader,
+                },
+          ),
         })
         const raw = await res.text()
         let data = {}
@@ -758,6 +1137,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     return () => controller.abort()
   }, [
     step,
+    isBatchMode,
+    activeUnitId,
+    effectiveSourcePath,
+    effectiveTargetPath,
     sourceStorageType,
     targetStorageType,
     sourcePath,
@@ -900,8 +1283,93 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   ])
 
   async function handleValidate() {
-    setIsRunning(true); setPhase('running'); setResult(null); setErrorMsg('')
+    setIsRunning(true); setPhase('running'); setResult(null); setBatchResult(null); setErrorMsg('')
     try {
+      if (isBatchMode) {
+        persistActiveUnitConfig()
+        const mergedConfigs = {
+          ...unitConfigs,
+          ...(activeUnitId ? {
+            [activeUnitId]: {
+              ...(unitConfigs[activeUnitId] || {}),
+              mappings,
+              uidColumn,
+              delimiter,
+              hasHeader,
+              validateHeaderFormats,
+              validateFooters,
+              footerTrailingRows,
+              columnMappings: toColumnMappingPayload(mappings),
+            },
+          } : {}),
+        }
+        const bodyPayload = buildBatchValidatePayload({
+          fileFormat,
+          units: validationUnits,
+          unitConfigs: Object.fromEntries(
+            validationUnits.map(u => [u.unitId, {
+              ...(mergedConfigs[u.unitId] || {}),
+              columnMappings: toColumnMappingPayload(mergedConfigs[u.unitId]?.mappings || mappings),
+              uidColumn: mergedConfigs[u.unitId]?.uidColumn || uidColumn,
+            }]),
+          ),
+          onUnitFailure,
+          delimiter,
+          hasHeader,
+          validateHeaderFormats,
+          validateFooters,
+          footerTrailingRows,
+          fixedWidthConfigBuilder: cfg => buildFixedWidthValidateConfig({
+            columns: cfg.fwColumns || fwColumns,
+            joinColumn: cfg.fwJoinColumn || fwJoinColumn,
+            matchStrategy: cfg.fwMatchStrategy || fwMatchStrategy,
+            dateColumn: cfg.fwDateColumn || fwDateColumn,
+            sourceDateStart: cfg.sourceDateStart ?? sourceDateStart,
+            sourceDateEnd: cfg.sourceDateEnd ?? sourceDateEnd,
+            sourceDateFormat: cfg.sourceDateFormat || sourceDateFormat,
+            targetDateStart: cfg.targetDateStart ?? targetDateStart,
+            targetDateEnd: cfg.targetDateEnd ?? targetDateEnd,
+            targetDateFormat: cfg.targetDateFormat || targetDateFormat,
+          }),
+          cloudBucket: sourceStorageType === 'cloud' ? sourceCloudConfig.bucket : undefined,
+          cloudCredentialsJson: sourceStorageType === 'cloud' ? sourceCloudConfig.credentialsJson : undefined,
+          cloudProjectId: sourceStorageType === 'cloud' ? sourceCloudConfig.projectId : undefined,
+        })
+        const res = await fetch(absoluteApiUrl('/api/v1/validate/local/batch'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyPayload),
+        })
+        const raw = await res.text()
+        let data = {}
+        if (raw) { try { data = JSON.parse(raw) } catch { data = { detail: raw.trim().slice(0, 800) } } }
+        if (!res.ok) throw new Error(formatDetail(data.detail) || `${res.status} ${res.statusText}`)
+        if (res.status === 202 && data.poll_url) {
+          const jid = data.job_id != null ? String(data.job_id) : null
+          setJobProgress({ phase: 'accepted', jobId: jid })
+          const pollPayload = await pollJobDetail(data.poll_url, {
+            timeoutMs: pollTimeoutMs,
+            onPoll: payload => {
+              const st = payload?.status
+              setJobProgress(prev => ({ ...prev, phase: payload?.phase || (st === 'running' ? 'running' : st) || 'running' }))
+            },
+          })
+          const batch = normalizeBatchPollResult(pollPayload)
+          if (batch) {
+            setBatchResult(batch)
+            setPhase(batch.summary?.is_match ? 'success' : 'error')
+            if (!batch.summary?.is_match) {
+              setErrorMsg(`${batch.summary.failed_units} failed, ${batch.summary.total_units - batch.summary.passed_units} with mismatches`)
+            }
+          } else {
+            throw new Error('Batch job completed without batch_result payload')
+          }
+        } else {
+          throw new Error('Unexpected batch API response')
+        }
+        return
+      }
+
       const sourcePayload = buildStoragePayload('source', sourceStorageType, sourcePath, sourceCloudConfig)
       const targetPayload = buildStoragePayload('target', targetStorageType, targetPath, targetCloudConfig)
       const bodyPayload = fileFormat === 'fixed-width' ? {
@@ -1016,12 +1484,20 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
 
 
   const showFormatSelect = step === 1 && subPhase === 'format-select'
+  const showInputLayout = step === 2 && subPhase === 'input-layout'
   const showTypeSelect = step === 2 && subPhase === 'type-select'
-  const showPickSource = step === 2 && subPhase === 'pick-source'
-  const showPickTarget = step === 2 && subPhase === 'pick-target'
+  const showPickSource = step === 2 && (subPhase === 'pick-source' || subPhase === 'pick-source-folder' || subPhase === 'pick-source-multi')
+  const showPickTarget = step === 2 && (subPhase === 'pick-target' || subPhase === 'pick-target-folder' || subPhase === 'pick-target-multi')
+  const showFilePairing = step === 2 && subPhase === 'file-pairing'
   const showConfigure  = step === 3
   const showReview     = step === 4
-  const isValidForRun  = fileFormat === 'json'
+  const isValidForRun  = isBatchMode
+    ? validationUnits.length > 0 && (fileFormat === 'json'
+      ? true
+      : fileFormat === 'fixed-width'
+        ? fwColumns.length > 0 && !!fwJoinColumn
+        : !!uidColumn.trim())
+    : fileFormat === 'json'
     ? (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
       && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig))
     : fileFormat === 'fixed-width'
@@ -1032,8 +1508,12 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       && !!sourceDateFormat.trim()
       && !!targetDateFormat.trim())
     : (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig) && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig) && !!uidColumn.trim())
-  const sourceDisplay = describeStorageInput(sourceStorageType, sourcePath, sourceCloudConfig)
-  const targetDisplay = describeStorageInput(targetStorageType, targetPath, targetCloudConfig)
+  const sourceDisplay = isBatchMode && activeUnit
+    ? activeUnit.sourcePaths.join(', ')
+    : describeStorageInput(sourceStorageType, sourcePath, sourceCloudConfig)
+  const targetDisplay = isBatchMode && activeUnit
+    ? activeUnit.targetPaths.join(', ')
+    : describeStorageInput(targetStorageType, targetPath, targetCloudConfig)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1173,7 +1653,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
               {/* CSV Option */}
               <button
-                onClick={() => { setFileFormat('csv'); setStep(2); setSubPhase('type-select') }}
+                onClick={() => { setFileFormat('csv'); setStep(2); setSubPhase('input-layout') }}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -1220,7 +1700,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
 
               {/* Fixed Width Option */}
               <button
-                onClick={() => { setFileFormat('fixed-width'); setStep(2); setSubPhase('type-select') }}
+                onClick={() => { setFileFormat('fixed-width'); setStep(2); setSubPhase('input-layout') }}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -1266,7 +1746,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               </button>
 
               <button
-                onClick={() => { setFileFormat('json'); setStep(2); setSubPhase('type-select') }}
+                onClick={() => { setFileFormat('json'); setStep(2); setSubPhase('input-layout') }}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -1316,10 +1796,18 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         )}
 
         {/* Step 1b: Select Storage */}
+        {showInputLayout && (
+          <StepInputLayout
+            fileFormat={fileFormat}
+            onBack={() => { setStep(1); setSubPhase('format-select') }}
+            onNext={handleInputLayoutNext}
+          />
+        )}
+
         {showTypeSelect && (
           <div>
             <button
-              onClick={() => { setStep(1); setSubPhase('format-select') }}
+              onClick={() => { setStep(2); setSubPhase('input-layout') }}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
                 background: 'none', border: 'none', cursor: 'pointer',
@@ -1348,11 +1836,16 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
             onCloudConfigChange={setSourceCloudConfig}
             onSelect={handleSourceSelected}
             onBack={() => setSubPhase('type-select')}
-            disabled={false}
+            disabled={pairingLoading}
+            selectionMode={
+              subPhase === 'pick-source-folder' ? 'folder'
+                : subPhase === 'pick-source-multi' ? 'multi'
+                  : 'file'
+            }
+            fileFormat={fileFormat}
           />
         )}
 
-        {/* Step 1c */}
         {showPickTarget && (
           <Step2_FilePicker
             panelLabel="Target"
@@ -1361,14 +1854,79 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
             cloudConfig={targetCloudConfig}
             onCloudConfigChange={setTargetCloudConfig}
             onSelect={handleTargetSelected}
-            onBack={() => setSubPhase('pick-source')}
-            disabled={false}
+            onBack={() => {
+              if (subPhase === 'pick-target-folder') setSubPhase('pick-source-folder')
+              else if (subPhase === 'pick-target-multi') setSubPhase('pick-source')
+              else setSubPhase('pick-source')
+            }}
+            disabled={pairingLoading}
+            selectionMode={
+              subPhase === 'pick-target-folder' ? 'folder'
+                : subPhase === 'pick-target-multi' ? 'multi'
+                  : 'file'
+            }
+            fileFormat={fileFormat}
           />
+        )}
+
+        {pairingLoading && (
+          <div style={{ padding: 16, fontSize: 13, color: 'var(--text-3)' }}>Matching files by name…</div>
+        )}
+        {pairingError && (
+          <div style={{ padding: 12, borderRadius: 8, background: 'var(--danger-muted)', color: 'var(--danger)', fontSize: 12 }}>
+            {pairingError}
+          </div>
+        )}
+
+        {showFilePairing && (
+          <>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-2)', marginBottom: 8 }}>
+              <input
+                type="checkbox"
+                checked={recursiveFolderMatch}
+                onChange={e => setRecursiveFolderMatch(e.target.checked)}
+              />
+              Include files in subfolders (recursive match by filename)
+            </label>
+            <StepFilePairing
+            pairs={pairingState.pairs}
+            unmatchedSources={pairingState.unmatchedSources}
+            unmatchedTargets={pairingState.unmatchedTargets}
+            onChange={setPairingState}
+            onBack={() => setSubPhase('pick-target-folder')}
+            onContinue={handlePairingComplete}
+          />
+          </>
         )}
 
         {/* Step 2: Configure */}
         {showConfigure && (
           <>
+            {isBatchMode && validationUnits.length > 1 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+                {validationUnits.map(unit => (
+                  <button
+                    key={unit.unitId}
+                    type="button"
+                    onClick={() => switchActiveUnit(unit.unitId)}
+                    className={activeUnitId === unit.unitId ? 'btn btn-primary' : 'btn btn-secondary'}
+                    style={{ height: 30, fontSize: 12 }}
+                  >
+                    {unit.label || unit.sourcePaths[0]?.split('/').pop() || unit.unitId.slice(0, 8)}
+                  </button>
+                ))}
+              </div>
+            )}
+            {isBatchMode && activeUnit && (
+              <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
+                Source: {activeUnit.sourcePaths.map(p => p.split('/').pop()).join(', ')}
+                {' → '}
+                Target: {activeUnit.targetPaths.map(p => p.split('/').pop()).join(', ')}
+                {(activeUnit.sourcePaths.length > 1 || activeUnit.targetPaths.length > 1) && (
+                  <span style={{ color: 'var(--text-4)' }}> (merged before validate)</span>
+                )}
+              </p>
+            )}
             {fileFormat === 'json' ? (
               <div style={{
                 padding: 20,
@@ -1468,7 +2026,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               </button>
               <button
                 type="button"
-                onClick={() => setStep(4)}
+                onClick={() => { persistActiveUnitConfig(); setStep(4) }}
                 className="btn btn-primary"
               >
                 Review & Save
@@ -1518,6 +2076,44 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 </div>
               ))}
             </div>
+
+            {isBatchMode && phase === 'idle' && (
+              <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, border: '1px solid var(--border-1)', background: 'var(--surface-2)' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 8 }}>
+                  Batch: {validationUnits.length} validation unit{validationUnits.length === 1 ? '' : 's'}
+                </div>
+                <ul style={{ margin: '0 0 12px', paddingLeft: 18, fontSize: 12, color: 'var(--text-3)' }}>
+                  {validationUnits.map(u => (
+                    <li key={u.unitId} style={{ marginBottom: 4 }}>
+                      {u.label || u.sourcePaths.map(p => p.split('/').pop()).join(' + ')}
+                      {' → '}
+                      {u.targetPaths.map(p => p.split('/').pop()).join(' + ')}
+                    </li>
+                  ))}
+                </ul>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-4)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  When a file pair fails
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    className={onUnitFailure === 'continue' ? 'btn btn-primary' : 'btn btn-secondary'}
+                    style={{ height: 32, fontSize: 12 }}
+                    onClick={() => setOnUnitFailure('continue')}
+                  >
+                    Run all pairs
+                  </button>
+                  <button
+                    type="button"
+                    className={onUnitFailure === 'stop' ? 'btn btn-primary' : 'btn btn-secondary'}
+                    style={{ height: 32, fontSize: 12 }}
+                    onClick={() => setOnUnitFailure('stop')}
+                  >
+                    Stop on first failure
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Config summary */}
             {fileFormat === 'csv' ? (
@@ -1661,6 +2257,75 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 >
                   View Detailed Report
                 </button>
+              </div>
+            )}
+
+            {batchResult && (
+              <div style={{
+                marginBottom: 12, padding: '14px 16px', borderRadius: 9,
+                background: batchResult.summary?.is_match ? 'var(--success-muted)' : 'var(--surface-2)',
+                border: `1px solid ${batchResult.summary?.is_match ? 'rgba(34,197,94,0.25)' : 'var(--border-1)'}`,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', marginBottom: 10 }}>
+                  Batch results — {batchResult.summary.passed_units}/{batchResult.summary.total_units} passed
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 12 }}>
+                  <StatCard label="Completed" value={batchResult.summary.completed_units} />
+                  <StatCard label="Failed" value={batchResult.summary.failed_units} accent={batchResult.summary.failed_units ? 'var(--danger)' : undefined} />
+                  <StatCard label="Skipped" value={batchResult.summary.skipped_units} />
+                  <StatCard label="All match" value={batchResult.summary.is_match ? 'Yes' : 'No'} accent={batchResult.summary.is_match ? 'var(--success)' : 'var(--danger)'} />
+                </div>
+                {batchResult.units?.map(unit => (
+                  <div
+                    key={unit.unit_id}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      border: '1px solid var(--border-1)',
+                      marginBottom: 6,
+                      fontSize: 12,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                      <code style={{ fontFamily: 'Geist Mono, monospace', color: 'var(--text-2)' }}>
+                        {unit.source_paths?.map(p => p.split('/').pop()).join(' + ')}
+                        {' → '}
+                        {unit.target_paths?.map(p => p.split('/').pop()).join(' + ')}
+                      </code>
+                      <span style={{
+                        fontWeight: 600,
+                        color: unit.status === 'completed' && unit.result?.summary?.is_match
+                          ? 'var(--success)'
+                          : unit.status === 'completed' ? 'var(--danger)' : 'var(--text-4)',
+                      }}>
+                        {unit.status}
+                      </span>
+                    </div>
+                    {unit.error && (
+                      <p style={{ margin: '6px 0 0', color: 'var(--danger)' }}>{unit.error}</p>
+                    )}
+                    {unit.result?.summary && (
+                      <p style={{ margin: '6px 0 0', color: 'var(--text-3)' }}>
+                        Mismatches: {unit.result.summary.total_mismatch_records ?? 0}
+                      </p>
+                    )}
+                    {unit.status === 'completed' && unit.result && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ marginTop: 8, height: 28, fontSize: 11 }}
+                        onClick={() => navigate('/report', {
+                          state: {
+                            result: unit.result,
+                            reportTitle: `${unit.source_paths?.map(p => p.split('/').pop()).join(' + ')} → ${unit.target_paths?.map(p => p.split('/').pop()).join(' + ')}`,
+                          },
+                        })}
+                      >
+                        View detailed report
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
 

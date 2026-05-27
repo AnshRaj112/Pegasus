@@ -6,6 +6,7 @@ export default function DetailedReport() {
   const location = useLocation()
   const navigate = useNavigate()
   const result = location?.state?.result ?? null
+  const reportTitle = location?.state?.reportTitle ?? null
   const [filterUid, setFilterUid] = useState('')
   const [activeSection, setActiveSection] = useState('mismatched')
   const samples = useMemo(() => {
@@ -78,6 +79,9 @@ export default function DetailedReport() {
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Validation output</p>
               <h2 className="mt-2 text-3xl font-black text-slate-900">Detailed Report</h2>
+              {reportTitle && (
+                <p className="mt-2 text-sm text-slate-600 font-mono">{reportTitle}</p>
+              )}
               <p className="mt-2 max-w-3xl text-sm text-slate-600">
                 Review mismatched, missing, and extra records in separate sections with unified cards and page-by-page navigation.
               </p>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { fetchLocalBrowseConfig } from '../../api/validationHistory'
+import Step2_CloudPicker from './Step2_CloudPicker'
 
 const DEFAULT_CLOUD_CONFIG = {
   provider: 'google-cloud-storage',
@@ -69,6 +70,8 @@ export default function Step2_FilePicker({
   onSelect,
   onBack,
   disabled,
+  selectionMode = 'file',
+  fileFormat = 'csv',
 }) {
   const [folderInput, setFolderInput] = useState(() => parentDirOfFile(value) || '')
   const [folders, setFolders]         = useState([])
@@ -78,6 +81,7 @@ export default function Step2_FilePicker({
   const [loading, setLoading]         = useState(false)
   const [error, setError]             = useState('')
   const [selectedFile, setSelectedFile] = useState(value || null)
+  const [selectedFiles, setSelectedFiles] = useState([])
   const [hasListed, setHasListed]     = useState(false)
 
   useEffect(() => {
@@ -120,191 +124,50 @@ export default function Step2_FilePicker({
     onCloudConfigChange?.({ ...activeCloudConfig, ...patch })
   }
 
+  function handleConfirmSelection() {
+    if (selectionMode === 'folder') {
+      if (!listedDir) return
+      onSelect({ kind: 'folder', path: listedDir })
+      return
+    }
+    if (selectionMode === 'multi') {
+      if (selectedFiles.length === 0) return
+      onSelect({ kind: 'files', paths: selectedFiles })
+      return
+    }
+    if (selectedFile) onSelect(selectedFile)
+  }
+
+  function toggleMultiFile(filePath) {
+    setSelectedFiles(prev => (
+      prev.includes(filePath) ? prev.filter(p => p !== filePath) : [...prev, filePath]
+    ))
+  }
+
+  const canConfirm = selectionMode === 'folder'
+    ? Boolean(listedDir)
+    : selectionMode === 'multi'
+      ? selectedFiles.length > 0
+      : Boolean(selectedFile)
+
+  const confirmLabel = selectionMode === 'folder'
+    ? `Use folder as ${panelLabel}`
+    : selectionMode === 'multi'
+      ? `Use ${selectedFiles.length} file${selectedFiles.length === 1 ? '' : 's'} as ${panelLabel}`
+      : `Use as ${panelLabel}`
+
   if (storageType === 'cloud') {
-    const canContinue =
-      activeCloudConfig.provider === 'google-cloud-storage'
-      && activeCloudConfig.bucket.trim()
-      && activeCloudConfig.objectName.trim()
-      && activeCloudConfig.credentialsJson.trim()
-
     return (
-      <div style={{ animation: 'fade-in 0.2s ease', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 6 }}>
-              Step 2 of 4 — {panelLabel} storage
-            </div>
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1.2, marginBottom: 4 }}>
-              Configure {panelLabel} cloud storage
-            </h2>
-            <p style={{ fontSize: 13, color: 'var(--text-3)' }}>
-              Only Google Cloud Storage is enabled right now. Paste the raw service account JSON, then point to the CSV object.
-            </p>
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
-          {CLOUD_PROVIDERS.map(provider => {
-            const selected = activeCloudConfig.provider === provider.id
-            return (
-              <button
-                key={provider.id}
-                type="button"
-                disabled={disabled || !provider.available}
-                onClick={() => provider.available && updateCloudConfig({ provider: provider.id })}
-                style={{
-                  position: 'relative',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-start',
-                  gap: 10,
-                  minHeight: 120,
-                  padding: 16,
-                  borderRadius: 10,
-                  border: selected ? '1px solid var(--accent-border)' : '1px solid var(--border-1)',
-                  background: selected ? 'var(--accent-muted)' : 'var(--surface-1)',
-                  cursor: provider.available ? 'pointer' : 'not-allowed',
-                  opacity: provider.available ? 1 : 0.55,
-                  textAlign: 'left',
-                }}
-              >
-                <span style={{
-                  position: 'absolute', top: 10, right: 10,
-                  fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
-                  padding: '2px 6px', borderRadius: 4,
-                  background: provider.available ? 'var(--success-muted)' : 'var(--surface-3)',
-                  color: provider.available ? 'var(--success)' : 'var(--text-4)',
-                  border: provider.available ? '1px solid rgba(34,197,94,0.2)' : '1px solid var(--border-1)',
-                }}>
-                  {provider.badge}
-                </span>
-                <div style={{
-                  width: 36, height: 36, borderRadius: 8,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: selected ? 'var(--accent)' : 'var(--surface-3)',
-                  color: selected ? '#fff' : 'var(--text-2)',
-                  border: selected ? 'none' : '1px solid var(--border-2)',
-                }}>
-                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                    <path d="M12.5 13.5a3.5 3.5 0 0 0-3.4-2.7H8.7a4 4 0 0 0-7.2 2.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                    <path d="M5 10.5a3.2 3.2 0 0 1 6.1-1.1A2.9 2.9 0 0 1 14.6 12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                  </svg>
-                </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', marginBottom: 3 }}>
-                    {provider.title}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.4 }}>
-                    {provider.description}
-                  </div>
-                </div>
-              </button>
-            )
-          })}
-        </div>
-
-        <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12,
-          padding: 16, borderRadius: 10,
-          background: 'var(--surface-2)', border: '1px solid var(--border-1)',
-        }}>
-          <label>
-            <span style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6 }}>
-              Bucket name
-            </span>
-            <input
-              type="text"
-              value={activeCloudConfig.bucket}
-              disabled={disabled}
-              onChange={e => updateCloudConfig({ bucket: e.target.value })}
-              placeholder="my-validation-bucket"
-              className="input input-mono"
-            />
-          </label>
-          <label>
-            <span style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6 }}>
-              Object path inside bucket
-            </span>
-            <input
-              type="text"
-              value={activeCloudConfig.objectName}
-              disabled={disabled}
-              onChange={e => updateCloudConfig({ objectName: e.target.value })}
-              placeholder="source.csv"
-              className="input input-mono"
-            />
-          </label>
-          <label>
-            <span style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6 }}>
-              Project id <span style={{ color: 'var(--text-4)' }}>(optional)</span>
-            </span>
-            <input
-              type="text"
-              value={activeCloudConfig.projectId}
-              disabled={disabled}
-              onChange={e => updateCloudConfig({ projectId: e.target.value })}
-              placeholder="my-gcp-project"
-              className="input input-mono"
-            />
-          </label>
-          <div style={{ display: 'flex', alignItems: 'end' }}>
-            <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>
-              Paste the full raw JSON from the service account file. The backend will parse it directly.
-            </div>
-          </div>
-        </div>
-
-        <label>
-          <span style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6 }}>
-            Service account JSON
-          </span>
-          <textarea
-            value={activeCloudConfig.credentialsJson}
-            disabled={disabled}
-            onChange={e => updateCloudConfig({ credentialsJson: e.target.value })}
-            placeholder='{"type":"service_account", ...}'
-            rows={10}
-            className="input input-mono"
-            style={{ width: '100%', minHeight: 220, paddingTop: 10, paddingBottom: 10, resize: 'vertical' }}
-          />
-        </label>
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <button
-            type="button"
-            onClick={onBack}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              background: 'none', border: 'none', cursor: 'pointer',
-              fontSize: 12, color: 'var(--text-3)', fontFamily: 'inherit', padding: 0,
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-              <path d="M9 6.5H3M5.5 4L3 6.5 5.5 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            Back to storage selection
-          </button>
-
-          <button
-            type="button"
-            disabled={disabled || !canContinue}
-            onClick={() => onSelect({
-              kind: 'cloud',
-              provider: activeCloudConfig.provider,
-              bucket: activeCloudConfig.bucket.trim(),
-              objectName: activeCloudConfig.objectName.trim(),
-              credentialsJson: activeCloudConfig.credentialsJson,
-              projectId: activeCloudConfig.projectId.trim(),
-            })}
-            className="btn btn-primary btn-lg"
-          >
-            Use as {panelLabel}
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M3 6h6M6.5 3.5L9 6l-2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
-        </div>
-      </div>
+      <Step2_CloudPicker
+        panelLabel={panelLabel}
+        cloudConfig={activeCloudConfig}
+        onCloudConfigChange={onCloudConfigChange}
+        onSelect={onSelect}
+        onBack={onBack}
+        disabled={disabled}
+        selectionMode={selectionMode}
+        fileFormat={fileFormat}
+      />
     )
   }
 
@@ -322,12 +185,16 @@ export default function Step2_FilePicker({
             <span style={{ color: 'var(--accent)' }}>{panelLabel}</span>
           </h2>
           <p style={{ fontSize: 13, color: 'var(--text-3)' }}>
-            Browse the server filesystem. Click a file to select it.
+            {selectionMode === 'folder'
+              ? 'Browse to the folder you want to use, then confirm.'
+              : selectionMode === 'multi'
+                ? 'Select one or more files (click to toggle). Order is preserved for merge.'
+                : 'Browse the server filesystem. Click a file to select it.'}
           </p>
         </div>
-        {selectedFile && (
+        {canConfirm && (
           <button
-            onClick={() => onSelect(selectedFile)}
+            onClick={handleConfirmSelection}
             disabled={disabled}
             className="btn btn-primary btn-lg"
             style={{ flexShrink: 0 }}
@@ -335,7 +202,7 @@ export default function Step2_FilePicker({
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
               <path d="M2 6.5l3 3 6-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            Use as {panelLabel}
+            {confirmLabel}
           </button>
         )}
       </div>
@@ -484,16 +351,21 @@ export default function Step2_FilePicker({
               <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-4)', fontFamily: 'Geist Mono, monospace' }}>
                 {files.length}
               </span>
-              {selectedFile && (
+              {selectedFile && selectionMode === 'file' && (
                 <button
                   type="button"
-                  onClick={() => onSelect(selectedFile)}
+                  onClick={handleConfirmSelection}
                   disabled={disabled}
                   className="btn btn-primary"
                   style={{ marginLeft: 8, height: 24, padding: '0 10px', fontSize: 11 }}
                 >
                   Use as {panelLabel}
                 </button>
+              )}
+              {selectionMode === 'multi' && selectedFiles.length > 0 && (
+                <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>
+                  {selectedFiles.length} selected
+                </span>
               )}
             </div>
 
@@ -515,7 +387,9 @@ export default function Step2_FilePicker({
               {files.length > 0 && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 6 }}>
                   {files.map(f => {
-                    const selected = selectedFile === f.path
+                    const selected = selectionMode === 'multi'
+                      ? selectedFiles.includes(f.path)
+                      : selectedFile === f.path
                     const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
                     const isTabular = ['csv', 'tsv', 'txt', 'parquet', 'xlsx'].includes(ext)
                     return (
@@ -523,7 +397,10 @@ export default function Step2_FilePicker({
                         key={f.path}
                         type="button"
                         disabled={disabled}
-                        onClick={() => setSelectedFile(prev => prev === f.path ? null : f.path)}
+                        onClick={() => {
+                          if (selectionMode === 'multi') toggleMultiFile(f.path)
+                          else setSelectedFile(prev => prev === f.path ? null : f.path)
+                        }}
                         style={{
                           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7,
                           padding: '10px 8px', borderRadius: 8, cursor: 'pointer',
