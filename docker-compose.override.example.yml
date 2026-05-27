@@ -3,6 +3,9 @@
 #
 #   cp docker-compose.override.example.yml docker-compose.override.yml
 #   # edit volumes, then: docker compose up --build
+#
+# Local CSV paths: set PEGASUS_HOST_HOME in repo-root .env to your real home (passwd),
+# especially when using snap Docker — otherwise ${HOME} may point at ~/snap/docker/... .
 
 services:
   backend:

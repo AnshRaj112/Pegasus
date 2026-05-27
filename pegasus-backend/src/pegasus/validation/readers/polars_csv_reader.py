@@ -184,7 +184,7 @@ class PolarsCSVReader(CSVReader):
             schema = pl.scan_csv(str(resolved), **scan_kw).collect_schema()
         except pl_exc.PolarsError as exc:
             logger.exception("Polars failed inferring schema for %s", resolved)
-            raise CSVParseError(f"Failed to infer CSV schema: {resolved}") from exc
+            raise CSVParseError(f"Failed to infer CSV schema for {resolved.name}: {exc}") from exc
         schema = pl.Schema({k.strip(): v for k, v in schema.items()})
         logger.info("Inferred schema for %s with %d columns", resolved.name, len(schema))
         return schema
@@ -257,7 +257,7 @@ class PolarsCSVReader(CSVReader):
                 df = pl.read_csv(str(resolved), **kw)
             except pl_exc.PolarsError as exc:
                 logger.exception("Polars read_csv failed for %s", resolved)
-                raise CSVParseError(f"Failed to read CSV: {resolved}") from exc
+                raise CSVParseError(f"Failed to read CSV {resolved.name}: {exc}") from exc
             rename_map = {col: col.strip() for col in df.columns if col != col.strip()}
             if rename_map:
                 df = df.rename(rename_map)
@@ -290,7 +290,7 @@ class PolarsCSVReader(CSVReader):
                 df = lf.collect()
         except pl_exc.PolarsError as exc:
             logger.exception("Polars failed collecting CSV %s", resolved)
-            raise CSVParseError(f"Failed to read CSV: {resolved}") from exc
+            raise CSVParseError(f"Failed to read CSV {resolved.name}: {exc}") from exc
 
         rename_map = {col: col.strip() for col in df.columns if col != col.strip()}
         if rename_map:
@@ -356,7 +356,7 @@ class PolarsCSVReader(CSVReader):
             return lf
         except pl_exc.PolarsError as exc:
             logger.exception("Polars failed to open scan for %s", resolved)
-            raise CSVParseError(f"Failed to scan CSV: {resolved}") from exc
+            raise CSVParseError(f"Failed to scan CSV {resolved.name}: {exc}") from exc
 
     def iter_batches(
         self,
@@ -430,7 +430,7 @@ class PolarsCSVReader(CSVReader):
             lazy = pl.scan_csv(str(resolved), **scan_kw)
         except pl_exc.PolarsError as exc:
             logger.exception("Polars failed to open scan for batched read %s", resolved)
-            raise CSVParseError(f"Failed to open CSV scan: {resolved}") from exc
+            raise CSVParseError(f"Failed to open CSV scan for {resolved.name}: {exc}") from exc
 
         total_rows = 0
         try:
@@ -447,7 +447,9 @@ class PolarsCSVReader(CSVReader):
             logger.info("CSV has no data rows for batched read path=%s", resolved.name)
         except pl_exc.PolarsError as exc:
             logger.exception("Polars failed during collect_batches for %s", resolved)
-            raise CSVParseError(f"Failed while reading CSV batches: {resolved}") from exc
+            raise CSVParseError(
+                f"Failed while reading CSV batches for {resolved.name}: {exc}"
+            ) from exc
 
         logger.info("Finished batched CSV read path=%s total_rows=%s", resolved.name, total_rows)
 
@@ -477,7 +479,7 @@ class PolarsCSVReader(CSVReader):
             schema = pl.read_csv(str(resolved), **kw).schema
         except pl_exc.PolarsError as exc:
             logger.exception("Polars failed schema probe (eager) for %s", resolved)
-            raise CSVParseError(f"Failed to infer CSV schema: {resolved}") from exc
+            raise CSVParseError(f"Failed to infer CSV schema for {resolved.name}: {exc}") from exc
         schema = pl.Schema({k.strip(): v for k, v in schema.items()})
         logger.info("Inferred schema (eager sample) for %s with %d columns", resolved.name, len(schema))
         return schema

@@ -234,6 +234,10 @@ class ColumnMapping(BaseModel):
 
     source_column: str = Field(description="Source column name to validate")
     target_column: str = Field(description="Target column name to compare against the source column")
+    target_columns: list[str] | None = Field(
+        default=None,
+        description="Optional list of multiple target columns for 1-to-many mapping",
+    )
     compare_mode: str = Field(
         default="auto",
         description=(

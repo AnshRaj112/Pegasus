@@ -1,4 +1,4 @@
-ID,First_Name,Last_Name,Account_Status
+User_ID,First_Name,Last_Name,Account_Status
 1000,John,Smith,Active
 1001,Alice,Marie Johnson,Inactive
 1002,Bob,,Active

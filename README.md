@@ -557,7 +557,7 @@ docker compose up --build
 | UI (nginx proxies `/api` → backend) | http://127.0.0.1:8080 (set `PEGASUS_UI_PORT=5173` if Vite is not running) |
 | API (direct) | http://127.0.0.1:8000 |
 
-**Local path validation:** `docker-compose.yml` bind-mounts `$HOME` at the same path inside the container. Use normal absolute paths in the file picker (e.g. `$HOME/Pegasus/test-data/validation_source.csv`). For paths outside `$HOME`, copy `docker-compose.override.example.yml` to `docker-compose.override.yml` and add read-only volume mounts.
+**Local path validation:** `docker-compose.yml` bind-mounts your home at the same path inside the container (set `PEGASUS_HOST_HOME` in repo-root `.env` if snap Docker rewrites `$HOME`). Use normal absolute paths in the file picker (e.g. `$HOME/Pegasus/test-data/validation_source.csv`). For paths outside `$HOME`, copy `docker-compose.override.example.yml` to `docker-compose.override.yml` and add read-only volume mounts.
 
 **Backend only** (no UI container):
 

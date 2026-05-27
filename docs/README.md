@@ -436,6 +436,8 @@ Optional helper: `./restart-docker.sh` from the repo root.
 
 For extra host directories (outside `$HOME`), copy `docker-compose.override.example.yml` to `docker-compose.override.yml` and add volume mounts.
 
+**Local paths in Docker:** the backend bind-mounts your home directory so paths like `/home/you/Pegasus/test-data` work in the file picker. If you see `Path not found` for paths that exist on the host, set `PEGASUS_HOST_HOME` in the repo-root `.env` to your real home directory (`getent passwd $USER | cut -d: -f6`). Snap-installed Docker often rewrites `$HOME` to `~/snap/docker/...` during `docker compose`, which skips mounting your project tree.
+
 ---
 
 ## ⚠️ Troubleshooting & FAQs

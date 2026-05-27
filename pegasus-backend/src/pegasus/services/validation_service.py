@@ -55,6 +55,7 @@ from pegasus.validation.reconciliation.coordinator import (
 from pegasus.validation.reconciliation.exceptions import ReconciliationError, ReconciliationStrategyError
 from pegasus.validation.mapping_analyze import analyze_column_mappings
 from pegasus.validation.reconciliation.partition_manager import multichar_csv_header_frame
+from pegasus.validation.csv_preflight import CsvPreflightError, preflight_csv_structure
 from pegasus.validation.flat_file import csv_has_data_rows
 from pegasus.validation.fixed_width_dates import normalize_strptime_format, parse_fixed_width_date
 from pegasus.validation.fixed_width_layout import preview_fixed_width_layout
@@ -248,6 +249,7 @@ class ValidationService:
             target_path=target_path,
             delimiter=delimiter,
         )
+        self._preflight_csv_pair(source_path, target_path, delim)
         source_columns = self._read_column_names(source_path, delim)
         target_columns = self._read_column_names(target_path, delim)
         compare_columns = [c for c in source_columns if c != uid]
@@ -328,6 +330,8 @@ class ValidationService:
             raise ValidationBadRequestError(str(exc)) from exc
         except CSVValidationError as exc:
             raise ValidationBadRequestError(str(exc)) from exc
+
+        self._preflight_csv_pair(source_path, target_path, delim)
 
         log_swap_pressure_warning(logger)
 
@@ -529,6 +533,50 @@ class ValidationService:
         if target_rename_map:
             target_df = target_df.rename(target_rename_map)
 
+        # Synthesize 1-to-many mapped composite columns (e.g. Full Name from First/Last/Middle Name)
+        from collections import defaultdict
+        source_to_targets = defaultdict(list)
+        for mapping in (column_mappings or []):
+            src = mapping.source_column.strip()
+            if not src:
+                continue
+            tgts_list = []
+            if hasattr(mapping, "target_columns") and mapping.target_columns:
+                tgts_list = [t.strip() for t in mapping.target_columns if t.strip()]
+            if not tgts_list and mapping.target_column.strip():
+                tgts_list = [mapping.target_column.strip()]
+            for t in tgts_list:
+                if t not in source_to_targets[src]:
+                    source_to_targets[src].append(t)
+
+        composite_mappings = {src: tgts for src, tgts in source_to_targets.items() if len(tgts) > 1}
+        if composite_mappings:
+            target_col_order = {col: i for i, col in enumerate(target_df.columns)}
+            
+            def get_target_name_rank(col_name: str) -> int:
+                name_lower = col_name.lower()
+                if any(k in name_lower for k in ("first", "fname", "f_name", "given")):
+                    return 1
+                if any(k in name_lower for k in ("middle", "mname", "m_name")):
+                    return 2
+                if any(k in name_lower for k in ("last", "lname", "l_name", "sur", "family")):
+                    return 3
+                return 4
+
+            for src_col, tgt_cols in composite_mappings.items():
+                # Sort target columns by name rank, then by original file layout position
+                sorted_tgts = sorted(
+                    tgt_cols,
+                    key=lambda col: (get_target_name_rank(col), target_col_order.get(col, 999))
+                )
+                exprs = [pl.col(col).cast(pl.String).fill_null("") for col in sorted_tgts]
+                concat_expr = (
+                    pl.concat_str(exprs, separator=" ")
+                    .str.replace_all(r"\s+", " ", literal=False)
+                    .str.strip_chars()
+                )
+                target_df = target_df.with_columns(concat_expr.alias(src_col))
+
         src_cols = set(source_df.columns)
         tgt_cols = set(target_df.columns)
         shared = src_cols & tgt_cols
@@ -611,27 +659,44 @@ class ValidationService:
         source_set = set(source_columns)
         target_set = set(target_columns)
         rename_map: dict[str, str] = {}
-        used_sources: set[str] = set()
-        used_targets: set[str] = set()
-
+        
+        # Build normalized source-to-targets mapping
+        from collections import defaultdict
+        source_to_targets = defaultdict(list)
         for mapping in column_mappings:
             source = mapping.source_column.strip()
-            target = mapping.target_column.strip()
-            if not source or not target:
+            if not source:
                 continue
-            if source == uid_column or target == uid_column:
+            tgts_list = []
+            if hasattr(mapping, "target_columns") and mapping.target_columns:
+                tgts_list = [t.strip() for t in mapping.target_columns if t.strip()]
+            if not tgts_list and mapping.target_column.strip():
+                tgts_list = [mapping.target_column.strip()]
+            for t in tgts_list:
+                if t not in source_to_targets[source]:
+                    source_to_targets[source].append(t)
+                    
+        used_targets: set[str] = set()
+
+        # Validate normalized mappings
+        for source, tgts in source_to_targets.items():
+            if source == uid_column:
                 raise ValidationBadRequestError("column_mappings cannot include the uid_column")
             if source not in source_set:
                 raise ValidationBadRequestError(f"source column {source!r} not found in source file columns")
-            if target not in target_set:
-                raise ValidationBadRequestError(f"target column {target!r} not found in target file columns")
-            if source in used_sources:
-                raise ValidationBadRequestError(f"source column {source!r} is mapped more than once")
-            if target in used_targets:
-                raise ValidationBadRequestError(f"target column {target!r} is mapped more than once")
-            rename_map[target] = source
-            used_sources.add(source)
-            used_targets.add(target)
+                
+            for target in tgts:
+                if target == uid_column:
+                    raise ValidationBadRequestError("column_mappings cannot include the uid_column")
+                if target not in target_set:
+                    raise ValidationBadRequestError(f"target column {target!r} not found in target file columns")
+                if target in used_targets:
+                    raise ValidationBadRequestError(f"target column {target!r} is mapped more than once")
+                used_targets.add(target)
+                
+            # Standard 1-to-1 mappings are added to rename_map
+            if len(tgts) == 1:
+                rename_map[tgts[0]] = source
 
         if not rename_map:
             return {}
@@ -654,6 +719,14 @@ class ValidationService:
             raise ValidationBadRequestError(
                 "Both source and target files are empty (no data rows)."
             )
+
+    @staticmethod
+    def _preflight_csv_pair(source_path: Path, target_path: Path, delimiter: str) -> None:
+        for path, tag in ((source_path, "source"), (target_path, "target")):
+            try:
+                preflight_csv_structure(path, delimiter, label=tag)
+            except CsvPreflightError as exc:
+                raise ValidationBadRequestError(str(exc)) from exc
 
     def _resolve_delimiter(
         self,

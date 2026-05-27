@@ -8,6 +8,16 @@ if [[ ! -f pegasus-backend/.env.backend ]]; then
   exit 1
 fi
 
+# Snap Docker rewrites $HOME (e.g. ~/snap/docker/NNNN); compose must bind-mount the real home.
+if [[ -z "${PEGASUS_HOST_HOME:-}" ]]; then
+  if [[ "${HOME:-}" == *"/snap/docker/"* ]]; then
+    PEGASUS_HOST_HOME="$(getent passwd "$(id -un)" | cut -d: -f6)"
+  else
+    PEGASUS_HOST_HOME="${HOME}"
+  fi
+  export PEGASUS_HOST_HOME
+fi
+
 docker compose down --remove-orphans 2>/dev/null || true
 # Remove legacy containers from the old pegasus-backend-only compose (fixed container_name).
 docker rm -f pegasus-backend pegasus-frontend 2>/dev/null || true
