@@ -194,6 +194,15 @@ function PaginationControls({
   )
 }
 
+function FileDetailTile({ label, value }) {
+  return (
+    <div className="rounded-2xl bg-white/70 p-3 ring-1 ring-black/5">
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">{label}</p>
+      <p className="mt-2 break-words text-sm font-medium text-slate-900">{value || '—'}</p>
+    </div>
+  )
+}
+
 function parseHistoryRowDetail(rowDetail) {
   if (!rowDetail) return null
   if (typeof rowDetail === 'object') return rowDetail
@@ -813,9 +822,9 @@ export default function History({ onLoadMapping }) {
                   }}
                   onClick={() => handleMappingClick(row)}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
                     <span style={{ fontSize: 13, color: 'var(--text-1)', fontWeight: 500 }}>
-                      {basename(row.source_path || row.source_filename)} ↔ {basename(row.target_path || row.target_filename)}
+                      Mapping pair
                     </span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       {loadingMappingId === row.run_id ? (
@@ -826,7 +835,14 @@ export default function History({ onLoadMapping }) {
                       <DeleteButton title="Delete mapping history" onClick={() => handleDeleteMapping(row)} />
                     </div>
                   </div>
-                  <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-3)' }}>
+
+                  <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+                    <FileDetailTile label="Source file name" value={basename(row.source_path || row.source_filename)} />
+                    <FileDetailTile label="Source file path" value={row.source_path || row.source_filename} />
+                    <FileDetailTile label="Target file name" value={basename(row.target_path || row.target_filename)} />
+                    <FileDetailTile label="Target file path" value={row.target_path || row.target_filename} />
+                  </div>
+                  <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--text-3)' }}>
                     {row.delimiter === 'fixed-width' || row.delimiter === 'fixed' ? (
                       <span style={{ color: 'var(--blue, #3b82f6)', fontWeight: 500 }}>Fixed-Width Date validation</span>
                     ) : (
@@ -910,7 +926,8 @@ export default function History({ onLoadMapping }) {
                 <thead>
                   <tr style={{ textAlign: 'left', color: 'var(--text-3)', borderBottom: '1px solid var(--border-1)' }}>
                     <th style={{ padding: '8px' }}>When</th>
-                    <th style={{ padding: '8px' }}>Files</th>
+                    <th style={{ padding: '8px' }}>Source file</th>
+                    <th style={{ padding: '8px' }}>Target file</th>
                     <th style={{ padding: '8px' }}>Mappings</th>
                     <th style={{ padding: '8px' }}>Duration</th>
                     <th style={{ padding: '8px' }}>Result</th>
@@ -936,9 +953,24 @@ export default function History({ onLoadMapping }) {
                         {row.completed_at ? new Date(row.completed_at).toLocaleString() : new Date(row.created_at).toLocaleString()}
                       </td>
                       <td style={{ padding: '8px' }}>
-                        {basename(row.source_path || row.source_filename)}
-                        <br />
-                        <span style={{ color: 'var(--text-4)', fontSize: 11 }}>→ {basename(row.target_path || row.target_filename)}</span>
+                        <div style={{ minWidth: 220 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-1)' }}>
+                            {basename(row.source_path || row.source_filename)}
+                          </div>
+                          <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-2)', wordBreak: 'break-word' }}>
+                            {row.source_path || row.source_filename}
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ padding: '8px' }}>
+                        <div style={{ minWidth: 220 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-1)' }}>
+                            {basename(row.target_path || row.target_filename)}
+                          </div>
+                          <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-2)', wordBreak: 'break-word' }}>
+                            {row.target_path || row.target_filename}
+                          </div>
+                        </div>
                         {(row.delimiter === 'fixed-width' || row.delimiter === 'fixed') && (
                           <span style={{ display: 'block', fontSize: 10, color: 'var(--blue, #3b82f6)', fontWeight: 600, marginTop: 2 }}>
                             Fixed-Width Format
@@ -951,7 +983,21 @@ export default function History({ onLoadMapping }) {
                       <td style={{ padding: '8px' }}>{formatDuration(row.durations?.validation_seconds ?? row.durations?.total_seconds)}</td>
                       <td style={{ padding: '8px' }}><StatusBadge isMatch={row.is_match} status={row.status} /></td>
                       <td style={{ padding: '8px', textAlign: 'right' }}>
-                        <DeleteButton title="Delete validation run" onClick={() => handleDeleteRun(row)} />
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleOpenValidationReport(row)
+                            }}
+                            disabled={openingRunId === row.run_id}
+                            style={{ height: 30, padding: '0 10px', fontSize: 12, fontWeight: 500 }}
+                          >
+                            View report
+                          </button>
+                          <DeleteButton title="Delete validation run" onClick={() => handleDeleteRun(row)} />
+                        </div>
                       </td>
                     </tr>
                   ))}
