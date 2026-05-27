@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   basename,
@@ -14,6 +14,7 @@ import {
 
 const HISTORY_MISMATCH_PAGE_SIZE = 5000
 const HISTORY_PAGE_SIZE = 15
+const HISTORY_PAGE_SIZE_OPTIONS = [15, 25, 50, 100]
 const HISTORY_FETCH_BATCH_SIZE = 100
 
 const TrashIcon = () => (
@@ -114,8 +115,21 @@ function Panel({ children, style }) {
   )
 }
 
-function PaginationControls({ page, pageCount, totalItems, startItem, endItem, onPrevious, onNext, label }) {
+function PaginationControls({
+  page,
+  pageCount,
+  totalItems,
+  pageSize,
+  onPrevious,
+  onNext,
+  onPageChange,
+  onPageSizeChange,
+  label,
+}) {
   if (!totalItems) return null
+
+  const startItem = (page - 1) * pageSize + 1
+  const endItem = Math.min(page * pageSize, totalItems)
 
   return (
     <div
@@ -133,16 +147,48 @@ function PaginationControls({ page, pageCount, totalItems, startItem, endItem, o
       <p style={{ margin: 0, fontSize: 12, color: 'var(--text-3)' }}>
         Showing {startItem}-{endItem} of {totalItems} {label}
       </p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <button type="button" className="btn btn-secondary" onClick={onPrevious} disabled={page <= 1}>
-          Previous
-        </button>
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-          Page {page} of {pageCount}
-        </span>
-        <button type="button" className="btn btn-secondary" onClick={onNext} disabled={page >= pageCount}>
-          Next
-        </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button type="button" className="btn btn-secondary" onClick={onPrevious} disabled={page <= 1}>
+            Previous
+          </button>
+          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+            Page {page} of {pageCount}
+          </span>
+          <button type="button" className="btn btn-secondary" onClick={onNext} disabled={page >= pageCount}>
+            Next
+          </button>
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-3)' }}>
+          Go to
+          <input
+            type="number"
+            min="1"
+            max={pageCount}
+            value={page}
+            onChange={(e) => {
+              const nextPage = Number.parseInt(e.target.value, 10)
+              if (!Number.isNaN(nextPage)) {
+                onPageChange(Math.min(Math.max(1, nextPage), pageCount))
+              }
+            }}
+            style={{ width: 72, padding: '6px 8px', borderRadius: 8, border: '1px solid var(--border-1)' }}
+          />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-3)' }}>
+          Rows
+          <select
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(Number(e.target.value))}
+            style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid var(--border-1)' }}
+          >
+            {HISTORY_PAGE_SIZE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
     </div>
   )
@@ -460,9 +506,11 @@ export default function History({ onLoadMapping }) {
   const [mappingRows, setMappingRows] = useState([])
   const [mappingLoading, setMappingLoading] = useState(false)
   const [mappingPage, setMappingPage] = useState(1)
+  const [mappingPageSize, setMappingPageSize] = useState(HISTORY_PAGE_SIZE)
   const [validationRows, setValidationRows] = useState([])
   const [validationTotal, setValidationTotal] = useState(0)
   const [validationPage, setValidationPage] = useState(1)
+  const [validationPageSize, setValidationPageSize] = useState(HISTORY_PAGE_SIZE)
   const [validationLoading, setValidationLoading] = useState(false)
   const [loadingMappingId, setLoadingMappingId] = useState(null)
   const [error, setError] = useState('')
@@ -636,13 +684,13 @@ export default function History({ onLoadMapping }) {
     }
   }, [])
 
-  const loadValidationHistory = useCallback(async (page = validationPage) => {
+  const loadValidationHistory = useCallback(async (page, pageSize) => {
     setValidationLoading(true)
     setError('')
     try {
       const data = await fetchValidationHistory({
-        limit: HISTORY_PAGE_SIZE,
-        offset: (page - 1) * HISTORY_PAGE_SIZE,
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
         sourcePath: pairFilter.source.trim() || undefined,
         targetPath: pairFilter.target.trim() || undefined,
       })
@@ -655,7 +703,7 @@ export default function History({ onLoadMapping }) {
     } finally {
       setValidationLoading(false)
     }
-  }, [pairFilter.source, pairFilter.target, validationPage])
+  }, [pairFilter.source, pairFilter.target])
 
   useEffect(() => {
     if (topTab === 'mapping') {
@@ -665,9 +713,9 @@ export default function History({ onLoadMapping }) {
 
   useEffect(() => {
     if (topTab === 'validation') {
-      loadValidationHistory(validationPage)
+      loadValidationHistory(validationPage, validationPageSize)
     }
-  }, [topTab, validationPage, loadValidationHistory])
+  }, [topTab, validationPage, validationPageSize, loadValidationHistory])
 
   const mappingPairs = useMemo(() => {
     const seen = new Map()
@@ -678,16 +726,14 @@ export default function History({ onLoadMapping }) {
     return [...seen.values()]
   }, [mappingRows])
 
-  const mappingPageCount = Math.max(1, Math.ceil(mappingPairs.length / HISTORY_PAGE_SIZE))
-  const validationPageCount = Math.max(1, Math.ceil(validationTotal / HISTORY_PAGE_SIZE))
+  const mappingPageCount = Math.max(1, Math.ceil(mappingPairs.length / mappingPageSize))
+  const validationPageCount = Math.max(1, Math.ceil(validationTotal / validationPageSize))
   const safeMappingPage = Math.min(mappingPage, mappingPageCount)
   const safeValidationPage = Math.min(validationPage, validationPageCount)
   const paginatedMappingPairs = useMemo(() => {
-    const start = (safeMappingPage - 1) * HISTORY_PAGE_SIZE
-    return mappingPairs.slice(start, start + HISTORY_PAGE_SIZE)
-  }, [mappingPairs, safeMappingPage])
-  const validationStart = validationTotal === 0 ? 0 : (safeValidationPage - 1) * HISTORY_PAGE_SIZE + 1
-  const validationEnd = validationTotal === 0 ? 0 : Math.min(validationTotal, validationStart + validationRows.length - 1)
+    const start = (safeMappingPage - 1) * mappingPageSize
+    return mappingPairs.slice(start, start + mappingPageSize)
+  }, [mappingPairs, mappingPageSize, safeMappingPage])
 
   useEffect(() => {
     if (mappingPage !== safeMappingPage) setMappingPage(safeMappingPage)
@@ -699,15 +745,22 @@ export default function History({ onLoadMapping }) {
 
   const handleApplyValidationFilter = () => {
     setValidationPage(1)
-    if (topTab === 'validation') {
-      loadValidationHistory(1)
-    }
   }
 
   const handlePreviousMappingPage = () => setMappingPage((page) => Math.max(1, page - 1))
   const handleNextMappingPage = () => setMappingPage((page) => Math.min(mappingPageCount, page + 1))
   const handlePreviousValidationPage = () => setValidationPage((page) => Math.max(1, page - 1))
   const handleNextValidationPage = () => setValidationPage((page) => Math.min(validationPageCount, page + 1))
+  const handleMappingPageChange = (nextPage) => setMappingPage(Math.min(Math.max(1, nextPage), mappingPageCount))
+  const handleValidationPageChange = (nextPage) => setValidationPage(Math.min(Math.max(1, nextPage), validationPageCount))
+  const handleMappingPageSizeChange = (nextPageSize) => {
+    setMappingPageSize(nextPageSize)
+    setMappingPage(1)
+  }
+  const handleValidationPageSizeChange = (nextPageSize) => {
+    setValidationPageSize(nextPageSize)
+    setValidationPage(1)
+  }
 
   return (
     <div style={{ padding: 12 }}>
@@ -790,10 +843,11 @@ export default function History({ onLoadMapping }) {
             page={safeMappingPage}
             pageCount={mappingPageCount}
             totalItems={mappingPairs.length}
-            startItem={mappingPairs.length ? (safeMappingPage - 1) * HISTORY_PAGE_SIZE + 1 : 0}
-            endItem={mappingPairs.length ? Math.min(mappingPairs.length, safeMappingPage * HISTORY_PAGE_SIZE) : 0}
+            pageSize={mappingPageSize}
             onPrevious={handlePreviousMappingPage}
             onNext={handleNextMappingPage}
+            onPageChange={handleMappingPageChange}
+            onPageSizeChange={handleMappingPageSizeChange}
             label="mapping groups"
           />
         </Panel>
@@ -907,10 +961,11 @@ export default function History({ onLoadMapping }) {
                 page={safeValidationPage}
                 pageCount={validationPageCount}
                 totalItems={validationTotal}
-                startItem={validationStart}
-                endItem={validationEnd}
+                pageSize={validationPageSize}
                 onPrevious={handlePreviousValidationPage}
                 onNext={handleNextValidationPage}
+                onPageChange={handleValidationPageChange}
+                onPageSizeChange={handleValidationPageSizeChange}
                 label="validation runs"
               />
             </div>

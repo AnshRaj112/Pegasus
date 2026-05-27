@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 const PAGE_SIZE = 10
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
 
 const variantStyles = {
   mismatched: {
@@ -169,7 +170,7 @@ function RowCard({ row, variant }) {
   )
 }
 
-function Pagination({ page, totalPages, totalItems, pageSize, onPageChange }) {
+function Pagination({ page, totalPages, totalItems, pageSize, onPageChange, onPageSizeChange }) {
   if (!totalItems) return null
 
   return (
@@ -181,26 +182,61 @@ function Pagination({ page, totalPages, totalItems, pageSize, onPageChange }) {
         {' '}
         of <span className="font-semibold text-slate-900">{totalItems}</span> rows
       </p>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => onPageChange(page - 1)}
-          disabled={page <= 1}
-          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Previous
-        </button>
-        <span className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-900">
-          Page {page} of {totalPages}
-        </span>
-        <button
-          type="button"
-          onClick={() => onPageChange(page + 1)}
-          disabled={page >= totalPages}
-          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Next
-        </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onPageChange(page - 1)}
+            disabled={page <= 1}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <span className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-900">
+            Page {page} of {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => onPageChange(page + 1)}
+            disabled={page >= totalPages}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+          <label className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+            Go to
+          </label>
+          <input
+            type="number"
+            min="1"
+            max={totalPages}
+            value={page}
+            onChange={(event) => {
+              const nextPage = Number.parseInt(event.target.value, 10)
+
+              if (!Number.isNaN(nextPage)) {
+                onPageChange(Math.min(Math.max(1, nextPage), totalPages))
+              }
+            }}
+            className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 outline-none focus:border-slate-400"
+          />
+        </div>
+        <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">Rows</span>
+          <select
+            value={pageSize}
+            onChange={(event) => onPageSizeChange(Number(event.target.value))}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 outline-none focus:border-slate-400"
+          >
+            {PAGE_SIZE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
     </div>
   )
@@ -208,29 +244,21 @@ function Pagination({ page, totalPages, totalItems, pageSize, onPageChange }) {
 
 export function ReportSection({ type, samples = [] }) {
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE)
   const firstRowRef = useRef(null)
   const style = variantStyles[type] ?? variantStyles.mismatched
-  const totalPages = Math.max(1, Math.ceil(samples.length / PAGE_SIZE))
-
-  useEffect(() => {
-    setPage(1)
-  }, [samples, type])
-
-  useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages)
-    }
-  }, [page, totalPages])
+  const totalPages = Math.max(1, Math.ceil(samples.length / pageSize))
+  const safePage = Math.min(page, totalPages)
 
   const visibleSamples = useMemo(() => {
-    const start = (page - 1) * PAGE_SIZE
-    return samples.slice(start, start + PAGE_SIZE)
-  }, [samples, page])
+    const start = (safePage - 1) * pageSize
+    return samples.slice(start, start + pageSize)
+  }, [samples, safePage, pageSize])
 
   useEffect(() => {
     if (!visibleSamples.length) return
     firstRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [page, visibleSamples.length])
+  }, [safePage, visibleSamples.length])
 
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
@@ -248,7 +276,7 @@ export function ReportSection({ type, samples = [] }) {
         </div>
         <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200">
           <span className="font-semibold text-slate-900">{samples.length}</span> total rows
-          <div className="mt-1 text-xs text-slate-500">Showing up to {PAGE_SIZE} rows per page</div>
+          <div className="mt-1 text-xs text-slate-500">Showing up to {pageSize} rows per page</div>
         </div>
       </div>
 
@@ -257,11 +285,11 @@ export function ReportSection({ type, samples = [] }) {
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">Active page</p>
-              <p className="mt-2 text-2xl font-black text-slate-900">{page}</p>
+              <p className="mt-2 text-2xl font-black text-slate-900">{safePage}</p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">Page size</p>
-              <p className="mt-2 text-2xl font-black text-slate-900">{PAGE_SIZE}</p>
+              <p className="mt-2 text-2xl font-black text-slate-900">{pageSize}</p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">Total pages</p>
@@ -276,11 +304,15 @@ export function ReportSection({ type, samples = [] }) {
           ))}
 
           <Pagination
-            page={page}
+            page={safePage}
             totalPages={totalPages}
             totalItems={samples.length}
-            pageSize={PAGE_SIZE}
+            pageSize={pageSize}
             onPageChange={setPage}
+            onPageSizeChange={(nextPageSize) => {
+              setPageSize(nextPageSize)
+              setPage(1)
+            }}
           />
         </div>
       ) : (
