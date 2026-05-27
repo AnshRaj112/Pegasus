@@ -7,6 +7,7 @@ import Step2_FilePicker from './Step2_FilePicker'
 import Step3_Configure  from './Step3_Configure'
 import StepInputLayout from './StepInputLayout'
 import StepFilePairing from './StepFilePairing'
+import StepBatchMappingMode from './StepBatchMappingMode'
 import ActionBar        from './ActionBar'
 import ParallelValidationModal from '../ParallelValidationModal'
 import { buildMappingRows, mappingRowFromApi, toColumnMappingPayload } from './columnMapping'
@@ -23,6 +24,10 @@ import {
   unitsFromPairs,
 } from '../../api/batchValidation'
 import { matchCloudFilePairs } from '../../api/cloudBrowse'
+import {
+  applyTemplateToAllUnits,
+  buildTemplateSnapshot,
+} from '../../api/batchColumnMapping'
 
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
@@ -600,9 +605,21 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [recursiveFolderMatch, setRecursiveFolderMatch] = useState(false)
   const [sourceCloudPrefix, setSourceCloudPrefix] = useState('')
   const [targetCloudPrefix, setTargetCloudPrefix] = useState('')
+  const [batchColumnMappingMode, setBatchColumnMappingMode] = useState('choose')
+  const [batchMismatchUnitIds, setBatchMismatchUnitIds] = useState([])
+  const [batchMismatchDetails, setBatchMismatchDetails] = useState({})
+  const [batchApplyAllLoading, setBatchApplyAllLoading] = useState(false)
+  const [batchApplyAllError, setBatchApplyAllError] = useState('')
 
   const isBatchMode = inputLayout !== 'pair'
-  const activeUnit = validationUnits.find(u => u.unitId === activeUnitId) || validationUnits[0] || null
+  const multiPairCsvBatch = isBatchMode && validationUnits.length > 1 && fileFormat === 'csv'
+  const mappingQueueUnits = batchColumnMappingMode === 'template-fixups'
+    ? validationUnits.filter(u => batchMismatchUnitIds.includes(u.unitId))
+    : validationUnits
+  const activeUnit = validationUnits.find(u => u.unitId === activeUnitId)
+    || mappingQueueUnits.find(u => u.unitId === activeUnitId)
+    || (activeUnitId == null && batchColumnMappingMode === 'choose' ? null : validationUnits[0])
+    || null
   const effectiveSourcePath = isBatchMode ? (activeUnit?.sourcePaths?.[0] || '') : sourcePath
   const effectiveTargetPath = isBatchMode ? (activeUnit?.targetPaths?.[0] || '') : targetPath
 
@@ -812,8 +829,11 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     loadUnitConfig(unitId)
   }
 
-  const activeUnitIndex = validationUnits.findIndex(u => u.unitId === activeUnitId)
-  const sequentialBatchMapping = isBatchMode && validationUnits.length > 1
+  const activeUnitIndex = mappingQueueUnits.findIndex(u => u.unitId === activeUnitId)
+  const sequentialBatchMapping = multiPairCsvBatch
+    && (batchColumnMappingMode === 'manual' || batchColumnMappingMode === 'template-fixups')
+  const showBatchMappingModeChoice = multiPairCsvBatch && batchColumnMappingMode === 'choose'
+  const showTemplateMapping = multiPairCsvBatch && batchColumnMappingMode === 'template'
 
   function isCurrentPairMappingValid() {
     if (fileFormat === 'json') return true
@@ -837,17 +857,81 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   }
 
   function goToPairAtIndex(index) {
-    if (index < 0 || index >= validationUnits.length) return
+    if (index < 0 || index >= mappingQueueUnits.length) return
     persistActiveUnitConfig()
-    const unit = validationUnits[index]
+    const unit = mappingQueueUnits[index]
     setActiveUnitId(unit.unitId)
     loadUnitConfig(unit.unitId)
   }
 
+  function handleBatchMappingModeSelect(mode) {
+    setBatchApplyAllError('')
+    setBatchMismatchUnitIds([])
+    setBatchMismatchDetails({})
+    setUnitConfigs({})
+    const firstId = validationUnits[0]?.unitId
+    if (!firstId) return
+    if (mode === 'manual') {
+      setBatchColumnMappingMode('manual')
+      setActiveUnitId(firstId)
+      loadUnitConfig(firstId)
+      return
+    }
+    if (mode === 'template') {
+      setBatchColumnMappingMode('template')
+      setActiveUnitId(firstId)
+      loadUnitConfig(firstId)
+    }
+  }
+
+  async function handleApplyTemplateToAll() {
+    if (!isCurrentPairMappingValid()) return
+    setBatchApplyAllLoading(true)
+    setBatchApplyAllError('')
+    try {
+      const template = buildTemplateSnapshot({
+        mappings,
+        uidColumn,
+        delimiter,
+        hasHeader,
+        validateHeaderFormats,
+        validateFooters,
+        footerTrailingRows,
+        columnPreview,
+      })
+      const { unitConfigs: allConfigs, mismatchUnitIds, mismatchDetails } = await applyTemplateToAllUnits(
+        validationUnits,
+        template,
+        {
+          sourceStorageType,
+          targetStorageType,
+          sourceCloudConfig,
+          targetCloudConfig,
+        },
+      )
+      setUnitConfigs(allConfigs)
+      if (mismatchUnitIds.length === 0) {
+        setBatchColumnMappingMode('manual')
+        setStep(4)
+        return
+      }
+      setBatchMismatchUnitIds(mismatchUnitIds)
+      setBatchMismatchDetails(mismatchDetails)
+      setBatchColumnMappingMode('template-fixups')
+      const firstMismatch = mismatchUnitIds[0]
+      setActiveUnitId(firstMismatch)
+      loadUnitConfig(firstMismatch)
+    } catch (err) {
+      setBatchApplyAllError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBatchApplyAllLoading(false)
+    }
+  }
+
   function handleConfigureContinue() {
-    if (sequentialBatchMapping && !isCurrentPairMappingValid()) return
+    if ((sequentialBatchMapping || showTemplateMapping) && !isCurrentPairMappingValid()) return
     persistActiveUnitConfig()
-    if (sequentialBatchMapping && activeUnitIndex >= 0 && activeUnitIndex < validationUnits.length - 1) {
+    if (sequentialBatchMapping && activeUnitIndex >= 0 && activeUnitIndex < mappingQueueUnits.length - 1) {
       goToPairAtIndex(activeUnitIndex + 1)
       return
     }
@@ -858,6 +942,12 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     persistActiveUnitConfig()
     if (sequentialBatchMapping && activeUnitIndex > 0) {
       goToPairAtIndex(activeUnitIndex - 1)
+      return
+    }
+    if (showTemplateMapping || batchColumnMappingMode === 'template-fixups') {
+      setBatchColumnMappingMode('choose')
+      setBatchMismatchUnitIds([])
+      setBatchMismatchDetails({})
       return
     }
     setStep(2)
@@ -1072,8 +1162,16 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     const units = unitsFromPairs(pairs)
     setValidationUnits(units)
     setUnitConfigs({})
-    setActiveUnitId(units[0]?.unitId || null)
-    if (units[0]?.unitId) loadUnitConfig(units[0].unitId)
+    setBatchColumnMappingMode(units.length > 1 && fileFormat === 'csv' ? 'choose' : 'manual')
+    setBatchMismatchUnitIds([])
+    setBatchMismatchDetails({})
+    setBatchApplyAllError('')
+    if (units.length === 1) {
+      setActiveUnitId(units[0]?.unitId || null)
+      if (units[0]?.unitId) loadUnitConfig(units[0].unitId)
+    } else {
+      setActiveUnitId(null)
+    }
     setStep(3)
   }
 
@@ -1084,7 +1182,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     const hasTarget = isBatchMode
       ? Boolean(activeUnit?.targetPaths?.length)
       : isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
-    if (step !== 3 || !hasSource || !hasTarget || fileFormat === 'fixed-width' || fileFormat === 'json') return
+    if (step !== 3 || showBatchMappingModeChoice || !hasSource || !hasTarget || fileFormat === 'fixed-width' || fileFormat === 'json') return
 
     const controller = new AbortController()
 
@@ -1205,6 +1303,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     delimiter,
     hasHeader,
     fileFormat,
+    showBatchMappingModeChoice,
   ])
 
   useEffect(() => {
@@ -1545,7 +1644,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const showFilePairing = step === 2 && subPhase === 'file-pairing'
   const showConfigure  = step === 3
   const showReview     = step === 4
-  const allBatchUnitsConfigured = sequentialBatchMapping
+  const allBatchUnitsConfigured = multiPairCsvBatch
     ? validationUnits.every(u => isUnitMappingConfigured(u.unitId))
     : true
 
@@ -1958,8 +2057,68 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         )}
 
         {/* Step 2: Configure */}
-        {showConfigure && (
+        {showConfigure && showBatchMappingModeChoice && (
+          <StepBatchMappingMode
+            pairCount={validationUnits.length}
+            onSelect={handleBatchMappingModeSelect}
+            onBack={() => {
+              setStep(2)
+              setSubPhase('file-pairing')
+            }}
+          />
+        )}
+
+        {showConfigure && !showBatchMappingModeChoice && (
           <>
+            {showTemplateMapping && (
+              <div style={{
+                marginBottom: 16,
+                padding: '14px 16px',
+                borderRadius: 10,
+                border: '1px solid var(--accent-border)',
+                background: 'var(--accent-muted)',
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' }}>
+                  Shared mapping template
+                </div>
+                <p style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 8, marginBottom: 0, lineHeight: 1.5 }}>
+                  Configure columns using the first pair (
+                  <code style={{ fontFamily: 'Geist Mono, monospace' }}>
+                    {validationUnits[0]?.sourcePaths?.[0]?.split('/').pop()}
+                  </code>
+                  {' → '}
+                  <code style={{ fontFamily: 'Geist Mono, monospace' }}>
+                    {validationUnits[0]?.targetPaths?.[0]?.split('/').pop()}
+                  </code>
+                  ). Then apply this mapping to all {validationUnits.length} pairs. Only files with column mismatches will need manual mapping.
+                </p>
+              </div>
+            )}
+
+            {batchColumnMappingMode === 'template-fixups' && (
+              <div style={{
+                marginBottom: 16,
+                padding: '12px 14px',
+                borderRadius: 10,
+                border: '1px solid var(--border-1)',
+                background: 'var(--surface-2)',
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', marginBottom: 6 }}>
+                  {validationUnits.length - batchMismatchUnitIds.length} of {validationUnits.length} files matched the template automatically
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--text-3)', margin: '0 0 8px', lineHeight: 1.45 }}>
+                  Map the remaining {batchMismatchUnitIds.length} file pair{batchMismatchUnitIds.length === 1 ? '' : 's'} below.
+                </p>
+                {activeUnitId && Array.isArray(batchMismatchDetails[activeUnitId]) && batchMismatchDetails[activeUnitId].length > 0 && (
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--danger)' }}>
+                    {batchMismatchDetails[activeUnitId].map(issue => (
+                      <li key={issue} style={{ marginBottom: 4 }}>{issue}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             {sequentialBatchMapping && (
               <div style={{
                 marginBottom: 20,
@@ -1977,7 +2136,9 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 }}>
                   <div>
                     <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)' }}>
-                      Column mapping — file pair {activeUnitIndex + 1} of {validationUnits.length}
+                      {batchColumnMappingMode === 'template-fixups'
+                        ? `Manual fix — file ${activeUnitIndex + 1} of ${mappingQueueUnits.length}`
+                        : `Column mapping — file pair ${activeUnitIndex + 1} of ${mappingQueueUnits.length}`}
                     </div>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', marginTop: 4 }}>
                       {activeUnit?.sourcePaths?.[0]?.split('/').pop() ?? 'Source'}
@@ -1990,7 +2151,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                   </div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {validationUnits.map((unit, index) => {
+                  {mappingQueueUnits.map((unit, index) => {
                     const isActive = unit.unitId === activeUnitId
                     const isDone = isUnitMappingConfigured(unit.unitId)
                     const srcName = unit.sourcePaths[0]?.split('/').pop() || 'source'
@@ -2045,7 +2206,9 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                   })}
                 </div>
                 <p style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 10, marginBottom: 0 }}>
-                  Map columns for this pair, then continue to the next file. You can return to earlier pairs from the list above.
+                  {batchColumnMappingMode === 'template-fixups'
+                    ? 'Fix mapping for each file that did not match the shared template, then continue.'
+                    : 'Map columns for this pair, then continue to the next file. You can return to earlier pairs from the list above.'}
                 </p>
               </div>
             )}
@@ -2145,30 +2308,63 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 setTargetDateFormat={setTargetDateFormat}
               />
             )}
+            {batchApplyAllError && (
+              <div style={{
+                marginTop: 12,
+                padding: '10px 12px',
+                borderRadius: 8,
+                background: 'var(--danger-muted)',
+                color: 'var(--danger)',
+                fontSize: 12,
+              }}>
+                {batchApplyAllError}
+              </div>
+            )}
+
             <div style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <button
                 type="button"
                 onClick={handleConfigureBack}
                 className="btn btn-ghost"
+                disabled={batchApplyAllLoading}
               >
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                   <path d="M9 6H3M5.5 3.5L3 6l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
-                {sequentialBatchMapping && activeUnitIndex > 0 ? 'Previous pair' : 'Back'}
+                {sequentialBatchMapping && activeUnitIndex > 0
+                  ? 'Previous pair'
+                  : showTemplateMapping
+                    ? 'Change strategy'
+                    : 'Back'}
               </button>
-              <button
-                type="button"
-                onClick={handleConfigureContinue}
-                disabled={sequentialBatchMapping && !isCurrentPairMappingValid()}
-                className="btn btn-primary"
-              >
-                {sequentialBatchMapping && activeUnitIndex >= 0 && activeUnitIndex < validationUnits.length - 1
-                  ? `Save & next pair (${activeUnitIndex + 2} of ${validationUnits.length})`
-                  : 'Review & run'}
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path d="M3 6h6M6.5 3.5L9 6l-2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </button>
+              {showTemplateMapping ? (
+                <button
+                  type="button"
+                  onClick={handleApplyTemplateToAll}
+                  disabled={batchApplyAllLoading || !isCurrentPairMappingValid()}
+                  className="btn btn-primary"
+                >
+                  {batchApplyAllLoading
+                    ? 'Applying to all files…'
+                    : `Apply mapping to all ${validationUnits.length} files`}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleConfigureContinue}
+                  disabled={(sequentialBatchMapping || showTemplateMapping) && !isCurrentPairMappingValid()}
+                  className="btn btn-primary"
+                >
+                  {sequentialBatchMapping && activeUnitIndex >= 0 && activeUnitIndex < mappingQueueUnits.length - 1
+                    ? batchColumnMappingMode === 'template-fixups'
+                      ? `Save & next (${activeUnitIndex + 2} of ${mappingQueueUnits.length})`
+                      : `Save & next pair (${activeUnitIndex + 2} of ${mappingQueueUnits.length})`
+                    : 'Review & run'}
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path d="M3 6h6M6.5 3.5L9 6l-2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              )}
             </div>
           </>
         )}
