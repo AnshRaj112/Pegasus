@@ -113,3 +113,43 @@ class SaveDraftRequest(BaseModel):
     validate_header_formats: bool = Field(default=False, description="Header formats validation flag")
     validate_footers: bool = Field(default=False, description="Footers validation flag")
 
+
+class ValidationEntityCreateRequest(BaseModel):
+    display_name: str = Field(min_length=2, max_length=128)
+    aliases: list[str] = Field(default_factory=list, description="Additional aliases/keywords")
+
+
+class ValidationEntityRecord(BaseModel):
+    name: str
+    display_name: str
+    aliases: list[str] = Field(default_factory=list)
+    created_at: datetime
+
+
+class ValidationEntityRunDetail(BaseModel):
+    run_id: UUID
+    status: str
+    source_filename: str | None = None
+    target_filename: str | None = None
+    completed_at: datetime | None = None
+    is_match: bool | None = None
+    mismatch_counts: MismatchCounts
+
+
+class ValidationEntityInsight(BaseModel):
+    inferred_entity: str
+    display_name: str
+    confidence: str
+    matched_existing_entity: bool = False
+    needs_confirmation: bool = False
+    candidate_tokens: list[str] = Field(default_factory=list)
+    success_count: int = Field(ge=0, default=0)
+    failed_count: int = Field(ge=0, default=0)
+    total_count: int = Field(ge=0, default=0)
+    details: list[ValidationEntityRunDetail] = Field(default_factory=list)
+
+
+class ValidationEntityInsightsResponse(BaseModel):
+    limit: int = Field(ge=1)
+    entities: list[ValidationEntityInsight] = Field(default_factory=list)
+

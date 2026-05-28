@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { Select, DatePicker } from 'antd'
+import { useEffect, useState } from 'react'
+import { Select, DatePicker, Modal, Input, InputNumber, Tag, Table, Button } from 'antd'
 import {
   AreaChart,
   Area,
@@ -30,7 +30,12 @@ function formatToIST(iso, { short = false, compact = false } = {}) {
   return `${months[MM]} ${DD}, ${YYYY} ${hour12}:${mm} ${suffix} IST`
 }
 import { CheckCircle, XCircle, Activity } from 'lucide-react'
-import { fetchValidationDailyStats, fetchValidationHistory } from '../api/validationHistory'
+import {
+  createEntityDefinition,
+  fetchEntityInsights,
+  fetchValidationDailyStats,
+  fetchValidationHistory,
+} from '../api/validationHistory'
 
 const { RangePicker } = DatePicker
 
@@ -77,11 +82,50 @@ function formatDailyTick(value) {
   return `${displayHour} ${suffix}`
 }
 
+function CustomTooltip({ active, payload, label }) {
+  if (active && payload && payload.length) {
+    return (
+      <div style={{
+        background: 'var(--surface-0)',
+        border: '1px solid var(--border-2)',
+        borderRadius: 8,
+        padding: '12px',
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+      }}>
+        <p style={{ fontWeight: 600, color: 'var(--text-1)', marginBottom: 8 }}>{payload[0]?.payload?.fullDate ?? label}</p>
+        {payload.map((entry, index) => (
+          <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: entry.color }} />
+            <span style={{ color: 'var(--text-2)' }}>{entry.name}:</span>
+            <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{entry.value}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+  return null
+}
+
+function bucketRunStatus(detail) {
+  const status = String(detail?.status || '').toLowerCase()
+  const isPassed = detail?.is_match === true && status === 'completed'
+  if (isPassed) return 'passed'
+  if (status === 'running') return 'running'
+  if (status === 'pending' || status === 'queued' || status === 'scheduled') return 'scheduled'
+  if (status === 'completed' || status === 'failed') return 'failed'
+  return 'failed'
+}
+
 export default function Dashboard() {
   const [filterType, setFilterType] = useState('weekly')
   const [dateRange, setDateRange] = useState(null)
   const [chartData, setChartData] = useState([])
   const [totals, setTotals] = useState({ passed: 0, failed: 0, total: 0 })
+  const [entityInsights, setEntityInsights] = useState([])
+  const [entityLimit, setEntityLimit] = useState(25)
+  const [entityError, setEntityError] = useState('')
+  const [createEntityModal, setCreateEntityModal] = useState({ open: false, candidate: null, displayName: '', aliases: '' })
+  const [savingEntity, setSavingEntity] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -155,29 +199,136 @@ export default function Dashboard() {
     }
   }, [filterType, dateRange])
 
-  const CustomTooltip = ({ active, payload, label }) => {
-    if (active && payload && payload.length) {
-      return (
-        <div style={{
-          background: 'var(--surface-0)',
-          border: '1px solid var(--border-2)',
-          borderRadius: 8,
-          padding: '12px',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
-        }}>
-          <p style={{ fontWeight: 600, color: 'var(--text-1)', marginBottom: 8 }}>{payload[0]?.payload?.fullDate ?? label}</p>
-          {payload.map((entry, index) => (
-            <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: entry.color }} />
-              <span style={{ color: 'var(--text-2)' }}>{entry.name}:</span>
-              <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{entry.value}</span>
-            </div>
-          ))}
-        </div>
-      )
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await fetchEntityInsights({ limit: entityLimit })
+        if (cancelled) return
+        setEntityInsights(Array.isArray(data.entities) ? data.entities : [])
+        setEntityError('')
+      } catch (error) {
+        if (!cancelled) {
+          setEntityInsights([])
+          setEntityError(error instanceof Error ? error.message : 'Failed to load entity insights')
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
     }
-    return null
+  }, [entityLimit])
+
+  async function handleCreateEntity() {
+    if (!createEntityModal.displayName.trim()) return
+    setSavingEntity(true)
+    try {
+      const aliases = createEntityModal.aliases
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+      await createEntityDefinition({
+        displayName: createEntityModal.displayName.trim(),
+        aliases,
+      })
+      setCreateEntityModal({ open: false, candidate: null, displayName: '', aliases: '' })
+      const refreshed = await fetchEntityInsights({ limit: entityLimit })
+      setEntityInsights(Array.isArray(refreshed.entities) ? refreshed.entities : [])
+      setEntityError('')
+    } catch (error) {
+      setEntityError(error instanceof Error ? error.message : 'Failed to create entity')
+    } finally {
+      setSavingEntity(false)
+    }
   }
+
+  const entityTableData = entityInsights.map((entity) => {
+    const details = Array.isArray(entity.details) ? entity.details : []
+    const bucketCounts = details.reduce(
+      (acc, detail) => {
+        const bucket = bucketRunStatus(detail)
+        acc[bucket] += 1
+        return acc
+      },
+      { passed: 0, failed: 0, running: 0, scheduled: 0 },
+    )
+    return {
+      ...entity,
+      key: entity.inferred_entity,
+      statusCounts: bucketCounts,
+    }
+  })
+
+  const entityColumns = [
+    {
+      title: 'Entity',
+      dataIndex: 'display_name',
+      key: 'display_name',
+      render: (_, row) => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{row.display_name}</span>
+          <Tag color={row.matched_existing_entity ? 'green' : 'orange'}>
+            {row.matched_existing_entity ? 'Known' : 'Needs Confirmation'}
+          </Tag>
+          <Tag>{row.confidence}</Tag>
+        </div>
+      ),
+    },
+    {
+      title: 'Passed',
+      dataIndex: ['statusCounts', 'passed'],
+      key: 'passed',
+      width: 90,
+    },
+    {
+      title: 'Failed',
+      dataIndex: ['statusCounts', 'failed'],
+      key: 'failed',
+      width: 90,
+    },
+    {
+      title: 'Running',
+      dataIndex: ['statusCounts', 'running'],
+      key: 'running',
+      width: 90,
+    },
+    {
+      title: 'Scheduled',
+      dataIndex: ['statusCounts', 'scheduled'],
+      key: 'scheduled',
+      width: 110,
+    },
+    {
+      title: 'Total',
+      dataIndex: 'total_count',
+      key: 'total_count',
+      width: 90,
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      width: 150,
+      render: (_, row) =>
+        row.matched_existing_entity ? (
+          <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>
+        ) : (
+          <Button
+            size="small"
+            type="default"
+            onClick={() =>
+              setCreateEntityModal({
+                open: true,
+                candidate: row,
+                displayName: row.display_name,
+                aliases: (row.candidate_tokens || []).join(','),
+              })
+            }
+          >
+            Create Entity
+          </Button>
+        ),
+    },
+  ]
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, animation: 'fade-in 0.3s ease-out' }}>
@@ -353,6 +504,109 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      <div className="card" style={{ padding: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+          <div>
+            <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-1)', margin: 0 }}>Entity Health (Last X Validations)</h3>
+            <p style={{ margin: '6px 0 0 0', color: 'var(--text-2)', fontSize: 13 }}>
+              Entity is inferred from source/target file names such as <code>employee_ddmmyy_timestamp</code>.
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ color: 'var(--text-2)', fontSize: 13 }}>Last</span>
+            <InputNumber min={5} max={500} value={entityLimit} onChange={(v) => setEntityLimit(Number(v) || 25)} />
+            <span style={{ color: 'var(--text-2)', fontSize: 13 }}>files</span>
+          </div>
+        </div>
+
+        {entityError && (
+          <div style={{ marginBottom: 12, color: 'var(--danger)', fontSize: 13 }}>{entityError}</div>
+        )}
+
+        <Table
+          columns={entityColumns}
+          dataSource={entityTableData}
+          pagination={false}
+          locale={{ emptyText: entityError ? '—' : 'No recent validation history found for entity inference.' }}
+          expandable={{
+            expandedRowRender: (entityRow) => (
+              <Table
+                size="small"
+                pagination={false}
+                rowKey={(detail) => detail.run_id}
+                dataSource={(entityRow.details || []).map((detail) => ({
+                  ...detail,
+                  status_bucket: bucketRunStatus(detail),
+                }))}
+                columns={[
+                  {
+                    title: 'Source File',
+                    dataIndex: 'source_filename',
+                    key: 'source_filename',
+                    render: (value) => value || '—',
+                  },
+                  {
+                    title: 'Target File',
+                    dataIndex: 'target_filename',
+                    key: 'target_filename',
+                    render: (value) => value || '—',
+                  },
+                  {
+                    title: 'Status',
+                    dataIndex: 'status_bucket',
+                    key: 'status_bucket',
+                    render: (value) => {
+                      const colorMap = {
+                        passed: 'green',
+                        failed: 'red',
+                        running: 'blue',
+                        scheduled: 'gold',
+                      }
+                      return <Tag color={colorMap[value] || 'default'}>{String(value).toUpperCase()}</Tag>
+                    },
+                  },
+                  {
+                    title: 'Completed At',
+                    dataIndex: 'completed_at',
+                    key: 'completed_at',
+                    render: (value) => formatToIST(value) || '—',
+                  },
+                ]}
+              />
+            ),
+            rowExpandable: (record) => Array.isArray(record.details) && record.details.length > 0,
+          }}
+        />
+      </div>
+
+      <Modal
+        open={createEntityModal.open}
+        title="Create Entity from Filename Pattern"
+        onCancel={() => setCreateEntityModal({ open: false, candidate: null, displayName: '', aliases: '' })}
+        onOk={handleCreateEntity}
+        okText="Create Entity"
+        confirmLoading={savingEntity}
+      >
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div>
+            <p style={{ marginBottom: 6, color: 'var(--text-2)', fontSize: 13 }}>Entity display name</p>
+            <Input
+              value={createEntityModal.displayName}
+              onChange={(e) => setCreateEntityModal((prev) => ({ ...prev, displayName: e.target.value }))}
+              placeholder="Employee"
+            />
+          </div>
+          <div>
+            <p style={{ marginBottom: 6, color: 'var(--text-2)', fontSize: 13 }}>Aliases (comma-separated)</p>
+            <Input
+              value={createEntityModal.aliases}
+              onChange={(e) => setCreateEntityModal((prev) => ({ ...prev, aliases: e.target.value }))}
+              placeholder="employee,emp,staff"
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

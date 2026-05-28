@@ -53,6 +53,28 @@ export async function fetchValidationHistory({ limit = 50, offset = 0, sourcePat
   return data
 }
 
+export async function fetchEntityInsights({ limit = 50 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  const res = await fetch(absoluteApiUrl(`/api/v1/validate/history/entities/insights?${params}`))
+  const data = await parseJson(res)
+  if (!res.ok) throw new Error(formatDetail(data.detail) || `Entity insights failed (${res.status})`)
+  return data
+}
+
+export async function createEntityDefinition({ displayName, aliases = [] }) {
+  const res = await fetch(absoluteApiUrl('/api/v1/validate/history/entities'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      display_name: displayName,
+      aliases,
+    }),
+  })
+  const data = await parseJson(res)
+  if (!res.ok) throw new Error(formatDetail(data.detail) || `Create entity failed (${res.status})`)
+  return data
+}
+
 export async function fetchValidationHistoryDetail(runId) {
   const res = await fetch(absoluteApiUrl(`/api/v1/validate/history/${runId}`))
   const data = await parseJson(res)

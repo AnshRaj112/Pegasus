@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
+from sqlalchemy import select
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -16,12 +17,23 @@ from pegasus.core.local_paths import (
     compute_file_pair_key_for_settings,
     to_display_path,
 )
+from pegasus.models import ValidationEntity
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
+from pegasus.services.entity_inference_service import (
+    EntityDefinition,
+    infer_entity_from_filenames,
+    normalize_entity_name,
+)
 from pegasus.validation.delimiter_tokens import normalize_delimiter_for_storage
 from pegasus.schemas.validation import ColumnMapping, ColumnMappingFormatCheck, FooterValidationResult, MismatchCounts
 from pegasus.schemas.validation_history import (
     SaveDraftRequest,
+    ValidationEntityCreateRequest,
+    ValidationEntityInsight,
+    ValidationEntityInsightsResponse,
+    ValidationEntityRecord,
+    ValidationEntityRunDetail,
     ValidationDailyStatRow,
     ValidationDailyStatsResponse,
     ValidationDailyTotals,
@@ -36,6 +48,31 @@ from pegasus.schemas.validation_history import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["validation-history"])
+
+
+async def _list_entity_definitions(session) -> list[EntityDefinition]:
+    rows = list((await session.scalars(select(ValidationEntity))).all())
+    return [
+        EntityDefinition(
+            name=row.name,
+            display_name=row.display_name,
+            aliases=list(row.aliases or []),
+        )
+        for row in rows
+    ]
+
+
+def _entity_table_missing(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return (
+        "validation_entities" in text
+        and (
+            "undefinedtableerror" in text
+            or "undefined table" in text
+            or 'relation "validation_entities" does not exist' in text
+            or "relation 'validation_entities' does not exist" in text
+        )
+    )
 
 
 def _require_persistence(settings: AppSettings) -> None:
@@ -420,6 +457,135 @@ async def save_validation_draft(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not save draft mapping; check database connectivity",
         ) from exc
+
+
+@router.post(
+    "/validate/history/entities",
+    response_model=ValidationEntityRecord,
+    summary="Create or update an entity used for filename inference",
+)
+async def create_validation_entity(
+    settings: AppSettings,
+    body: ValidationEntityCreateRequest,
+) -> ValidationEntityRecord:
+    _require_persistence(settings)
+    normalized_name = normalize_entity_name(body.display_name)
+    if not normalized_name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="display_name does not contain a valid entity name")
+    clean_aliases = sorted({normalize_entity_name(a) for a in body.aliases if normalize_entity_name(a)})
+    clean_aliases = [a for a in clean_aliases if a != normalized_name]
+    try:
+        async with AsyncSessionLocal() as session:
+            existing = await session.scalar(select(ValidationEntity).where(ValidationEntity.name == normalized_name))
+            if existing is not None:
+                merged = sorted(set(list(existing.aliases or []) + clean_aliases))
+                existing.display_name = body.display_name.strip()
+                existing.aliases = merged
+                await session.commit()
+                await session.refresh(existing)
+                row = existing
+            else:
+                row = ValidationEntity(
+                    name=normalized_name,
+                    display_name=body.display_name.strip(),
+                    aliases=clean_aliases,
+                )
+                session.add(row)
+                await session.commit()
+                await session.refresh(row)
+    except Exception as exc:
+        if _entity_table_missing(exc):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Entity registry is not migrated yet. Run backend database migration and try again.",
+            ) from exc
+        logger.exception("Failed to create/update validation entity: %s", exc)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not persist entity definition; check database connectivity",
+        ) from exc
+    return ValidationEntityRecord(
+        name=row.name,
+        display_name=row.display_name,
+        aliases=list(row.aliases or []),
+        created_at=row.created_at,
+    )
+
+
+@router.get(
+    "/validate/history/entities/insights",
+    response_model=ValidationEntityInsightsResponse,
+    summary="Infer entities from filenames and summarize pass/fail over recent runs",
+)
+async def list_validation_entity_insights(
+    settings: AppSettings,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+) -> ValidationEntityInsightsResponse:
+    _require_persistence(settings)
+    try:
+        async with AsyncSessionLocal() as session:
+            try:
+                entities = await _list_entity_definitions(session)
+            except Exception as exc:
+                if _entity_table_missing(exc):
+                    logger.warning(
+                        "validation_entities table missing; falling back to filename-only inference"
+                    )
+                    await session.rollback()
+                    entities = []
+                else:
+                    raise
+            runs = await ValidationRunRepository.list_recent(session, limit=limit, offset=0)
+    except Exception as exc:
+        logger.exception("Failed to compute entity insights: %s", exc)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not load entity insights; check database connectivity",
+        ) from exc
+
+    buckets: dict[str, ValidationEntityInsight] = {}
+    for run in runs:
+        inference = infer_entity_from_filenames(run.source_filename, run.target_filename, entities)
+        key = inference.inferred_entity
+        if key not in buckets:
+            buckets[key] = ValidationEntityInsight(
+                inferred_entity=inference.inferred_entity,
+                display_name=inference.display_name,
+                confidence=inference.confidence,
+                matched_existing_entity=inference.matched_existing,
+                needs_confirmation=not inference.matched_existing,
+                candidate_tokens=inference.candidate_tokens,
+                success_count=0,
+                failed_count=0,
+                total_count=0,
+                details=[],
+            )
+        item = buckets[key]
+        is_success = run.is_match is True and run.status == ValidationRunStatus.COMPLETED
+        if is_success:
+            item.success_count += 1
+        else:
+            item.failed_count += 1
+        item.total_count += 1
+        item.details.append(
+            ValidationEntityRunDetail(
+                run_id=run.id,
+                status=run.status.value if isinstance(run.status, ValidationRunStatus) else str(run.status),
+                source_filename=run.source_filename,
+                target_filename=run.target_filename,
+                completed_at=run.completed_at,
+                is_match=run.is_match,
+                mismatch_counts=_mismatch_counts_from_run(run),
+            )
+        )
+
+    return ValidationEntityInsightsResponse(
+        limit=limit,
+        entities=sorted(
+            list(buckets.values()),
+            key=lambda x: (x.needs_confirmation, -x.total_count, x.display_name.lower()),
+        ),
+    )
 
 
 
