@@ -625,6 +625,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [batchApplyAllError, setBatchApplyAllError] = useState('')
 
   const isBatchMode = inputLayout !== 'pair'
+  const apiFileFormat = backendFileFormat(fileFormat)
   const multiPairBatch = isBatchMode && validationUnits.length > 1
     && (isCsvLikeFormat(fileFormat) || fileFormat === 'fixed-width' || fileFormat === 'json')
   const mappingQueueUnits = batchColumnMappingMode === 'template-fixups'
@@ -870,8 +871,13 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     if (fileFormat === 'fixed-width') {
       return fwColumns.length > 0 && !!fwJoinColumn && !!sourceDateFormat.trim() && !!targetDateFormat.trim()
     }
-    if (testMode === 'litmus') return true
-    return !!uidColumn.trim() && mappings.some(row => String(row.targetCol || '').trim())
+    const hasMappedColumns = mappings.some(row => {
+      const primary = String(row.targetCol || '').trim()
+      if (primary) return true
+      return Array.isArray(row.targetCols) && row.targetCols.some(col => String(col || '').trim())
+    })
+    if (testMode === 'litmus') return hasMappedColumns || columnPreview.compareColumns.length > 0
+    return !!uidColumn.trim() && hasMappedColumns
   }
 
   function isUnitMappingConfigured(unitId) {
@@ -888,10 +894,17 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     if (fileFormat === 'fixed-width') {
       return (cfg.fwColumns?.length ?? 0) > 0 && !!cfg.fwJoinColumn
     }
-    if ((cfg.testMode || 'full') === 'litmus') return true
-    const uid = String(cfg.uidColumn || '').trim()
     const rows = Array.isArray(cfg.mappings) ? cfg.mappings : []
-    return !!uid && rows.some(row => String(row.targetCol || '').trim())
+    const hasMappedColumns = rows.some(row => {
+      const primary = String(row.targetCol || '').trim()
+      if (primary) return true
+      return Array.isArray(row.targetCols) && row.targetCols.some(col => String(col || '').trim())
+    })
+    if ((cfg.testMode || 'full') === 'litmus') {
+      return hasMappedColumns || ((cfg.columnPreview?.compareColumns?.length ?? 0) > 0)
+    }
+    const uid = String(cfg.uidColumn || '').trim()
+    return !!uid && hasMappedColumns
   }
 
   function goToPairAtIndex(index) {
@@ -1025,7 +1038,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       const data = await matchFilePairs({
         sourceDirectory: sourceDir,
         targetDirectory: targetDir,
-        apiFileFormat,
+        fileFormat: apiFileFormat,
         recursive: recursiveFolderMatch,
       })
       setPairingState({
@@ -1051,7 +1064,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         targetPrefix,
         credentialsJson: sourceCloudConfig.credentialsJson,
         projectId: sourceCloudConfig.projectId,
-        fileFormat,
+        fileFormat: apiFileFormat,
         recursive: recursiveFolderMatch,
       })
       setPairingState({
@@ -1221,7 +1234,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     setValidationUnits(units)
     setUnitConfigs({})
     setBatchColumnMappingMode(
-      units.length > 1 && (fileFormat === 'csv' || fileFormat === 'fixed-width' || fileFormat === 'json')
+      units.length > 1 && (isCsvLikeFormat(fileFormat) || fileFormat === 'fixed-width' || fileFormat === 'json')
         ? 'choose'
         : 'manual',
     )
@@ -1750,7 +1763,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       ? true
       : fileFormat === 'fixed-width'
         ? fwColumns.length > 0 && !!fwJoinColumn
-        : !!uidColumn.trim())
+        : isCurrentPairMappingValid())
     : fileFormat === 'json'
     ? (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
       && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig))
@@ -1763,7 +1776,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       && !!targetDateFormat.trim())
     : (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
       && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
-      && (testMode === 'litmus' || !!uidColumn.trim()))
+      && isCurrentPairMappingValid())
   const sourceDisplay = isBatchMode && activeUnit
     ? activeUnit.sourcePaths.join(', ')
     : describeStorageInput(sourceStorageType, sourcePath, sourceCloudConfig)

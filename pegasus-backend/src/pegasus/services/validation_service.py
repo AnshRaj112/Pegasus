@@ -7,6 +7,7 @@ import logging
 import re
 import tempfile
 import csv
+from collections import OrderedDict
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -67,6 +68,10 @@ from pegasus.validation.fixed_width_matching import fuzzy_pair_by_join_key
 logger = logging.getLogger(__name__)
 
 _MAPPING_PREVIEW_SAMPLE_ROWS = 6
+_LITMUS_LINE_ESTIMATE_THRESHOLD_BYTES = 2 * 1024 * 1024
+_LITMUS_SAMPLE_BYTES = 256 * 1024
+_LITMUS_STATS_CACHE_MAX = 256
+_LITMUS_STATS_CACHE: "OrderedDict[tuple[str, int, int], dict[str, Any]]" = OrderedDict()
 
 
 @dataclass(slots=True)
@@ -265,6 +270,10 @@ class ValidationService:
             else:
                 checks_failed.append("row_count")
                 notes.append("Row counts differ.")
+            if source_path.stat().st_size > _LITMUS_LINE_ESTIMATE_THRESHOLD_BYTES:
+                notes.append("Source row count is estimated for speed (turbo litmus).")
+            if target_path.stat().st_size > _LITMUS_LINE_ESTIMATE_THRESHOLD_BYTES:
+                notes.append("Target row count is estimated for speed (turbo litmus).")
             if source_stats["column_count"] == target_stats["column_count"]:
                 checks_passed.append("column_count")
             else:
@@ -328,6 +337,41 @@ class ValidationService:
         has_header: bool,
     ) -> dict[str, Any]:
         """Fast byte-level CSV stats for litmus mode."""
+        stat = path.stat()
+        cache_key = (str(path), stat.st_size, stat.st_mtime_ns)
+        cached = _LITMUS_STATS_CACHE.get(cache_key)
+        if cached is not None:
+            _LITMUS_STATS_CACHE.move_to_end(cache_key)
+            return dict(cached)
+
+        line_count = ValidationService._fast_line_count(path, stat.st_size)
+
+        header_line = ValidationService._first_non_empty_line(path)
+        columns = ValidationService._split_csv_line(header_line, delimiter=delimiter) if header_line else []
+        if not has_header:
+            columns = [f"column_{idx}" for idx in range(1, len(columns) + 1)]
+        data_rows = max(line_count - (1 if has_header and line_count > 0 else 0), 0)
+        out = {
+            "row_count": data_rows,
+            "column_count": len(columns),
+            "columns": columns,
+        }
+        _LITMUS_STATS_CACHE[cache_key] = dict(out)
+        _LITMUS_STATS_CACHE.move_to_end(cache_key)
+        while len(_LITMUS_STATS_CACHE) > _LITMUS_STATS_CACHE_MAX:
+            _LITMUS_STATS_CACHE.popitem(last=False)
+        return out
+
+    @staticmethod
+    def _fast_line_count(path: Path, file_size: int) -> int:
+        if file_size <= 0:
+            return 0
+        if file_size <= _LITMUS_LINE_ESTIMATE_THRESHOLD_BYTES:
+            return ValidationService._exact_line_count(path)
+        return ValidationService._estimated_line_count(path, file_size)
+
+    @staticmethod
+    def _exact_line_count(path: Path) -> int:
         line_count = 0
         saw_any = False
         last_chunk_ended_with_newline = True
@@ -341,17 +385,22 @@ class ValidationService:
                 last_chunk_ended_with_newline = chunk.endswith(b"\n")
         if saw_any and not last_chunk_ended_with_newline:
             line_count += 1
+        return line_count
 
-        header_line = ValidationService._first_non_empty_line(path)
-        columns = ValidationService._split_csv_line(header_line, delimiter=delimiter) if header_line else []
-        if not has_header:
-            columns = [f"column_{idx}" for idx in range(1, len(columns) + 1)]
-        data_rows = max(line_count - (1 if has_header and line_count > 0 else 0), 0)
-        return {
-            "row_count": data_rows,
-            "column_count": len(columns),
-            "columns": columns,
-        }
+    @staticmethod
+    def _estimated_line_count(path: Path, file_size: int) -> int:
+        sample_size = min(_LITMUS_SAMPLE_BYTES, file_size)
+        with path.open("rb") as handle:
+            sample = handle.read(sample_size)
+            if not sample:
+                return 0
+            newline_count = sample.count(b"\n")
+            if newline_count <= 0:
+                return 1
+            estimated = int((newline_count / sample_size) * file_size)
+            if not sample.endswith(b"\n"):
+                estimated += 1
+            return max(estimated, 1)
 
     @staticmethod
     def _first_non_empty_line(path: Path) -> str:

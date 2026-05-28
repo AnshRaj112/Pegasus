@@ -9,7 +9,7 @@ from pathlib import Path
 
 from pegasus.validation.fixed_width_meta import normalize_file_format
 
-_CSV_EXTENSIONS = frozenset({".csv", ".tsv", ".txt"})
+_CSV_EXTENSIONS = frozenset({".csv", ".tsv", ".txt", ".dat"})
 _JSON_EXTENSIONS = frozenset({".json", ".ndjson"})
 _FIXED_WIDTH_EXTENSIONS = frozenset({".txt", ".dat", ".fw", ".fixed"})
 
