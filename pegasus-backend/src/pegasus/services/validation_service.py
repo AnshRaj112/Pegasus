@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 import tempfile
+import csv
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -228,17 +229,14 @@ class ValidationService:
             footer_trailing_rows=0,
         )
         try:
-            self._preflight_csv_pair(prepared_source, prepared_target, delim, has_header=has_header)
-            source_df = self._read_dataframe(
-                PolarsCSVReader(default_batch_size=1024),
+            source_stats = self._quick_csv_litmus_stats(
                 prepared_source,
-                delim,
+                delimiter=delim,
                 has_header=has_header,
             )
-            target_df = self._read_dataframe(
-                PolarsCSVReader(default_batch_size=1024),
+            target_stats = self._quick_csv_litmus_stats(
                 prepared_target,
-                delim,
+                delimiter=delim,
                 has_header=has_header,
             )
             checks_run = [
@@ -262,17 +260,17 @@ class ValidationService:
             else:
                 checks_failed.append("file_size")
                 notes.append("File sizes differ.")
-            if source_df.height == target_df.height:
+            if source_stats["row_count"] == target_stats["row_count"]:
                 checks_passed.append("row_count")
             else:
                 checks_failed.append("row_count")
                 notes.append("Row counts differ.")
-            if len(source_df.columns) == len(target_df.columns):
+            if source_stats["column_count"] == target_stats["column_count"]:
                 checks_passed.append("column_count")
             else:
                 checks_failed.append("column_count")
                 notes.append("Column counts differ.")
-            if source_df.columns == target_df.columns:
+            if source_stats["columns"] == target_stats["columns"]:
                 checks_passed.append("column_names")
             else:
                 checks_failed.append("column_names")
@@ -287,18 +285,18 @@ class ValidationService:
                     "file_name": source_path.name,
                     "file_type": "csv",
                     "size_bytes": source_path.stat().st_size,
-                    "row_count": source_df.height,
-                    "column_count": len(source_df.columns),
-                    "columns": list(source_df.columns),
+                    "row_count": int(source_stats["row_count"]),
+                    "column_count": int(source_stats["column_count"]),
+                    "columns": list(source_stats["columns"]),
                 },
                 "target": {
                     "path": str(target_path),
                     "file_name": target_path.name,
                     "file_type": "csv",
                     "size_bytes": target_path.stat().st_size,
-                    "row_count": target_df.height,
-                    "column_count": len(target_df.columns),
-                    "columns": list(target_df.columns),
+                    "row_count": int(target_stats["row_count"]),
+                    "column_count": int(target_stats["column_count"]),
+                    "columns": list(target_stats["columns"]),
                 },
                 "notes": notes,
             }
@@ -311,16 +309,72 @@ class ValidationService:
                         MismatchType.VALUE_MISMATCH.value: len(checks_failed),
                     },
                 ),
-                source_row_count=source_df.height,
-                target_row_count=target_df.height,
-                compared_column_count=min(len(source_df.columns), len(target_df.columns)),
-                compared_columns=[c for c in source_df.columns if c in set(target_df.columns)],
+                source_row_count=int(source_stats["row_count"]),
+                target_row_count=int(target_stats["row_count"]),
+                compared_column_count=min(int(source_stats["column_count"]), int(target_stats["column_count"])),
+                compared_columns=[c for c in source_stats["columns"] if c in set(target_stats["columns"])],
                 test_mode="litmus",
                 litmus=litmus,
             )
         finally:
             for p in cleanup_paths:
                 p.unlink(missing_ok=True)
+
+    @staticmethod
+    def _quick_csv_litmus_stats(
+        path: Path,
+        *,
+        delimiter: str,
+        has_header: bool,
+    ) -> dict[str, Any]:
+        """Fast byte-level CSV stats for litmus mode."""
+        line_count = 0
+        saw_any = False
+        last_chunk_ended_with_newline = True
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(8 * 1024 * 1024)
+                if not chunk:
+                    break
+                saw_any = True
+                line_count += chunk.count(b"\n")
+                last_chunk_ended_with_newline = chunk.endswith(b"\n")
+        if saw_any and not last_chunk_ended_with_newline:
+            line_count += 1
+
+        header_line = ValidationService._first_non_empty_line(path)
+        columns = ValidationService._split_csv_line(header_line, delimiter=delimiter) if header_line else []
+        if not has_header:
+            columns = [f"column_{idx}" for idx in range(1, len(columns) + 1)]
+        data_rows = max(line_count - (1 if has_header and line_count > 0 else 0), 0)
+        return {
+            "row_count": data_rows,
+            "column_count": len(columns),
+            "columns": columns,
+        }
+
+    @staticmethod
+    def _first_non_empty_line(path: Path) -> str:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                stripped = line.strip()
+                if stripped:
+                    return stripped
+        return ""
+
+    @staticmethod
+    def _split_csv_line(line: str, *, delimiter: str) -> list[str]:
+        if not line:
+            return []
+        if delimiter and len(delimiter) == 1:
+            try:
+                return next(csv.reader([line], delimiter=delimiter))
+            except Exception:
+                pass
+        # Multi-char delimiter fallback for litmus mode.
+        if not delimiter:
+            return [line]
+        return [part.strip() for part in line.split(delimiter)]
 
     def analyze_local_mappings(
         self,
