@@ -76,6 +76,14 @@ const DEFAULT_CLOUD_CONFIG = {
   projectId: '',
 }
 
+function isCsvLikeFormat(fileFormat) {
+  return fileFormat === 'csv' || fileFormat === 'zip' || fileFormat === 'dat'
+}
+
+function backendFileFormat(fileFormat) {
+  return fileFormat === 'zip' || fileFormat === 'dat' ? 'csv' : fileFormat
+}
+
 function pickDefaultUidColumn(columns, hasHeader) {
   if (!Array.isArray(columns) || columns.length === 0) return ''
   if (hasHeader) {
@@ -242,7 +250,7 @@ function FixedWidthConfigurator({
   matchStrategy,
   setMatchStrategy,
   dateColumn,
-  setDateColumn,
+    setDateColumn,
   layoutLoading,
   layoutError,
   sourceDateStart,
@@ -615,7 +623,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
 
   const isBatchMode = inputLayout !== 'pair'
   const multiPairBatch = isBatchMode && validationUnits.length > 1
-    && (fileFormat === 'csv' || fileFormat === 'fixed-width' || fileFormat === 'json')
+    && (isCsvLikeFormat(fileFormat) || fileFormat === 'fixed-width' || fileFormat === 'json')
   const mappingQueueUnits = batchColumnMappingMode === 'template-fixups'
     ? validationUnits.filter(u => batchMismatchUnitIds.includes(u.unitId))
     : validationUnits
@@ -903,6 +911,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     setBatchApplyAllLoading(true)
     setBatchApplyAllError('')
     try {
+      const apiFileFormat = backendFileFormat(fileFormat)
       const template = fileFormat === 'fixed-width'
         ? buildFixedWidthTemplateSnapshot({
           fwColumns,
@@ -937,7 +946,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           sourceCloudConfig,
           targetCloudConfig,
         },
-        fileFormat,
+        apiFileFormat,
       )
       setUnitConfigs(allConfigs)
       if (mismatchUnitIds.length === 0) {
@@ -997,7 +1006,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       const data = await matchFilePairs({
         sourceDirectory: sourceDir,
         targetDirectory: targetDir,
-        fileFormat,
+        apiFileFormat,
         recursive: recursiveFolderMatch,
       })
       setPairingState({
@@ -1488,6 +1497,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   async function handleValidate() {
     setIsRunning(true); setPhase('running'); setResult(null); setBatchResult(null); setErrorMsg('')
     try {
+      const apiFileFormat = backendFileFormat(fileFormat)
       if (isBatchMode) {
         persistActiveUnitConfig()
         const mergedConfigs = {
@@ -1507,7 +1517,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           } : {}),
         }
         const bodyPayload = buildBatchValidatePayload({
-          fileFormat,
+          fileFormat: apiFileFormat,
           units: validationUnits,
           unitConfigs: Object.fromEntries(
             validationUnits.map(u => [u.unitId, {
@@ -1608,7 +1618,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         validate_footers: validateFooters,
         footer_trailing_rows: footerTrailingRows,
         has_header: hasHeader,
-        file_format: 'csv'
+        file_format: apiFileFormat
       };
 
       const res = await fetch(absoluteApiUrl('/api/v1/validate/local'), {
@@ -1857,7 +1867,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               </p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(240px, 1fr))', gap: 16 }}>
               {/* CSV Option */}
               <button
                 onClick={() => { setFileFormat('csv'); setStep(2); setSubPhase('input-layout') }}
@@ -1905,6 +1915,102 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 </div>
               </button>
 
+              {/* ZIP Option */}
+              <button
+                onClick={() => { setFileFormat('zip'); setStep(2); setSubPhase('input-layout') }}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: 16,
+                  padding: 24,
+                  borderRadius: 12,
+                  border: '1px solid var(--border-1)',
+                  background: 'var(--surface-1)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = 'var(--orange, #f59e0b)'
+                  e.currentTarget.style.background = 'rgba(245, 158, 11, 0.05)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = 'var(--border-1)'
+                  e.currentTarget.style.background = 'var(--surface-1)'
+                }}
+              >
+                <div style={{
+                  width: 42, height: 42,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: 10,
+                  background: 'var(--orange, #f59e0b)',
+                  color: '#fff',
+                }}>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <path d="M5 4h10v12H5V4z" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M7 8h6M7 11h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    <path d="M6 4.5l2-2h4l2 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-1)', marginBottom: 6 }}>
+                    ZIP Archive Validation
+                  </h3>
+                  <p style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.4, margin: 0 }}>
+                    Archive-first workflows keep the same frontend wizard and pair/folder layout, so ZIP can slot into the existing flow.
+                  </p>
+                </div>
+              </button>
+
+              {/* DAT Option */}
+              <button
+                onClick={() => { setFileFormat('dat'); setStep(2); setSubPhase('input-layout') }}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: 16,
+                  padding: 24,
+                  borderRadius: 12,
+                  border: '1px solid var(--border-1)',
+                  background: 'var(--surface-1)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = 'var(--orange, #f59e0b)'
+                  e.currentTarget.style.background = 'rgba(245, 158, 11, 0.05)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = 'var(--border-1)'
+                  e.currentTarget.style.background = 'var(--surface-1)'
+                }}
+              >
+                <div style={{
+                  width: 42, height: 42,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: 10,
+                  background: 'var(--orange, #f59e0b)',
+                  color: '#fff',
+                }}>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <path d="M5 4h10v12H5V4z" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M7 8h6M7 11h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    <path d="M6 4.5l2-2h4l2 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-1)', marginBottom: 6 }}>
+                    DAT File Validation
+                  </h3>
+                  <p style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.4, margin: 0 }}>
+                    Frontend-only DAT flow that keeps the same wizard experience while normalizing to CSV for the backend.
+                  </p>
+                </div>
+              </button>
+
               {/* Fixed Width Option */}
               <button
                 onClick={() => { setFileFormat('fixed-width'); setStep(2); setSubPhase('input-layout') }}
@@ -1944,7 +2050,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 </div>
                 <div>
                   <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-1)', marginBottom: 6 }}>
-                    Fixed-Width Date Validation 
+                    Fixed-Width Date Validation
                   </h3>
                   <p style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.4, margin: 0 }}>
                     Extremely fast low-memory streaming line-by-line validation for giant records. Slices and standardizes target/source date segments at specific character indices.
@@ -2316,7 +2422,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                   No UID column or delimiter is required.
                 </p>
               </div>
-            ) : fileFormat === 'csv' ? (
+            ) : isCsvLikeFormat(fileFormat) ? (
               <Step3_Configure
                 sourcePath={sourceDisplay}
                 targetPath={targetDisplay}
@@ -2526,7 +2632,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
             )}
 
             {/* Config summary */}
-            {fileFormat === 'csv' ? (
+            {isCsvLikeFormat(fileFormat) ? (
               <div style={{
                 display: 'flex', gap: 16, padding: '10px 14px', borderRadius: 9,
                 background: 'var(--surface-2)', border: '1px solid var(--border-1)',
@@ -2550,14 +2656,14 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               </div>
             )}
 
-            {fileFormat === 'csv' && (
+            {isCsvLikeFormat(fileFormat) && (
               <ResolvedDelimiterNotice
                 requestedDelimiter={delimiter}
                 resolvedDelimiter={columnPreview.delimiter}
               />
             )}
 
-            {fileFormat === 'csv' && uidColumn.trim() && (
+            {isCsvLikeFormat(fileFormat) && uidColumn.trim() && (
               <MappingColumnPreview
                 uidColumn={uidColumn}
                 hasHeader={hasHeader}
@@ -2568,7 +2674,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               />
             )}
 
-            {fileFormat === 'csv' && (
+            {isCsvLikeFormat(fileFormat) && (
               <div style={{ marginBottom: 16 }}>
                 <label style={{ display: 'block' }}>
                   <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 5 }}>

@@ -23,6 +23,13 @@ const LAYOUTS = [
   },
 ]
 
+function formatDisplayName(fileFormat) {
+  if (fileFormat === 'fixed-width') return 'Fixed-width'
+  if (fileFormat === 'json') return 'JSON'
+  if (fileFormat === 'zip') return 'ZIP archive'
+  return 'CSV'
+}
+
 export default function StepInputLayout({ fileFormat, onNext, onBack }) {
   const [layout, setLayout] = useState('pair')
 
@@ -33,7 +40,7 @@ export default function StepInputLayout({ fileFormat, onNext, onBack }) {
           Step 1 of 4 — Input layout
         </div>
         <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1.2, marginBottom: 6 }}>
-          How are your {fileFormat === 'json' ? 'JSON' : fileFormat === 'fixed-width' ? 'fixed-width' : 'CSV'} files organized?
+          How are your {formatDisplayName(fileFormat)} files organized?
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5 }}>
           Choose whether you are validating one file pair, whole folders, or merged shards.

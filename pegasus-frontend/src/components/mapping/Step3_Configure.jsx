@@ -523,19 +523,22 @@ export default function Step3_Configure({
                     <div
                       style={{
                         marginTop: 8,
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        border: '1px solid var(--border-1)',
+                        background: 'var(--surface-2)',
                         display: 'flex',
-                        alignItems: 'center',
+                        flexDirection: 'column',
                         gap: 8,
-                        flexWrap: 'wrap',
                       }}
                     >
                       <label
                         style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          fontSize: 11,
-                          color: 'var(--text-3)',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 10,
+                          fontSize: 12,
+                          color: 'var(--text-2)',
                           cursor: 'pointer',
                         }}
                       >
@@ -551,34 +554,74 @@ export default function Step3_Configure({
                                 }
                               : row
                           )))}
+                          style={{ marginTop: 2, flexShrink: 0 }}
                         />
-                        Treat as structured (list/dict/tuple)
+                        <span>
+                          <strong style={{ display: 'block', color: 'var(--text-1)', fontWeight: 600 }}>
+                            Treat as structured values
+                          </strong>
+                          <span style={{ display: 'block', marginTop: 2, fontSize: 11, color: 'var(--text-4)', lineHeight: 1.4 }}>
+                            Use this for lists, dicts, or tuples stored in the cell.
+                          </span>
+                        </span>
                       </label>
                       {m.compareMode === 'structured' && (
-                        <label
+                        <div
                           style={{
-                            display: 'inline-flex',
+                            display: 'flex',
                             alignItems: 'center',
-                            gap: 6,
-                            fontSize: 11,
-                            color: 'var(--text-3)',
+                            gap: 8,
+                            flexWrap: 'wrap',
+                            paddingLeft: 22,
                           }}
                         >
-                          Order
-                          <select
-                            value={m.structuredOrderSensitive ? 'strict' : 'ignore'}
-                            onChange={e => onMappingChange(activeMappings.map(row => (
-                              row.id === m.id
-                                ? { ...row, structuredOrderSensitive: e.target.value === 'strict' }
-                                : row
-                            )))}
-                            className="input input-mono"
-                            style={{ height: 26, fontSize: 11, width: 'auto', minWidth: 132, paddingRight: 24 }}
+                          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-4)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                            Order
+                          </span>
+                          <div
+                            role="group"
+                            aria-label="Structured order handling"
+                            style={{
+                              display: 'inline-flex',
+                              borderRadius: 999,
+                              border: '1px solid var(--border-1)',
+                              overflow: 'hidden',
+                              background: 'var(--surface-1)',
+                            }}
                           >
-                            <option value="ignore">Ignore order</option>
-                            <option value="strict">Require same order</option>
-                          </select>
-                        </label>
+                            {[
+                              { value: 'ignore', label: 'Ignore order', strict: false },
+                              { value: 'strict', label: 'Keep same order', strict: true },
+                            ].map(option => {
+                              const active = Boolean(m.structuredOrderSensitive) === option.strict
+                              return (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  onClick={() => onMappingChange(activeMappings.map(row => (
+                                    row.id === m.id
+                                      ? { ...row, structuredOrderSensitive: option.strict }
+                                      : row
+                                  )))}
+                                  style={{
+                                    height: 28,
+                                    padding: '0 12px',
+                                    border: 'none',
+                                    borderRight: option.value === 'ignore' ? '1px solid var(--border-1)' : 'none',
+                                    background: active ? 'var(--accent-muted)' : 'transparent',
+                                    color: active ? 'var(--accent)' : 'var(--text-3)',
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    transition: 'background 0.15s ease, color 0.15s ease',
+                                  }}
+                                >
+                                  {option.label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
                       )}
                     </div>
                   )}

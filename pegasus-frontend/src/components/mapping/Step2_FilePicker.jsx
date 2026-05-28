@@ -61,6 +61,14 @@ function parentDirOfFile(filePath) {
 
 const CHEVRON_SVG = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%2371717a' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`
 
+function formatDisplayName(fileFormat) {
+  if (fileFormat === 'fixed-width') return 'Fixed-width'
+  if (fileFormat === 'json') return 'JSON'
+  if (fileFormat === 'zip') return 'ZIP archive'
+  if (fileFormat === 'dat') return 'DAT file'
+  return 'CSV'
+}
+
 export default function Step2_FilePicker({
   panelLabel,
   storageType = 'local',
@@ -154,7 +162,13 @@ export default function Step2_FilePicker({
     ? `Use folder as ${panelLabel}`
     : selectionMode === 'multi'
       ? `Use ${selectedFiles.length} file${selectedFiles.length === 1 ? '' : 's'} as ${panelLabel}`
-      : `Use as ${panelLabel}`
+      : fileFormat === 'zip'
+        ? `Use ZIP archive as ${panelLabel}`
+        : fileFormat === 'dat'
+          ? `Use DAT file as ${panelLabel}`
+        : `Use as ${panelLabel}`
+
+  const formatLabel = formatDisplayName(fileFormat)
 
   if (storageType === 'cloud') {
     return (
@@ -178,7 +192,7 @@ export default function Step2_FilePicker({
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 6 }}>
-            Step 1 of 3 — {panelLabel} file
+            Step 1 of 3 — {panelLabel} {formatLabel}
           </div>
           <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1.2, marginBottom: 4 }}>
             Select{' '}
@@ -186,10 +200,10 @@ export default function Step2_FilePicker({
           </h2>
           <p style={{ fontSize: 13, color: 'var(--text-3)' }}>
             {selectionMode === 'folder'
-              ? 'Browse to the folder you want to use, then confirm.'
+              ? `Browse to the folder you want to use, then confirm.${fileFormat === 'zip' ? ' ZIP archives can be selected from the same browser flow.' : ''}`
               : selectionMode === 'multi'
-                ? 'Select one or more files (click to toggle). Order is preserved for merge.'
-                : 'Browse the server filesystem. Click a file to select it.'}
+                ? `Select one or more files (click to toggle). Order is preserved for merge.${fileFormat === 'zip' ? ' ZIP archives stay in the same frontend flow.' : ''}`
+                : `Browse the server filesystem. Click a ${fileFormat === 'zip' ? 'ZIP archive' : 'file'} to select it.`}
           </p>
         </div>
         {canConfirm && (
@@ -391,6 +405,7 @@ export default function Step2_FilePicker({
                       ? selectedFiles.includes(f.path)
                       : selectedFile === f.path
                     const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
+                    const isZip = ext === 'zip'
                     const isTabular = ['csv', 'tsv', 'txt', 'parquet', 'xlsx'].includes(ext)
                     return (
                       <button
@@ -415,8 +430,8 @@ export default function Step2_FilePicker({
                         <div style={{
                           width: 32, height: 32, borderRadius: 6,
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          background: selected ? 'var(--accent)' : isTabular ? 'var(--success-muted)' : 'var(--surface-3)',
-                          color: selected ? '#fff' : isTabular ? 'var(--success)' : 'var(--text-3)',
+                          background: selected ? 'var(--accent)' : isZip ? 'rgba(245, 158, 11, 0.14)' : isTabular ? 'var(--success-muted)' : 'var(--surface-3)',
+                          color: selected ? '#fff' : isZip ? 'var(--orange, #f59e0b)' : isTabular ? 'var(--success)' : 'var(--text-3)',
                           flexShrink: 0,
                         }}>
                           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -430,10 +445,10 @@ export default function Step2_FilePicker({
                         <span style={{
                           fontSize: 9, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase',
                           padding: '1px 5px', borderRadius: 3,
-                          background: selected ? 'rgba(255,255,255,0.2)' : isTabular ? 'var(--success-muted)' : 'var(--surface-3)',
-                          color: selected ? '#fff' : isTabular ? 'var(--success)' : 'var(--text-4)',
+                          background: selected ? 'rgba(255,255,255,0.2)' : isZip ? 'rgba(245, 158, 11, 0.14)' : isTabular ? 'var(--success-muted)' : 'var(--surface-3)',
+                          color: selected ? '#fff' : isZip ? 'var(--orange, #f59e0b)' : isTabular ? 'var(--success)' : 'var(--text-4)',
                         }}>
-                          {ext || 'file'}
+                          {isZip ? 'ZIP' : ext || 'file'}
                         </span>
 
                         {/* Name */}
