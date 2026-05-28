@@ -574,6 +574,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [columnPreviewError, setColumnPreviewError] = useState('')
   const [validateHeaderFormats, setValidateHeaderFormats] = useState(false)
   const [validateFooters, setValidateFooters] = useState(false)
+  const [headerLeadingRows, setHeaderLeadingRows] = useState(0)
   const [footerTrailingRows, setFooterTrailingRows] = useState(1)
   const [formatChecks, setFormatChecks] = useState([])
   const [footerValidation, setFooterValidation] = useState(null)
@@ -642,6 +643,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     setTargetPath(detail.target_path || detail.target_filename || '')
     setValidateHeaderFormats(detail.validate_header_formats || false)
     setValidateFooters(detail.validate_footers || false)
+    setHeaderLeadingRows(detail.header_leading_rows || 0)
     setFooterTrailingRows(detail.footer_trailing_rows || 1)
 
     if (detail.delimiter === 'fixed-width' || detail.delimiter === 'fixed') {
@@ -752,6 +754,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         hasHeader,
         validateHeaderFormats,
         validateFooters,
+        headerLeadingRows,
         footerTrailingRows,
         columnPreview,
         formatChecks,
@@ -800,6 +803,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     setHasHeader(cfg.hasHeader !== false)
     setValidateHeaderFormats(cfg.validateHeaderFormats || false)
     setValidateFooters(cfg.validateFooters || false)
+    setHeaderLeadingRows(cfg.headerLeadingRows || 0)
     setFooterTrailingRows(cfg.footerTrailingRows || 1)
     setColumnPreview(cfg.columnPreview || {
       sourceColumns: [],
@@ -925,6 +929,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
             hasHeader,
             validateHeaderFormats,
             validateFooters,
+            headerLeadingRows,
             footerTrailingRows,
             columnPreview,
           })
@@ -1248,6 +1253,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                   uid_column: uidColumn.trim(),
                   delimiter: delimiter.trim() || 'auto',
                   has_header: hasHeader,
+                  header_leading_rows: headerLeadingRows,
                 }
               : {
                   source_path: effectiveSourcePath,
@@ -1255,6 +1261,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                   uid_column: uidColumn.trim(),
                   delimiter: delimiter.trim() || 'auto',
                   has_header: hasHeader,
+                  header_leading_rows: headerLeadingRows,
                 },
           ),
         })
@@ -1336,6 +1343,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     uidColumn,
     delimiter,
     hasHeader,
+    headerLeadingRows,
     fileFormat,
     showBatchMappingModeChoice,
   ])
@@ -1440,6 +1448,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
             mappings,
             validateHeaderFormats,
             validateFooters,
+            headerLeadingRows,
             footerTrailingRows,
             hasHeader,
           })),
@@ -1480,6 +1489,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     mappings,
     validateHeaderFormats,
     validateFooters,
+    headerLeadingRows,
     footerTrailingRows,
     hasHeader,
     fileFormat,
@@ -1501,6 +1511,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               hasHeader,
               validateHeaderFormats,
               validateFooters,
+              headerLeadingRows,
               footerTrailingRows,
               columnMappings: toColumnMappingPayload(mappings),
             },
@@ -1519,6 +1530,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           onUnitFailure,
           delimiter,
           hasHeader,
+          headerLeadingRows,
           validateHeaderFormats,
           validateFooters,
           footerTrailingRows,
@@ -1606,6 +1618,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         column_mappings: toColumnMappingPayload(mappings),
         validate_header_formats: validateHeaderFormats,
         validate_footers: validateFooters,
+        header_leading_rows: headerLeadingRows,
         footer_trailing_rows: footerTrailingRows,
         has_header: hasHeader,
         file_format: 'csv'
@@ -1672,6 +1685,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         columnMappings: toColumnMappingPayload(mappings),
         validateHeaderFormats,
         validateFooters,
+        headerLeadingRows,
+        footerTrailingRows,
       };
 
       await saveValidationDraft(draftPayload)
@@ -2346,6 +2361,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 onValidateHeaderFormatsChange={setValidateHeaderFormats}
                 validateFooters={validateFooters}
                 onValidateFootersChange={setValidateFooters}
+                headerLeadingRows={headerLeadingRows}
+                onHeaderLeadingRowsChange={setHeaderLeadingRows}
                 footerTrailingRows={footerTrailingRows}
                 onFooterTrailingRowsChange={setFooterTrailingRows}
                 formatCheckBySource={formatCheckBySource(formatChecks)}

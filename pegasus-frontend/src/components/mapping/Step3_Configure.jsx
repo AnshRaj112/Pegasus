@@ -33,6 +33,8 @@ export default function Step3_Configure({
   onValidateHeaderFormatsChange,
   validateFooters = false,
   onValidateFootersChange,
+  headerLeadingRows = 0,
+  onHeaderLeadingRowsChange,
   footerTrailingRows = 1,
   onFooterTrailingRowsChange,
   formatCheckBySource = new Map(),
@@ -220,6 +222,18 @@ export default function Step3_Configure({
             First row is a header
           </span>
         </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto', fontSize: 12, color: 'var(--text-3)' }}>
+          Leading header rows
+          <input
+            type="number"
+            min={0}
+            max={50}
+            value={headerLeadingRows}
+            onChange={e => onHeaderLeadingRowsChange?.(Math.max(0, Number(e.target.value) || 0))}
+            className="input input-mono"
+            style={{ width: 64, height: 28, fontSize: 12 }}
+          />
+        </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto' }}>
           <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)', letterSpacing: '-0.01em' }}>
@@ -286,7 +300,7 @@ export default function Step3_Configure({
           </label>
           {validateFooters && (
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 26, fontSize: 12, color: 'var(--text-3)' }}>
-              Trailing rows
+              Trailing footer rows
               <input
                 type="number"
                 min={1}

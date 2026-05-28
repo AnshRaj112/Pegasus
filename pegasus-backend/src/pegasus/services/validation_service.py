@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -180,6 +181,7 @@ class ValidationService:
         validate_footers: bool = False,
         footer_trailing_rows: int = 1,
         has_header: bool = True,
+        header_leading_rows: int = 0,
     ) -> ValidationRunResult:
         """Run validation off the event loop so Polars work does not block asyncio."""
         return await asyncio.to_thread(
@@ -195,6 +197,7 @@ class ValidationService:
             validate_footers,
             footer_trailing_rows,
             has_header,
+            header_leading_rows,
         )
 
     def analyze_local_mappings(
@@ -209,6 +212,7 @@ class ValidationService:
         validate_footers: bool,
         footer_trailing_rows: int,
         has_header: bool = True,
+        header_leading_rows: int = 0,
     ) -> dict[str, Any]:
         """Run optional format/footer checks for the mapping wizard."""
         delim = self._resolve_delimiter(
@@ -225,6 +229,7 @@ class ValidationService:
             validate_footers=validate_footers,
             footer_trailing_rows=footer_trailing_rows,
             has_header=has_header,
+            header_leading_rows=header_leading_rows,
         )
         analysis["delimiter"] = delim
         return analysis
@@ -249,6 +254,7 @@ class ValidationService:
         uid_column: str,
         delimiter: str,
         has_header: bool = True,
+        header_leading_rows: int = 0,
     ) -> dict[str, Any]:
         """Return source/target headers and exact-name mapping suggestions for the UI."""
         uid = uid_column.strip()
@@ -257,46 +263,56 @@ class ValidationService:
             target_path=target_path,
             delimiter=delimiter,
         )
-        inferred_has_header = infer_csv_has_header(source_path, delim) and infer_csv_has_header(
-            target_path, delim
+        prepared_source, prepared_target, cleanup_paths = self._prepare_csv_pair_for_comparison(
+            source_path=source_path,
+            target_path=target_path,
+            header_leading_rows=header_leading_rows,
+            footer_trailing_rows=0,
         )
-        self._preflight_csv_pair(source_path, target_path, delim, has_header=has_header)
-        source_columns = self._read_column_names(source_path, delim, has_header=has_header)
-        target_columns = self._read_column_names(target_path, delim, has_header=has_header)
-        compare_columns = [c for c in source_columns if c != uid]
-        compare_targets = [c for c in target_columns if c != uid]
-        auto_mappings = self._auto_map_columns(compare_columns, compare_targets)
-        matched_sources = {m["source_column"] for m in auto_mappings}
-        matched_targets = {m["target_column"] for m in auto_mappings}
-        sample_rows = _MAPPING_PREVIEW_SAMPLE_ROWS
-        source_samples = sample_column_values(
-            source_path,
-            delimiter=delim,
-            columns=source_columns,
-            sample_rows=sample_rows,
-            has_header=has_header,
-        )
-        target_samples = sample_column_values(
-            target_path,
-            delimiter=delim,
-            columns=target_columns,
-            sample_rows=sample_rows,
-            has_header=has_header,
-        )
-        return {
-            "source_columns": source_columns,
-            "target_columns": target_columns,
-            "compare_columns": compare_columns,
-            "auto_mappings": auto_mappings,
-            "unmatched_source_columns": [c for c in source_columns if c not in matched_sources],
-            "unmatched_target_columns": [c for c in target_columns if c not in matched_targets],
-            "delimiter": delim,
-            "has_header": has_header,
-            "inferred_has_header": inferred_has_header,
-            "source_samples": source_samples,
-            "target_samples": target_samples,
-            "sample_row_count": sample_rows,
-        }
+        try:
+            inferred_has_header = infer_csv_has_header(prepared_source, delim) and infer_csv_has_header(
+                prepared_target, delim
+            )
+            self._preflight_csv_pair(prepared_source, prepared_target, delim, has_header=has_header)
+            source_columns = self._read_column_names(prepared_source, delim, has_header=has_header)
+            target_columns = self._read_column_names(prepared_target, delim, has_header=has_header)
+            compare_columns = [c for c in source_columns if c != uid]
+            compare_targets = [c for c in target_columns if c != uid]
+            auto_mappings = self._auto_map_columns(compare_columns, compare_targets)
+            matched_sources = {m["source_column"] for m in auto_mappings}
+            matched_targets = {m["target_column"] for m in auto_mappings}
+            sample_rows = _MAPPING_PREVIEW_SAMPLE_ROWS
+            source_samples = sample_column_values(
+                prepared_source,
+                delimiter=delim,
+                columns=source_columns,
+                sample_rows=sample_rows,
+                has_header=has_header,
+            )
+            target_samples = sample_column_values(
+                prepared_target,
+                delimiter=delim,
+                columns=target_columns,
+                sample_rows=sample_rows,
+                has_header=has_header,
+            )
+            return {
+                "source_columns": source_columns,
+                "target_columns": target_columns,
+                "compare_columns": compare_columns,
+                "auto_mappings": auto_mappings,
+                "unmatched_source_columns": [c for c in source_columns if c not in matched_sources],
+                "unmatched_target_columns": [c for c in target_columns if c not in matched_targets],
+                "delimiter": delim,
+                "has_header": has_header,
+                "inferred_has_header": inferred_has_header,
+                "source_samples": source_samples,
+                "target_samples": target_samples,
+                "sample_row_count": sample_rows,
+            }
+        finally:
+            for p in cleanup_paths:
+                p.unlink(missing_ok=True)
 
     def _validate_csv_pair_sync(
         self,
@@ -311,11 +327,14 @@ class ValidationService:
         validate_footers: bool = False,
         footer_trailing_rows: int = 1,
         has_header: bool = True,
+        header_leading_rows: int = 0,
         resource_policy: dict[str, object] | None = None,
     ) -> ValidationRunResult:
         uid = uid_column.strip()
         if not uid:
             raise ValidationBadRequestError("uid_column must be a non-empty string")
+        original_source_path = source_path
+        original_target_path = target_path
 
         queue_policy = QueueResourcePolicy.from_dict(
             dict(resource_policy) if resource_policy else None,
@@ -332,6 +351,12 @@ class ValidationService:
             source_path=source_path,
             target_path=target_path,
             delimiter=delimiter,
+        )
+        source_path, target_path, _cleanup_paths = self._prepare_csv_pair_for_comparison(
+            source_path=source_path,
+            target_path=target_path,
+            header_leading_rows=header_leading_rows,
+            footer_trailing_rows=footer_trailing_rows if validate_footers else 0,
         )
         rcfg = rcfg.model_copy(update={"has_header": has_header})
 
@@ -360,6 +385,9 @@ class ValidationService:
                 validate_footers=validate_footers,
                 footer_trailing_rows=footer_trailing_rows,
                 has_header=has_header,
+                header_leading_rows=0,
+                footer_validation_source_path=original_source_path,
+                footer_validation_target_path=original_target_path,
             )
 
         self._raise_if_csv_pair_has_no_data(source_path, target_path)
@@ -677,6 +705,46 @@ class ValidationService:
             mapping_format_checks=list(mapping_analysis.get("format_checks") or []) or None,
             footer_validation=mapping_analysis.get("footer_validation"),
         )
+
+    @staticmethod
+    def _prepare_csv_pair_for_comparison(
+        *,
+        source_path: Path,
+        target_path: Path,
+        header_leading_rows: int,
+        footer_trailing_rows: int,
+    ) -> tuple[Path, Path, list[Path]]:
+        header_rows = max(0, int(header_leading_rows or 0))
+        footer_rows = max(0, int(footer_trailing_rows or 0))
+        if header_rows == 0 and footer_rows == 0:
+            return source_path, target_path, []
+        prepared_source, src_tmp = ValidationService._slice_csv_rows(
+            source_path,
+            header_rows=header_rows,
+            footer_rows=footer_rows,
+        )
+        prepared_target, tgt_tmp = ValidationService._slice_csv_rows(
+            target_path,
+            header_rows=header_rows,
+            footer_rows=footer_rows,
+        )
+        return prepared_source, prepared_target, [src_tmp, tgt_tmp]
+
+    @staticmethod
+    def _slice_csv_rows(
+        path: Path,
+        *,
+        header_rows: int,
+        footer_rows: int,
+    ) -> tuple[Path, Path]:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        lines = text.splitlines()
+        start = min(header_rows, len(lines))
+        end = len(lines) - min(footer_rows, max(0, len(lines) - start))
+        kept = lines[start:end]
+        fd, tmp_path = tempfile.mkstemp(prefix="pegasus_csv_slice_", suffix=".csv")
+        Path(tmp_path).write_text("\n".join(kept), encoding="utf-8")
+        return Path(tmp_path), Path(tmp_path)
 
     def _read_column_names(self, path: Path, delimiter: str, *, has_header: bool = True) -> list[str]:
         if not polars_supports_csv_delimiter(delimiter):

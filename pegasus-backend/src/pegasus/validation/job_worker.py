@@ -148,6 +148,7 @@ def run_job_directory(job_dir: Path) -> int:
     validate_footers = bool(meta.get("validate_footers"))
     footer_trailing_rows = int(meta.get("footer_trailing_rows") or 1)
     has_header = bool(meta.get("has_header", True))
+    header_leading_rows = int(meta.get("header_leading_rows") or 0)
     mem_iv = int(meta.get("memory_log_interval_seconds") or 0)
     sp = meta.get("source_path")
     tp = meta.get("target_path")
@@ -285,6 +286,7 @@ def run_job_directory(job_dir: Path) -> int:
                 validate_footers=validate_footers,
                 footer_trailing_rows=footer_trailing_rows,
                 has_header=has_header,
+                header_leading_rows=header_leading_rows,
                 resource_policy=resource_policy,
             )
         end = time.time()

@@ -217,6 +217,15 @@ class LocalPathValidateRequest(BaseModel):
             "for mapping and UID selection."
         ),
     )
+    header_leading_rows: int = Field(
+        default=0,
+        ge=0,
+        le=50,
+        description=(
+            "Number of physical rows at the start of each file to treat as header/preamble and "
+            "exclude from row-level comparison. Applied before has_header."
+        ),
+    )
     file_format: str = Field(
         default="csv",
         description="File format type: 'csv', 'fixed-width', or 'json'",
@@ -362,6 +371,12 @@ class MappingAnalyzeRequest(BaseModel):
     has_header: bool = Field(
         default=True,
         description="When false, files have no header row (columns are column_1, column_2, …).",
+    )
+    header_leading_rows: int = Field(
+        default=0,
+        ge=0,
+        le=50,
+        description="Number of leading rows to skip before sampling/analysis.",
     )
 
     @model_validator(mode="after")
@@ -590,6 +605,7 @@ class LocalBatchValidateRequest(BaseModel):
     )
     delimiter: str = Field(default="auto")
     has_header: bool = Field(default=True)
+    header_leading_rows: int = Field(default=0, ge=0, le=50)
     validate_header_formats: bool = Field(default=False)
     validate_footers: bool = Field(default=False)
     footer_trailing_rows: int = Field(default=1, ge=0, le=10)

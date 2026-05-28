@@ -48,6 +48,7 @@ def run_batch_job_directory(
     file_format = str(meta.get("file_format") or "csv")
     delimiter = str(meta.get("delimiter") or "auto")
     has_header = bool(meta.get("has_header", True))
+    header_leading_rows = int(meta.get("header_leading_rows") or 0)
     validate_header_formats = bool(meta.get("validate_header_formats"))
     validate_footers = bool(meta.get("validate_footers"))
     footer_trailing_rows = int(meta.get("footer_trailing_rows") or 1)
@@ -172,6 +173,7 @@ def run_batch_job_directory(
                     validate_footers=validate_footers,
                     footer_trailing_rows=footer_trailing_rows,
                     has_header=has_header,
+                    header_leading_rows=header_leading_rows,
                     resource_policy=resource_policy,
                 )
 

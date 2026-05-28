@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -86,6 +87,9 @@ def analyze_column_mappings(
     footer_trailing_rows: int,
     sample_rows: int = 500,
     has_header: bool = True,
+    header_leading_rows: int = 0,
+    footer_validation_source_path: Path | None = None,
+    footer_validation_target_path: Path | None = None,
 ) -> dict[str, Any]:
     """Run optional header-format and footer checks."""
     result: dict[str, Any] = {
@@ -93,18 +97,26 @@ def analyze_column_mappings(
         "footer_validation": None,
     }
 
+    source_for_samples = source_path
+    target_for_samples = target_path
+    cleanup_paths: list[Path] = []
+    if header_leading_rows > 0:
+        source_for_samples, src_tmp = _trim_csv_rows(source_path, header_leading_rows)
+        target_for_samples, tgt_tmp = _trim_csv_rows(target_path, header_leading_rows)
+        cleanup_paths.extend([src_tmp, tgt_tmp])
+
     if validate_header_formats and column_mappings:
         source_cols = [m.source_column for m in column_mappings]
         target_cols = [m.target_column for m in column_mappings]
         src_samples = sample_column_values(
-            source_path,
+            source_for_samples,
             delimiter=delimiter,
             columns=source_cols,
             sample_rows=sample_rows,
             has_header=has_header,
         )
         tgt_samples = sample_column_values(
-            target_path,
+            target_for_samples,
             delimiter=delimiter,
             columns=target_cols,
             sample_rows=sample_rows,
@@ -124,11 +136,23 @@ def analyze_column_mappings(
 
     if validate_footers and footer_trailing_rows > 0:
         src_footer = read_trailing_csv_rows(
-            source_path, delimiter=delimiter, trailing_rows=footer_trailing_rows
+            footer_validation_source_path or source_path, delimiter=delimiter, trailing_rows=footer_trailing_rows
         )
         tgt_footer = read_trailing_csv_rows(
-            target_path, delimiter=delimiter, trailing_rows=footer_trailing_rows
+            footer_validation_target_path or target_path, delimiter=delimiter, trailing_rows=footer_trailing_rows
         )
         result["footer_validation"] = validate_footer_rows(src_footer, tgt_footer)
 
+    for p in cleanup_paths:
+        p.unlink(missing_ok=True)
     return result
+
+
+def _trim_csv_rows(path: Path, header_leading_rows: int) -> tuple[Path, Path]:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    kept = lines[min(header_leading_rows, len(lines)):]
+    fd, tmp_path = tempfile.mkstemp(prefix="pegasus_mapping_trim_", suffix=".csv")
+    Path(tmp_path).write_text("\n".join(kept), encoding="utf-8")
+    tmp = Path(tmp_path)
+    return tmp, tmp

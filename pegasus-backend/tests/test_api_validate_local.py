@@ -558,6 +558,93 @@ def test_preview_headerless_csv_uses_positional_columns(
         assert body["target_samples"]["column_3"][-1] == "28"
 
 
+def test_preview_columns_supports_header_leading_rows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_text(
+            "META,source,run\nMETA,source,file\nid,name,city\n1,alice,paris\n2,bob,rome\n",
+            encoding="utf-8",
+        )
+        tgt.write_text(
+            "META,target,run\nMETA,target,file\nid,name,city\n1,alice,paris\n2,bob,lyon\n",
+            encoding="utf-8",
+        )
+        r = client.get(
+            "/api/v1/validate/local/columns",
+            params={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": ",",
+                "has_header": "true",
+                "header_leading_rows": 2,
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["source_columns"] == ["id", "name", "city"]
+        assert body["target_columns"] == ["id", "name", "city"]
+        assert body["source_samples"]["name"][:2] == ["alice", "bob"]
+        assert body["target_samples"]["city"][:2] == ["paris", "lyon"]
+
+
+def test_validate_local_with_header_leading_rows_and_multi_footer_rows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as client:
+        src = tmp_path / "s.csv"
+        tgt = tmp_path / "t.csv"
+        src.write_text(
+            "META,source,run\n"
+            "META,source,file\n"
+            "id,name\n"
+            "1,alice\n"
+            "2,bob\n"
+            "F001,totals\n"
+            "F002,checksum_src\n",
+            encoding="utf-8",
+        )
+        tgt.write_text(
+            "META,target,run\n"
+            "META,target,file\n"
+            "id,name\n"
+            "1,alice\n"
+            "3,charlie\n"
+            "F001,totals\n"
+            "F002,checksum_tgt\n",
+            encoding="utf-8",
+        )
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": ",",
+                "has_header": True,
+                "header_leading_rows": 2,
+                "validate_footers": True,
+                "footer_trailing_rows": 2,
+            },
+        )
+        assert r.status_code == 202, r.text
+        body = _poll_completed(client, r.json()["poll_url"])
+        assert body["summary"]["source_row_count"] == 2
+        assert body["summary"]["target_row_count"] == 2
+        assert body["mismatch_counts"]["missing_in_target"] == 1
+        assert body["mismatch_counts"]["extra_in_target"] == 1
+        footer = body.get("footer_validation")
+        assert footer is not None
+        assert footer["match"] is False
+
+
 def test_validate_headerless_csv_with_explicit_mapping(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

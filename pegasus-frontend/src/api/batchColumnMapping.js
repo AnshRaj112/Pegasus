@@ -28,6 +28,7 @@ export function buildColumnPreviewRequestBody(unit, options) {
     uidColumn,
     delimiter,
     hasHeader,
+    headerLeadingRows,
   } = options
 
   if (sourceStorageType === 'cloud') {
@@ -49,6 +50,7 @@ export function buildColumnPreviewRequestBody(unit, options) {
       uid_column: (uidColumn || 'id').trim(),
       delimiter: (delimiter || 'auto').trim(),
       has_header: hasHeader,
+      header_leading_rows: headerLeadingRows ?? 0,
     }
   }
 
@@ -58,6 +60,7 @@ export function buildColumnPreviewRequestBody(unit, options) {
     uid_column: (uidColumn || 'id').trim(),
     delimiter: (delimiter || 'auto').trim(),
     has_header: hasHeader,
+    header_leading_rows: headerLeadingRows ?? 0,
   }
 }
 
@@ -159,6 +162,7 @@ export function adaptTemplateToUnit(template, previewApiData) {
     validateHeaderFormats: template.validateHeaderFormats || false,
     validateFooters: template.validateFooters || false,
     footerTrailingRows: template.footerTrailingRows ?? 1,
+    headerLeadingRows: template.headerLeadingRows ?? 0,
     columnPreview,
     formatChecks: [],
     footerValidation: null,
@@ -178,6 +182,7 @@ export function buildCsvTemplateSnapshot({
   validateHeaderFormats,
   validateFooters,
   footerTrailingRows,
+  headerLeadingRows,
   columnPreview,
 }) {
   return {
@@ -189,6 +194,7 @@ export function buildCsvTemplateSnapshot({
     validateHeaderFormats,
     validateFooters,
     footerTrailingRows,
+    headerLeadingRows,
     columnPreview: columnPreview ? { ...columnPreview } : null,
   }
 }
@@ -316,6 +322,7 @@ export async function applyCsvTemplateToAllUnits(units, template, previewOptions
       uidColumn: template.uidColumn,
       delimiter: template.delimiter,
       hasHeader: template.hasHeader,
+      headerLeadingRows: template.headerLeadingRows ?? 0,
     })
     const { unitConfig, issues, hasMismatch } = adaptTemplateToUnit(template, preview)
     unitConfigs[unit.unitId] = unitConfig

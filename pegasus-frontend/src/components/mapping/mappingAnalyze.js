@@ -42,6 +42,7 @@ export function buildAnalyzePayload({
   validateHeaderFormats,
   validateFooters,
   footerTrailingRows,
+  headerLeadingRows,
   hasHeader = true,
 }) {
   return {
@@ -55,6 +56,7 @@ export function buildAnalyzePayload({
     validate_header_formats: validateHeaderFormats,
     validate_footers: validateFooters,
     footer_trailing_rows: footerTrailingRows,
+    header_leading_rows: headerLeadingRows ?? 0,
     has_header: hasHeader,
   }
 }
