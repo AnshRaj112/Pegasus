@@ -5,6 +5,7 @@ import { clearCompareRule } from './columnMapping'
 const COMPARE_MODES = [
   { value: 'auto', label: 'Default (auto)' },
   { value: 'custom', label: 'Custom expression' },
+  { value: 'structured', label: 'Structured (list / dict / tuple)' },
   { value: 'date', label: 'Date — calendar match' },
   { value: 'phone', label: 'Phone — digits only' },
   { value: 'digits', label: 'Digits only' },
@@ -116,7 +117,8 @@ export default function ColumnCompareRuleEditor({
       </div>
 
       <p style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 10, lineHeight: 1.45 }}>
-        Applies to this column pair only. Use the transform fields below to remove or add text on either side before validation.
+        Applies to this column pair only. Default (auto) treats list, dict, and tuple literals in CSV cells as
+        structured values and ignores element order. Use Structured mode when you need strict order or per-column control.
       </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
@@ -194,6 +196,39 @@ export default function ColumnCompareRuleEditor({
             Use this field to describe the custom removal or addition you want to apply for this mapping.
           </div>
         </div>
+      )}
+
+      {row.compareMode === 'structured' && (
+        <fieldset style={{ border: 'none', margin: '0 0 10px', padding: 0 }}>
+          <legend style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-4)', marginBottom: 6 }}>
+            Element order
+          </legend>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11, color: 'var(--text-2)', marginBottom: 6, cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name={`structured-order-${rowId}`}
+              checked={!row.structuredOrderSensitive}
+              onChange={() => patch({ structuredOrderSensitive: false })}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              Order does not matter — same items in lists, dicts, or tuples match even when reordered.
+              Spelling and values must still match.
+            </span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11, color: 'var(--text-2)', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name={`structured-order-${rowId}`}
+              checked={Boolean(row.structuredOrderSensitive)}
+              onChange={() => patch({ structuredOrderSensitive: true })}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              Order must match — source and target must use the same sequence of elements and dict keys.
+            </span>
+          </label>
+        </fieldset>
       )}
 
       {row.compareMode === 'date' && (

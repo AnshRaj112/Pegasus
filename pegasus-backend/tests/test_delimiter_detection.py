@@ -54,6 +54,17 @@ def test_preview_local_columns_emoji_delimiter(monkeypatch: pytest.MonkeyPatch, 
     assert body["target_columns"] == ["id", "name", "score"]
 
 
+def test_detect_comma_delimiter_structured_compare_fixture() -> None:
+    """Comma CSV with quoted JSON; auto must not pick ``ta`` from column names."""
+    root = _repo_test_data()
+    source = root / "structured-compare" / "csv" / "source.csv"
+    if not source.is_file():
+        pytest.skip("structured-compare fixtures not present")
+    assert detect_delimiter(source).delimiter == ","
+    shared = resolve_shared_auto_delimiter(source, source)
+    assert shared.delimiter == ","
+
+
 def test_detect_alphabetic_multichar_xx_delimiter(tmp_path: Path) -> None:
     path = tmp_path / "sample.csv"
     path.write_text(
@@ -71,10 +82,10 @@ def test_detect_validation_fixture_files_auto_xx() -> None:
     target = root / "validation_target.csv"
     if not source.is_file() or not target.is_file():
         pytest.skip("validation fixtures not present")
-    assert detect_delimiter(source).delimiter == "xx"
-    assert detect_delimiter(target).delimiter == "xx"
+    assert detect_delimiter(source).delimiter == r"~\^|~"
+    assert detect_delimiter(target).delimiter == r"~\^|~"
     shared = resolve_shared_auto_delimiter(source, target)
-    assert shared.delimiter == "xx"
+    assert shared.delimiter == r"~\^|~"
 
 
 def test_preview_local_columns_validation_fixtures_four_columns(
@@ -101,7 +112,7 @@ def test_preview_local_columns_validation_fixtures_four_columns(
         )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["delimiter"] == "xx"
+    assert body["delimiter"] == r"~\^|~"
     assert body["has_header"] is False
     assert body["inferred_has_header"] is False
     assert body["source_columns"] == ["column_1", "column_2", "column_3", "column_4"]

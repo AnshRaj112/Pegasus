@@ -971,6 +971,9 @@ class ValidationService:
         def _row_detail_json(payload: dict[str, Any]) -> str:
             return json.dumps(payload, default=str)
 
+        from pegasus.validation.structured_compare import structured_strings_equal
+        from pegasus.validation.value_compare import values_equal_for_validation
+
         def safe_cast(value_str: str, f_type: str, d_format: str | None) -> tuple[Any, str | None]:
             v = value_str.strip()
             if not v:
@@ -983,10 +986,31 @@ class ValidationService:
                 elif f_type == "date":
                     fmt = normalize_strptime_format(d_format or "%Y-%m-%d")
                     return parse_fixed_width_date(v, fmt), None
-                else: # text
+                elif f_type == "structured":
+                    return v, None
+                else:  # text
                     return v, None
             except Exception as e:
                 return None, str(e)
+
+        def _fixed_width_values_match(
+            *,
+            src_raw: str,
+            tgt_raw: str,
+            f_type: str,
+            src_val: Any,
+            tgt_val: Any,
+            order_sensitive: bool,
+        ) -> bool:
+            if f_type == "structured":
+                return structured_strings_equal(
+                    src_raw,
+                    tgt_raw,
+                    order_sensitive=order_sensitive,
+                )
+            if f_type == "text":
+                return values_equal_for_validation(src_raw.strip(), tgt_raw.strip())
+            return src_val == tgt_val
 
         def _uid_from_line(line: str, start: int | None, end: int | None, fallback: str) -> str:
             if start is None or end is None:
@@ -1046,7 +1070,14 @@ class ValidationService:
                 if src_err or tgt_err:
                     has_mismatch = True
                     err_msg = f"Parsing error: Source({src_err}) Target({tgt_err})"
-                elif src_val != tgt_val:
+                elif not _fixed_width_values_match(
+                    src_raw=src_raw,
+                    tgt_raw=tgt_raw,
+                    f_type=f_type,
+                    src_val=src_val,
+                    tgt_val=tgt_val,
+                    order_sensitive=bool(field.get("structured_order_sensitive", False)),
+                ):
                     has_mismatch = True
 
                 if has_mismatch:

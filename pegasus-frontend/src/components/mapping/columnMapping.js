@@ -4,6 +4,7 @@ export function normalizeColumnName(name) {
 
 const DEFAULT_COMPARE = {
   compareMode: 'auto',
+  structuredOrderSensitive: false,
   customExpression: '',
   sourceDateFormat: '',
   targetDateFormat: '',
@@ -41,6 +42,7 @@ export function buildMappingRows(sourceColumns, targetColumns, previousRows = []
       targetCols: initialTargets,
       color: previous?.color ?? ROW_COLORS[index % ROW_COLORS.length],
       compareMode: previous?.compareMode ?? DEFAULT_COMPARE.compareMode,
+      structuredOrderSensitive: previous?.structuredOrderSensitive ?? DEFAULT_COMPARE.structuredOrderSensitive,
       customExpression: previous?.customExpression ?? '',
       sourceDateFormat: previous?.sourceDateFormat ?? '',
       targetDateFormat: previous?.targetDateFormat ?? '',
@@ -75,6 +77,9 @@ export function toColumnMappingPayload(rows) {
       }
       const mode = String(row.compareMode || 'auto').trim() || 'auto'
       if (mode !== 'auto') payload.compare_mode = mode
+      if (mode === 'structured' && row.structuredOrderSensitive) {
+        payload.structured_order_sensitive = true
+      }
       const customExpression = optionalField(row.customExpression)
       if (customExpression) payload.custom_expression = customExpression
       const srcFmt = optionalField(row.sourceDateFormat)
@@ -111,6 +116,7 @@ export function mappingRowFromApi(mapping) {
       ? [primaryTarget, ...targetColumns.filter(col => col !== primaryTarget)]
       : targetColumns,
     compareMode: mapping.compare_mode || 'auto',
+    structuredOrderSensitive: Boolean(mapping.structured_order_sensitive),
     customExpression: mapping.custom_expression || '',
     sourceDateFormat: mapping.source_date_format || '',
     targetDateFormat: mapping.target_date_format || '',
@@ -130,6 +136,7 @@ export function countMappedRows(rows) {
 export function mappingHasCustomRule(row) {
   if (!row) return false
   const mode = String(row.compareMode || 'auto').trim() || 'auto'
+  if (mode === 'structured' && row.structuredOrderSensitive) return true
   if (mode !== 'auto') return true
   return Boolean(
     row.customExpression?.trim()

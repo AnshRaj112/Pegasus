@@ -519,6 +519,69 @@ export default function Step3_Configure({
                       )}
                     </div>
                   )}
+                  {isMapped && (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <label
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          fontSize: 11,
+                          color: 'var(--text-3)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={m.compareMode === 'structured'}
+                          onChange={e => onMappingChange(activeMappings.map(row => (
+                            row.id === m.id
+                              ? {
+                                  ...row,
+                                  compareMode: e.target.checked ? 'structured' : 'auto',
+                                  structuredOrderSensitive: e.target.checked ? Boolean(row.structuredOrderSensitive) : false,
+                                }
+                              : row
+                          )))}
+                        />
+                        Treat as structured (list/dict/tuple)
+                      </label>
+                      {m.compareMode === 'structured' && (
+                        <label
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            fontSize: 11,
+                            color: 'var(--text-3)',
+                          }}
+                        >
+                          Order
+                          <select
+                            value={m.structuredOrderSensitive ? 'strict' : 'ignore'}
+                            onChange={e => onMappingChange(activeMappings.map(row => (
+                              row.id === m.id
+                                ? { ...row, structuredOrderSensitive: e.target.value === 'strict' }
+                                : row
+                            )))}
+                            className="input input-mono"
+                            style={{ height: 26, fontSize: 11, width: 'auto', minWidth: 132, paddingRight: 24 }}
+                          >
+                            <option value="ignore">Ignore order</option>
+                            <option value="strict">Require same order</option>
+                          </select>
+                        </label>
+                      )}
+                    </div>
+                  )}
                   {!isMapped && (
                     <div style={{ marginTop: 4, fontSize: 11, color: 'var(--danger)' }}>
                       Pick a target column to compare.

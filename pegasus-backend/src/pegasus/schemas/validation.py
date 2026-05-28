@@ -93,7 +93,14 @@ class FixedWidthField(BaseModel):
     source_end: int = Field(ge=0, description="0-indexed end position in source line")
     target_start: int = Field(ge=0, description="0-indexed start position in target line")
     target_end: int = Field(ge=0, description="0-indexed end position in target line")
-    field_type: str = Field(default="text", description="Field type: text, integer, float, date")
+    field_type: str = Field(
+        default="text",
+        description="Field type: text, integer, float, date, structured (list/dict/tuple literals in the slice)",
+    )
+    structured_order_sensitive: bool = Field(
+        default=False,
+        description="When field_type is structured: require element/key order to match between source and target",
+    )
     date_format: str | None = Field(
         default=None,
         description="Optional strptime/friendly format if field_type is date (used for both sides when source/target formats omitted)",
@@ -249,7 +256,15 @@ class ColumnMapping(BaseModel):
         default="auto",
         description=(
             "How to compare values: auto (smart dates), text (exact string), "
-            "date (calendar date with optional formats), phone (digits only), digits (digits only)"
+            "date (calendar date with optional formats), phone (digits only), digits (digits only), "
+            "structured (list/dict/tuple literals in cells)"
+        ),
+    )
+    structured_order_sensitive: bool = Field(
+        default=False,
+        description=(
+            "When compare_mode is structured: require list/tuple element order and dict key "
+            "order to match. When false, order is ignored but values and spelling must still match."
         ),
     )
     source_date_format: str | None = Field(

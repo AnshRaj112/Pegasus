@@ -12,12 +12,13 @@ from pegasus.validation.value_compare import try_parse_calendar_date, values_equ
 
 Side = Literal["source", "target"]
 
-_COMPARE_MODES = frozenset({"auto", "text", "date", "phone", "digits"})
+_COMPARE_MODES = frozenset({"auto", "text", "date", "phone", "digits", "structured"})
 
 
 @dataclass(frozen=True, slots=True)
 class CompareRule:
     compare_mode: str = "auto"
+    structured_order_sensitive: bool = False
     source_date_format: str | None = None
     target_date_format: str | None = None
     source_strip_prefix: str | None = None
@@ -33,8 +34,10 @@ def rule_from_mapping(mapping: object) -> CompareRule | None:
     mode = (getattr(mapping, "compare_mode", None) or "auto").strip().lower()
     if mode not in _COMPARE_MODES:
         mode = "auto"
+    structured_order_sensitive = bool(getattr(mapping, "structured_order_sensitive", False))
     rule = CompareRule(
         compare_mode=mode,
+        structured_order_sensitive=structured_order_sensitive,
         source_date_format=_empty_as_none(getattr(mapping, "source_date_format", None)),
         target_date_format=_empty_as_none(getattr(mapping, "target_date_format", None)),
         source_strip_prefix=_empty_as_none(getattr(mapping, "source_strip_prefix", None)),
@@ -113,6 +116,9 @@ def normalize_cell_value(value: Any, rule: CompareRule | None, *, side: Side) ->
     if mode == "text":
         return text
 
+    if mode == "structured":
+        return text
+
     # auto
     return text
 
@@ -133,8 +139,20 @@ def values_equal_with_rule(left: Any, right: Any, rule: CompareRule | None) -> b
     if isinstance(left_n, date) and isinstance(right_n, date):
         return left_n == right_n
 
+    if rule.compare_mode == "structured":
+        from pegasus.validation.structured_compare import structured_strings_equal
+
+        return structured_strings_equal(
+            left_n,
+            right_n,
+            order_sensitive=rule.structured_order_sensitive,
+        )
+
     if rule.compare_mode == "auto":
-        return values_equal_for_validation(left, right)
+        return values_equal_for_validation(left_n, right_n)
+
+    if rule.compare_mode == "text":
+        return left_n == right_n
 
     return left_n == right_n
 

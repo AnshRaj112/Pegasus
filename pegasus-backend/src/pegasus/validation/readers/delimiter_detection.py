@@ -137,46 +137,91 @@ def _file_delimiter_stability(path: Path, delim: str) -> tuple[int | None, float
     return mode_value, score
 
 
-def detect_delimiter(path: Path) -> DelimiterDetectionResult:
-    """Detect delimiter using package-first strategy with safe fallbacks.
+def _sniffer_delimiter_hints(sample_text: str) -> list[str]:
+    """Optional delimiter hints from dialect sniffers (validated later)."""
+    hints: list[str] = []
+    try:
+        dialect = clevercsv.Sniffer().sniff(sample_text)
+        delim = getattr(dialect, "delimiter", None)
+        if delim and delim not in hints:
+            hints.append(delim)
+    except Exception:
+        pass
+    try:
+        dialect = csv.Sniffer().sniff(sample_text)
+        delim = getattr(dialect, "delimiter", None)
+        if delim and delim not in hints:
+            hints.append(delim)
+    except Exception:
+        pass
+    return hints
 
-    Order:
-    1) multi-character heuristic (because dialect detectors typically assume one char)
-    2) clevercsv sniffer
-    3) stdlib csv.Sniffer
-    4) common-candidates score fallback
+
+def _delimiter_candidate_tokens(header: str) -> list[str]:
+    """Single- and multi-character delimiter candidates for one file."""
+    single = [",", ";", "|", "\t", ":", "\x1f", "\x1e", "\x1d"]
+    multi = _multi_char_candidates(header)
+    merged: list[str] = []
+    for token in (*single, *multi):
+        if token and token not in merged:
+            merged.append(token)
+    return merged
+
+
+def _pick_best_delimiter(
+    lines: list[str],
+    *,
+    extra_candidates: list[str] | None = None,
+) -> DelimiterDetectionResult | None:
+    """Choose the delimiter with the most stable quote-aware field counts."""
+    header = lines[0]
+    candidates = _delimiter_candidate_tokens(header)
+    for token in extra_candidates or []:
+        if token and token not in candidates:
+            candidates.append(token)
+
+    scored: list[tuple[int, float, float, int, str]] = []
+    for cand in candidates:
+        row = _score_delimiter_candidate(lines, cand)
+        if row is not None:
+            scored.append(row)
+    if not scored:
+        return None
+
+    scored.sort(reverse=True)
+    best_row = scored[0]
+    best = best_row[4]
+    if len(best) == 1:
+        strategy = "heuristic-single-char"
+    elif best in (extra_candidates or []):
+        strategy = "clevercsv" if extra_candidates and best == extra_candidates[0] else "csv-sniffer"
+    else:
+        strategy = "heuristic-multi-char"
+    return DelimiterDetectionResult(delimiter=best, strategy=strategy)
+
+
+def detect_delimiter(path: Path) -> DelimiterDetectionResult:
+    """Detect delimiter using quote-aware scoring over all plausible candidates.
+
+    RFC 4180 comma files with quoted JSON/list cells are scored with the same
+    quote-aware :func:`~pegasus.validation.flat_file.field_count` used at validation
+    time, so commas inside ``"[1, 2, 3]"`` do not beat the real field separator.
     """
     text = _read_utf8_prefix(path)
     lines = [ln for ln in text.splitlines() if ln.strip()]
     if not lines:
         raise ValueError(f"Cannot infer delimiter for empty file: {path.name}")
     sample_lines = lines[:100]
-
-    multi = _detect_multi_char_delimiter(sample_lines)
-    if multi is not None:
-        return DelimiterDetectionResult(delimiter=multi, strategy="heuristic-multi-char")
-
     sample_text = "\n".join(sample_lines)
-    try:
-        dialect = clevercsv.Sniffer().sniff(sample_text)
-        if getattr(dialect, "delimiter", None):
-            return DelimiterDetectionResult(delimiter=dialect.delimiter, strategy="clevercsv")
-    except Exception:
-        pass
 
-    try:
-        dialect2 = csv.Sniffer().sniff(sample_text)
-        if getattr(dialect2, "delimiter", None):
-            return DelimiterDetectionResult(delimiter=dialect2.delimiter, strategy="csv-sniffer")
-    except Exception:
-        pass
+    hints = _sniffer_delimiter_hints(sample_text)
+    picked = _pick_best_delimiter(sample_lines, extra_candidates=hints)
+    if picked is not None:
+        return picked
 
-    single = _detect_single_char_delimiter(sample_lines)
-    if single is None:
-        raise ValueError(
-            f"Could not infer delimiter for {path.name}; please provide delimiter explicitly"
-        )
-    return DelimiterDetectionResult(delimiter=single, strategy="heuristic-single-char")
+    raise ValueError(
+        f"Could not infer delimiter for {path.name}; please provide delimiter explicitly"
+    )
 
 
 def _repeated_substring_candidates(
@@ -210,41 +255,32 @@ def _multi_char_candidates(header: str) -> list[str]:
     return sorted(merged, key=len, reverse=True)
 
 
-def _score_delimiter_candidate(lines: list[str], cand: str) -> tuple[int, float, float, str] | None:
+def _score_delimiter_candidate(lines: list[str], cand: str) -> tuple[int, float, float, int, str] | None:
     fields = [field_count(line, cand) for line in lines]
     active = [f for f in fields if f > 1]
     if len(active) < max(2, len(lines) // 3):
         return None
     variance = statistics.pvariance(fields) if len(fields) > 1 else 0.0
-    return (len(active), -variance, sum(fields) / len(fields), cand)
+    mode_value, mode_freq = Counter(fields).most_common(1)[0]
+    consistency = mode_freq / len(fields)
+    if consistency < 0.85:
+        return None
+    # Prefer stable parses; when tied, prefer the longer delimiter token (``xx`` over ``x``,
+    # ``~\^|~`` over ``~``) so substrings inside real separators are not chosen.
+    return (len(active), -variance, consistency, len(cand), cand)
 
 
 def _detect_multi_char_delimiter(lines: list[str]) -> str | None:
-    header = lines[0]
-    candidates = _multi_char_candidates(header)
-    if not candidates:
+    """Legacy helper; prefer :func:`_pick_best_delimiter`."""
+    picked = _pick_best_delimiter(lines)
+    if picked is None or len(picked.delimiter) == 1:
         return None
-
-    scored: list[tuple[int, float, float, str]] = []
-    for cand in candidates:
-        row = _score_delimiter_candidate(lines, cand)
-        if row is not None:
-            scored.append(row)
-    if not scored:
-        return None
-    scored.sort(reverse=True)
-    return scored[0][3]
+    return picked.delimiter
 
 
 def _detect_single_char_delimiter(lines: list[str]) -> str | None:
-    candidates = [",", ";", "|", "\t", ":", "\x1f", "\x1e", "\x1d"]
-    scored: list[tuple[int, float, float, str]] = []
-    for cand in candidates:
-        row = _score_delimiter_candidate(lines, cand)
-        if row is None:
-            continue
-        scored.append(row)
-    if not scored:
+    """Legacy helper; prefer :func:`_pick_best_delimiter`."""
+    picked = _pick_best_delimiter(lines)
+    if picked is None or len(picked.delimiter) != 1:
         return None
-    scored.sort(reverse=True)
-    return scored[0][3]
+    return picked.delimiter

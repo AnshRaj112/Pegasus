@@ -21,6 +21,18 @@ def test_different_dates_not_equal() -> None:
     assert not values_equal_for_validation("14-04-1960", "1960-04-15")
 
 
+def test_auto_detects_reordered_list_literal() -> None:
+    assert values_equal_for_validation("[1, 2, 3]", "[3, 2, 1]")
+    assert not values_equal_for_validation('["a"]', '["b"]')
+
+
+def test_uid_comparator_auto_structured_cell() -> None:
+    source = pl.DataFrame({"id": ["1"], "tags": ['["x", "y"]']})
+    target = pl.DataFrame({"id": ["1"], "tags": ['["y", "x"]']})
+    report = UIDBasedComparator().compare_dataframes(source, target, uid_column="id")
+    assert report.mismatches.is_empty()
+
+
 def test_uid_comparator_treats_cross_format_dob_as_match() -> None:
     source = pl.DataFrame(
         {

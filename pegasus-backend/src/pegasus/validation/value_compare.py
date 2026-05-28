@@ -64,6 +64,14 @@ def values_equal_for_validation(
     if left_date is not None and right_date is not None:
         return left_date == right_date
 
+    from pegasus.validation.structured_compare import (
+        looks_like_structured_string,
+        structured_strings_equal,
+    )
+
+    if looks_like_structured_string(left_s) and looks_like_structured_string(right_s):
+        return structured_strings_equal(left_s, right_s, order_sensitive=False)
+
     return False
 
 
@@ -114,7 +122,39 @@ def polars_values_differ_expr(
         target_date = _polars_date_expr(target)
         date_equal = source_date.is_not_null() & target_date.is_not_null() & (source_date == target_date)
 
-        return ~(string_equal | date_equal)
+        from pegasus.validation.structured_compare import looks_like_structured_string
+
+        def _structured_pair_equal(pair: dict[str, str]) -> bool:
+            from pegasus.validation.structured_compare import structured_strings_equal
+
+            left = pair.get("_src") or ""
+            right = pair.get("_tgt") or ""
+            if not looks_like_structured_string(left) or not looks_like_structured_string(right):
+                return False
+            return structured_strings_equal(left, right, order_sensitive=False)
+
+        structured_candidate = (
+            source_s.str.starts_with("[")
+            | source_s.str.starts_with("{")
+            | source_s.str.starts_with("(")
+        ) & (
+            target_s.str.starts_with("[")
+            | target_s.str.starts_with("{")
+            | target_s.str.starts_with("(")
+        )
+        structured_equal = (
+            pl.when(structured_candidate & ~string_equal & ~date_equal)
+            .then(
+                pl.struct([source_s.alias("_src"), target_s.alias("_tgt")]).map_elements(
+                    _structured_pair_equal,
+                    return_dtype=pl.Boolean,
+                )
+            )
+            .otherwise(pl.lit(False))
+            .fill_null(False)
+        )
+
+        return ~(string_equal | date_equal | structured_equal)
 
     mode = rule.compare_mode
     src = _polars_apply_regex(
@@ -133,6 +173,27 @@ def polars_values_differ_expr(
 
     if mode == "text":
         return src.fill_null("__NULL__") != tgt.fill_null("__NULL__")
+
+    if mode == "structured":
+        from pegasus.validation.structured_compare import structured_strings_equal
+
+        order_sensitive = rule.structured_order_sensitive
+
+        def _pair_differs(pair: dict[str, str]) -> bool:
+            return not structured_strings_equal(
+                pair.get("_src"),
+                pair.get("_tgt"),
+                order_sensitive=order_sensitive,
+            )
+
+        return (
+            pl.struct([
+                src.fill_null("").alias("_src"),
+                tgt.fill_null("").alias("_tgt"),
+            ])
+            .map_elements(_pair_differs, return_dtype=pl.Boolean)
+            .fill_null(True)
+        )
 
     if mode == "date":
         src_dates = _polars_date_expr_with_format(src, rule.source_date_format)

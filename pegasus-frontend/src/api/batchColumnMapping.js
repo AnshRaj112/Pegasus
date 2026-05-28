@@ -170,7 +170,7 @@ export function adaptTemplateToUnit(template, previewApiData) {
   return { unitConfig, issues, hasMismatch }
 }
 
-export function buildTemplateSnapshot({
+export function buildCsvTemplateSnapshot({
   mappings,
   uidColumn,
   delimiter,
@@ -181,6 +181,7 @@ export function buildTemplateSnapshot({
   columnPreview,
 }) {
   return {
+    format: 'csv',
     mappings: mappings.map(row => ({ ...row, targetCols: [...(row.targetCols || [])] })),
     uidColumn,
     delimiter,
@@ -192,7 +193,119 @@ export function buildTemplateSnapshot({
   }
 }
 
-export async function applyTemplateToAllUnits(units, template, previewOptions) {
+export function buildFixedWidthTemplateSnapshot({
+  fwColumns,
+  fwJoinColumn,
+  fwMatchStrategy,
+  fwDateColumn,
+  sourceDateStart,
+  sourceDateEnd,
+  sourceDateFormat,
+  targetDateStart,
+  targetDateEnd,
+  targetDateFormat,
+}) {
+  return {
+    format: 'fixed-width',
+    fwColumns: (fwColumns || []).map(col => ({ ...col })),
+    fwJoinColumn,
+    fwMatchStrategy,
+    fwDateColumn,
+    sourceDateStart,
+    sourceDateEnd,
+    sourceDateFormat,
+    targetDateStart,
+    targetDateEnd,
+    targetDateFormat,
+  }
+}
+
+export function buildJsonTemplateSnapshot() {
+  return { format: 'json' }
+}
+
+/** @deprecated Use buildCsvTemplateSnapshot */
+export function buildTemplateSnapshot(opts) {
+  return buildCsvTemplateSnapshot(opts)
+}
+
+export async function fetchUnitFixedWidthLayout(unit) {
+  const params = new URLSearchParams({
+    source_path: unit.sourcePaths[0],
+    target_path: unit.targetPaths[0],
+  })
+  const res = await fetch(absoluteApiUrl(`/api/v1/validate/local/fixed-width/columns?${params}`))
+  const raw = await res.text()
+  let data = {}
+  if (raw) {
+    try { data = JSON.parse(raw) } catch { throw new Error(raw.trim().slice(0, 500)) }
+  }
+  if (!res.ok) throw new Error(formatDetail(data.detail) || `${res.status} ${res.statusText}`)
+  return data
+}
+
+export function adaptFixedWidthTemplateToUnit(template, layoutData) {
+  const detected = Array.isArray(layoutData.columns) ? layoutData.columns : []
+  const detectedByName = Object.fromEntries(detected.map(col => [col.field_name, col]))
+  const templateColumns = Array.isArray(template.fwColumns) ? template.fwColumns : []
+  const issues = []
+
+  const join = String(template.fwJoinColumn || '').trim()
+  if (!join) {
+    issues.push('Template is missing a join column')
+  } else if (!detectedByName[join]) {
+    issues.push(`Join column "${join}" is not in this file pair`)
+  }
+
+  const dateName = String(template.fwDateColumn || '').trim()
+  if (dateName && !detectedByName[dateName]) {
+    issues.push(`Date column "${dateName}" is not in this file pair`)
+  }
+
+  if (templateColumns.length === 0) {
+    issues.push('Template has no fixed-width fields defined')
+  }
+
+  for (const col of templateColumns) {
+    const name = col.field_name
+    if (!detectedByName[name]) {
+      issues.push(`Field "${name}" is not in this file pair`)
+    }
+  }
+
+  const fwColumns = templateColumns
+    .map(tc => detectedByName[tc.field_name])
+    .filter(Boolean)
+
+  if (fwColumns.length !== templateColumns.length && templateColumns.length > 0) {
+    issues.push('One or more template fields could not be aligned to this file')
+  }
+
+  const dcol = dateName ? fwColumns.find(c => c.field_name === dateName) : null
+
+  const unitConfig = {
+    fwColumns,
+    fwJoinColumn: join || detected[0]?.field_name || 'id',
+    fwMatchStrategy: template.fwMatchStrategy || 'fuzzy',
+    fwDateColumn: dateName || templateColumns[templateColumns.length - 1]?.field_name || 'dob',
+    sourceDateStart: dcol ? Number(dcol.source_start) : template.sourceDateStart,
+    sourceDateEnd: dcol ? Number(dcol.source_end) : template.sourceDateEnd,
+    sourceDateFormat: template.sourceDateFormat || 'dd/mm/yyyy',
+    targetDateStart: dcol ? Number(dcol.target_start) : template.targetDateStart,
+    targetDateEnd: dcol ? Number(dcol.target_end) : template.targetDateEnd,
+    targetDateFormat: template.targetDateFormat || 'yyyy/mm/dd',
+    fwSourceSample: layoutData.source_sample || '',
+    fwTargetSample: layoutData.target_sample || '',
+  }
+
+  const hasMismatch = issues.length > 0
+    || fwColumns.length === 0
+    || (templateColumns.length > 0 && fwColumns.length < templateColumns.length)
+
+  return { unitConfig, issues, hasMismatch }
+}
+
+export async function applyCsvTemplateToAllUnits(units, template, previewOptions) {
   const unitConfigs = {}
   const mismatchUnitIds = []
   const mismatchDetails = {}
@@ -213,4 +326,44 @@ export async function applyTemplateToAllUnits(units, template, previewOptions) {
   }
 
   return { unitConfigs, mismatchUnitIds, mismatchDetails }
+}
+
+export async function applyFixedWidthTemplateToAllUnits(units, template) {
+  const unitConfigs = {}
+  const mismatchUnitIds = []
+  const mismatchDetails = {}
+
+  for (const unit of units) {
+    const layout = await fetchUnitFixedWidthLayout(unit)
+    const { unitConfig, issues, hasMismatch } = adaptFixedWidthTemplateToUnit(template, layout)
+    unitConfigs[unit.unitId] = unitConfig
+    if (hasMismatch) {
+      mismatchUnitIds.push(unit.unitId)
+      mismatchDetails[unit.unitId] = issues
+    }
+  }
+
+  return { unitConfigs, mismatchUnitIds, mismatchDetails }
+}
+
+export function applyJsonTemplateToAllUnits(units) {
+  const unitConfigs = {}
+  for (const unit of units) {
+    unitConfigs[unit.unitId] = { jsonConfigured: true }
+  }
+  return {
+    unitConfigs,
+    mismatchUnitIds: [],
+    mismatchDetails: {},
+  }
+}
+
+export async function applyTemplateToAllUnits(units, template, previewOptions, fileFormat) {
+  if (fileFormat === 'fixed-width') {
+    return applyFixedWidthTemplateToAllUnits(units, template)
+  }
+  if (fileFormat === 'json') {
+    return applyJsonTemplateToAllUnits(units)
+  }
+  return applyCsvTemplateToAllUnits(units, template, previewOptions)
 }

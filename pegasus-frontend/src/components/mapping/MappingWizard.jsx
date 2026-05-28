@@ -26,7 +26,9 @@ import {
 import { matchCloudFilePairs } from '../../api/cloudBrowse'
 import {
   applyTemplateToAllUnits,
-  buildTemplateSnapshot,
+  buildCsvTemplateSnapshot,
+  buildFixedWidthTemplateSnapshot,
+  buildJsonTemplateSnapshot,
 } from '../../api/batchColumnMapping'
 
 
@@ -612,7 +614,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [batchApplyAllError, setBatchApplyAllError] = useState('')
 
   const isBatchMode = inputLayout !== 'pair'
-  const multiPairCsvBatch = isBatchMode && validationUnits.length > 1 && fileFormat === 'csv'
+  const multiPairBatch = isBatchMode && validationUnits.length > 1
+    && (fileFormat === 'csv' || fileFormat === 'fixed-width' || fileFormat === 'json')
   const mappingQueueUnits = batchColumnMappingMode === 'template-fixups'
     ? validationUnits.filter(u => batchMismatchUnitIds.includes(u.unitId))
     : validationUnits
@@ -763,6 +766,9 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         targetDateStart,
         targetDateEnd,
         targetDateFormat,
+        fwSourceSample,
+        fwTargetSample,
+        jsonConfigured: fileFormat === 'json' ? true : undefined,
       },
     }))
   }
@@ -820,6 +826,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       setTargetDateStart(cfg.targetDateStart ?? 58)
       setTargetDateEnd(cfg.targetDateEnd ?? 68)
       setTargetDateFormat(cfg.targetDateFormat || 'yyyy/mm/dd')
+      setFwSourceSample(cfg.fwSourceSample || '')
+      setFwTargetSample(cfg.fwTargetSample || '')
     }
   }
 
@@ -830,10 +838,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   }
 
   const activeUnitIndex = mappingQueueUnits.findIndex(u => u.unitId === activeUnitId)
-  const sequentialBatchMapping = multiPairCsvBatch
+  const sequentialBatchMapping = multiPairBatch
     && (batchColumnMappingMode === 'manual' || batchColumnMappingMode === 'template-fixups')
-  const showBatchMappingModeChoice = multiPairCsvBatch && batchColumnMappingMode === 'choose'
-  const showTemplateMapping = multiPairCsvBatch && batchColumnMappingMode === 'template'
+  const showBatchMappingModeChoice = multiPairBatch && batchColumnMappingMode === 'choose'
+  const showTemplateMapping = multiPairBatch && batchColumnMappingMode === 'template'
 
   function isCurrentPairMappingValid() {
     if (fileFormat === 'json') return true
@@ -844,6 +852,12 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   }
 
   function isUnitMappingConfigured(unitId) {
+    if (fileFormat === 'json' && multiPairBatch) {
+      if (unitId === activeUnitId && batchColumnMappingMode === 'manual') {
+        return true
+      }
+      return Boolean(unitConfigs[unitId]?.jsonConfigured)
+    }
     if (unitId === activeUnitId) return isCurrentPairMappingValid()
     const cfg = unitConfigs[unitId]
     if (!cfg) return false
@@ -885,20 +899,35 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   }
 
   async function handleApplyTemplateToAll() {
-    if (!isCurrentPairMappingValid()) return
+    if (fileFormat !== 'json' && !isCurrentPairMappingValid()) return
     setBatchApplyAllLoading(true)
     setBatchApplyAllError('')
     try {
-      const template = buildTemplateSnapshot({
-        mappings,
-        uidColumn,
-        delimiter,
-        hasHeader,
-        validateHeaderFormats,
-        validateFooters,
-        footerTrailingRows,
-        columnPreview,
-      })
+      const template = fileFormat === 'fixed-width'
+        ? buildFixedWidthTemplateSnapshot({
+          fwColumns,
+          fwJoinColumn,
+          fwMatchStrategy,
+          fwDateColumn,
+          sourceDateStart,
+          sourceDateEnd,
+          sourceDateFormat,
+          targetDateStart,
+          targetDateEnd,
+          targetDateFormat,
+        })
+        : fileFormat === 'json'
+          ? buildJsonTemplateSnapshot()
+          : buildCsvTemplateSnapshot({
+            mappings,
+            uidColumn,
+            delimiter,
+            hasHeader,
+            validateHeaderFormats,
+            validateFooters,
+            footerTrailingRows,
+            columnPreview,
+          })
       const { unitConfigs: allConfigs, mismatchUnitIds, mismatchDetails } = await applyTemplateToAllUnits(
         validationUnits,
         template,
@@ -908,6 +937,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           sourceCloudConfig,
           targetCloudConfig,
         },
+        fileFormat,
       )
       setUnitConfigs(allConfigs)
       if (mismatchUnitIds.length === 0) {
@@ -1162,7 +1192,11 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     const units = unitsFromPairs(pairs)
     setValidationUnits(units)
     setUnitConfigs({})
-    setBatchColumnMappingMode(units.length > 1 && fileFormat === 'csv' ? 'choose' : 'manual')
+    setBatchColumnMappingMode(
+      units.length > 1 && (fileFormat === 'csv' || fileFormat === 'fixed-width' || fileFormat === 'json')
+        ? 'choose'
+        : 'manual',
+    )
     setBatchMismatchUnitIds([])
     setBatchMismatchDetails({})
     setBatchApplyAllError('')
@@ -1307,14 +1341,17 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   ])
 
   useEffect(() => {
-    const hasSource = isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
-    const hasTarget = isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
-    if ((step !== 3 && step !== 4) || !hasSource || !hasTarget || fileFormat !== 'fixed-width') return
+    const fwSource = isBatchMode ? (effectiveSourcePath || '').trim() : sourcePath.trim()
+    const fwTarget = isBatchMode ? (effectiveTargetPath || '').trim() : targetPath.trim()
+    const hasSource = isBatchMode ? Boolean(fwSource) : isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
+    const hasTarget = isBatchMode ? Boolean(fwTarget) : isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
+    if ((step !== 3 && step !== 4) || showBatchMappingModeChoice || !hasSource || !hasTarget || fileFormat !== 'fixed-width') return
+    if (isBatchMode && activeUnitId && (unitConfigs[activeUnitId]?.fwColumns?.length ?? 0) > 0) return
 
     const controller = new AbortController()
     const params = new URLSearchParams()
-    if (sourceStorageType === 'local' && sourcePath.trim()) params.set('source_path', sourcePath.trim())
-    if (targetStorageType === 'local' && targetPath.trim()) params.set('target_path', targetPath.trim())
+    if (fwSource) params.set('source_path', fwSource)
+    if (fwTarget) params.set('target_path', fwTarget)
     if (!params.get('source_path') || !params.get('target_path')) return
 
     async function loadLayout() {
@@ -1356,7 +1393,20 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     }
     loadLayout()
     return () => controller.abort()
-  }, [step, sourceStorageType, targetStorageType, sourcePath, targetPath, fileFormat])
+  }, [
+    step,
+    sourceStorageType,
+    targetStorageType,
+    sourcePath,
+    targetPath,
+    fileFormat,
+    isBatchMode,
+    effectiveSourcePath,
+    effectiveTargetPath,
+    activeUnitId,
+    unitConfigs,
+    showBatchMappingModeChoice,
+  ])
 
   useEffect(() => {
     const hasSource = isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
@@ -1644,7 +1694,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const showFilePairing = step === 2 && subPhase === 'file-pairing'
   const showConfigure  = step === 3
   const showReview     = step === 4
-  const allBatchUnitsConfigured = multiPairCsvBatch
+  const allBatchUnitsConfigured = multiPairBatch
     ? validationUnits.every(u => isUnitMappingConfigured(u.unitId))
     : true
 
@@ -2060,6 +2110,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         {showConfigure && showBatchMappingModeChoice && (
           <StepBatchMappingMode
             pairCount={validationUnits.length}
+            fileFormat={fileFormat}
             onSelect={handleBatchMappingModeSelect}
             onBack={() => {
               setStep(2)
@@ -2079,18 +2130,34 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 background: 'var(--accent-muted)',
               }}>
                 <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' }}>
-                  Shared mapping template
+                  {fileFormat === 'json'
+                    ? 'Shared JSON validation'
+                    : fileFormat === 'fixed-width'
+                      ? 'Shared fixed-width layout'
+                      : 'Shared mapping template'}
                 </div>
                 <p style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 8, marginBottom: 0, lineHeight: 1.5 }}>
-                  Configure columns using the first pair (
-                  <code style={{ fontFamily: 'Geist Mono, monospace' }}>
-                    {validationUnits[0]?.sourcePaths?.[0]?.split('/').pop()}
-                  </code>
-                  {' → '}
-                  <code style={{ fontFamily: 'Geist Mono, monospace' }}>
-                    {validationUnits[0]?.targetPaths?.[0]?.split('/').pop()}
-                  </code>
-                  ). Then apply this mapping to all {validationUnits.length} pairs. Only files with column mismatches will need manual mapping.
+                  {fileFormat === 'json' ? (
+                    <>
+                      All {validationUnits.length} pairs will use semantic JSON comparison (sorted keys, multiset arrays).
+                      Click apply below to confirm every pair, or change strategy to review each pair individually.
+                    </>
+                  ) : (
+                    <>
+                      Configure using the first pair (
+                      <code style={{ fontFamily: 'Geist Mono, monospace' }}>
+                        {validationUnits[0]?.sourcePaths?.[0]?.split('/').pop()}
+                      </code>
+                      {' → '}
+                      <code style={{ fontFamily: 'Geist Mono, monospace' }}>
+                        {validationUnits[0]?.targetPaths?.[0]?.split('/').pop()}
+                      </code>
+                      ), then apply to all {validationUnits.length} pairs.
+                      {fileFormat === 'fixed-width'
+                        ? ' Field slice positions are re-detected per file; only pairs whose fields do not match need manual setup.'
+                        : ' Only files with column mismatches will need manual mapping.'}
+                    </>
+                  )}
                 </p>
               </div>
             )}
@@ -2104,10 +2171,12 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 background: 'var(--surface-2)',
               }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', marginBottom: 6 }}>
-                  {validationUnits.length - batchMismatchUnitIds.length} of {validationUnits.length} files matched the template automatically
+                  {validationUnits.length - batchMismatchUnitIds.length} of {validationUnits.length} file
+                  {fileFormat === 'fixed-width' ? ' pairs matched the layout' : ' pairs matched the template'}
+                  {' '}automatically
                 </div>
                 <p style={{ fontSize: 12, color: 'var(--text-3)', margin: '0 0 8px', lineHeight: 1.45 }}>
-                  Map the remaining {batchMismatchUnitIds.length} file pair{batchMismatchUnitIds.length === 1 ? '' : 's'} below.
+                  {fileFormat === 'fixed-width' ? 'Configure' : 'Map'} the remaining {batchMismatchUnitIds.length} file pair{batchMismatchUnitIds.length === 1 ? '' : 's'} below.
                 </p>
                 {activeUnitId && Array.isArray(batchMismatchDetails[activeUnitId]) && batchMismatchDetails[activeUnitId].length > 0 && (
                   <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--danger)' }}>
@@ -2207,8 +2276,14 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 </div>
                 <p style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 10, marginBottom: 0 }}>
                   {batchColumnMappingMode === 'template-fixups'
-                    ? 'Fix mapping for each file that did not match the shared template, then continue.'
-                    : 'Map columns for this pair, then continue to the next file. You can return to earlier pairs from the list above.'}
+                    ? (fileFormat === 'fixed-width'
+                      ? 'Fix layout for each file pair that did not match the shared template, then continue.'
+                      : 'Fix mapping for each file that did not match the shared template, then continue.')
+                    : (fileFormat === 'json'
+                      ? 'Confirm each pair, then continue. You can return to earlier pairs from the list above.'
+                      : fileFormat === 'fixed-width'
+                        ? 'Configure fields for this pair, then continue. You can return to earlier pairs from the list above.'
+                        : 'Map columns for this pair, then continue to the next file. You can return to earlier pairs from the list above.')}
                 </p>
               </div>
             )}
@@ -2346,7 +2421,11 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 >
                   {batchApplyAllLoading
                     ? 'Applying to all files…'
-                    : `Apply mapping to all ${validationUnits.length} files`}
+                    : fileFormat === 'json'
+                      ? `Apply to all ${validationUnits.length} pairs`
+                      : fileFormat === 'fixed-width'
+                        ? `Apply layout to all ${validationUnits.length} files`
+                        : `Apply mapping to all ${validationUnits.length} files`}
                 </button>
               ) : (
                 <button
