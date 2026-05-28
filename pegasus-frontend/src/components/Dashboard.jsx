@@ -259,18 +259,35 @@ export default function Dashboard() {
     }
   })
 
+  const entityStats = entityTableData.reduce((acc, row) => {
+    acc.entities += 1
+    acc.validations += Number(row.total_count || 0)
+    if (row.matched_existing_entity) acc.known += 1
+    else acc.needsConfirmation += 1
+    return acc
+  }, {
+    entities: 0,
+    validations: 0,
+    known: 0,
+    needsConfirmation: 0,
+  })
+
   const entityColumns = [
     {
       title: 'Entity',
       dataIndex: 'display_name',
       key: 'display_name',
       render: (_, row) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{row.display_name}</span>
-          <Tag color={row.matched_existing_entity ? 'green' : 'orange'}>
-            {row.matched_existing_entity ? 'Known' : 'Needs Confirmation'}
-          </Tag>
-          <Tag>{row.confidence}</Tag>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.display_name}</span>
+            <Tag color={row.matched_existing_entity ? 'green' : 'orange'} style={{ marginInlineEnd: 0 }}>
+              {row.matched_existing_entity ? 'Known' : 'Needs review'}
+            </Tag>
+          </div>
+          <div style={{ color: 'var(--text-3)', fontSize: 12, lineHeight: 1.35 }}>
+            {row.confidence ? `Confidence ${row.confidence}` : 'No confidence score'}
+          </div>
         </div>
       ),
     },
@@ -279,42 +296,73 @@ export default function Dashboard() {
       dataIndex: ['statusCounts', 'passed'],
       key: 'passed',
       width: 90,
+      align: 'center',
+      render: (value) => (
+        <span style={{ display: 'inline-flex', minWidth: 34, justifyContent: 'center', padding: '4px 8px', borderRadius: 999, background: 'rgba(34,197,94,0.10)', color: 'var(--success)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+          {value}
+        </span>
+      ),
     },
     {
       title: 'Failed',
       dataIndex: ['statusCounts', 'failed'],
       key: 'failed',
       width: 90,
+      align: 'center',
+      render: (value) => (
+        <span style={{ display: 'inline-flex', minWidth: 34, justifyContent: 'center', padding: '4px 8px', borderRadius: 999, background: 'rgba(239,68,68,0.10)', color: 'var(--danger)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+          {value}
+        </span>
+      ),
     },
     {
       title: 'Running',
       dataIndex: ['statusCounts', 'running'],
       key: 'running',
       width: 90,
+      align: 'center',
+      render: (value) => (
+        <span style={{ display: 'inline-flex', minWidth: 34, justifyContent: 'center', padding: '4px 8px', borderRadius: 999, background: 'rgba(59,130,246,0.10)', color: 'var(--blue, #3b82f6)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+          {value}
+        </span>
+      ),
     },
     {
       title: 'Scheduled',
       dataIndex: ['statusCounts', 'scheduled'],
       key: 'scheduled',
       width: 110,
+      align: 'center',
+      render: (value) => (
+        <span style={{ display: 'inline-flex', minWidth: 34, justifyContent: 'center', padding: '4px 8px', borderRadius: 999, background: 'rgba(245,158,11,0.12)', color: 'var(--warning, #d97706)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+          {value}
+        </span>
+      ),
     },
     {
       title: 'Total',
       dataIndex: 'total_count',
       key: 'total_count',
       width: 90,
+      align: 'center',
+      render: (value) => (
+        <span style={{ display: 'inline-flex', minWidth: 34, justifyContent: 'center', padding: '4px 8px', borderRadius: 999, background: 'var(--surface-2)', color: 'var(--text-1)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+          {value}
+        </span>
+      ),
     },
     {
       title: 'Action',
       key: 'action',
       width: 150,
+      align: 'center',
       render: (_, row) =>
         row.matched_existing_entity ? (
-          <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>
+          <span style={{ color: 'var(--text-3)', fontSize: 12 }}>Reviewed</span>
         ) : (
           <Button
             size="small"
-            type="default"
+            type="primary"
             onClick={() =>
               setCreateEntityModal({
                 open: true,
@@ -505,18 +553,49 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="card" style={{ padding: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
-          <div>
-            <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-1)', margin: 0 }}>Entity Health (Last X Validations)</h3>
-            <p style={{ margin: '6px 0 0 0', color: 'var(--text-2)', fontSize: 13 }}>
-              Entity is inferred from source/target file names such as <code>employee_ddmmyy_timestamp</code>.
+      <div className="card" style={{
+        padding: 24,
+        border: '1px solid var(--border-1)',
+        background: 'linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(248,250,252,0.92) 100%)',
+        boxShadow: '0 10px 32px rgba(15,23,42,0.05)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', marginBottom: 18, flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 260, flex: '1 1 360px' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 999, background: 'var(--surface-2)', border: '1px solid var(--border-1)', color: 'var(--text-2)', fontSize: 12, fontWeight: 600, marginBottom: 10 }}>
+              Entity Health
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)' }} />
+              <span>Last {entityLimit} validations</span>
+            </div>
+            <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)', margin: 0, letterSpacing: '-0.02em' }}>How reliably filenames map to entities</h3>
+            <p style={{ margin: '8px 0 0 0', color: 'var(--text-2)', fontSize: 13, lineHeight: 1.5, maxWidth: 720 }}>
+              Entity is inferred from source and target file names such as <code>employee_ddmmyy_timestamp</code>. Use the limit to widen or narrow the history window.
             </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ color: 'var(--text-2)', fontSize: 13 }}>Last</span>
-            <InputNumber min={5} max={500} value={entityLimit} onChange={(v) => setEntityLimit(Number(v) || 25)} />
-            <span style={{ color: 'var(--text-2)', fontSize: 13 }}>files</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 14, background: 'var(--surface-2)', border: '1px solid var(--border-1)' }}>
+              <span style={{ color: 'var(--text-2)', fontSize: 13 }}>Last</span>
+              <InputNumber min={5} max={500} value={entityLimit} onChange={(v) => setEntityLimit(Number(v) || 25)} />
+              <span style={{ color: 'var(--text-2)', fontSize: 13 }}>files</span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
+          <div style={{ padding: '12px 14px', borderRadius: 14, background: 'var(--surface-2)', border: '1px solid var(--border-1)' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 6 }}>Entities</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1 }}>{entityStats.entities}</div>
+          </div>
+          <div style={{ padding: '12px 14px', borderRadius: 14, background: 'var(--surface-2)', border: '1px solid var(--border-1)' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 6 }}>Validations</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1 }}>{entityStats.validations.toLocaleString()}</div>
+          </div>
+          <div style={{ padding: '12px 14px', borderRadius: 14, background: 'var(--surface-2)', border: '1px solid var(--border-1)' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 6 }}>Known</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--success)', lineHeight: 1 }}>{entityStats.known}</div>
+          </div>
+          <div style={{ padding: '12px 14px', borderRadius: 14, background: 'var(--surface-2)', border: '1px solid var(--border-1)' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 6 }}>Needs review</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--warning, #d97706)', lineHeight: 1 }}>{entityStats.needsConfirmation}</div>
           </div>
         </div>
 
@@ -524,12 +603,25 @@ export default function Dashboard() {
           <div style={{ marginBottom: 12, color: 'var(--danger)', fontSize: 13 }}>{entityError}</div>
         )}
 
-        <Table
-          columns={entityColumns}
-          dataSource={entityTableData}
-          pagination={false}
-          locale={{ emptyText: entityError ? '—' : 'No recent validation history found for entity inference.' }}
-          expandable={{
+        <div style={{ borderRadius: 16, overflow: 'hidden', border: '1px solid var(--border-1)', background: 'var(--surface-0)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--border-1)', background: 'rgba(248,250,252,0.9)' }}>
+            <div style={{ color: 'var(--text-2)', fontSize: 12 }}>
+              Showing {entityTableData.length} entity pattern{entityTableData.length === 1 ? '' : 's'}
+            </div>
+            <div style={{ color: 'var(--text-3)', fontSize: 12 }}>
+              Click a row to inspect validation details.
+            </div>
+          </div>
+          <Table
+            columns={entityColumns}
+            dataSource={entityTableData}
+            pagination={false}
+            size="middle"
+            bordered={false}
+            tableLayout="fixed"
+            scroll={{ x: 920 }}
+            locale={{ emptyText: entityError ? '—' : 'No recent validation history found for entity inference.' }}
+            expandable={{
             expandedRowRender: (entityRow) => (
               <Table
                 size="small"
@@ -575,9 +667,10 @@ export default function Dashboard() {
                 ]}
               />
             ),
-            rowExpandable: (record) => Array.isArray(record.details) && record.details.length > 0,
-          }}
-        />
+              rowExpandable: (record) => Array.isArray(record.details) && record.details.length > 0,
+            }}
+          />
+        </div>
       </div>
 
       <Modal
