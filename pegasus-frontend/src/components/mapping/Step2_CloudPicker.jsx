@@ -11,6 +11,8 @@ export default function Step2_CloudPicker({
   selectionMode = 'file',
   fileFormat = 'csv',
 }) {
+  const browseFileFormat = fileFormat === 'zip' || fileFormat === 'dat' ? 'csv' : fileFormat
+  const formatLabel = fileFormat === 'zip' ? 'ZIP archive' : fileFormat === 'dat' ? 'DAT file' : fileFormat === 'fixed-width' ? 'Fixed-width' : fileFormat === 'json' ? 'JSON' : 'CSV'
   const [prefix, setPrefix] = useState('')
   const [parentPrefix, setParentPrefix] = useState(null)
   const [entries, setEntries] = useState([])
@@ -35,7 +37,7 @@ export default function Step2_CloudPicker({
         prefix: nextPrefix ?? '',
         credentialsJson: cloudConfig.credentialsJson,
         projectId: cloudConfig.projectId,
-        fileFormat,
+        fileFormat: browseFileFormat,
       })
       setPrefix(data.prefix ?? '')
       setParentPrefix(data.parent_prefix ?? null)
@@ -47,7 +49,7 @@ export default function Step2_CloudPicker({
     } finally {
       setLoading(false)
     }
-  }, [canBrowse, cloudConfig, fileFormat])
+  }, [canBrowse, cloudConfig, browseFileFormat])
 
   useEffect(() => {
     if (canBrowse && !hasListed) loadPrefix('')
@@ -93,14 +95,14 @@ export default function Step2_CloudPicker({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
         <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4 }}>
-          Browse GCS — {panelLabel}
+          Browse GCS — {panelLabel} {formatLabel}
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-3)' }}>
           {selectionMode === 'folder'
-            ? 'Navigate to the folder prefix, then confirm.'
+            ? `Navigate to the folder prefix that contains the ${formatLabel.toLowerCase()} files, then confirm.`
             : selectionMode === 'multi'
-              ? 'Select multiple objects (toggle). Order is preserved for merge.'
-              : 'Select one object in the bucket.'}
+              ? `Select multiple objects (toggle). Order is preserved for merge.${fileFormat === 'zip' ? ' ZIP archives stay in the same frontend flow.' : fileFormat === 'dat' ? ' DAT files stay in the same frontend flow.' : ''}`
+              : `Select one object in the bucket.${fileFormat === 'zip' ? ' ZIP archives stay in the same frontend flow.' : fileFormat === 'dat' ? ' DAT files stay in the same frontend flow.' : ''}`}
         </p>
       </div>
 

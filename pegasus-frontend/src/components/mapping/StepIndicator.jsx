@@ -1,5 +1,5 @@
 const STEPS = [
-  { id: 1, label: 'Select File Type',    desc: 'CSV or Fixed-Width' },
+  { id: 1, label: 'Select File Type',    desc: 'CSV, ZIP or Fixed-Width' },
   { id: 2, label: 'Select Files',        desc: 'Source & target'    },
   { id: 3, label: 'Configure Mapping',   desc: 'Map layouts & bounds'},
   { id: 4, label: 'Review & Run',        desc: 'Validate or draft'  },
