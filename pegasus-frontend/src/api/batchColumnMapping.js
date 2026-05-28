@@ -163,6 +163,8 @@ export function adaptTemplateToUnit(template, previewApiData) {
     validateFooters: template.validateFooters || false,
     footerTrailingRows: template.footerTrailingRows ?? 1,
     headerLeadingRows: template.headerLeadingRows ?? 0,
+    testMode: template.testMode || 'full',
+    uidGte: template.uidGte || '',
     columnPreview,
     formatChecks: [],
     footerValidation: null,
@@ -183,6 +185,8 @@ export function buildCsvTemplateSnapshot({
   validateFooters,
   footerTrailingRows,
   headerLeadingRows,
+  testMode,
+  uidGte,
   columnPreview,
 }) {
   return {
@@ -195,6 +199,8 @@ export function buildCsvTemplateSnapshot({
     validateFooters,
     footerTrailingRows,
     headerLeadingRows,
+    testMode: testMode || 'full',
+    uidGte: uidGte || '',
     columnPreview: columnPreview ? { ...columnPreview } : null,
   }
 }

@@ -149,6 +149,8 @@ def run_job_directory(job_dir: Path) -> int:
     footer_trailing_rows = int(meta.get("footer_trailing_rows") or 1)
     has_header = bool(meta.get("has_header", True))
     header_leading_rows = int(meta.get("header_leading_rows") or 0)
+    test_mode = str(meta.get("test_mode") or "full").strip().lower()
+    uid_gte = str(meta.get("uid_gte")).strip() if meta.get("uid_gte") is not None else None
     mem_iv = int(meta.get("memory_log_interval_seconds") or 0)
     sp = meta.get("source_path")
     tp = meta.get("target_path")
@@ -264,6 +266,24 @@ def run_job_directory(job_dir: Path) -> int:
                 artifact_export_parent=job_dir,
                 progress_callback=_progress_cb,
             )
+        elif test_mode == "litmus":
+            _write_json(
+                status_path,
+                {
+                    "status": "running",
+                    "phase": "validating",
+                    "message": "Running litmus checks (metadata and structure)",
+                    "progress": {"started_at_epoch_s": start},
+                },
+            )
+            result = service.validate_csv_litmus_sync(
+                source_path=src,
+                target_path=tgt,
+                uid_column=uid_column,
+                delimiter=delimiter,
+                has_header=has_header,
+                header_leading_rows=header_leading_rows,
+            )
         else:
             _write_json(
                 status_path,
@@ -287,6 +307,7 @@ def run_job_directory(job_dir: Path) -> int:
                 footer_trailing_rows=footer_trailing_rows,
                 has_header=has_header,
                 header_leading_rows=header_leading_rows,
+                uid_gte=uid_gte,
                 resource_policy=resource_policy,
             )
         end = time.time()
@@ -318,6 +339,8 @@ def run_job_directory(job_dir: Path) -> int:
             "mismatch_artifact_path": artifact_abs,
             "mapping_format_checks": result.mapping_format_checks,
             "footer_validation": result.footer_validation,
+            "test_mode": result.test_mode,
+            "litmus": result.litmus,
             "durations": {
                 "upload_seconds": upload_duration,
                 "validation_seconds": validation_duration,

@@ -68,6 +68,8 @@ export function buildBatchValidatePayload({
   cloudBucket,
   cloudCredentialsJson,
   cloudProjectId,
+  testMode,
+  uidGte,
 }) {
   const payload = {
     file_format: fileFormat,
@@ -78,6 +80,8 @@ export function buildBatchValidatePayload({
     validate_header_formats: validateHeaderFormats,
     validate_footers: validateFooters,
     footer_trailing_rows: footerTrailingRows,
+    test_mode: testMode || 'full',
+    uid_gte: uidGte?.trim() || undefined,
     units: units.map(unit => {
       const cfg = unitConfigs[unit.unitId] || {}
       const base = {

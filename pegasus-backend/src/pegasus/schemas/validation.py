@@ -69,6 +69,36 @@ class ValidationSummary(BaseModel):
     is_match: bool = Field(description="True when there are zero mismatch records")
 
 
+class ValidationTestMode(str, Enum):
+    """Execution depth for CSV validation."""
+
+    LITMUS = "litmus"
+    FULL = "full"
+
+
+class LitmusFileStats(BaseModel):
+    """Quick structural stats for one compared file."""
+
+    path: str | None = None
+    file_name: str | None = None
+    file_type: str = "csv"
+    size_bytes: int | None = Field(default=None, ge=0)
+    row_count: int = Field(ge=0)
+    column_count: int = Field(ge=0)
+    columns: list[str] = Field(default_factory=list)
+
+
+class LitmusComparison(BaseModel):
+    """Result payload for fast metadata/shape checks."""
+
+    checks_run: list[str] = Field(default_factory=list)
+    checks_passed: list[str] = Field(default_factory=list)
+    checks_failed: list[str] = Field(default_factory=list)
+    source: LitmusFileStats
+    target: LitmusFileStats
+    notes: list[str] = Field(default_factory=list)
+
+
 class MismatchCounts(BaseModel):
     """Counts keyed by :class:`MismatchType` string values."""
 
@@ -233,6 +263,20 @@ class LocalPathValidateRequest(BaseModel):
     fixed_width_config: FixedWidthConfig | None = Field(
         default=None,
         description="Detailed configuration when file_format is 'fixed-width'",
+    )
+    test_mode: ValidationTestMode = Field(
+        default=ValidationTestMode.FULL,
+        description=(
+            "litmus: quick structural checks only (name/type/size/rows/columns/headers); "
+            "full: complete UID-based row comparison."
+        ),
+    )
+    uid_gte: str | None = Field(
+        default=None,
+        description=(
+            "Optional full-test filter: compare only rows where uid_column >= this value "
+            "(numeric when possible, otherwise lexical string compare)."
+        ),
     )
 
     @model_validator(mode="after")
@@ -546,6 +590,14 @@ class ValidateResponse(BaseModel):
         default=None,
         description="Wall-clock timings when available from the validation worker.",
     )
+    test_mode: ValidationTestMode = Field(
+        default=ValidationTestMode.FULL,
+        description="Validation depth used for this run.",
+    )
+    litmus: LitmusComparison | None = Field(
+        default=None,
+        description="Present when test_mode is litmus.",
+    )
 
 
 class ValidationJobAcceptedResponse(BaseModel):
@@ -618,6 +670,8 @@ class LocalBatchValidateRequest(BaseModel):
         description="Service account JSON used with cloud_bucket for batch jobs",
     )
     cloud_project_id: str | None = None
+    test_mode: ValidationTestMode = Field(default=ValidationTestMode.FULL)
+    uid_gte: str | None = None
 
 
 class MatchFilePairsRequest(BaseModel):

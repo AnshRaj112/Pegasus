@@ -64,6 +64,7 @@ from pegasus.schemas.validation import (
     ValidationJobAcceptedResponse,
     ValidationJobDetailResponse,
     ValidationSummary,
+    ValidationTestMode,
     build_mismatch_counts,
 )
 from pegasus.services.validation_job_queue import get_validation_queue
@@ -434,6 +435,11 @@ def _build_validate_response(
             total_seconds=run_result.durations.total_seconds,
         )
 
+    try:
+        response_test_mode = ValidationTestMode(str(run_result.test_mode or "full"))
+    except ValueError:
+        response_test_mode = ValidationTestMode.FULL
+
     return ValidateResponse(
         summary=summary,
         mismatch_counts=counts_model,
@@ -445,6 +451,8 @@ def _build_validate_response(
         mapping_format_checks=format_checks,
         footer_validation=footer_val,
         durations=api_durations,
+        test_mode=response_test_mode,
+        litmus=run_result.litmus,
     )
 
 
@@ -575,6 +583,8 @@ def _run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.U
         mismatch_artifact_path=apath,
         mapping_format_checks=list(format_checks_raw) if format_checks_raw else None,
         footer_validation=dict(footer_raw) if isinstance(footer_raw, dict) else None,
+        test_mode=str(res.get("test_mode") or "full"),
+        litmus=dict(res.get("litmus")) if isinstance(res.get("litmus"), dict) else None,
         durations=_durations_from_result_json(res),
     )
     return vr, run_uuid, meta
@@ -620,6 +630,8 @@ def _validate_response_from_unit_json(
         mismatch_artifact_path=apath,
         mapping_format_checks=list(format_checks_raw) if format_checks_raw else None,
         footer_validation=dict(footer_raw) if isinstance(footer_raw, dict) else None,
+        test_mode=str(res.get("test_mode") or "full"),
+        litmus=dict(res.get("litmus")) if isinstance(res.get("litmus"), dict) else None,
         durations=None,
     )
     return _build_validate_response(settings=settings, run_result=vr, run_id=None)
@@ -1027,6 +1039,8 @@ async def validate_csv_local_paths(
         "target_filename": target_input.display_name,
         "file_format": file_format,
         "fixed_width_config": fixed_width_config_dict,
+        "test_mode": body.test_mode.value,
+        "uid_gte": body.uid_gte,
     }
     (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
 
@@ -1255,6 +1269,8 @@ async def validate_local_batch(
         "on_unit_failure": body.on_unit_failure.value,
         "memory_log_interval_seconds": settings.validation_memory_log_interval_seconds,
         "units": units_meta,
+        "test_mode": body.test_mode.value,
+        "uid_gte": body.uid_gte,
     }
     if use_cloud:
         meta["cloud_bucket"] = body.cloud_bucket.strip()

@@ -41,6 +41,10 @@ export default function Step3_Configure({
   analyzeLoading = false,
   analyzeError = '',
   footerValidation = null,
+  testMode = 'full',
+  onTestModeChange,
+  uidGte = '',
+  onUidGteChange,
 }) {
   const activeMappings = mappings
   const mapped = activeMappings.filter(m => m.targetCol || (Array.isArray(m.targetCols) && m.targetCols.length > 0)).length
@@ -266,6 +270,43 @@ export default function Step3_Configure({
         marginBottom: 12, padding: '12px 14px', borderRadius: 10,
         background: 'var(--surface-2)', border: '1px solid var(--border-1)',
       }}>
+        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 10 }}>
+          Test mode
+        </div>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 10 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-2)', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="test-mode"
+              checked={testMode === 'litmus'}
+              onChange={() => onTestModeChange?.('litmus')}
+            />
+            Litmus test (name/type/size/rows/columns metadata checks)
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-2)', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="test-mode"
+              checked={testMode === 'full'}
+              onChange={() => onTestModeChange?.('full')}
+            />
+            Full test (complete row-level comparison)
+          </label>
+        </div>
+        {testMode === 'full' && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-3)', marginBottom: 10 }}>
+            Row filter: UID greater than or equal to
+            <input
+              type="text"
+              value={uidGte}
+              onChange={e => onUidGteChange?.(e.target.value)}
+              placeholder="1000"
+              className="input input-mono"
+              style={{ width: 120, height: 28, fontSize: 12 }}
+            />
+          </label>
+        )}
+        <div style={{ borderTop: '1px solid var(--border-1)', marginBottom: 10 }} />
         <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 10 }}>
           Optional checks
         </div>

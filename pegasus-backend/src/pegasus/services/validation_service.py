@@ -89,6 +89,8 @@ class ValidationRunResult:
     mismatch_artifact_path: Path | None = None
     mapping_format_checks: list[dict[str, Any]] | None = None
     footer_validation: dict[str, Any] | None = None
+    test_mode: str = "full"
+    litmus: dict[str, Any] | None = None
     durations: ValidationRunDurations | None = None
 
 
@@ -182,6 +184,7 @@ class ValidationService:
         footer_trailing_rows: int = 1,
         has_header: bool = True,
         header_leading_rows: int = 0,
+        uid_gte: str | None = None,
     ) -> ValidationRunResult:
         """Run validation off the event loop so Polars work does not block asyncio."""
         return await asyncio.to_thread(
@@ -198,7 +201,126 @@ class ValidationService:
             footer_trailing_rows,
             has_header,
             header_leading_rows,
+            uid_gte,
         )
+
+    def validate_csv_litmus_sync(
+        self,
+        *,
+        source_path: Path,
+        target_path: Path,
+        uid_column: str,
+        delimiter: str,
+        has_header: bool = True,
+        header_leading_rows: int = 0,
+    ) -> ValidationRunResult:
+        """Run quick structural checks without row-level mismatch comparison."""
+        del uid_column  # not required for litmus mode
+        delim = self._resolve_delimiter(
+            source_path=source_path,
+            target_path=target_path,
+            delimiter=delimiter,
+        )
+        prepared_source, prepared_target, cleanup_paths = self._prepare_csv_pair_for_comparison(
+            source_path=source_path,
+            target_path=target_path,
+            header_leading_rows=header_leading_rows,
+            footer_trailing_rows=0,
+        )
+        try:
+            self._preflight_csv_pair(prepared_source, prepared_target, delim, has_header=has_header)
+            source_df = self._read_dataframe(
+                PolarsCSVReader(default_batch_size=1024),
+                prepared_source,
+                delim,
+                has_header=has_header,
+            )
+            target_df = self._read_dataframe(
+                PolarsCSVReader(default_batch_size=1024),
+                prepared_target,
+                delim,
+                has_header=has_header,
+            )
+            checks_run = [
+                "file_name",
+                "file_type",
+                "file_size",
+                "row_count",
+                "column_count",
+                "column_names",
+            ]
+            checks_passed: list[str] = []
+            checks_failed: list[str] = []
+            notes: list[str] = []
+            if source_path.name == target_path.name:
+                checks_passed.append("file_name")
+            else:
+                checks_failed.append("file_name")
+            checks_passed.append("file_type")
+            if source_path.stat().st_size == target_path.stat().st_size:
+                checks_passed.append("file_size")
+            else:
+                checks_failed.append("file_size")
+                notes.append("File sizes differ.")
+            if source_df.height == target_df.height:
+                checks_passed.append("row_count")
+            else:
+                checks_failed.append("row_count")
+                notes.append("Row counts differ.")
+            if len(source_df.columns) == len(target_df.columns):
+                checks_passed.append("column_count")
+            else:
+                checks_failed.append("column_count")
+                notes.append("Column counts differ.")
+            if source_df.columns == target_df.columns:
+                checks_passed.append("column_names")
+            else:
+                checks_failed.append("column_names")
+                notes.append("Column names/order differ.")
+
+            litmus = {
+                "checks_run": checks_run,
+                "checks_passed": checks_passed,
+                "checks_failed": checks_failed,
+                "source": {
+                    "path": str(source_path),
+                    "file_name": source_path.name,
+                    "file_type": "csv",
+                    "size_bytes": source_path.stat().st_size,
+                    "row_count": source_df.height,
+                    "column_count": len(source_df.columns),
+                    "columns": list(source_df.columns),
+                },
+                "target": {
+                    "path": str(target_path),
+                    "file_name": target_path.name,
+                    "file_type": "csv",
+                    "size_bytes": target_path.stat().st_size,
+                    "row_count": target_df.height,
+                    "column_count": len(target_df.columns),
+                    "columns": list(target_df.columns),
+                },
+                "notes": notes,
+            }
+            return ValidationRunResult(
+                report=MismatchReport(
+                    mismatches=empty_mismatch_frame(),
+                    summary={
+                        MismatchType.MISSING_IN_TARGET.value: 0,
+                        MismatchType.EXTRA_IN_TARGET.value: 0,
+                        MismatchType.VALUE_MISMATCH.value: len(checks_failed),
+                    },
+                ),
+                source_row_count=source_df.height,
+                target_row_count=target_df.height,
+                compared_column_count=min(len(source_df.columns), len(target_df.columns)),
+                compared_columns=[c for c in source_df.columns if c in set(target_df.columns)],
+                test_mode="litmus",
+                litmus=litmus,
+            )
+        finally:
+            for p in cleanup_paths:
+                p.unlink(missing_ok=True)
 
     def analyze_local_mappings(
         self,
@@ -328,6 +450,7 @@ class ValidationService:
         footer_trailing_rows: int = 1,
         has_header: bool = True,
         header_leading_rows: int = 0,
+        uid_gte: str | None = None,
         resource_policy: dict[str, object] | None = None,
     ) -> ValidationRunResult:
         uid = uid_column.strip()
@@ -407,6 +530,9 @@ class ValidationService:
 
         combined_bytes = source_path.stat().st_size + target_path.stat().st_size
         use_multichar_streaming = not polars_supports_csv_delimiter(delim)
+        uid_threshold = (uid_gte or "").strip() or None
+        if uid_threshold is not None:
+            use_multichar_streaming = False
 
         rcfg = self._apply_host_reconciliation_tuning(
             rcfg,
@@ -491,10 +617,15 @@ class ValidationService:
                 mapping_analysis,
             )
 
-        want_external = not column_mappings and polars_supports_csv_delimiter(delim) and (
+        want_external = (
+            uid_threshold is None
+            and not column_mappings
+            and polars_supports_csv_delimiter(delim)
+            and (
             self._settings.validation_force_external_reconciliation
             or rcfg.strategy != ReconciliationStrategy.AUTO
             or auto_external_enabled(source_path=source_path, target_path=target_path, cfg=rcfg)
+            )
         )
 
         if want_external:
@@ -593,6 +724,10 @@ class ValidationService:
             logger.warning("CSV parse failed during validation: %s", exc)
             raise ValidationBadRequestError(f"Could not parse CSV: {exc}") from exc
 
+        if uid_threshold is not None:
+            source_df = self._apply_uid_gte_filter(source_df, uid, uid_threshold)
+            target_df = self._apply_uid_gte_filter(target_df, uid, uid_threshold)
+
         if uid not in source_df.columns:
             raise ValidationBadRequestError(
                 f"uid_column {uid!r} not found in source file columns: {list(source_df.columns)}"
@@ -689,9 +824,20 @@ class ValidationService:
                 compared_column_count=compared,
                 compared_columns=compared_columns,
                 mismatch_artifact_path=report.mismatch_artifact_path,
+                test_mode="full",
             ),
             mapping_analysis,
         )
+
+    @staticmethod
+    def _apply_uid_gte_filter(df: pl.DataFrame, uid_column: str, threshold: str) -> pl.DataFrame:
+        expr = pl.col(uid_column).cast(pl.Utf8).str.strip_chars()
+        try:
+            numeric_threshold = float(threshold)
+        except ValueError:
+            return df.filter(expr >= threshold)
+        numeric_expr = expr.cast(pl.Float64, strict=False)
+        return df.filter(numeric_expr >= numeric_threshold)
 
     @staticmethod
     def _attach_mapping_analysis(

@@ -52,6 +52,8 @@ def run_batch_job_directory(
     validate_header_formats = bool(meta.get("validate_header_formats"))
     validate_footers = bool(meta.get("validate_footers"))
     footer_trailing_rows = int(meta.get("footer_trailing_rows") or 1)
+    test_mode = str(meta.get("test_mode") or "full").strip().lower()
+    uid_gte = str(meta.get("uid_gte")).strip() if meta.get("uid_gte") is not None else None
     resource_policy = meta.get("resource_policy")
     if resource_policy is not None and not isinstance(resource_policy, dict):
         resource_policy = None
@@ -160,6 +162,15 @@ def run_batch_job_directory(
                     artifact_export_parent=unit_dir,
                     progress_callback=progress_callback,
                 )
+            elif test_mode == "litmus":
+                result = service.validate_csv_litmus_sync(
+                    source_path=merged_source,
+                    target_path=merged_target,
+                    uid_column=uid_column,
+                    delimiter=delimiter,
+                    has_header=has_header,
+                    header_leading_rows=header_leading_rows,
+                )
             else:
                 result = service._validate_csv_pair_sync(  # noqa: SLF001
                     merged_source,
@@ -174,6 +185,7 @@ def run_batch_job_directory(
                     footer_trailing_rows=footer_trailing_rows,
                     has_header=has_header,
                     header_leading_rows=header_leading_rows,
+                    uid_gte=uid_gte,
                     resource_policy=resource_policy,
                 )
 
@@ -205,6 +217,8 @@ def run_batch_job_directory(
                     "mismatch_artifact_rel": artifact_rel,
                     "mapping_format_checks": result.mapping_format_checks,
                     "footer_validation": result.footer_validation,
+                    "test_mode": result.test_mode,
+                    "litmus": result.litmus,
                 },
             }
             unit_results.append(unit_payload)

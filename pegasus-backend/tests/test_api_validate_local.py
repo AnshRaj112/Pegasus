@@ -670,3 +670,59 @@ def test_validate_headerless_csv_with_explicit_mapping(
         body = _poll_completed(client, r.json()["poll_url"])
         assert body["summary"]["is_match"] is False
         assert body["mismatch_counts"]["value_mismatch"] == 1
+
+
+def test_validate_local_litmus_mode_uses_quick_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    root = Path(__file__).resolve().parents[2]
+    src = root / "test-data" / "structured-compare" / "csv-multiline-hf" / "source.csv"
+    tgt = root / "test-data" / "structured-compare" / "csv-multiline-hf" / "target.csv"
+    with TestClient(create_app()) as client:
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "id",
+                "delimiter": ",",
+                "test_mode": "litmus",
+                "has_header": True,
+            },
+        )
+        assert r.status_code == 202, r.text
+        body = _poll_completed(client, r.json()["poll_url"])
+        assert body["test_mode"] == "litmus"
+        assert body["litmus"] is not None
+        assert body["litmus"]["source"]["row_count"] >= 1
+        assert body["litmus"]["target"]["column_count"] >= 1
+
+
+def test_validate_local_uid_gte_filter_limits_rows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS", "true")
+    get_settings.cache_clear()
+    src = tmp_path / "s.csv"
+    tgt = tmp_path / "t.csv"
+    src.write_text("uid,name\n999,alice\n1000,bob\n1001,cara\n", encoding="utf-8")
+    tgt.write_text("uid,name\n999,alice\n1000,bobby\n1001,cara\n", encoding="utf-8")
+    with TestClient(create_app()) as client:
+        r = client.post(
+            "/api/v1/validate/local",
+            json={
+                "source_path": str(src),
+                "target_path": str(tgt),
+                "uid_column": "uid",
+                "delimiter": ",",
+                "uid_gte": "1000",
+                "test_mode": "full",
+            },
+        )
+        assert r.status_code == 202, r.text
+        body = _poll_completed(client, r.json()["poll_url"])
+        assert body["summary"]["source_row_count"] == 2
+        assert body["summary"]["target_row_count"] == 2
+        assert body["mismatch_counts"]["value_mismatch"] == 1

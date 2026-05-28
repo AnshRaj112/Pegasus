@@ -584,6 +584,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [validateFooters, setValidateFooters] = useState(false)
   const [headerLeadingRows, setHeaderLeadingRows] = useState(0)
   const [footerTrailingRows, setFooterTrailingRows] = useState(1)
+  const [testMode, setTestMode] = useState('full')
+  const [uidGte, setUidGte] = useState('')
   const [formatChecks, setFormatChecks] = useState([])
   const [footerValidation, setFooterValidation] = useState(null)
   const [analyzeLoading, setAnalyzeLoading] = useState(false)
@@ -653,6 +655,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     setValidateFooters(detail.validate_footers || false)
     setHeaderLeadingRows(detail.header_leading_rows || 0)
     setFooterTrailingRows(detail.footer_trailing_rows || 1)
+    setTestMode(detail.test_mode || 'full')
+    setUidGte(detail.uid_gte || '')
 
     if (detail.delimiter === 'fixed-width' || detail.delimiter === 'fixed') {
       setFileFormat('fixed-width')
@@ -764,6 +768,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         validateFooters,
         headerLeadingRows,
         footerTrailingRows,
+        testMode,
+        uidGte,
         columnPreview,
         formatChecks,
         footerValidation,
@@ -803,6 +809,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       })
       setFormatChecks([])
       setFooterValidation(null)
+      setTestMode('full')
+      setUidGte('')
       return
     }
     setMappings(cfg.mappings || [])
@@ -813,6 +821,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     setValidateFooters(cfg.validateFooters || false)
     setHeaderLeadingRows(cfg.headerLeadingRows || 0)
     setFooterTrailingRows(cfg.footerTrailingRows || 1)
+    setTestMode(cfg.testMode || 'full')
+    setUidGte(cfg.uidGte || '')
     setColumnPreview(cfg.columnPreview || {
       sourceColumns: [],
       targetColumns: [],
@@ -860,6 +870,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     if (fileFormat === 'fixed-width') {
       return fwColumns.length > 0 && !!fwJoinColumn && !!sourceDateFormat.trim() && !!targetDateFormat.trim()
     }
+    if (testMode === 'litmus') return true
     return !!uidColumn.trim() && mappings.some(row => String(row.targetCol || '').trim())
   }
 
@@ -877,6 +888,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     if (fileFormat === 'fixed-width') {
       return (cfg.fwColumns?.length ?? 0) > 0 && !!cfg.fwJoinColumn
     }
+    if ((cfg.testMode || 'full') === 'litmus') return true
     const uid = String(cfg.uidColumn || '').trim()
     const rows = Array.isArray(cfg.mappings) ? cfg.mappings : []
     return !!uid && rows.some(row => String(row.targetCol || '').trim())
@@ -940,6 +952,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
             validateFooters,
             headerLeadingRows,
             footerTrailingRows,
+            testMode,
+            uidGte,
             columnPreview,
           })
       const { unitConfigs: allConfigs, mismatchUnitIds, mismatchDetails } = await applyTemplateToAllUnits(
@@ -1523,6 +1537,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               validateFooters,
               headerLeadingRows,
               footerTrailingRows,
+              testMode,
+              uidGte,
               columnMappings: toColumnMappingPayload(mappings),
             },
           } : {}),
@@ -1544,6 +1560,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           validateHeaderFormats,
           validateFooters,
           footerTrailingRows,
+          testMode,
+          uidGte,
           fixedWidthConfigBuilder: cfg => buildFixedWidthValidateConfig({
             columns: cfg.fwColumns || fwColumns,
             joinColumn: cfg.fwJoinColumn || fwJoinColumn,
@@ -1630,6 +1648,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         validate_footers: validateFooters,
         header_leading_rows: headerLeadingRows,
         footer_trailing_rows: footerTrailingRows,
+        test_mode: testMode,
+        uid_gte: uidGte.trim() || undefined,
         has_header: hasHeader,
         file_format: apiFileFormat
       };
@@ -1697,6 +1717,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         validateFooters,
         headerLeadingRows,
         footerTrailingRows,
+        testMode,
+        uidGte,
       };
 
       await saveValidationDraft(draftPayload)
@@ -1739,7 +1761,9 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       && !!fwJoinColumn
       && !!sourceDateFormat.trim()
       && !!targetDateFormat.trim())
-    : (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig) && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig) && !!uidColumn.trim())
+    : (isStorageSelectionComplete(sourceStorageType, sourcePath, sourceCloudConfig)
+      && isStorageSelectionComplete(targetStorageType, targetPath, targetCloudConfig)
+      && (testMode === 'litmus' || !!uidColumn.trim()))
   const sourceDisplay = isBatchMode && activeUnit
     ? activeUnit.sourcePaths.join(', ')
     : describeStorageInput(sourceStorageType, sourcePath, sourceCloudConfig)
@@ -2471,6 +2495,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                 onHeaderLeadingRowsChange={setHeaderLeadingRows}
                 footerTrailingRows={footerTrailingRows}
                 onFooterTrailingRowsChange={setFooterTrailingRows}
+                testMode={testMode}
+                onTestModeChange={setTestMode}
+                uidGte={uidGte}
+                onUidGteChange={setUidGte}
                 formatCheckBySource={formatCheckBySource(formatChecks)}
                 analyzeLoading={analyzeLoading}
                 analyzeError={analyzeError}
@@ -2772,24 +2800,36 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                   <StatCard label={fileFormat === 'fixed-width' ? 'Target lines' : fileFormat === 'json' ? 'Compared' : 'Target rows'} value={result.summary?.target_row_count ?? '—'} />
                   <StatCard label="Mismatches" value={result.summary?.total_mismatch_records ?? '—'} accent={result.summary?.total_mismatch_records > 0 ? 'var(--danger)' : undefined} />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => navigate('/report', { state: { result } })}
-                  style={{
-                    marginTop: 12,
-                    width: '100%',
-                    height: 38,
-                    borderRadius: 8,
-                    border: '1px solid var(--border-1)',
-                    background: 'var(--surface-1)',
-                    color: 'var(--text-1)',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  View Detailed Report
-                </button>
+                {result.test_mode === 'litmus' && result.litmus && (
+                  <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-3)' }}>
+                    Litmus checks passed: {result.litmus.checks_passed?.length ?? 0} / {result.litmus.checks_run?.length ?? 0}
+                    {(result.litmus.checks_failed?.length ?? 0) > 0 && (
+                      <div style={{ marginTop: 4, color: 'var(--danger)' }}>
+                        Failed checks: {result.litmus.checks_failed.join(', ')}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {result.test_mode !== 'litmus' && (
+                  <button
+                    type="button"
+                    onClick={() => navigate('/report', { state: { result } })}
+                    style={{
+                      marginTop: 12,
+                      width: '100%',
+                      height: 38,
+                      borderRadius: 8,
+                      border: '1px solid var(--border-1)',
+                      background: 'var(--surface-1)',
+                      color: 'var(--text-1)',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    View Detailed Report
+                  </button>
+                )}
               </div>
             )}
 
