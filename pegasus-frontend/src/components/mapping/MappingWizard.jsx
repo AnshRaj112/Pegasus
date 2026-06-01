@@ -538,14 +538,21 @@ function FixedWidthConfigurator({
 export default function MappingWizard({ initialMappingData, onResetInitialData }) {
   const navigate = useNavigate()
   const [step, setStep]         = useState(1)
-  const [subPhase, setSubPhase] = useState('format-select')
-  const [sourceStorageType, setSourceStorageType] = useState(null)
-  const [targetStorageType, setTargetStorageType] = useState(null)
+  const [subPhase, setSubPhase] = useState('unified-selection')
+  const [sourceStorageType, setSourceStorageType] = useState('local')
+  const [targetStorageType, setTargetStorageType] = useState('local')
   const [sourcePath, setSourcePath] = useState('')
   const [targetPath, setTargetPath] = useState('')
   const [sourceCloudConfig, setSourceCloudConfig] = useState(DEFAULT_CLOUD_CONFIG)
   const [targetCloudConfig, setTargetCloudConfig] = useState(DEFAULT_CLOUD_CONFIG)
   const [fileFormat, setFileFormat] = useState('csv')
+
+  // Redesign state variables
+  const [isBrowserOpen, setIsBrowserOpen] = useState(false)
+  const [browserTarget, setBrowserTarget] = useState('source')
+  const [isFormatPopupOpen, setIsFormatPopupOpen] = useState(false)
+  const [isManualFormat, setIsManualFormat] = useState(false)
+  const [pendingTransition, setPendingTransition] = useState(false)
   const [sourceDateStart, setSourceDateStart] = useState(58)
   const [sourceDateEnd, setSourceDateEnd] = useState(68)
   const [sourceDateFormat, setSourceDateFormat] = useState('dd/mm/yyyy')
@@ -723,11 +730,14 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     }
 
     // Route step
-    setStep(targetStep)
-    if (targetStep === 2) {
-      setSubPhase('pick-source')
-    } else if (targetStep === 4) {
-      setSubPhase('type-select')
+    if (targetStep === 1 || targetStep === 2) {
+      setStep(1)
+      setSubPhase('unified-selection')
+    } else {
+      setStep(targetStep)
+      if (targetStep === 4) {
+        setSubPhase('type-select')
+      }
     }
     if (error) {
       setAnalyzeError(error)
@@ -738,6 +748,172 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   }, [initialMappingData, onResetInitialData])
 
 
+
+  function detectFormatFromPath(path) {
+    if (!path) return null
+    if (Array.isArray(path)) {
+      if (path.length === 0) return null
+      path = path[0]
+    }
+    const cleanPath = String(path).trim().toLowerCase()
+    if (cleanPath.endsWith('.csv') || cleanPath.endsWith('.tsv')) return 'csv'
+    if (cleanPath.endsWith('.zip')) return 'zip'
+    if (cleanPath.endsWith('.dat')) return 'dat'
+    if (cleanPath.endsWith('.json') || cleanPath.endsWith('.jsonl')) return 'json'
+    return null
+  }
+
+  function autoDetectFormat() {
+    let pathsToCheck = []
+    if (inputLayout === 'pair') {
+      pathsToCheck = [sourcePath, targetPath]
+    } else if (inputLayout === 'folder') {
+      pathsToCheck = [sourceFolder, targetFolder]
+    } else if (inputLayout === 'source-one-target-many') {
+      pathsToCheck = [sourcePath, ...targetMultiPaths]
+    } else if (inputLayout === 'source-many-target-one') {
+      pathsToCheck = [...sourceMultiPaths, targetPath]
+    }
+
+    for (const p of pathsToCheck) {
+      const detected = detectFormatFromPath(p)
+      if (detected) return detected
+    }
+    return null
+  }
+
+  function handleContinue() {
+    let err = ''
+    if (inputLayout === 'pair') {
+      if (!sourcePath.trim()) err = 'Please specify a Source path.'
+      else if (!targetPath.trim()) err = 'Please specify a Target path.'
+    } else if (inputLayout === 'folder') {
+      if (!sourceFolder.trim()) err = 'Please specify a Source folder.'
+      else if (!targetFolder.trim()) err = 'Please specify a Target folder.'
+    } else if (inputLayout === 'source-one-target-many') {
+      if (!sourcePath.trim()) err = 'Please specify a Source path.'
+      else if (targetMultiPaths.length === 0) err = 'Please select at least one Target file.'
+    } else if (inputLayout === 'source-many-target-one') {
+      if (sourceMultiPaths.length === 0) err = 'Please select at least one Source file.'
+      else if (!targetPath.trim()) err = 'Please specify a Target path.'
+    }
+
+    if (err) {
+      setPairingError(err)
+      return
+    }
+    setPairingError('')
+
+    let format = fileFormat
+    if (!isManualFormat) {
+      const detected = autoDetectFormat()
+      if (detected) {
+        format = detected
+        setFileFormat(detected)
+      } else {
+        setPendingTransition(true)
+        setIsFormatPopupOpen(true)
+        return
+      }
+    }
+
+    executeTransition(format)
+  }
+
+  function executeTransition(format) {
+    setPendingTransition(false)
+    if (inputLayout === 'pair') {
+      setStep(3)
+    } else if (inputLayout === 'folder') {
+      setStep(2)
+      if (sourceStorageType === 'cloud' || targetStorageType === 'cloud') {
+        runAutoPairingCloud(sourceCloudPrefix, targetCloudPrefix)
+      } else {
+        runAutoPairing(sourceFolder, targetFolder)
+      }
+    } else if (inputLayout === 'source-one-target-many') {
+      const unit = unitFromMerge({
+        sourcePaths: [sourcePath],
+        targetPaths: targetMultiPaths,
+        label: `${sourcePath.split('/').pop()} → ${targetMultiPaths.length} targets`,
+      })
+      setValidationUnits([unit])
+      setActiveUnitId(unit.unitId)
+      setStep(3)
+    } else if (inputLayout === 'source-many-target-one') {
+      const unit = unitFromMerge({
+        sourcePaths: sourceMultiPaths,
+        targetPaths: [targetPath],
+        label: `${sourceMultiPaths.length} sources → ${targetPath.split('/').pop()}`,
+      })
+      setValidationUnits([unit])
+      setActiveUnitId(unit.unitId)
+      setStep(3)
+    }
+  }
+
+  function handleSourceBrowserSelect(selection) {
+    const parsed = parseSelection(selection)
+    if (!parsed) return
+    if (parsed.kind === 'cloud') {
+      setSourceCloudConfig({
+        provider: parsed.provider || 'google-cloud-storage',
+        bucket: parsed.bucket || '',
+        objectName: parsed.objectName || '',
+        credentialsJson: parsed.credentialsJson || '',
+        projectId: parsed.projectId || '',
+      })
+      setSourcePath('')
+    } else if (parsed.kind === 'cloud-folder') {
+      applyCloudConfig(parsed)
+      setSourceCloudPrefix(parsed.prefix || '')
+    } else if (parsed.kind === 'cloud-files') {
+      applyCloudConfig(parsed)
+      setSourceMultiPaths(parsed.objectNames || [])
+    } else if (inputLayout === 'folder' && parsed.kind === 'folder') {
+      setSourceFolder(parsed.path)
+    } else if (inputLayout === 'source-many-target-one' && parsed.kind === 'files') {
+      setSourceMultiPaths(parsed.paths || [])
+    } else if (parsed.kind === 'file' || typeof selection === 'string') {
+      setSourcePath(parsed.path || selection)
+    }
+
+    if (parsed.path || typeof selection === 'string') {
+      const detected = detectFormatFromPath(parsed.path || selection)
+      if (detected) {
+        setFileFormat(detected)
+        setIsManualFormat(false)
+      }
+    }
+
+    setIsBrowserOpen(false)
+  }
+
+  function handleTargetBrowserSelect(selection) {
+    const parsed = parseSelection(selection)
+    if (!parsed) return
+    if (parsed.kind === 'cloud') {
+      setTargetCloudConfig({
+        provider: parsed.provider || 'google-cloud-storage',
+        bucket: parsed.bucket || '',
+        objectName: parsed.objectName || '',
+        credentialsJson: parsed.credentialsJson || '',
+        projectId: parsed.projectId || '',
+      })
+      setTargetPath('')
+    } else if (parsed.kind === 'cloud-folder') {
+      applyCloudConfig(parsed)
+      setTargetCloudPrefix(parsed.prefix || '')
+    } else if (inputLayout === 'folder' && parsed.kind === 'folder') {
+      setTargetFolder(parsed.path)
+    } else if (inputLayout === 'source-one-target-many' && parsed.kind === 'files') {
+      setTargetMultiPaths(parsed.paths || [])
+    } else if (parsed.kind === 'file' || typeof selection === 'string') {
+      setTargetPath(parsed.path || selection)
+    }
+
+    setIsBrowserOpen(false)
+  }
 
   function handleDataSourceNext(srcType, tgtType) {
     setSourceStorageType(srcType); setTargetStorageType(tgtType)
@@ -1021,8 +1197,13 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       setBatchMismatchDetails({})
       return
     }
-    setStep(2)
-    setSubPhase(inputLayout === 'folder' ? 'file-pairing' : 'pick-target')
+    if (inputLayout === 'pair') {
+      setStep(1)
+      setSubPhase('unified-selection')
+    } else {
+      setStep(2)
+      setSubPhase(inputLayout === 'folder' ? 'file-pairing' : 'pick-target')
+    }
   }
 
   function parseSelection(selection) {
@@ -1746,6 +1927,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   }
 
 
+  const showUnifiedSelection = step === 1 && subPhase === 'unified-selection'
   const showFormatSelect = step === 1 && subPhase === 'format-select'
   const showInputLayout = step === 2 && subPhase === 'input-layout'
   const showTypeSelect = step === 2 && subPhase === 'type-select'
@@ -1895,7 +2077,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         background: 'var(--surface-1)', border: '1px solid var(--border-1)',
         borderRadius: 12, overflow: 'hidden',
       }}>
-        <StepIndicator currentStep={step} />
+        <StepIndicator currentStep={step} inputLayout={inputLayout} />
       </div>
 
       {/* Step content */}
@@ -1903,6 +2085,629 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         background: 'var(--surface-1)', border: '1px solid var(--border-1)',
         borderRadius: 12, padding: '24px 28px',
       }}>
+
+        {/* Step 1: Select Files & Layout */}
+        {showUnifiedSelection && (
+          <div style={{ animation: 'fade-in 0.2s ease' }}>
+            {/* Page Header */}
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-4)', marginBottom: 6 }}>
+                Step 1 of 3
+              </div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.03em', lineHeight: 1.2, marginBottom: 6 }}>
+                Select Files & Validation Layout
+              </h2>
+              <p style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5 }}>
+                Expose your source and target paths directly, and select a validation mode to run.
+              </p>
+            </div>
+
+            {/* Validation Mode selector dropdown */}
+            <div style={{
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border-1)',
+              borderRadius: 12,
+              padding: '16px 20px',
+              marginBottom: 24,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 16,
+              flexWrap: 'wrap',
+            }}>
+              <div>
+                <h4 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', margin: '0 0 4px 0' }}>
+                  Validation Mode
+                </h4>
+                <p style={{ fontSize: 12, color: 'var(--text-3)', margin: 0 }}>
+                  Define the file relationship layout for validation checks.
+                </p>
+              </div>
+              <select
+                value={inputLayout}
+                onChange={e => {
+                  setInputLayout(e.target.value)
+                  // Clean paths when layout changes
+                  setSourcePath('')
+                  setTargetPath('')
+                  setSourceMultiPaths([])
+                  setTargetMultiPaths([])
+                  setSourceFolder('')
+                  setTargetFolder('')
+                  setValidationUnits([])
+                }}
+                style={{
+                  minWidth: 260,
+                  height: 38,
+                  borderRadius: 8,
+                  border: '1px solid var(--border-2)',
+                  background: 'var(--surface-1)',
+                  color: 'var(--text-1)',
+                  padding: '0 12px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  outline: 'none',
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                }}
+              >
+                <option value="pair">Single file pair (Single-to-Single) [Primary]</option>
+                <option value="folder">Folder ↔ folder</option>
+                <option value="source-one-target-many">One source → many targets</option>
+                <option value="source-many-target-one">Many sources → one target</option>
+              </select>
+            </div>
+
+            {/* Two Column Layout for Source and Target */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 28 }}>
+              {/* SOURCE COLUMN */}
+              <div style={{
+                background: 'var(--surface-1)',
+                border: '1px solid var(--border-1)',
+                borderRadius: 12,
+                padding: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 16,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }}></span>
+                    Source Location
+                  </h3>
+                  {/* Storage Segment Toggle */}
+                  <div style={{
+                    display: 'inline-flex',
+                    background: 'var(--surface-3)',
+                    borderRadius: 8,
+                    padding: 2,
+                    border: '1px solid var(--border-2)',
+                  }}>
+                    <button
+                      type="button"
+                      onClick={() => setSourceStorageType('local')}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        borderRadius: 6,
+                        border: 'none',
+                        background: sourceStorageType === 'local' ? 'var(--surface-1)' : 'transparent',
+                        color: sourceStorageType === 'local' ? 'var(--text-1)' : 'var(--text-3)',
+                        cursor: 'pointer',
+                        boxShadow: sourceStorageType === 'local' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                        transition: 'all 0.1s',
+                      }}
+                    >
+                      Local Device
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSourceStorageType('cloud')}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        borderRadius: 6,
+                        border: 'none',
+                        background: sourceStorageType === 'cloud' ? 'var(--surface-1)' : 'transparent',
+                        color: sourceStorageType === 'cloud' ? 'var(--text-1)' : 'var(--text-3)',
+                        cursor: 'pointer',
+                        boxShadow: sourceStorageType === 'cloud' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                        transition: 'all 0.1s',
+                      }}
+                    >
+                      Cloud Storage
+                    </button>
+                  </div>
+                </div>
+
+                {sourceStorageType === 'local' ? (
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 6 }}>
+                      {inputLayout === 'folder' ? 'Local Folder Path' : 'Local File Path'}
+                    </label>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="text"
+                        value={
+                          inputLayout === 'folder'
+                            ? sourceFolder
+                            : inputLayout === 'source-many-target-one'
+                              ? sourceMultiPaths.join(', ')
+                              : sourcePath
+                        }
+                        onChange={e => {
+                          if (inputLayout === 'folder') setSourceFolder(e.target.value)
+                          else if (inputLayout === 'source-many-target-one') setSourceMultiPaths(e.target.value.split(',').map(s => s.trim()).filter(Boolean))
+                          else {
+                            setSourcePath(e.target.value)
+                            const detected = detectFormatFromPath(e.target.value)
+                            if (detected) {
+                              setFileFormat(detected)
+                              setIsManualFormat(false)
+                            }
+                          }
+                        }}
+                        placeholder={inputLayout === 'folder' ? 'e.g. /path/to/source_folder' : 'e.g. /path/to/source_file.csv'}
+                        style={{
+                          flex: 1,
+                          height: 38,
+                          borderRadius: 8,
+                          border: '1px solid var(--border-2)',
+                          background: 'var(--surface-2)',
+                          color: 'var(--text-1)',
+                          padding: '0 12px',
+                          fontSize: 13,
+                          outline: 'none',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBrowserTarget('source')
+                          setIsBrowserOpen(true)
+                        }}
+                        className="btn btn-secondary"
+                        style={{ height: 38, padding: '0 14px', fontSize: 13, fontWeight: 600 }}
+                      >
+                        Browse...
+                      </button>
+                    </div>
+                    {inputLayout === 'source-many-target-one' && sourceMultiPaths.length > 0 && (
+                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
+                        Selected {sourceMultiPaths.length} source file(s)
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Bucket Name
+                      </label>
+                      <input
+                        type="text"
+                        value={sourceCloudConfig.bucket}
+                        onChange={e => setSourceCloudConfig(prev => ({ ...prev, bucket: e.target.value }))}
+                        placeholder="my-gcs-bucket"
+                        style={{
+                          width: '100%',
+                          height: 36,
+                          borderRadius: 8,
+                          border: '1px solid var(--border-2)',
+                          background: 'var(--surface-2)',
+                          color: 'var(--text-1)',
+                          padding: '0 12px',
+                          fontSize: 13,
+                          outline: 'none',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Project ID (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={sourceCloudConfig.projectId}
+                        onChange={e => setSourceCloudConfig(prev => ({ ...prev, projectId: e.target.value }))}
+                        placeholder="my-gcs-project-id"
+                        style={{
+                          width: '100%',
+                          height: 36,
+                          borderRadius: 8,
+                          border: '1px solid var(--border-2)',
+                          background: 'var(--surface-2)',
+                          color: 'var(--text-1)',
+                          padding: '0 12px',
+                          fontSize: 13,
+                          outline: 'none',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Credentials JSON (Optional)
+                      </label>
+                      <textarea
+                        value={sourceCloudConfig.credentialsJson}
+                        onChange={e => setSourceCloudConfig(prev => ({ ...prev, credentialsJson: e.target.value }))}
+                        placeholder='{"type": "service_account", ...}'
+                        style={{
+                          width: '100%',
+                          height: 50,
+                          borderRadius: 8,
+                          border: '1px solid var(--border-2)',
+                          background: 'var(--surface-2)',
+                          color: 'var(--text-1)',
+                          padding: '8px 12px',
+                          fontSize: 12,
+                          outline: 'none',
+                          resize: 'vertical',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>
+                        {inputLayout === 'folder' ? 'Cloud Prefix (Folder)' : 'Object Name / Prefix'}
+                      </label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          type="text"
+                          value={
+                            inputLayout === 'folder'
+                              ? sourceCloudPrefix
+                              : inputLayout === 'source-many-target-one'
+                                ? sourceMultiPaths.join(', ')
+                                : sourceCloudConfig.objectName
+                          }
+                          onChange={e => {
+                            if (inputLayout === 'folder') setSourceCloudPrefix(e.target.value)
+                            else if (inputLayout === 'source-many-target-one') setSourceMultiPaths(e.target.value.split(',').map(s => s.trim()).filter(Boolean))
+                            else setSourceCloudConfig(prev => ({ ...prev, objectName: e.target.value }))
+                          }}
+                          placeholder="e.g. data/sources/"
+                          style={{
+                            flex: 1,
+                            height: 38,
+                            borderRadius: 8,
+                            border: '1px solid var(--border-2)',
+                            background: 'var(--surface-2)',
+                            color: 'var(--text-1)',
+                            padding: '0 12px',
+                            fontSize: 13,
+                            outline: 'none',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBrowserTarget('source')
+                            setIsBrowserOpen(true)
+                          }}
+                          className="btn btn-secondary"
+                          style={{ height: 38, padding: '0 14px', fontSize: 13, fontWeight: 600 }}
+                        >
+                          Browse...
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* TARGET COLUMN */}
+              <div style={{
+                background: 'var(--surface-1)',
+                border: '1px solid var(--border-1)',
+                borderRadius: 12,
+                padding: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 16,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--success)' }}></span>
+                    Target Location
+                  </h3>
+                  {/* Storage Segment Toggle */}
+                  <div style={{
+                    display: 'inline-flex',
+                    background: 'var(--surface-3)',
+                    borderRadius: 8,
+                    padding: 2,
+                    border: '1px solid var(--border-2)',
+                  }}>
+                    <button
+                      type="button"
+                      onClick={() => setTargetStorageType('local')}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        borderRadius: 6,
+                        border: 'none',
+                        background: targetStorageType === 'local' ? 'var(--surface-1)' : 'transparent',
+                        color: targetStorageType === 'local' ? 'var(--text-1)' : 'var(--text-3)',
+                        cursor: 'pointer',
+                        boxShadow: targetStorageType === 'local' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                        transition: 'all 0.1s',
+                      }}
+                    >
+                      Local Device
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTargetStorageType('cloud')}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        borderRadius: 6,
+                        border: 'none',
+                        background: targetStorageType === 'cloud' ? 'var(--surface-1)' : 'transparent',
+                        color: targetStorageType === 'cloud' ? 'var(--text-1)' : 'var(--text-3)',
+                        cursor: 'pointer',
+                        boxShadow: targetStorageType === 'cloud' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                        transition: 'all 0.1s',
+                      }}
+                    >
+                      Cloud Storage
+                    </button>
+                  </div>
+                </div>
+
+                {targetStorageType === 'local' ? (
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 6 }}>
+                      {inputLayout === 'folder' ? 'Local Folder Path' : 'Local File Path'}
+                    </label>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="text"
+                        value={
+                          inputLayout === 'folder'
+                            ? targetFolder
+                            : inputLayout === 'source-one-target-many'
+                              ? targetMultiPaths.join(', ')
+                              : targetPath
+                        }
+                        onChange={e => {
+                          if (inputLayout === 'folder') setTargetFolder(e.target.value)
+                          else if (inputLayout === 'source-one-target-many') setTargetMultiPaths(e.target.value.split(',').map(s => s.trim()).filter(Boolean))
+                          else setTargetPath(e.target.value)
+                        }}
+                        placeholder={inputLayout === 'folder' ? 'e.g. /path/to/target_folder' : 'e.g. /path/to/target_file.csv'}
+                        style={{
+                          flex: 1,
+                          height: 38,
+                          borderRadius: 8,
+                          border: '1px solid var(--border-2)',
+                          background: 'var(--surface-2)',
+                          color: 'var(--text-1)',
+                          padding: '0 12px',
+                          fontSize: 13,
+                          outline: 'none',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBrowserTarget('target')
+                          setIsBrowserOpen(true)
+                        }}
+                        className="btn btn-secondary"
+                        style={{ height: 38, padding: '0 14px', fontSize: 13, fontWeight: 600 }}
+                      >
+                        Browse...
+                      </button>
+                    </div>
+                    {inputLayout === 'source-one-target-many' && targetMultiPaths.length > 0 && (
+                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
+                        Selected {targetMultiPaths.length} target file(s)
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Bucket Name
+                      </label>
+                      <input
+                        type="text"
+                        value={targetCloudConfig.bucket}
+                        onChange={e => setTargetCloudConfig(prev => ({ ...prev, bucket: e.target.value }))}
+                        placeholder="my-gcs-bucket"
+                        style={{
+                          width: '100%',
+                          height: 36,
+                          borderRadius: 8,
+                          border: '1px solid var(--border-2)',
+                          background: 'var(--surface-2)',
+                          color: 'var(--text-1)',
+                          padding: '0 12px',
+                          fontSize: 13,
+                          outline: 'none',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Project ID (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={targetCloudConfig.projectId}
+                        onChange={e => setTargetCloudConfig(prev => ({ ...prev, projectId: e.target.value }))}
+                        placeholder="my-gcs-project-id"
+                        style={{
+                          width: '100%',
+                          height: 36,
+                          borderRadius: 8,
+                          border: '1px solid var(--border-2)',
+                          background: 'var(--surface-2)',
+                          color: 'var(--text-1)',
+                          padding: '0 12px',
+                          fontSize: 13,
+                          outline: 'none',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Credentials JSON (Optional)
+                      </label>
+                      <textarea
+                        value={targetCloudConfig.credentialsJson}
+                        onChange={e => setTargetCloudConfig(prev => ({ ...prev, credentialsJson: e.target.value }))}
+                        placeholder='{"type": "service_account", ...}'
+                        style={{
+                          width: '100%',
+                          height: 50,
+                          borderRadius: 8,
+                          border: '1px solid var(--border-2)',
+                          background: 'var(--surface-2)',
+                          color: 'var(--text-1)',
+                          padding: '8px 12px',
+                          fontSize: 12,
+                          outline: 'none',
+                          resize: 'vertical',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>
+                        {inputLayout === 'folder' ? 'Cloud Prefix (Folder)' : 'Object Name / Prefix'}
+                      </label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          type="text"
+                          value={
+                            inputLayout === 'folder'
+                              ? targetCloudPrefix
+                              : inputLayout === 'source-one-target-many'
+                                ? targetMultiPaths.join(', ')
+                                : targetCloudConfig.objectName
+                          }
+                          onChange={e => {
+                            if (inputLayout === 'folder') setTargetCloudPrefix(e.target.value)
+                            else if (inputLayout === 'source-one-target-many') setTargetMultiPaths(e.target.value.split(',').map(s => s.trim()).filter(Boolean))
+                            else setTargetCloudConfig(prev => ({ ...prev, objectName: e.target.value }))
+                          }}
+                          placeholder="e.g. data/targets/"
+                          style={{
+                            flex: 1,
+                            height: 38,
+                            borderRadius: 8,
+                            border: '1px solid var(--border-2)',
+                            background: 'var(--surface-2)',
+                            color: 'var(--text-1)',
+                            padding: '0 12px',
+                            fontSize: 13,
+                            outline: 'none',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBrowserTarget('target')
+                            setIsBrowserOpen(true)
+                          }}
+                          className="btn btn-secondary"
+                          style={{ height: 38, padding: '0 14px', fontSize: 13, fontWeight: 600 }}
+                        >
+                          Browse...
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Format detection status and continue bar */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingTop: 20,
+              borderTop: '1px solid var(--border-1)',
+              gap: 16,
+              flexWrap: 'wrap',
+            }}>
+              <div>
+                {fileFormat && (
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '6px 12px',
+                    borderRadius: 20,
+                    background: 'var(--accent-muted)',
+                    border: '1px solid var(--accent-border)',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    color: 'var(--accent)',
+                  }}>
+                    <span>Detected Format: <strong style={{ textTransform: 'uppercase' }}>{fileFormat}</strong> {isManualFormat ? '(Manual override)' : '(Auto-detected)'}</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsFormatPopupOpen(true)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-2)',
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                        fontSize: 11,
+                        padding: 0,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Change
+                    </button>
+                  </div>
+                )}
+                {!fileFormat && (
+                  <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                    Please select files to automatically detect format.
+                  </div>
+                )}
+              </div>
+
+              {/* Action button */}
+              <button
+                type="button"
+                onClick={handleContinue}
+                className="btn btn-primary"
+                style={{ height: 40, padding: '0 24px', fontSize: 13, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <span>Continue</span>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M3 6h6M6.5 3.5L9 6 6.5 8.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+            </div>
+
+            {pairingError && (
+              <div style={{
+                marginTop: 16,
+                padding: '10px 12px',
+                borderRadius: 8,
+                background: 'var(--danger-muted)',
+                color: 'var(--danger)',
+                fontSize: 12,
+              }}>
+                {pairingError}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Step 1a: Select Format */}
         {showFormatSelect && (
@@ -2957,6 +3762,202 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           return true
         }}
       />
+
+      {/* Redesign Overlay Modals */}
+      {isBrowserOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          animation: 'fade-in 0.15s ease',
+        }}>
+          <div style={{
+            background: 'var(--surface-1)',
+            border: '1px solid var(--border-1)',
+            borderRadius: 16,
+            width: '90%',
+            maxWidth: 800,
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '16px 24px',
+              borderBottom: '1px solid var(--border-1)',
+            }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)', margin: 0 }}>
+                Browse Server Files ({browserTarget === 'source' ? 'Source' : 'Target'})
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsBrowserOpen(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-3)',
+                  cursor: 'pointer',
+                  fontSize: 20,
+                  fontWeight: 'bold',
+                  lineHeight: 1,
+                  padding: 4,
+                }}
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '24px 24px 16px 24px', flex: 1, overflowY: 'auto' }}>
+              <Step2_FilePicker
+                panelLabel={browserTarget === 'source' ? 'Source' : 'Target'}
+                storageType={browserTarget === 'source' ? sourceStorageType : targetStorageType}
+                value={browserTarget === 'source' ? (inputLayout === 'folder' ? sourceFolder : sourcePath) : (inputLayout === 'folder' ? targetFolder : targetPath)}
+                cloudConfig={browserTarget === 'source' ? sourceCloudConfig : targetCloudConfig}
+                onCloudConfigChange={browserTarget === 'source' ? setSourceCloudConfig : setTargetCloudConfig}
+                onSelect={browserTarget === 'source' ? handleSourceBrowserSelect : handleTargetBrowserSelect}
+                onBack={() => setIsBrowserOpen(false)}
+                disabled={pairingLoading}
+                selectionMode={
+                  inputLayout === 'folder' ? 'folder'
+                    : browserTarget === 'source' && inputLayout === 'source-many-target-one' ? 'multi'
+                    : browserTarget === 'target' && inputLayout === 'source-one-target-many' ? 'multi'
+                    : 'file'
+                }
+                fileFormat={fileFormat}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isFormatPopupOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          animation: 'fade-in 0.15s ease',
+        }}>
+          <div style={{
+            background: 'var(--surface-1)',
+            border: '1px solid var(--border-1)',
+            borderRadius: 16,
+            width: '90%',
+            maxWidth: 500,
+            padding: 24,
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
+            position: 'relative',
+          }}>
+            {/* Close button */}
+            <button
+              type="button"
+              onClick={() => {
+                setIsFormatPopupOpen(false)
+                setPendingTransition(false)
+              }}
+              style={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-3)',
+                cursor: 'pointer',
+                fontSize: 20,
+                fontWeight: 'bold',
+              }}
+            >
+              &times;
+            </button>
+
+            <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)', marginTop: 0, marginBottom: 8, letterSpacing: '-0.02em' }}>
+              Select File Format
+            </h3>
+            <p style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5, marginBottom: 20 }}>
+              {!fileFormat || pendingTransition
+                ? "We couldn't automatically detect the file format from the selected paths. Please manually select a file format below to proceed."
+                : "Choose the file format to apply for mapping and validation."}
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+              {[
+                { id: 'csv', label: 'CSV / TSV Flat Files', desc: 'Delimiter-separated tabular files (comma, tab, pipe, semicolon, etc.)' },
+                { id: 'fixed-width', label: 'Fixed-Width Files', desc: 'Files where columns have a fixed character length' },
+                { id: 'json', label: 'JSON Document', desc: 'Compare and validate structured JSON documents' },
+              ].map(opt => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    setFileFormat(opt.id)
+                    setIsManualFormat(true)
+                    setIsFormatPopupOpen(false)
+                    if (pendingTransition) {
+                      executeTransition(opt.id)
+                    }
+                  }}
+                  style={{
+                    textAlign: 'left',
+                    padding: '12px 16px',
+                    borderRadius: 10,
+                    border: fileFormat === opt.id ? '2px solid var(--accent)' : '1px solid var(--border-2)',
+                    background: fileFormat === opt.id ? 'var(--accent-muted)' : 'var(--surface-2)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                  }}
+                  onMouseEnter={e => {
+                    if (fileFormat !== opt.id) e.currentTarget.style.borderColor = 'var(--text-3)'
+                  }}
+                  onMouseLeave={e => {
+                    if (fileFormat !== opt.id) e.currentTarget.style.borderColor = 'var(--border-2)'
+                  }}
+                >
+                  <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)' }}>{opt.label}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.3 }}>{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFormatPopupOpen(false)
+                  setPendingTransition(false)
+                }}
+                className="btn btn-ghost"
+                style={{ padding: '0 16px', height: 36, fontSize: 13 }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

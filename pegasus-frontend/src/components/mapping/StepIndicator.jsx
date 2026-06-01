@@ -1,14 +1,18 @@
-const STEPS = [
-  { id: 1, label: 'Select File Type',    desc: 'CSV, ZIP or Fixed-Width' },
-  { id: 2, label: 'Select Files',        desc: 'Source & target'    },
-  { id: 3, label: 'Configure Mapping',   desc: 'Map layouts & bounds'},
-  { id: 4, label: 'Review & Run',        desc: 'Validate or draft'  },
-]
+export default function StepIndicator({ currentStep, inputLayout = 'pair' }) {
+  const steps = inputLayout === 'pair' ? [
+    { id: 1, label: 'Select Files',        desc: 'Source & target'    },
+    { id: 3, label: 'Configure Mapping',   desc: 'Map layouts & bounds'},
+    { id: 4, label: 'Review & Run',        desc: 'Validate or draft'  },
+  ] : [
+    { id: 1, label: 'Select Files',        desc: 'Source & target'    },
+    { id: 2, label: 'Pair Files',          desc: 'Match filenames'    },
+    { id: 3, label: 'Configure Mapping',   desc: 'Map layouts & bounds'},
+    { id: 4, label: 'Review & Run',        desc: 'Validate or draft'  },
+  ]
 
-export default function StepIndicator({ currentStep }) {
   return (
     <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
-      {STEPS.map((step, i) => {
+      {steps.map((step, i) => {
         const done    = currentStep > step.id
         const active  = currentStep === step.id
         const upcoming = currentStep < step.id
@@ -22,7 +26,7 @@ export default function StepIndicator({ currentStep }) {
               alignItems: 'center',
               gap: 10,
               padding: '14px 16px',
-              borderRight: i < STEPS.length - 1 ? '1px solid var(--border-1)' : 'none',
+              borderRight: i < steps.length - 1 ? '1px solid var(--border-1)' : 'none',
               borderTop: active ? '2px solid var(--accent)' : '2px solid transparent',
               background: active ? 'rgba(249,115,22,0.04)' : 'transparent',
               transition: 'all 0.2s',
@@ -52,7 +56,7 @@ export default function StepIndicator({ currentStep }) {
                 <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
                   <path d="M2 5l2 2 4-4" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
-              ) : step.id}
+              ) : i + 1}
             </div>
 
             {/* Labels */}
