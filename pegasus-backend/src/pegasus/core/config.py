@@ -12,13 +12,13 @@ def _resolved_dotenv_files() -> tuple[Path, ...]:
     """Dotenv paths that do not depend on the process working directory.
 
     Files are loaded in order; **later files override earlier ones** for the same key
-    (see pydantic-settings). We load ``<repo>/.env`` first, then ``pegasus-backend/.env``
-    so the backend-local file wins when both exist.
+    (see pydantic-settings). We load ``<repo>/.env`` first, then ``pegasus-backend/.env``,
+    then ``pegasus-backend/.env.backend`` so the backend-local files win when both exist.
     """
     backend_root = Path(__file__).resolve().parents[3]
     repo_root = backend_root.parent
     paths: list[Path] = []
-    for candidate in (repo_root / ".env", backend_root / ".env"):
+    for candidate in (repo_root / ".env", backend_root / ".env", backend_root / ".env.backend"):
         if candidate.is_file():
             paths.append(candidate)
     return tuple(paths)
@@ -28,7 +28,7 @@ DOTENV_FILES_LOADED: tuple[Path, ...] = _resolved_dotenv_files()
 
 
 def loaded_dotenv_files() -> tuple[Path, ...]:
-    """Return ``.env`` paths used to build :class:`Settings` (repo root, then ``pegasus-backend/``)."""
+    """Return ``.env`` paths used to build :class:`Settings` (repo root, backend, backend override)."""
     return DOTENV_FILES_LOADED
 
 
