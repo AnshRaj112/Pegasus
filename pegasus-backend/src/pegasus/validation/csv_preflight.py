@@ -24,6 +24,7 @@ UTF8_BOM = b"\xef\xbb\xbf"
 
 # Bound row scans so multi-million-row files stay predictable.
 _DEFAULT_MAX_ROWS_TO_SCAN = 50_000
+_MULTICHAR_PREFLIGHT_MAX_BYTES = 8 * 1024 * 1024
 
 
 class CsvPreflightError(ValueError):
@@ -125,7 +126,14 @@ def _preflight_multichar(
     from pegasus.validation.flat_file import split_physical_lines
 
     try:
-        text = path.read_text(encoding="utf-8-sig")
+        with path.open("rb") as handle:
+            raw = handle.read(_MULTICHAR_PREFLIGHT_MAX_BYTES + 1)
+            truncated = len(raw) > _MULTICHAR_PREFLIGHT_MAX_BYTES
+            if truncated:
+                raw = raw[:_MULTICHAR_PREFLIGHT_MAX_BYTES]
+            else:
+                truncated = False
+        text = raw.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise CsvPreflightError(
             f"{label}: invalid UTF-8 byte sequence ({exc}). "
@@ -133,6 +141,10 @@ def _preflight_multichar(
         ) from exc
 
     lines = split_physical_lines(text)
+    # If we sampled only a prefix, the final parsed record may be truncated at
+    # the byte boundary; ignore that tail record for consistency checks.
+    if truncated and lines:
+        lines = lines[:-1]
     if not lines:
         raise CsvPreflightError(f"{label}: file is empty.")
 
@@ -169,7 +181,13 @@ def _preflight_multichar(
                 break
 
     if errors:
-        raise CsvPreflightError("\n".join(errors))
+        extra = ""
+        if truncated:
+            extra = (
+                f" (checked only first {_MULTICHAR_PREFLIGHT_MAX_BYTES // (1024 * 1024)} MiB "
+                "for multi-character delimiter preflight)"
+            )
+        raise CsvPreflightError("\n".join(errors) + extra)
 
 
 def preflight_csv_structure(

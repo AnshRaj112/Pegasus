@@ -130,3 +130,21 @@ def test_lazy_comparator_requires_single_key():
             pl.DataFrame({"uid": [1]}).lazy(),
             key_columns=["uid", "other"],
         )
+
+
+def test_wide_schema_comparison_remains_correct():
+    n_cols = 700
+    src_data = {"uid": ["u1"]}
+    tgt_data = {"uid": ["u1"]}
+    for i in range(n_cols):
+        col = f"c{i}"
+        src_data[col] = [f"v{i}"]
+        tgt_data[col] = [f"v{i}"]
+    tgt_data["c512"] = ["DIFF"]
+
+    source = pl.DataFrame(src_data)
+    target = pl.DataFrame(tgt_data)
+    report = UIDBasedComparator().compare_dataframes(source, target, uid_column="uid")
+    assert report.summary[MismatchType.VALUE_MISMATCH.value] == 1
+    row = report.row_dicts()[0]
+    assert row["column_name"] == "c512"

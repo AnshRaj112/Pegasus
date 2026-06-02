@@ -25,10 +25,12 @@ from pegasus.core.resource_tuning import (
     physical_cpu_count,
     physical_ram_bytes,
 )
+from pegasus.core.workload_budget import plan_workload_budget
 from pegasus.services.queue_resource_policy import (
     QueueResourcePolicy,
     apply_queue_policy_to_reconciliation_config,
 )
+from pegasus.services.resource_advisor import _available_disk_bytes, _available_ram_bytes
 from pegasus.services.exceptions import (
     ValidationBadRequestError,
     ValidationUnprocessableError,
@@ -56,7 +58,13 @@ from pegasus.validation.reconciliation.coordinator import (
     auto_external_enabled,
 )
 from pegasus.validation.reconciliation.exceptions import ReconciliationError, ReconciliationStrategyError
-from pegasus.validation.csv_header import infer_csv_has_header
+from pegasus.validation.reconciliation.merkle import compute_csv_merkle_root
+from pegasus.validation.csv_header import (
+    count_fields_first_row,
+    infer_csv_has_header,
+    read_first_row_fields,
+    synthetic_column_names,
+)
 from pegasus.validation.mapping_analyze import analyze_column_mappings, sample_column_values
 from pegasus.validation.reconciliation.partition_manager import multichar_csv_header_frame
 from pegasus.validation.csv_preflight import CsvPreflightError, preflight_csv_structure
@@ -138,6 +146,9 @@ class ValidationService:
             force_external=self._settings.validation_force_external_reconciliation,
             stream_mismatches=self._settings.validation_stream_mismatches_to_disk,
             artifact_export_path=artifact_export,
+            memory_budget_bytes=self._settings.validation_memory_budget_bytes,
+            target_duration_seconds=self._settings.validation_target_duration_seconds,
+            enable_merkle_fast_path=self._settings.validation_enable_merkle_fast_path,
         )
 
     def _apply_host_reconciliation_tuning(
@@ -174,6 +185,33 @@ class ValidationService:
             )
             return rcfg.model_copy(update=updates)
         return rcfg
+
+    @staticmethod
+    def _preflight_resource_feasibility(
+        *,
+        source_path: Path,
+        target_path: Path,
+        rcfg: ReconciliationRuntimeConfig,
+    ) -> None:
+        """Fail fast when disk/RAM headroom is clearly insufficient."""
+        combined = source_path.stat().st_size + target_path.stat().st_size
+        required_disk = int(combined * rcfg.disk_headroom_multiplier)
+        avail_disk = _available_disk_bytes(rcfg.temp_dir or source_path.parent)
+        if avail_disk < required_disk:
+            raise ValidationBadRequestError(
+                "Insufficient disk for validation spill: "
+                f"need {required_disk / (1024**3):.2f} GiB, have {avail_disk / (1024**3):.2f} GiB."
+            )
+
+        # Require at least 60% of configured per-job budget available before starting.
+        avail_ram = _available_ram_bytes()
+        min_start_ram = int(max(256 * 1024 * 1024, rcfg.memory_budget_bytes * 0.60))
+        if avail_ram < min_start_ram:
+            raise ValidationBadRequestError(
+                "Insufficient RAM headroom to start validation safely: "
+                f"need >= {min_start_ram / (1024**3):.2f} GiB available, "
+                f"have {avail_ram / (1024**3):.2f} GiB."
+            )
 
     async def validate_csv_pair(
         self,
@@ -643,6 +681,33 @@ class ValidationService:
             target_path=target_path,
             resource_policy=queue_policy,
         )
+        self._preflight_resource_feasibility(
+            source_path=source_path,
+            target_path=target_path,
+            rcfg=rcfg,
+        )
+        budget = plan_workload_budget(
+            source_bytes=source_path.stat().st_size,
+            target_bytes=target_path.stat().st_size,
+            compare_column_count=max(1, len(column_mappings or [])),
+            cpu_cores=physical_cpu_count(),
+            memory_budget_bytes=rcfg.memory_budget_bytes,
+            target_duration_seconds=rcfg.target_duration_seconds,
+            requested_chunk_rows=rcfg.chunk_rows,
+            requested_partition_buckets=rcfg.partition_buckets,
+            requested_max_workers=rcfg.max_parallel_workers,
+            requested_sub_partition_buckets=rcfg.sub_partition_buckets,
+            source_row_estimate=self._estimate_rows_quick(source_path, has_header=has_header),
+            target_row_estimate=self._estimate_rows_quick(target_path, has_header=has_header),
+        )
+        rcfg = rcfg.model_copy(
+            update={
+                "chunk_rows": budget.chunk_rows,
+                "partition_buckets": budget.partition_buckets,
+                "max_parallel_workers": budget.max_parallel_workers,
+                "sub_partition_buckets": budget.sub_partition_buckets,
+            }
+        )
 
         if use_multichar_streaming:
             try:
@@ -667,6 +732,40 @@ class ValidationService:
                 )
             compared_columns = sorted((src_cols & tgt_cols) - {uid})
             compared = len(compared_columns)
+            if rcfg.enable_merkle_fast_path and not column_mappings and polars_supports_csv_delimiter(delim):
+                src_root, src_merkle_rows = compute_csv_merkle_root(
+                    path=source_path,
+                    reader=reader,
+                    delimiter=delim,
+                    has_header=has_header,
+                    batch_rows=rcfg.chunk_rows,
+                    columns=[uid] + compared_columns,
+                )
+                tgt_root, tgt_merkle_rows = compute_csv_merkle_root(
+                    path=target_path,
+                    reader=reader,
+                    delimiter=delim,
+                    has_header=has_header,
+                    batch_rows=rcfg.chunk_rows,
+                    columns=[uid] + compared_columns,
+                )
+                if src_root == tgt_root and src_merkle_rows == tgt_merkle_rows:
+                    logger.info(
+                        "Merkle fast-path matched exactly; skipping full reconciliation root=%s rows=%d",
+                        src_root[:16],
+                        src_merkle_rows,
+                    )
+                    return self._attach_mapping_analysis(
+                        ValidationRunResult(
+                            report=MismatchReport(mismatches=empty_mismatch_frame(), summary={}),
+                            source_row_count=src_merkle_rows,
+                            target_row_count=tgt_merkle_rows,
+                            compared_column_count=compared,
+                            compared_columns=compared_columns,
+                            mismatch_artifact_path=None,
+                        ),
+                        mapping_analysis,
+                    )
 
             logger.info(
                 "Running chunked multichar hash-partition validation (combined_bytes=%d buckets=%d) "
@@ -933,6 +1032,27 @@ class ValidationService:
         )
 
     @staticmethod
+    def _estimate_rows_quick(path: Path, *, has_header: bool) -> int:
+        """Fast newline-density row estimate for adaptive chunk sizing."""
+        file_size = path.stat().st_size
+        if file_size <= 0:
+            return 0
+        sample_size = min(256 * 1024, file_size)
+        with path.open("rb") as handle:
+            sample = handle.read(sample_size)
+        if not sample:
+            return 0
+        newline_count = sample.count(b"\n")
+        if newline_count <= 0:
+            estimated_lines = 1
+        else:
+            estimated_lines = int((newline_count / sample_size) * file_size)
+            if not sample.endswith(b"\n"):
+                estimated_lines += 1
+        data_rows = max(0, estimated_lines - (1 if has_header and estimated_lines > 0 else 0))
+        return max(0, data_rows)
+
+    @staticmethod
     def _apply_uid_gte_filter(df: pl.DataFrame, uid_column: str, threshold: str) -> pl.DataFrame:
         expr = pl.col(uid_column).cast(pl.Utf8).str.strip_chars()
         try:
@@ -986,27 +1106,32 @@ class ValidationService:
         header_rows: int,
         footer_rows: int,
     ) -> tuple[Path, Path]:
-        text = path.read_text(encoding="utf-8", errors="replace")
-        lines = text.splitlines()
-        start = min(header_rows, len(lines))
-        end = len(lines) - min(footer_rows, max(0, len(lines) - start))
-        kept = lines[start:end]
         fd, tmp_path = tempfile.mkstemp(prefix="pegasus_csv_slice_", suffix=".csv")
-        Path(tmp_path).write_text("\n".join(kept), encoding="utf-8")
-        return Path(tmp_path), Path(tmp_path)
+        tmp = Path(tmp_path)
+        with path.open("r", encoding="utf-8", errors="replace") as src, tmp.open("w", encoding="utf-8") as out:
+            for _ in range(max(0, header_rows)):
+                if not src.readline():
+                    break
+            if footer_rows <= 0:
+                for line in src:
+                    out.write(line)
+            else:
+                from collections import deque
+
+                tail = deque()
+                for line in src:
+                    tail.append(line)
+                    if len(tail) > footer_rows:
+                        out.write(tail.popleft())
+        return tmp, tmp
 
     def _read_column_names(self, path: Path, delimiter: str, *, has_header: bool = True) -> list[str]:
-        if not polars_supports_csv_delimiter(delimiter):
-            frame = multichar_csv_header_frame(path, delimiter=delimiter, has_header=has_header)
-            return [c.strip() for c in frame.columns]
-        reader = PolarsCSVReader(default_batch_size=512)
-        schema = reader.detect_schema(
-            path,
-            delimiter=delimiter,
-            encoding="utf-8",
-            has_header=has_header,
-        )
-        return list(schema.keys())
+        # Keep header discovery O(1) with respect to file size:
+        # use only the first physical row instead of schema scans.
+        if has_header:
+            return read_first_row_fields(path, delimiter)
+        n_cols = count_fields_first_row(path, delimiter)
+        return synthetic_column_names(n_cols)
 
     def _auto_map_columns(self, source_columns: list[str], target_columns: list[str]) -> list[dict[str, str]]:
         target_by_norm = {self._normalize_column_name(c): c for c in target_columns}

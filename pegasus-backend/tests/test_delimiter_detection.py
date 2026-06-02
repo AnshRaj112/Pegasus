@@ -88,6 +88,18 @@ def test_detect_validation_fixture_files_auto_xx() -> None:
     assert shared.delimiter == r"~\^|~"
 
 
+def test_detect_delimiter_uses_bounded_prefix(tmp_path: Path) -> None:
+    path = tmp_path / "bounded.csv"
+    with path.open("w", encoding="utf-8") as f:
+        for i in range(2000):
+            f.write(f"id,sku,amount\n{i},SKU-{i:05d},{100+i}\n")
+        # Contradictory tail should not dominate detection for bounded prefix.
+        for i in range(2000):
+            f.write(f"id;sku;amount\n{i};SKU-{i:05d};{100+i}\n")
+    out = detect_delimiter(path)
+    assert out.delimiter == ","
+
+
 def test_preview_local_columns_validation_fixtures_four_columns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

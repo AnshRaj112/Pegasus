@@ -112,6 +112,21 @@ class ReconciliationRuntimeConfig(BaseModel):
         default=True,
         description="When false, CSV files have no header row (columns are column_1, column_2, …).",
     )
+    memory_budget_bytes: int = Field(
+        default=10 * 1024 * 1024 * 1024,
+        ge=256 * 1024 * 1024,
+        description="Hard per-job RAM budget used for runtime tuning and guardrails.",
+    )
+    target_duration_seconds: int = Field(
+        default=15 * 60,
+        ge=60,
+        le=24 * 60 * 60,
+        description="Target completion time used to bias chunk sizing and worker concurrency.",
+    )
+    enable_merkle_fast_path: bool = Field(
+        default=True,
+        description="When true, run an ordered streaming Merkle precheck and short-circuit if roots match exactly.",
+    )
 
     def with_overrides(self, **kwargs: Any) -> ReconciliationRuntimeConfig:
         """Return a copy with merged fields (convenience for tests)."""

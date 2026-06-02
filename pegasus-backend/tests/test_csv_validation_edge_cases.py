@@ -171,6 +171,30 @@ def test_preflight_multichar_delimiter(tmp_path: Path) -> None:
     preflight_csv_structure(path, "||")
 
 
+def test_preflight_multichar_does_not_read_entire_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    path = tmp_path / "pipes_big.csv"
+    path.write_text("id||name\n1||alice\n", encoding="utf-8")
+
+    def _raise_if_read_text(*_args, **_kwargs):
+        raise AssertionError("preflight should not call Path.read_text for multichar delimiter")
+
+    monkeypatch.setattr(Path, "read_text", _raise_if_read_text)
+    preflight_csv_structure(path, "||")
+
+
+def test_preflight_multichar_ignores_truncated_tail_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from pegasus.validation import csv_preflight as mod
+
+    path = tmp_path / "pipes_large.csv"
+    payload = "id||name||amount\n" + "".join(f"{i}||sku-{i}||{i*10}\n" for i in range(1, 2000))
+    path.write_text(payload, encoding="utf-8")
+
+    monkeypatch.setattr(mod, "_MULTICHAR_PREFLIGHT_MAX_BYTES", 1024)
+    preflight_csv_structure(path, "||")
+
+
 # --- API: errors surface to validation job poll (frontend reads ``error``) ---
 
 

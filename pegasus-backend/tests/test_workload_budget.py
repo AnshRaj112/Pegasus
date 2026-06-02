@@ -1,0 +1,54 @@
+from pegasus.core.workload_budget import plan_workload_budget
+
+
+def test_plan_workload_budget_caps_workers_and_chunk_for_memory() -> None:
+    budget = plan_workload_budget(
+        source_bytes=20 * 1024**3,
+        target_bytes=20 * 1024**3,
+        compare_column_count=120,
+        cpu_cores=16,
+        memory_budget_bytes=10 * 1024**3,
+        target_duration_seconds=15 * 60,
+        requested_chunk_rows=1_000_000,
+        requested_partition_buckets=256,
+        requested_max_workers=16,
+        requested_sub_partition_buckets=1,
+    )
+    assert budget.chunk_rows >= 4096
+    assert budget.chunk_rows <= 1_000_000
+    assert budget.max_parallel_workers <= 16
+    assert budget.partition_buckets >= 8
+
+
+def test_plan_workload_budget_scales_chunk_with_row_estimate() -> None:
+    small = plan_workload_budget(
+        source_bytes=200 * 1024**2,
+        target_bytes=200 * 1024**2,
+        compare_column_count=20,
+        cpu_cores=8,
+        memory_budget_bytes=10 * 1024**3,
+        target_duration_seconds=15 * 60,
+        requested_chunk_rows=500_000,
+        requested_partition_buckets=64,
+        requested_max_workers=8,
+        requested_sub_partition_buckets=1,
+        source_row_estimate=50_000,
+        target_row_estimate=50_000,
+    )
+    large = plan_workload_budget(
+        source_bytes=20 * 1024**3,
+        target_bytes=20 * 1024**3,
+        compare_column_count=20,
+        cpu_cores=8,
+        memory_budget_bytes=10 * 1024**3,
+        target_duration_seconds=15 * 60,
+        requested_chunk_rows=500_000,
+        requested_partition_buckets=64,
+        requested_max_workers=8,
+        requested_sub_partition_buckets=1,
+        source_row_estimate=100_000_000,
+        target_row_estimate=100_000_000,
+    )
+    assert small.chunk_rows <= 500_000
+    assert large.chunk_rows >= small.chunk_rows
+

@@ -27,11 +27,17 @@ class QueueResourcePolicy:
 
     disk_headroom_multiplier: float
     """Require free disk >= multiplier × (source_bytes + target_bytes) before spill."""
+    memory_budget_bytes: int
+    """Per-job RAM budget assigned by the queue before worker start."""
+    target_duration_seconds: int
+    """Per-job target duration hint used by workload tuning."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "threads_per_job": self.threads_per_job,
             "disk_headroom_multiplier": self.disk_headroom_multiplier,
+            "memory_budget_bytes": self.memory_budget_bytes,
+            "target_duration_seconds": self.target_duration_seconds,
         }
 
     @classmethod
@@ -42,6 +48,8 @@ class QueueResourcePolicy:
         return cls(
             threads_per_job=max(0, int(settings.validation_queue_threads_per_job)),
             disk_headroom_multiplier=float(disk),
+            memory_budget_bytes=int(settings.validation_memory_budget_bytes),
+            target_duration_seconds=int(settings.validation_target_duration_seconds),
         )
 
     @classmethod
@@ -51,9 +59,13 @@ class QueueResourcePolicy:
             return base
         threads = data.get("threads_per_job", base.threads_per_job)
         disk = data.get("disk_headroom_multiplier", base.disk_headroom_multiplier)
+        mem = data.get("memory_budget_bytes", base.memory_budget_bytes)
+        dur = data.get("target_duration_seconds", base.target_duration_seconds)
         return cls(
             threads_per_job=max(0, int(threads)) if threads is not None else base.threads_per_job,
             disk_headroom_multiplier=float(disk) if disk is not None else base.disk_headroom_multiplier,
+            memory_budget_bytes=max(256 * 1024 * 1024, int(mem)) if mem is not None else base.memory_budget_bytes,
+            target_duration_seconds=max(60, int(dur)) if dur is not None else base.target_duration_seconds,
         )
 
     def clamp(self, *, cpu_cores: int) -> QueueResourcePolicy:
@@ -62,7 +74,12 @@ class QueueResourcePolicy:
         if threads > cores:
             threads = cores
         disk = max(1.0, min(10.0, float(self.disk_headroom_multiplier)))
-        return QueueResourcePolicy(threads_per_job=max(0, threads), disk_headroom_multiplier=disk)
+        return QueueResourcePolicy(
+            threads_per_job=max(0, threads),
+            disk_headroom_multiplier=disk,
+            memory_budget_bytes=max(256 * 1024 * 1024, int(self.memory_budget_bytes)),
+            target_duration_seconds=max(60, int(self.target_duration_seconds)),
+        )
 
     def effective_threads(self, *, cpu_cores: int | None = None) -> int:
         """Resolved thread cap for one worker (never below 1)."""
@@ -86,6 +103,10 @@ def apply_queue_policy_to_reconciliation_config(
     updates: dict[str, Any] = {}
     if policy.disk_headroom_multiplier != rcfg.disk_headroom_multiplier:
         updates["disk_headroom_multiplier"] = policy.disk_headroom_multiplier
+    if policy.memory_budget_bytes != rcfg.memory_budget_bytes:
+        updates["memory_budget_bytes"] = policy.memory_budget_bytes
+    if policy.target_duration_seconds != rcfg.target_duration_seconds:
+        updates["target_duration_seconds"] = policy.target_duration_seconds
 
     effective_threads = policy.effective_threads(cpu_cores=cores)
     if policy.threads_per_job > 0:

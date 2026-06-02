@@ -15,6 +15,7 @@ from pegasus.validation.flat_file import field_count
 
 # Sniff delimiters from a bounded prefix only (never read multi‑GiB files into RAM).
 _DEFAULT_SNIFF_PREFIX_BYTES = 512 * 1024
+_DEFAULT_SNIFF_MAX_LINES = 500
 
 
 def _read_utf8_prefix(path: Path, *, max_bytes: int = _DEFAULT_SNIFF_PREFIX_BYTES) -> str:
@@ -22,6 +23,27 @@ def _read_utf8_prefix(path: Path, *, max_bytes: int = _DEFAULT_SNIFF_PREFIX_BYTE
     with path.open("rb") as fh:
         raw = fh.read(max_bytes)
     return raw.decode("utf-8", errors="replace")
+
+
+def _sample_non_empty_lines(
+    path: Path,
+    *,
+    max_bytes: int = _DEFAULT_SNIFF_PREFIX_BYTES,
+    max_lines: int = _DEFAULT_SNIFF_MAX_LINES,
+) -> list[str]:
+    """Read a bounded number of non-empty lines from a bounded byte prefix."""
+    out: list[str] = []
+    consumed = 0
+    with path.open("rb") as fh:
+        while consumed < max_bytes and len(out) < max_lines:
+            raw = fh.readline()
+            if not raw:
+                break
+            consumed += len(raw)
+            line = raw.decode("utf-8", errors="replace").strip()
+            if line:
+                out.append(line)
+    return out
 
 
 @dataclass(slots=True)
@@ -117,8 +139,7 @@ class _PairDelimiterQuality:
 
 def _file_delimiter_stability(path: Path, delim: str) -> tuple[int | None, float]:
     """Return ``(modal_field_count, score)`` or ``(None, _)`` if *delim* is a poor fit."""
-    text = _read_utf8_prefix(path)
-    lines = [ln for ln in text.splitlines() if ln.strip()][:500]
+    lines = _sample_non_empty_lines(path, max_lines=500)
     if len(lines) < 2:
         return None, float("-inf")
 
@@ -207,8 +228,7 @@ def detect_delimiter(path: Path) -> DelimiterDetectionResult:
     quote-aware :func:`~pegasus.validation.flat_file.field_count` used at validation
     time, so commas inside ``"[1, 2, 3]"`` do not beat the real field separator.
     """
-    text = _read_utf8_prefix(path)
-    lines = [ln for ln in text.splitlines() if ln.strip()]
+    lines = _sample_non_empty_lines(path)
     if not lines:
         raise ValueError(f"Cannot infer delimiter for empty file: {path.name}")
     sample_lines = lines[:100]

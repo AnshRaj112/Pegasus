@@ -100,13 +100,15 @@ class ValidationJobQueue:
         self._drain_event = asyncio.Event()
         self._drain_task: asyncio.Task[None] | None = None
         self._stopped = False
+        self._avg_runtime_seconds: float = 15 * 60
 
         logger.info(
-            "ValidationJobQueue created max_concurrency=%d auto_tune=%s threads_per_job=%d disk_mult=%.2f",
+            "ValidationJobQueue created max_concurrency=%d auto_tune=%s threads_per_job=%d disk_mult=%.2f mem_budget_mib=%.1f",
             self._max_concurrency,
             self._auto_tune_enabled,
             self._resource_policy.threads_per_job,
             self._resource_policy.disk_headroom_multiplier,
+            self._resource_policy.memory_budget_bytes / (1024**2),
         )
 
     @property
@@ -162,6 +164,8 @@ class ValidationJobQueue:
         self._resource_policy = QueueResourcePolicy(
             threads_per_job=clamped,
             disk_headroom_multiplier=policy.disk_headroom_multiplier,
+            memory_budget_bytes=policy.memory_budget_bytes,
+            target_duration_seconds=policy.target_duration_seconds,
         )
         logger.info("threads_per_job set to %d (effective=%d)", clamped, self.effective_threads_per_job())
         self._drain_event.set()
@@ -175,6 +179,8 @@ class ValidationJobQueue:
         self._resource_policy = QueueResourcePolicy(
             threads_per_job=policy.threads_per_job,
             disk_headroom_multiplier=clamped,
+            memory_budget_bytes=policy.memory_budget_bytes,
+            target_duration_seconds=policy.target_duration_seconds,
         )
         logger.info("disk_headroom_multiplier set to %.2f", clamped)
         self._drain_event.set()
@@ -206,13 +212,13 @@ class ValidationJobQueue:
         self._last_resource_snapshot = snapshot
         return snapshot
 
-    def effective_max_concurrency(self) -> int:
+    def effective_max_concurrency(self, *, snapshot: ResourceSnapshot | None = None) -> int:
         """User cap after optional auto-tune (what the drain loop uses)."""
         effective = self._max_concurrency
         if self._auto_tune_enabled:
             try:
-                snapshot = self.resource_recommendation()
-                effective = min(self._max_concurrency, snapshot.recommended_max_concurrency)
+                snap = snapshot or self.resource_recommendation()
+                effective = min(self._max_concurrency, snap.recommended_max_concurrency)
             except Exception:
                 logger.warning("Resource advisor failed, using user-set max_concurrency", exc_info=True)
         return max(1, effective)
@@ -228,6 +234,8 @@ class ValidationJobQueue:
                 "auto_tune_enabled": self._auto_tune_enabled,
                 "threads_per_job": policy.threads_per_job,
                 "disk_headroom_multiplier": policy.disk_headroom_multiplier,
+                "memory_budget_bytes": policy.memory_budget_bytes,
+                "target_duration_seconds": policy.target_duration_seconds,
                 "effective_threads_per_job": self.effective_threads_per_job(),
                 "pending": len(self._pending),
                 "running": len(self._running),
@@ -235,7 +243,7 @@ class ValidationJobQueue:
                 "total_tracked": len(self._all_jobs),
             }
         snapshot = self.resource_recommendation()
-        result["effective_max_concurrency"] = self.effective_max_concurrency()
+        result["effective_max_concurrency"] = self.effective_max_concurrency(snapshot=snapshot)
         result["resource_advisor"] = snapshot.to_dict()
         return result
 
@@ -247,6 +255,7 @@ class ValidationJobQueue:
             self._pending.append(job)
             self._all_jobs[job_id] = job
             self._update_queue_positions()
+            self._refresh_pending_statuses_locked(effective_max=max(1, self._max_concurrency))
             logger.info(
                 "Job %s enqueued position=%d pending=%d running=%d/%d",
                 job_id,
@@ -280,6 +289,8 @@ class ValidationJobQueue:
         """Return a snapshot of all tracked jobs (most recent first)."""
         with self._lock:
             jobs = sorted(self._all_jobs.values(), key=lambda j: j.enqueued_at, reverse=True)
+            running_jobs = len(self._running)
+            max_concurrency = self._max_concurrency
         return [
             {
                 "job_id": str(j.job_id),
@@ -288,6 +299,25 @@ class ValidationJobQueue:
                 "started_at": j.started_at,
                 "finished_at": j.finished_at,
                 "position": j.position if j.state == JobState.QUEUED else None,
+                "estimated_wait_seconds": (
+                    self._estimate_wait_seconds_for_position(
+                        queue_position=j.position,
+                        effective_max=max_concurrency,
+                        running_jobs=running_jobs,
+                    )
+                    if j.state == JobState.QUEUED
+                    else None
+                ),
+                "estimated_start_epoch_s": (
+                    time.time()
+                    + self._estimate_wait_seconds_for_position(
+                        queue_position=j.position,
+                        effective_max=max_concurrency,
+                        running_jobs=running_jobs,
+                    )
+                    if j.state == JobState.QUEUED
+                    else None
+                ),
             }
             for j in jobs[:limit]
         ]
@@ -341,8 +371,9 @@ class ValidationJobQueue:
             while self._pending and len(self._running) < effective_max:
                 job = self._pending.popleft()
                 self._update_queue_positions()
+                self._refresh_pending_statuses_locked(effective_max=effective_max)
                 try:
-                    self._stamp_resource_policy(job)
+                    self._stamp_resource_policy(job, effective_slots=effective_max)
                     handle = self._runner.start_job(job.job_dir)
                     # Quick sanity: did it die immediately?
                     if handle.poll() is not None:
@@ -391,6 +422,8 @@ class ValidationJobQueue:
                             rc,
                             job.finished_at - (job.started_at or job.enqueued_at),
                         )
+                        elapsed = max(1.0, job.finished_at - (job.started_at or job.enqueued_at))
+                        self._avg_runtime_seconds = (self._avg_runtime_seconds * 0.8) + (elapsed * 0.2)
 
             for jid in done_ids:
                 job = self._running.pop(jid)
@@ -399,7 +432,7 @@ class ValidationJobQueue:
             # Notify pending are now eligible to start
             if done_ids and self._pending:
                 # Will be picked up on next loop iteration
-                pass
+                self._refresh_pending_statuses_locked(effective_max=max(1, self._max_concurrency))
 
         # Prune old finished entries (keep last 500 max)
         with self._lock:
@@ -429,7 +462,7 @@ class ValidationJobQueue:
 
     # ── Status file helpers ───────────────────────────────────────
 
-    def _stamp_resource_policy(self, job: QueuedJob) -> None:
+    def _stamp_resource_policy(self, job: QueuedJob, *, effective_slots: int | None = None) -> None:
         """Write current queue resource policy into job meta.json before the worker starts."""
         meta_path = job.job_dir / "meta.json"
         if not meta_path.is_file():
@@ -439,8 +472,13 @@ class ValidationJobQueue:
             if not isinstance(meta, dict):
                 return
             policy = self._resource_policy.clamp(cpu_cores=self.cpu_cores_available())
+            slots = max(1, effective_slots or self.effective_max_concurrency())
+            # Split global budget fairly across active slots to avoid over-commit during bursts.
+            global_budget = max(512 * 1024 * 1024, int(self._settings.validation_global_memory_budget_bytes))
+            per_job_budget = max(512 * 1024 * 1024, global_budget // slots)
             meta["resource_policy"] = {
                 **policy.to_dict(),
+                "memory_budget_bytes": per_job_budget,
                 "effective_threads_per_job": policy.effective_threads(
                     cpu_cores=self.cpu_cores_available()
                 ),
@@ -449,26 +487,74 @@ class ValidationJobQueue:
         except (OSError, ValueError, TypeError):
             logger.warning("Could not stamp resource_policy for job %s", job.job_id, exc_info=True)
 
-    def _write_queued_status(self, job: QueuedJob) -> None:
+    def _write_queued_status(
+        self,
+        job: QueuedJob,
+        *,
+        effective_max: int | None = None,
+        pending_count: int | None = None,
+        running_jobs: int | None = None,
+    ) -> None:
         status_path = job.job_dir / "status.json"
+        eff = max(1, effective_max if effective_max is not None else self.effective_max_concurrency())
+        pend = pending_count if pending_count is not None else len(self._pending)
+        running = running_jobs if running_jobs is not None else len(self._running)
+        wait_s = self._estimate_wait_seconds_for_position(
+            queue_position=job.position,
+            effective_max=eff,
+            running_jobs=running,
+        )
         try:
             _atomic_write_json(
                 status_path,
                 {
                     "status": "queued",
                     "phase": "queued",
-                    "message": f"Waiting in queue (position {job.position + 1} of {len(self._pending)})",
+                    "message": (
+                        f"Waiting in queue (position {job.position + 1} of {pend}, "
+                        f"estimated wait {int(wait_s)}s)"
+                    ),
                     "progress": {
                         "queue_position": job.position,
                         "pending_ahead": job.position,
-                        "running_jobs": len(self._running),
+                        "running_jobs": running,
                         "max_concurrency": self._max_concurrency,
+                        "effective_max_concurrency": eff,
+                        "estimated_wait_seconds": wait_s,
+                        "estimated_start_epoch_s": time.time() + wait_s,
                         "enqueued_at_epoch_s": job.enqueued_at,
                     },
                 },
             )
         except OSError:
             pass
+
+    def _estimate_wait_seconds_for_position(
+        self,
+        *,
+        queue_position: int,
+        effective_max: int,
+        running_jobs: int,
+    ) -> float:
+        if queue_position <= 0 and running_jobs < max(1, effective_max):
+            return 0.0
+        slots = max(1, effective_max)
+        groups_ahead = queue_position // slots
+        running_penalty = 1 if running_jobs >= slots else 0
+        return float((groups_ahead + running_penalty) * self._avg_runtime_seconds)
+
+    def _refresh_pending_statuses_locked(self, *, effective_max: int) -> None:
+        """Rewrite queued status files with fresh position and ETA (caller holds lock)."""
+        eff = max(1, effective_max)
+        pend = len(self._pending)
+        running = len(self._running)
+        for job in self._pending:
+            self._write_queued_status(
+                job,
+                effective_max=eff,
+                pending_count=pend,
+                running_jobs=running,
+            )
 
     def _write_failed_status(self, job: QueuedJob, error: str) -> None:
         status_path = job.job_dir / "status.json"

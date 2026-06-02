@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
+from pathlib import Path
+
 from pegasus.core.config import Settings
+from pegasus.core.json_util import loads_str
 from pegasus.services.resource_advisor import compute_resource_recommendation
 from pegasus.services.validation_job_queue import ValidationJobQueue, reset_validation_queue
 
@@ -50,3 +54,32 @@ def test_effective_max_concurrency_respects_auto_tune() -> None:
     effective = queue.effective_max_concurrency()
     recommended = queue.resource_recommendation().recommended_max_concurrency
     assert effective == min(100, recommended)
+
+
+def test_queued_status_includes_wait_estimates(tmp_path: Path) -> None:
+    reset_validation_queue()
+    queue = ValidationJobQueue(Settings(validation_max_concurrency=2))
+    j1 = tmp_path / "job1"
+    j2 = tmp_path / "job2"
+    j1.mkdir()
+    j2.mkdir()
+    q1 = queue.enqueue(uuid.uuid4(), j1)
+    queue.enqueue(uuid.uuid4(), j2)
+    st1 = loads_str((q1.job_dir / "status.json").read_text(encoding="utf-8"))
+    st2 = loads_str((j2 / "status.json").read_text(encoding="utf-8"))
+    assert "estimated_wait_seconds" in st1.get("progress", {})
+    assert "estimated_wait_seconds" in st2.get("progress", {})
+    assert "effective_max_concurrency" in st2.get("progress", {})
+
+
+def test_list_jobs_includes_eta_for_queued(tmp_path: Path) -> None:
+    reset_validation_queue()
+    queue = ValidationJobQueue(Settings(validation_max_concurrency=2))
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    queue.enqueue(uuid.uuid4(), job_dir)
+    rows = queue.list_jobs(limit=10)
+    assert rows
+    assert rows[0]["state"] == "queued"
+    assert rows[0]["estimated_wait_seconds"] is not None
+    assert rows[0]["estimated_start_epoch_s"] is not None

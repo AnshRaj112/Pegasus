@@ -149,10 +149,12 @@ def analyze_column_mappings(
 
 
 def _trim_csv_rows(path: Path, header_leading_rows: int) -> tuple[Path, Path]:
-    text = path.read_text(encoding="utf-8", errors="replace")
-    lines = text.splitlines()
-    kept = lines[min(header_leading_rows, len(lines)):]
     fd, tmp_path = tempfile.mkstemp(prefix="pegasus_mapping_trim_", suffix=".csv")
-    Path(tmp_path).write_text("\n".join(kept), encoding="utf-8")
     tmp = Path(tmp_path)
+    with path.open("r", encoding="utf-8", errors="replace") as src, tmp.open("w", encoding="utf-8") as out:
+        for _ in range(max(0, header_leading_rows)):
+            if not src.readline():
+                break
+        for line in src:
+            out.write(line)
     return tmp, tmp

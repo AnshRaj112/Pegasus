@@ -56,7 +56,6 @@ from pegasus.schemas.validation import (
     CloudBrowseEntry,
     CloudMatchFilePairsRequest,
     MismatchSampleGroups,
-    MismatchSampleRow,
     QueueStatusResponse,
     UpdateQueueSettingsRequest,
     ValidateResponse,
@@ -367,9 +366,10 @@ def _build_validate_response(
             )
             val_rows = val_df.to_dicts()
         sample_groups = MismatchSampleGroups(
-            missing_in_target=[MismatchSampleRow.model_validate(r) for r in miss_rows],
-            extra_in_target=[MismatchSampleRow.model_validate(r) for r in ext_rows],
-            value_mismatch=[MismatchSampleRow.model_validate(r) for r in val_rows],
+            # Avoid per-row pre-validation here; ValidateResponse model will validate once.
+            missing_in_target=miss_rows,
+            extra_in_target=ext_rows,
+            value_mismatch=val_rows,
         )
     elif total_records > 0:
         mismatch_stats_frame = load_mismatch_polars_for_api(
@@ -384,9 +384,9 @@ def _build_validate_response(
             presence_max_rows=presence_cap,
         )
         sample_groups = MismatchSampleGroups(
-            missing_in_target=[MismatchSampleRow.model_validate(r) for r in miss_df.to_dicts()],
-            extra_in_target=[MismatchSampleRow.model_validate(r) for r in ext_df.to_dicts()],
-            value_mismatch=[MismatchSampleRow.model_validate(r) for r in val_df.to_dicts()],
+            missing_in_target=miss_df.to_dicts(),
+            extra_in_target=ext_df.to_dicts(),
+            value_mismatch=val_df.to_dicts(),
         )
     else:
         sample_groups = MismatchSampleGroups()
@@ -1496,7 +1496,14 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
                 progress["pending_ahead"] = pos
                 progress["running_jobs"] = queue.running_count
                 progress["max_concurrency"] = queue.max_concurrency
-                message = f"Waiting in queue (position {pos + 1} of {queue.pending_count})"
+                eta = progress.get("estimated_wait_seconds")
+                if isinstance(eta, (int, float)):
+                    message = (
+                        f"Waiting in queue (position {pos + 1} of {queue.pending_count}, "
+                        f"estimated wait {int(eta)}s)"
+                    )
+                else:
+                    message = f"Waiting in queue (position {pos + 1} of {queue.pending_count})"
         return ValidationJobDetailResponse(status=status_val, phase=phase, message=message, progress=progress)
     if status_val == "failed":
         batch_path = job_dir / "batch_result.json"

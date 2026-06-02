@@ -35,6 +35,20 @@ _PARALLEL_COLUMN_THRESHOLD = 16
 # Threads (not processes) because the DataFrame is already in memory
 # and Polars releases the GIL during its C++ filter/select ops.
 _DEFAULT_MAX_COLUMN_WORKERS = max(1, min(os.cpu_count() or 4, 8))
+_WIDE_SCHEMA_PREFILTER_THRESHOLD = 256
+
+
+def _chunk_signature_diff_expr(chunk_cols: list[str]) -> pl.Expr:
+    """Row-level chunk signature mismatch (superset prefilter, never false negatives)."""
+    src = pl.concat_str(
+        [pl.col(c).cast(pl.String).fill_null("<NULL>") for c in chunk_cols],
+        separator="\x1f",
+    )
+    tgt = pl.concat_str(
+        [pl.col(f"{c}_target").cast(pl.String).fill_null("<NULL>") for c in chunk_cols],
+        separator="\x1f",
+    )
+    return src != tgt
 
 
 def _null_safe_ne(col: str, col_target: str, rule: object | None = None) -> pl.Expr:
@@ -107,8 +121,22 @@ def emit_value_mismatches_single_pass(
     #    This ensures we only materialise rows that have *at least one* mismatch.
     #    For matching datasets the result is empty → near-zero cost.
     rules = compare_rules or {}
-    diff_exprs = [_null_safe_ne(c, f"{c}_target", rules.get(c)) for c in compare_columns]
-    any_diff = pl.any_horizontal(diff_exprs)
+    if n_cols >= _WIDE_SCHEMA_PREFILTER_THRESHOLD:
+        # For very wide tables, prune with chunk signatures first to reduce planner overhead.
+        signature_chunks = [
+            compare_columns[i : i + column_chunk_size]
+            for i in range(0, n_cols, column_chunk_size)
+        ]
+        chunk_diff_exprs = [_chunk_signature_diff_expr(cols) for cols in signature_chunks]
+        any_diff = pl.any_horizontal(chunk_diff_exprs)
+        logger.info(
+            "Using wide-schema signature prefilter: columns=%d chunks=%d",
+            n_cols,
+            len(signature_chunks),
+        )
+    else:
+        diff_exprs = [_null_safe_ne(c, f"{c}_target", rules.get(c)) for c in compare_columns]
+        any_diff = pl.any_horizontal(diff_exprs)
 
     # Select only the columns we need: uid + source cols + target cols
     needed = (

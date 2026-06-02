@@ -305,6 +305,29 @@ class Settings(BaseSettings):
             "None uses validation_reconciliation_disk_headroom_multiplier."
         ),
     )
+    validation_memory_budget_bytes: int = Field(
+        default=10 * 1024 * 1024 * 1024,
+        ge=256 * 1024 * 1024,
+        description="Hard RAM cap per validation job (default 10 GiB).",
+    )
+    validation_target_duration_seconds: int = Field(
+        default=15 * 60,
+        ge=60,
+        le=24 * 60 * 60,
+        description="Target completion time used to tune reconciliation runtime settings.",
+    )
+    validation_enable_merkle_fast_path: bool = Field(
+        default=True,
+        description="Enable streaming Merkle precheck to skip full reconciliation when files are identical.",
+    )
+    validation_global_memory_budget_bytes: int = Field(
+        default=10 * 1024 * 1024 * 1024,
+        ge=512 * 1024 * 1024,
+        description=(
+            "Global RAM budget for all concurrent validation jobs combined. "
+            "Queue admission splits this across running slots."
+        ),
+    )
 
     def cors_origin_list(self) -> list[str]:
         raw = self.cors_origins.strip()
