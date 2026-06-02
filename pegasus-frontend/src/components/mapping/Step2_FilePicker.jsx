@@ -235,7 +235,16 @@ export default function Step2_FilePicker({
           value={folderInput}
           disabled={disabled}
           onChange={e => setFolderInput(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleOpen() } }}
+          onKeyDown={e => {
+            if (e.key !== 'Enter') return
+            e.preventDefault()
+            const typedPath = folderInput.trim()
+            if (!typedPath) {
+              setError('Enter an absolute folder path')
+              return
+            }
+            handleOpen()
+          }}
           placeholder="/path/to/your/data"
           style={{
             flex: 1, background: 'transparent', border: 'none', outline: 'none',

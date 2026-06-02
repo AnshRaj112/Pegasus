@@ -368,8 +368,7 @@ Pegasus features a built-in Python script to generate mock CSV datasets with con
 To generate sample source and target pairs, run the following script:
 ```bash
 # Ensure you are at the repo root and your virtual env is active
-cd /home/ansh.raj/Pegasus
-
+cd /home/vidit.tiwari/Pegasus
 # Run the generator script
 python scripts/generate_validation_data.py \
   --rows 50000 \
