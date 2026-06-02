@@ -17,7 +17,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, File, Form, HTTPException, Query, UploadFile, status
 
-from pegasus.api.deps import AppSettings, ValidationServiceDep
+from pegasus.api.deps import AppSettings, DbSession, ValidationServiceDep
 from pegasus.core.config import Settings
 from pegasus.core.database import AsyncSessionLocal
 from pegasus.core.local_paths import (
@@ -31,6 +31,7 @@ from pegasus.core.local_paths import (
 from pegasus.core.json_util import dumps_bytes, loads_str
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
+from pegasus.repositories.cloud_connection_repository import CloudConnectionRepository
 from pegasus.schemas.validation import (
     BatchFailureMode,
     BatchUnitResult,
@@ -66,6 +67,7 @@ from pegasus.schemas.validation import (
     ValidationTestMode,
     build_mismatch_counts,
 )
+from pegasus.models.cloud_connection import CloudConnection
 from pegasus.services.validation_job_queue import get_validation_queue
 from pegasus.services.exceptions import ValidationBadRequestError, format_validation_job_error
 from pegasus.services.validation_service import ValidationRunDurations, ValidationRunResult
@@ -179,6 +181,31 @@ def _resolve_cloud_credentials(raw_json: str) -> dict[str, object]:
     return parsed
 
 
+async def _load_cloud_connection_or_404(connection_id: uuid.UUID, session: DbSession) -> CloudConnection:
+    row = await CloudConnectionRepository.get_connection(session, connection_id)
+    if row is None or not row.active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Saved cloud connection not found")
+    return row
+
+
+async def _resolve_cloud_config_with_saved_connection(
+    cloud: GoogleCloudStorageConfig,
+    *,
+    session: DbSession,
+) -> GoogleCloudStorageConfig:
+    if cloud.connection_id is None:
+        return cloud
+    saved = await _load_cloud_connection_or_404(cloud.connection_id, session)
+    return GoogleCloudStorageConfig(
+        provider="google-cloud-storage",
+        bucket=(cloud.bucket or "").strip() or saved.bucket,
+        object_name=cloud.object_name,
+        credentials_json=(cloud.credentials_json or "").strip() or saved.credentials_json,
+        connection_id=cloud.connection_id,
+        project_id=(cloud.project_id or "").strip() or saved.project_id,
+    )
+
+
 def _download_gcs_object_to_path(
     cloud: GoogleCloudStorageConfig,
     dest_path: Path,
@@ -192,7 +219,7 @@ def _download_gcs_object_to_path(
             detail="google-cloud-storage is required for cloud validation inputs",
         ) from exc
 
-    info = _resolve_cloud_credentials(cloud.credentials_json)
+    info = _resolve_cloud_credentials(cloud.credentials_json or "")
     try:
         credentials = service_account.Credentials.from_service_account_info(info)
     except Exception as exc:
@@ -928,6 +955,7 @@ async def validate_csv_files(
 )
 async def validate_csv_local_paths(
     settings: AppSettings,
+    session: DbSession,
     body: Annotated[LocalPathValidateRequest, Body()],
 ) -> ValidationJobAcceptedResponse:
     """Queue validation for server-local CSV paths (worker reads files in-place)."""
@@ -951,19 +979,29 @@ async def validate_csv_local_paths(
     job_dir = jobs_root / str(job_id)
     job_dir.mkdir(parents=True, exist_ok=False)
 
+    source_cloud = (
+        await _resolve_cloud_config_with_saved_connection(body.source_cloud, session=session)
+        if body.source_cloud is not None
+        else None
+    )
+    target_cloud = (
+        await _resolve_cloud_config_with_saved_connection(body.target_cloud, session=session)
+        if body.target_cloud is not None
+        else None
+    )
     source_input = resolve_validation_input(
         settings=settings,
         label="source",
         path=body.source_path,
-        cloud=body.source_cloud,
-        destination_path=job_dir / "source.csv" if body.source_cloud is not None else None,
+        cloud=source_cloud,
+        destination_path=job_dir / "source.csv" if source_cloud is not None else None,
     )
     target_input = resolve_validation_input(
         settings=settings,
         label="target",
         path=body.target_path,
-        cloud=body.target_cloud,
-        destination_path=job_dir / "target.csv" if body.target_cloud is not None else None,
+        cloud=target_cloud,
+        destination_path=job_dir / "target.csv" if target_cloud is not None else None,
     )
 
     run_id: uuid.UUID | None = None
@@ -1111,16 +1149,27 @@ async def match_local_file_pairs(
     summary="Browse GCS bucket prefixes and objects for the cloud file picker",
 )
 async def browse_cloud_prefix(
+    session: DbSession,
     body: Annotated[CloudBrowseRequest, Body()],
 ) -> CloudBrowseResponse:
     """List child prefixes and objects under a bucket prefix (delimiter='/')."""
-    info = _resolve_cloud_credentials(body.credentials_json)
+    bucket = (body.bucket or "").strip()
+    project_id = body.project_id
+    credentials_json = body.credentials_json or ""
+    if body.connection_id is not None:
+        saved = await _load_cloud_connection_or_404(body.connection_id, session)
+        bucket = bucket or saved.bucket
+        project_id = project_id or saved.project_id
+        credentials_json = credentials_json or saved.credentials_json
+    info = _resolve_cloud_credentials(credentials_json)
+    if not bucket:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Cloud bucket is required")
     try:
         result = browse_gcs_prefix(
-            bucket=body.bucket,
+            bucket=bucket,
             prefix=body.prefix,
             credentials_info=info,
-            project_id=body.project_id,
+            project_id=project_id,
             file_format=body.file_format,
         )
     except Exception as exc:
@@ -1142,24 +1191,35 @@ async def browse_cloud_prefix(
     summary="Auto-match GCS objects between two prefixes by filename",
 )
 async def match_cloud_file_pairs(
+    session: DbSession,
     body: Annotated[CloudMatchFilePairsRequest, Body()],
 ) -> MatchFilePairsResponse:
     """Suggest 1:1 object pairs from two bucket prefixes (basename match)."""
-    info = _resolve_cloud_credentials(body.credentials_json)
+    bucket = (body.bucket or "").strip()
+    project_id = body.project_id
+    credentials_json = body.credentials_json or ""
+    if body.connection_id is not None:
+        saved = await _load_cloud_connection_or_404(body.connection_id, session)
+        bucket = bucket or saved.bucket
+        project_id = project_id or saved.project_id
+        credentials_json = credentials_json or saved.credentials_json
+    info = _resolve_cloud_credentials(credentials_json)
+    if not bucket:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Cloud bucket is required")
     try:
         source_names = list_gcs_files_under_prefix(
-            bucket=body.bucket,
+            bucket=bucket,
             prefix=body.source_prefix,
             credentials_info=info,
-            project_id=body.project_id,
+            project_id=project_id,
             file_format=body.file_format,
             recursive=body.recursive,
         )
         target_names = list_gcs_files_under_prefix(
-            bucket=body.bucket,
+            bucket=bucket,
             prefix=body.target_prefix,
             credentials_info=info,
-            project_id=body.project_id,
+            project_id=project_id,
             file_format=body.file_format,
             recursive=body.recursive,
         )
@@ -1306,10 +1366,21 @@ async def validate_local_batch(
 async def analyze_local_mappings(
     service: ValidationServiceDep,
     settings: AppSettings,
+    session: DbSession,
     body: Annotated[MappingAnalyzeRequest, Body()],
 ) -> MappingAnalyzeResponse:
-    source_input = resolve_validation_input(settings=settings, label="source", path=body.source_path, cloud=body.source_cloud)
-    target_input = resolve_validation_input(settings=settings, label="target", path=body.target_path, cloud=body.target_cloud)
+    source_cloud = (
+        await _resolve_cloud_config_with_saved_connection(body.source_cloud, session=session)
+        if body.source_cloud is not None
+        else None
+    )
+    target_cloud = (
+        await _resolve_cloud_config_with_saved_connection(body.target_cloud, session=session)
+        if body.target_cloud is not None
+        else None
+    )
+    source_input = resolve_validation_input(settings=settings, label="source", path=body.source_path, cloud=source_cloud)
+    target_input = resolve_validation_input(settings=settings, label="target", path=body.target_path, cloud=target_cloud)
     try:
         analysis = service.analyze_local_mappings(
             source_path=source_input.path,
@@ -1406,10 +1477,21 @@ async def preview_local_csv_columns(
 async def preview_local_csv_columns_body(
     service: ValidationServiceDep,
     settings: AppSettings,
+    session: DbSession,
     body: Annotated[LocalPathValidateRequest, Body()],
 ) -> LocalColumnPreviewResponse:
-    source_input = resolve_validation_input(settings=settings, label="source", path=body.source_path, cloud=body.source_cloud)
-    target_input = resolve_validation_input(settings=settings, label="target", path=body.target_path, cloud=body.target_cloud)
+    source_cloud = (
+        await _resolve_cloud_config_with_saved_connection(body.source_cloud, session=session)
+        if body.source_cloud is not None
+        else None
+    )
+    target_cloud = (
+        await _resolve_cloud_config_with_saved_connection(body.target_cloud, session=session)
+        if body.target_cloud is not None
+        else None
+    )
+    source_input = resolve_validation_input(settings=settings, label="source", path=body.source_path, cloud=source_cloud)
+    target_input = resolve_validation_input(settings=settings, label="target", path=body.target_path, cloud=target_cloud)
     try:
         preview = service.preview_local_column_headers(
             source_path=source_input.path,

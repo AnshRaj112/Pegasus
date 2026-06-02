@@ -13,12 +13,15 @@ export function hasFormatWarnings(formatChecks = []) {
 function buildStoragePayload(prefix, { storageType, path, cloudConfig }) {
   if (storageType === 'cloud') {
     const normalizedProvider = String(cloudConfig?.provider || 'google-cloud-storage').trim() || 'google-cloud-storage'
+    const connectionId = String(cloudConfig?.connectionId || '').trim()
+    const credentialsJson = String(cloudConfig?.credentialsJson || '')
     return {
       [`${prefix}_cloud`]: {
         provider: normalizedProvider,
-        bucket: String(cloudConfig?.bucket || '').trim(),
+        connection_id: connectionId || undefined,
+        bucket: String(cloudConfig?.bucket || '').trim() || undefined,
         object_name: String(cloudConfig?.objectName || '').trim(),
-        credentials_json: String(cloudConfig?.credentialsJson || ''),
+        credentials_json: credentialsJson || undefined,
         project_id: String(cloudConfig?.projectId || '').trim() || undefined,
       },
     }

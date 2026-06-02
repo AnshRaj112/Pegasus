@@ -24,7 +24,7 @@ export default function Step2_CloudPicker({
 
   const canBrowse = Boolean(
     cloudConfig?.bucket?.trim()
-    && cloudConfig?.credentialsJson?.trim(),
+    && (cloudConfig?.credentialsJson?.trim() || cloudConfig?.connectionId?.trim()),
   )
 
   const loadPrefix = useCallback(async (nextPrefix) => {
@@ -36,6 +36,7 @@ export default function Step2_CloudPicker({
         bucket: cloudConfig.bucket,
         prefix: nextPrefix ?? '',
         credentialsJson: cloudConfig.credentialsJson,
+        connectionId: cloudConfig.connectionId,
         projectId: cloudConfig.projectId,
         fileFormat: browseFileFormat,
       })
@@ -64,6 +65,7 @@ export default function Step2_CloudPicker({
       provider: 'google-cloud-storage',
       bucket: cloudConfig.bucket.trim(),
       credentialsJson: cloudConfig.credentialsJson,
+      connectionId: cloudConfig.connectionId || '',
       projectId: cloudConfig.projectId?.trim() || '',
     }
     if (selectionMode === 'folder') {

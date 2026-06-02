@@ -64,6 +64,23 @@ class Settings(BaseSettings):
             "Fernet key used to encrypt validation history payloads before they are written to PostgreSQL."
         ),
     )
+    admin_api_token: str | None = Field(
+        default=None,
+        description=(
+            "Static admin token required for privileged admin APIs "
+            "(for example cloud connection management)."
+        ),
+    )
+    admin_session_ttl_hours: int = Field(
+        default=24 * 7,
+        ge=1,
+        le=24 * 365,
+        description="Admin session lifetime in hours.",
+    )
+    admin_session_cookie_secure: bool = Field(
+        default=False,
+        description="Set True to mark the admin session cookie as Secure (HTTPS-only).",
+    )
 
     cors_origins: str = Field(
         default="",

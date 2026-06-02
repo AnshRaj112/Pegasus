@@ -1,12 +1,24 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import MappingWizard  from './components/mapping/MappingWizard'
 import History         from './components/History'
 import Dashboard       from './components/Dashboard'
-import { LayoutDashboard, Compass, History as HistoryIcon, ShieldCheck } from 'lucide-react'
+import AdminCloudConnections from './components/AdminCloudConnections'
+import AdminAuthPage from './components/AdminAuthPage'
+import { adminLogout, fetchAdminMe } from './api/adminAuth'
+import { LayoutDashboard, Compass, History as HistoryIcon, Settings, ShieldCheck } from 'lucide-react'
 
 function App() {
   const [activeSection, setActiveSection] = useState('dashboard')
   const [initialMappingData, setInitialMappingData] = useState(null)
+  const [authChecked, setAuthChecked] = useState(false)
+  const [adminUser, setAdminUser] = useState(null)
+
+  useEffect(() => {
+    fetchAdminMe()
+      .then((user) => setAdminUser(user))
+      .catch(() => setAdminUser(null))
+      .finally(() => setAuthChecked(true))
+  }, [])
 
   const handleLoadMapping = (data) => {
     setInitialMappingData(data)
@@ -18,6 +30,24 @@ function App() {
       setInitialMappingData(null)
     }
     setActiveSection(section)
+  }
+
+  async function handleLogout() {
+    try {
+      await adminLogout()
+    } catch {
+      // ignore
+    }
+    setAdminUser(null)
+    setAuthChecked(true)
+  }
+
+  if (!authChecked) {
+    return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>Loading...</div>
+  }
+
+  if (!adminUser) {
+    return <AdminAuthPage onAuthenticated={(user) => { setAdminUser(user); setAuthChecked(true) }} />
   }
 
   return (
@@ -82,6 +112,7 @@ function App() {
             { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
             { id: 'mapping', label: 'Mapping', icon: Compass },
             { id: 'history', label: 'History', icon: HistoryIcon },
+            { id: 'admin', label: 'Admin', icon: Settings },
           ].map(({ id, label, icon: Icon }) => {
             const active = activeSection === id
             return (
@@ -161,9 +192,10 @@ function App() {
               Super User
             </span>
             <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 500 }}>
-              Admin
+              {adminUser?.email || 'Admin'}
             </span>
           </div>
+          <button type="button" className="btn btn-ghost" onClick={handleLogout}>Logout</button>
         </div>
       </aside>
 
@@ -183,6 +215,7 @@ function App() {
         )}
         {activeSection === 'history' && <History onLoadMapping={handleLoadMapping} />}
         {activeSection === 'dashboard' && <Dashboard />}
+        {activeSection === 'admin' && <AdminCloudConnections />}
       </main>
     </div>
   )

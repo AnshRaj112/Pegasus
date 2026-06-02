@@ -32,19 +32,23 @@ export function buildColumnPreviewRequestBody(unit, options) {
   } = options
 
   if (sourceStorageType === 'cloud') {
+    const connectionId = String(sourceCloudConfig?.connectionId || '').trim()
+    const targetConnectionId = String(targetCloudConfig?.connectionId || '').trim()
     return {
       source_cloud: {
         provider: 'google-cloud-storage',
-        bucket: sourceCloudConfig.bucket,
+        connection_id: connectionId || undefined,
+        bucket: sourceCloudConfig.bucket || undefined,
         object_name: unit.sourcePaths[0],
-        credentials_json: sourceCloudConfig.credentialsJson,
+        credentials_json: sourceCloudConfig.credentialsJson || undefined,
         project_id: sourceCloudConfig.projectId || undefined,
       },
       target_cloud: {
         provider: 'google-cloud-storage',
-        bucket: targetCloudConfig?.bucket || sourceCloudConfig.bucket,
+        connection_id: targetConnectionId || connectionId || undefined,
+        bucket: targetCloudConfig?.bucket || sourceCloudConfig.bucket || undefined,
         object_name: unit.targetPaths[0],
-        credentials_json: targetCloudConfig?.credentialsJson || sourceCloudConfig.credentialsJson,
+        credentials_json: targetCloudConfig?.credentialsJson || sourceCloudConfig.credentialsJson || undefined,
         project_id: targetCloudConfig?.projectId || sourceCloudConfig.projectId || undefined,
       },
       uid_column: (uidColumn || 'id').trim(),

@@ -24,6 +24,7 @@ import {
   unitsFromPairs,
 } from '../../api/batchValidation'
 import { matchCloudFilePairs } from '../../api/cloudBrowse'
+import { listAdminCloudConnections } from '../../api/adminCloudConnections'
 import {
   applyTemplateToAllUnits,
   buildCsvTemplateSnapshot,
@@ -70,6 +71,7 @@ function normalizeResult(data) {
 
 const DEFAULT_CLOUD_CONFIG = {
   provider: 'google-cloud-storage',
+  connectionId: '',
   bucket: '',
   objectName: '',
   credentialsJson: '',
@@ -107,30 +109,84 @@ function describeStorageInput(storageType, path, cloudConfig) {
   return path || '—'
 }
 
-function buildStoragePayload(prefix, storageType, path, cloudConfig) {
+function normalizeGcsObjectName(bucket, raw) {
+  let name = String(raw || '').trim()
+  if (!name) return ''
+  if (name.startsWith('gs://')) {
+    const withoutScheme = name.slice(5)
+    const slash = withoutScheme.indexOf('/')
+    name = slash >= 0 ? withoutScheme.slice(slash + 1) : ''
+  }
+  const bucketName = String(bucket || '').trim()
+  if (bucketName && name.startsWith(`${bucketName}/`)) {
+    name = name.slice(bucketName.length + 1)
+  }
+  return name
+}
+
+function resolveCloudConfig(cloudConfig, savedConnections = []) {
+  const bucket = String(cloudConfig?.bucket || '').trim()
+  const objectName = normalizeGcsObjectName(bucket, cloudConfig?.objectName)
+  let connectionId = String(cloudConfig?.connectionId || '').trim()
+  let credentialsJson = String(cloudConfig?.credentialsJson || '').trim()
+  let projectId = String(cloudConfig?.projectId || '').trim()
+  if (!connectionId && !credentialsJson && bucket) {
+    const match = savedConnections.find((row) => String(row.bucket || '').trim() === bucket)
+    if (match) {
+      connectionId = String(match.id)
+      if (!projectId) projectId = String(match.project_id || '').trim()
+    }
+  }
+  return {
+    provider: String(cloudConfig?.provider || 'google-cloud-storage').trim() || 'google-cloud-storage',
+    connectionId,
+    bucket,
+    objectName,
+    credentialsJson,
+    projectId,
+  }
+}
+
+function buildStoragePayload(prefix, storageType, path, cloudConfig, savedConnections = []) {
   if (storageType === 'cloud') {
+    const resolved = resolveCloudConfig(cloudConfig, savedConnections)
     return {
       [`${prefix}_cloud`]: {
-        provider: String(cloudConfig?.provider || 'google-cloud-storage').trim() || 'google-cloud-storage',
-        bucket: String(cloudConfig?.bucket || '').trim(),
-        object_name: String(cloudConfig?.objectName || '').trim(),
-        credentials_json: String(cloudConfig?.credentialsJson || ''),
-        project_id: String(cloudConfig?.projectId || '').trim() || undefined,
+        provider: resolved.provider,
+        connection_id: resolved.connectionId || undefined,
+        bucket: resolved.bucket || undefined,
+        object_name: resolved.objectName,
+        credentials_json: resolved.credentialsJson || undefined,
+        project_id: resolved.projectId || undefined,
       },
     }
   }
   return { [`${prefix}_path`]: String(path || '').trim() }
 }
 
-function isStorageSelectionComplete(storageType, path, cloudConfig) {
+function isStorageSelectionComplete(storageType, path, cloudConfig, savedConnections = []) {
   if (storageType === 'cloud') {
+    const resolved = resolveCloudConfig(cloudConfig, savedConnections)
     return Boolean(
-      String(cloudConfig?.bucket || '').trim()
-      && String(cloudConfig?.objectName || '').trim()
-      && String(cloudConfig?.credentialsJson || '').trim(),
+      resolved.bucket
+      && resolved.objectName
+      && (resolved.credentialsJson || resolved.connectionId),
     )
   }
   return Boolean(String(path || '').trim())
+}
+
+function cloudSelectionError(side, storageType, path, cloudConfig, savedConnections = []) {
+  if (storageType !== 'cloud') {
+    return String(path || '').trim() ? '' : `Please specify a ${side} path.`
+  }
+  const resolved = resolveCloudConfig(cloudConfig, savedConnections)
+  if (!resolved.bucket) return `Please specify a ${side} bucket.`
+  if (!resolved.objectName) return `Please specify a ${side} object path.`
+  if (!resolved.connectionId && !resolved.credentialsJson) {
+    return `Select a saved cloud connection for ${side}, or paste service account JSON.`
+  }
+  return ''
 }
 
 async function pollJobDetail(pollPath, { timeoutMs = 0, intervalMs = 400, onPoll } = {}) {
@@ -545,6 +601,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [targetPath, setTargetPath] = useState('')
   const [sourceCloudConfig, setSourceCloudConfig] = useState(DEFAULT_CLOUD_CONFIG)
   const [targetCloudConfig, setTargetCloudConfig] = useState(DEFAULT_CLOUD_CONFIG)
+  const [savedCloudConnections, setSavedCloudConnections] = useState([])
   const [fileFormat, setFileFormat] = useState('csv')
 
   // Redesign state variables
@@ -598,6 +655,18 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   const [analyzeLoading, setAnalyzeLoading] = useState(false)
   const [analyzeError, setAnalyzeError] = useState('')
 
+  useEffect(() => {
+    async function loadSavedCloudConnections() {
+      try {
+        const rows = await listAdminCloudConnections()
+        setSavedCloudConnections(Array.isArray(rows) ? rows : [])
+      } catch {
+        setSavedCloudConnections([])
+      }
+    }
+    loadSavedCloudConnections()
+  }, [])
+
   const [parallelModalOpen, setParallelModalOpen] = useState(false)
   const [isRunning, setIsRunning]   = useState(false)
   const [result, setResult]         = useState(null)
@@ -642,8 +711,28 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     || mappingQueueUnits.find(u => u.unitId === activeUnitId)
     || (activeUnitId == null && batchColumnMappingMode === 'choose' ? null : validationUnits[0])
     || null
-  const effectiveSourcePath = isBatchMode ? (activeUnit?.sourcePaths?.[0] || '') : sourcePath
-  const effectiveTargetPath = isBatchMode ? (activeUnit?.targetPaths?.[0] || '') : targetPath
+  const effectiveSourcePath = isBatchMode
+    ? (activeUnit?.sourcePaths?.[0] || '')
+    : (sourceStorageType === 'cloud' ? sourceCloudConfig.objectName : sourcePath)
+  const effectiveTargetPath = isBatchMode
+    ? (activeUnit?.targetPaths?.[0] || '')
+    : (targetStorageType === 'cloud' ? targetCloudConfig.objectName : targetPath)
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadSavedCloudConnections() {
+      try {
+        const rows = await listAdminCloudConnections()
+        if (!cancelled) setSavedCloudConnections(Array.isArray(rows) ? rows : [])
+      } catch {
+        if (!cancelled) setSavedCloudConnections([])
+      }
+    }
+    loadSavedCloudConnections()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!initialMappingData) return
@@ -766,13 +855,19 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   function autoDetectFormat() {
     let pathsToCheck = []
     if (inputLayout === 'pair') {
-      pathsToCheck = [sourcePath, targetPath]
+      const sourceCandidate = sourceStorageType === 'cloud' ? sourceCloudConfig.objectName : sourcePath
+      const targetCandidate = targetStorageType === 'cloud' ? targetCloudConfig.objectName : targetPath
+      pathsToCheck = [sourceCandidate, targetCandidate]
     } else if (inputLayout === 'folder') {
-      pathsToCheck = [sourceFolder, targetFolder]
+      const sourceCandidate = sourceStorageType === 'cloud' ? sourceCloudPrefix : sourceFolder
+      const targetCandidate = targetStorageType === 'cloud' ? targetCloudPrefix : targetFolder
+      pathsToCheck = [sourceCandidate, targetCandidate]
     } else if (inputLayout === 'source-one-target-many') {
-      pathsToCheck = [sourcePath, ...targetMultiPaths]
+      const sourceCandidate = sourceStorageType === 'cloud' ? sourceCloudConfig.objectName : sourcePath
+      pathsToCheck = [sourceCandidate, ...targetMultiPaths]
     } else if (inputLayout === 'source-many-target-one') {
-      pathsToCheck = [...sourceMultiPaths, targetPath]
+      const targetCandidate = targetStorageType === 'cloud' ? targetCloudConfig.objectName : targetPath
+      pathsToCheck = [...sourceMultiPaths, targetCandidate]
     }
 
     for (const p of pathsToCheck) {
@@ -785,17 +880,21 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   function handleContinue() {
     let err = ''
     if (inputLayout === 'pair') {
-      if (!sourcePath.trim()) err = 'Please specify a Source path.'
-      else if (!targetPath.trim()) err = 'Please specify a Target path.'
+      err = cloudSelectionError('Source', sourceStorageType, sourcePath, sourceCloudConfig, savedCloudConnections)
+        || cloudSelectionError('Target', targetStorageType, targetPath, targetCloudConfig, savedCloudConnections)
     } else if (inputLayout === 'folder') {
-      if (!sourceFolder.trim()) err = 'Please specify a Source folder.'
-      else if (!targetFolder.trim()) err = 'Please specify a Target folder.'
+      const sourceFolderValue = sourceStorageType === 'cloud' ? sourceCloudPrefix : sourceFolder
+      const targetFolderValue = targetStorageType === 'cloud' ? targetCloudPrefix : targetFolder
+      if (!sourceFolderValue.trim()) err = 'Please specify a Source folder.'
+      else if (!targetFolderValue.trim()) err = 'Please specify a Target folder.'
     } else if (inputLayout === 'source-one-target-many') {
-      if (!sourcePath.trim()) err = 'Please specify a Source path.'
-      else if (targetMultiPaths.length === 0) err = 'Please select at least one Target file.'
+      err = cloudSelectionError('Source', sourceStorageType, sourcePath, sourceCloudConfig, savedCloudConnections)
+      if (!err && targetMultiPaths.length === 0) err = 'Please select at least one Target file.'
     } else if (inputLayout === 'source-many-target-one') {
       if (sourceMultiPaths.length === 0) err = 'Please select at least one Source file.'
-      else if (!targetPath.trim()) err = 'Please specify a Target path.'
+      else {
+        err = cloudSelectionError('Target', targetStorageType, targetPath, targetCloudConfig, savedCloudConnections)
+      }
     }
 
     if (err) {
@@ -803,6 +902,12 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       return
     }
     setPairingError('')
+    if (sourceStorageType === 'cloud') {
+      setSourceCloudConfig(resolveCloudConfig(sourceCloudConfig, savedCloudConnections))
+    }
+    if (targetStorageType === 'cloud') {
+      setTargetCloudConfig(resolveCloudConfig(targetCloudConfig, savedCloudConnections))
+    }
 
     let format = fileFormat
     if (!isManualFormat) {
@@ -856,13 +961,14 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     const parsed = parseSelection(selection)
     if (!parsed) return
     if (parsed.kind === 'cloud') {
-      setSourceCloudConfig({
+      setSourceCloudConfig(resolveCloudConfig({
         provider: parsed.provider || 'google-cloud-storage',
         bucket: parsed.bucket || '',
         objectName: parsed.objectName || '',
         credentialsJson: parsed.credentialsJson || '',
         projectId: parsed.projectId || '',
-      })
+        connectionId: parsed.connectionId || sourceCloudConfig.connectionId || '',
+      }, savedCloudConnections))
       setSourcePath('')
     } else if (parsed.kind === 'cloud-folder') {
       applyCloudConfig(parsed)
@@ -893,13 +999,14 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     const parsed = parseSelection(selection)
     if (!parsed) return
     if (parsed.kind === 'cloud') {
-      setTargetCloudConfig({
+      setTargetCloudConfig(resolveCloudConfig({
         provider: parsed.provider || 'google-cloud-storage',
         bucket: parsed.bucket || '',
         objectName: parsed.objectName || '',
         credentialsJson: parsed.credentialsJson || '',
         projectId: parsed.projectId || '',
-      })
+        connectionId: parsed.connectionId || targetCloudConfig.connectionId || '',
+      }, savedCloudConnections))
       setTargetPath('')
     } else if (parsed.kind === 'cloud-folder') {
       applyCloudConfig(parsed)
@@ -1244,6 +1351,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         sourcePrefix,
         targetPrefix,
         credentialsJson: sourceCloudConfig.credentialsJson,
+        connectionId: sourceCloudConfig.connectionId || undefined,
         projectId: sourceCloudConfig.projectId,
         fileFormat: apiFileFormat,
         recursive: recursiveFolderMatch,
@@ -1278,23 +1386,41 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     })
   }
 
+  function applySavedCloudConnection(setter, connectionId) {
+    const selected = savedCloudConnections.find((row) => String(row.id) === String(connectionId))
+    if (!selected) {
+      setter((prev) => ({ ...prev, connectionId: '', bucket: '', projectId: '', credentialsJson: '' }))
+      return
+    }
+    setter((prev) => ({
+      ...prev,
+      connectionId: String(selected.id),
+      provider: selected.provider || 'google-cloud-storage',
+      bucket: selected.bucket || '',
+      projectId: selected.project_id || '',
+      credentialsJson: '',
+    }))
+  }
+
   function handleSourceSelected(selection) {
     const parsed = parseSelection(selection)
     if (!parsed) return
     if (parsed.kind === 'cloud') {
-      setSourceCloudConfig({
+      setSourceCloudConfig(resolveCloudConfig({
         provider: parsed.provider || 'google-cloud-storage',
         bucket: parsed.bucket || '',
         objectName: parsed.objectName || '',
         credentialsJson: parsed.credentialsJson || '',
         projectId: parsed.projectId || '',
-      })
-      setTargetCloudConfig(prev => ({
+        connectionId: parsed.connectionId || sourceCloudConfig.connectionId || '',
+      }, savedCloudConnections))
+      setTargetCloudConfig(prev => resolveCloudConfig({
         ...prev,
         bucket: parsed.bucket || prev.bucket,
         credentialsJson: parsed.credentialsJson || prev.credentialsJson,
+        connectionId: parsed.connectionId || prev.connectionId,
         projectId: parsed.projectId || prev.projectId,
-      }))
+      }, savedCloudConnections))
       setSourcePath('')
       setSubPhase(inputLayout === 'source-one-target-many' ? 'pick-target-multi' : 'pick-target')
       return
@@ -1332,13 +1458,14 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     const parsed = parseSelection(selection)
     if (!parsed) return
     if (parsed.kind === 'cloud') {
-      setTargetCloudConfig({
+      setTargetCloudConfig(resolveCloudConfig({
         provider: parsed.provider || 'google-cloud-storage',
         bucket: parsed.bucket || '',
         objectName: parsed.objectName || '',
         credentialsJson: parsed.credentialsJson || '',
         projectId: parsed.projectId || '',
-      })
+        connectionId: parsed.connectionId || targetCloudConfig.connectionId || '',
+      }, savedCloudConnections))
       setTargetPath('')
       if (inputLayout === 'source-many-target-one' && sourceMultiPaths.length) {
         const unit = unitFromMerge({
@@ -1446,40 +1573,33 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       setColumnPreviewLoading(true)
       setColumnPreviewError('')
       try {
+        const previewSourcePath = isBatchMode ? effectiveSourcePath : sourcePath
+        const previewTargetPath = isBatchMode ? effectiveTargetPath : targetPath
+        const previewSourceCloudConfig = sourceStorageType === 'cloud'
+          ? {
+              ...sourceCloudConfig,
+              objectName: (isBatchMode && activeUnit?.sourcePaths?.[0]) || sourceCloudConfig.objectName,
+            }
+          : sourceCloudConfig
+        const previewTargetCloudConfig = targetStorageType === 'cloud'
+          ? {
+              ...targetCloudConfig,
+              objectName: (isBatchMode && activeUnit?.targetPaths?.[0]) || targetCloudConfig.objectName,
+            }
+          : targetCloudConfig
         const res = await fetch(absoluteApiUrl('/api/v1/validate/local/columns'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
           body: JSON.stringify(
-            isBatchMode && sourceStorageType === 'cloud' && activeUnit
-              ? {
-                  source_cloud: {
-                    provider: 'google-cloud-storage',
-                    bucket: sourceCloudConfig.bucket,
-                    object_name: activeUnit.sourcePaths[0],
-                    credentials_json: sourceCloudConfig.credentialsJson,
-                    project_id: sourceCloudConfig.projectId || undefined,
-                  },
-                  target_cloud: {
-                    provider: 'google-cloud-storage',
-                    bucket: targetCloudConfig.bucket || sourceCloudConfig.bucket,
-                    object_name: activeUnit.targetPaths[0],
-                    credentials_json: targetCloudConfig.credentialsJson || sourceCloudConfig.credentialsJson,
-                    project_id: targetCloudConfig.projectId || sourceCloudConfig.projectId || undefined,
-                  },
-                  uid_column: uidColumn.trim(),
-                  delimiter: delimiter.trim() || 'auto',
-                  has_header: hasHeader,
-                  header_leading_rows: headerLeadingRows,
-                }
-              : {
-                  source_path: effectiveSourcePath,
-                  target_path: effectiveTargetPath,
-                  uid_column: uidColumn.trim(),
-                  delimiter: delimiter.trim() || 'auto',
-                  has_header: hasHeader,
-                  header_leading_rows: headerLeadingRows,
-                },
+            {
+              ...buildStoragePayload('source', sourceStorageType, previewSourcePath, previewSourceCloudConfig, savedCloudConnections),
+              ...buildStoragePayload('target', targetStorageType, previewTargetPath, previewTargetCloudConfig, savedCloudConnections),
+              uid_column: uidColumn.trim(),
+              delimiter: delimiter.trim() || 'auto',
+              has_header: hasHeader,
+              header_leading_rows: headerLeadingRows,
+            },
           ),
         })
         const raw = await res.text()
@@ -1807,8 +1927,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         return
       }
 
-      const sourcePayload = buildStoragePayload('source', sourceStorageType, sourcePath, sourceCloudConfig)
-      const targetPayload = buildStoragePayload('target', targetStorageType, targetPath, targetCloudConfig)
+      const sourcePayload = buildStoragePayload('source', sourceStorageType, sourcePath, sourceCloudConfig, savedCloudConnections)
+      const targetPayload = buildStoragePayload('target', targetStorageType, targetPath, targetCloudConfig, savedCloudConnections)
       const bodyPayload = fileFormat === 'fixed-width' ? {
         ...sourcePayload,
         ...targetPayload,
@@ -2285,12 +2405,39 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div>
                       <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Saved Connection (Optional)
+                      </label>
+                      <select
+                        value={sourceCloudConfig.connectionId || ''}
+                        onChange={e => applySavedCloudConnection(setSourceCloudConfig, e.target.value)}
+                        style={{
+                          width: '100%',
+                          height: 36,
+                          borderRadius: 8,
+                          border: '1px solid var(--border-2)',
+                          background: 'var(--surface-2)',
+                          color: 'var(--text-1)',
+                          padding: '0 12px',
+                          fontSize: 13,
+                          outline: 'none',
+                        }}
+                      >
+                        <option value="">-- Manual (paste JSON) --</option>
+                        {savedCloudConnections.map((conn) => (
+                          <option key={conn.id} value={conn.id}>
+                            {conn.name} ({conn.bucket})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>
                         Bucket Name
                       </label>
                       <input
                         type="text"
                         value={sourceCloudConfig.bucket}
-                        onChange={e => setSourceCloudConfig(prev => ({ ...prev, bucket: e.target.value }))}
+                        onChange={e => setSourceCloudConfig(prev => resolveCloudConfig({ ...prev, bucket: e.target.value }, savedCloudConnections))}
                         placeholder="my-gcs-bucket"
                         style={{
                           width: '100%',
@@ -2333,7 +2480,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                       </label>
                       <textarea
                         value={sourceCloudConfig.credentialsJson}
-                        onChange={e => setSourceCloudConfig(prev => ({ ...prev, credentialsJson: e.target.value }))}
+                        disabled={Boolean(sourceCloudConfig.connectionId)}
+                        onChange={e => setSourceCloudConfig(prev => ({ ...prev, connectionId: '', credentialsJson: e.target.value }))}
                         placeholder='{"type": "service_account", ...}'
                         style={{
                           width: '100%',
@@ -2346,6 +2494,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                           fontSize: 12,
                           outline: 'none',
                           resize: 'vertical',
+                          opacity: sourceCloudConfig.connectionId ? 0.6 : 1,
                         }}
                       />
                     </div>
@@ -2366,7 +2515,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                           onChange={e => {
                             if (inputLayout === 'folder') setSourceCloudPrefix(e.target.value)
                             else if (inputLayout === 'source-many-target-one') setSourceMultiPaths(e.target.value.split(',').map(s => s.trim()).filter(Boolean))
-                            else setSourceCloudConfig(prev => ({ ...prev, objectName: e.target.value }))
+                            else setSourceCloudConfig(prev => ({
+                              ...prev,
+                              objectName: normalizeGcsObjectName(prev.bucket, e.target.value),
+                            }))
                           }}
                           placeholder="e.g. data/sources/"
                           style={{
@@ -2516,12 +2668,39 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div>
                       <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Saved Connection (Optional)
+                      </label>
+                      <select
+                        value={targetCloudConfig.connectionId || ''}
+                        onChange={e => applySavedCloudConnection(setTargetCloudConfig, e.target.value)}
+                        style={{
+                          width: '100%',
+                          height: 36,
+                          borderRadius: 8,
+                          border: '1px solid var(--border-2)',
+                          background: 'var(--surface-2)',
+                          color: 'var(--text-1)',
+                          padding: '0 12px',
+                          fontSize: 13,
+                          outline: 'none',
+                        }}
+                      >
+                        <option value="">-- Manual (paste JSON) --</option>
+                        {savedCloudConnections.map((conn) => (
+                          <option key={conn.id} value={conn.id}>
+                            {conn.name} ({conn.bucket})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>
                         Bucket Name
                       </label>
                       <input
                         type="text"
                         value={targetCloudConfig.bucket}
-                        onChange={e => setTargetCloudConfig(prev => ({ ...prev, bucket: e.target.value }))}
+                        onChange={e => setTargetCloudConfig(prev => resolveCloudConfig({ ...prev, bucket: e.target.value }, savedCloudConnections))}
                         placeholder="my-gcs-bucket"
                         style={{
                           width: '100%',
@@ -2564,7 +2743,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                       </label>
                       <textarea
                         value={targetCloudConfig.credentialsJson}
-                        onChange={e => setTargetCloudConfig(prev => ({ ...prev, credentialsJson: e.target.value }))}
+                        disabled={Boolean(targetCloudConfig.connectionId)}
+                        onChange={e => setTargetCloudConfig(prev => ({ ...prev, connectionId: '', credentialsJson: e.target.value }))}
                         placeholder='{"type": "service_account", ...}'
                         style={{
                           width: '100%',
@@ -2577,6 +2757,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                           fontSize: 12,
                           outline: 'none',
                           resize: 'vertical',
+                          opacity: targetCloudConfig.connectionId ? 0.6 : 1,
                         }}
                       />
                     </div>
@@ -2597,7 +2778,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                           onChange={e => {
                             if (inputLayout === 'folder') setTargetCloudPrefix(e.target.value)
                             else if (inputLayout === 'source-one-target-many') setTargetMultiPaths(e.target.value.split(',').map(s => s.trim()).filter(Boolean))
-                            else setTargetCloudConfig(prev => ({ ...prev, objectName: e.target.value }))
+                            else setTargetCloudConfig(prev => ({
+                              ...prev,
+                              objectName: normalizeGcsObjectName(prev.bucket, e.target.value),
+                            }))
                           }}
                           placeholder="e.g. data/targets/"
                           style={{

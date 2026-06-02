@@ -187,12 +187,23 @@ class GoogleCloudStorageConfig(BaseModel):
         default="google-cloud-storage",
         description="Only Google Cloud Storage is supported for cloud validation inputs right now.",
     )
-    bucket: str = Field(description="GCS bucket name")
+    bucket: str | None = Field(default=None, description="GCS bucket name")
     object_name: str = Field(description="Path of the CSV object inside the bucket")
-    credentials_json: str = Field(
+    credentials_json: str | None = Field(
+        default=None,
         description="Raw service account JSON string copied from Google Cloud",
     )
+    connection_id: UUID | None = Field(
+        default=None,
+        description="Saved admin-managed cloud connection id (credentials_json may be omitted when set).",
+    )
     project_id: str | None = Field(default=None, description="Optional project id override")
+
+    @model_validator(mode="after")
+    def _validate_credentials_source(self) -> "GoogleCloudStorageConfig":
+        if self.connection_id is None and not (self.credentials_json or "").strip():
+            raise ValueError("credentials_json or connection_id is required")
+        return self
 
 
 class LocalPathValidateRequest(BaseModel):
@@ -689,11 +700,18 @@ class MatchFilePairsRequest(BaseModel):
 class CloudBrowseRequest(BaseModel):
     """JSON body for POST /validate/cloud/browse."""
 
-    bucket: str
+    bucket: str | None = None
     prefix: str = Field(default="", description="Folder prefix inside the bucket (e.g. data/2024/)")
-    credentials_json: str
+    credentials_json: str | None = None
+    connection_id: UUID | None = None
     project_id: str | None = None
     file_format: str = Field(default="csv")
+
+    @model_validator(mode="after")
+    def _validate_cloud_auth(self) -> "CloudBrowseRequest":
+        if self.connection_id is None and not (self.credentials_json or "").strip():
+            raise ValueError("credentials_json or connection_id is required")
+        return self
 
 
 class CloudBrowseEntry(BaseModel):
@@ -717,13 +735,20 @@ class CloudBrowseResponse(BaseModel):
 class CloudMatchFilePairsRequest(BaseModel):
     """JSON body for POST /validate/cloud/match-pairs."""
 
-    bucket: str
+    bucket: str | None = None
     source_prefix: str = ""
     target_prefix: str = ""
-    credentials_json: str
+    credentials_json: str | None = None
+    connection_id: UUID | None = None
     project_id: str | None = None
     file_format: str = Field(default="csv")
     recursive: bool = False
+
+    @model_validator(mode="after")
+    def _validate_cloud_auth(self) -> "CloudMatchFilePairsRequest":
+        if self.connection_id is None and not (self.credentials_json or "").strip():
+            raise ValueError("credentials_json or connection_id is required")
+        return self
 
 
 class FilePairMatch(BaseModel):
