@@ -64,7 +64,13 @@ def polars_supports_csv_delimiter(delimiter: str) -> bool:
     return len(delimiter) == 1 and len(delimiter.encode("utf-8")) == 1
 
 
-def resolve_shared_auto_delimiter(source_path: Path, target_path: Path) -> DelimiterDetectionResult:
+def resolve_shared_auto_delimiter(
+    source_path: Path,
+    target_path: Path,
+    *,
+    source_lines: list[str] | None = None,
+    target_lines: list[str] | None = None,
+) -> DelimiterDetectionResult:
     """Pick one delimiter that fits **both** files when per-file sniffers disagree.
 
     ``detect_delimiter`` runs independently on each path; real pipelines sometimes
@@ -76,8 +82,16 @@ def resolve_shared_auto_delimiter(source_path: Path, target_path: Path) -> Delim
     ValueError
         If no candidate produces stable, matching field counts on both sides.
     """
-    left = detect_delimiter(source_path)
-    right = detect_delimiter(target_path)
+    left = (
+        detect_delimiter_from_lines(source_lines, path=source_path)
+        if source_lines is not None
+        else detect_delimiter(source_path)
+    )
+    right = (
+        detect_delimiter_from_lines(target_lines, path=target_path)
+        if target_lines is not None
+        else detect_delimiter(target_path)
+    )
     if left.delimiter == right.delimiter:
         return DelimiterDetectionResult(
             delimiter=left.delimiter,
@@ -221,6 +235,25 @@ def _pick_best_delimiter(
     return DelimiterDetectionResult(delimiter=best, strategy=strategy)
 
 
+def detect_delimiter_from_lines(
+    lines: list[str],
+    *,
+    path: Path | None = None,
+) -> DelimiterDetectionResult:
+    """Detect delimiter from pre-loaded sample lines (avoids extra file read)."""
+    if not lines:
+        name = path.name if path is not None else "file"
+        raise ValueError(f"Cannot infer delimiter for empty file: {name}")
+    sample_lines = lines[:100]
+    sample_text = "\n".join(sample_lines)
+    hints = _sniffer_delimiter_hints(sample_text)
+    picked = _pick_best_delimiter(sample_lines, extra_candidates=hints)
+    if picked is not None:
+        return picked
+    name = path.name if path is not None else "file"
+    raise ValueError(f"Could not infer delimiter for {name}; please provide delimiter explicitly")
+
+
 def detect_delimiter(path: Path) -> DelimiterDetectionResult:
     """Detect delimiter using quote-aware scoring over all plausible candidates.
 
@@ -229,19 +262,7 @@ def detect_delimiter(path: Path) -> DelimiterDetectionResult:
     time, so commas inside ``"[1, 2, 3]"`` do not beat the real field separator.
     """
     lines = _sample_non_empty_lines(path)
-    if not lines:
-        raise ValueError(f"Cannot infer delimiter for empty file: {path.name}")
-    sample_lines = lines[:100]
-    sample_text = "\n".join(sample_lines)
-
-    hints = _sniffer_delimiter_hints(sample_text)
-    picked = _pick_best_delimiter(sample_lines, extra_candidates=hints)
-    if picked is not None:
-        return picked
-
-    raise ValueError(
-        f"Could not infer delimiter for {path.name}; please provide delimiter explicitly"
-    )
+    return detect_delimiter_from_lines(lines, path=path)
 
 
 def _repeated_substring_candidates(

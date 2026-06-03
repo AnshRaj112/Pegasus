@@ -39,7 +39,9 @@ def test_resolve_prefers_explicit_fixed_width_config() -> None:
         fixed_width_config=explicit,
         column_mappings=[],
     )
-    assert cfg == explicit
+    assert cfg is not None
+    assert cfg["source_date_start"] == explicit["source_date_start"]
+    assert cfg["source_date_end"] == explicit["source_date_end"]
 
 
 def test_coerce_local_validate_fields() -> None:

@@ -79,8 +79,13 @@ from pegasus.validation.delimiter_tokens import (
     JSON_DELIMITER,
     normalize_delimiter_for_storage,
 )
+from pegasus.validation.file_detection.routing import (
+    coerce_local_validate_fields_with_detection,
+    is_auto_format,
+)
 from pegasus.validation.fixed_width_meta import (
     coerce_local_validate_fields,
+    is_columnar_run,
     is_fixed_width_run,
     is_json_run,
 )
@@ -963,20 +968,10 @@ async def validate_csv_local_paths(
     body: Annotated[LocalPathValidateRequest, Body()],
 ) -> ValidationJobAcceptedResponse:
     """Queue validation for server-local CSV paths (worker reads files in-place)."""
-    file_format, delimiter, fixed_width_config_dict = coerce_local_validate_fields(
-        file_format=body.file_format,
-        delimiter=body.delimiter,
-        fixed_width_config=body.fixed_width_config.model_dump()
-        if body.fixed_width_config is not None
-        else None,
-        column_mappings=[m.model_dump() for m in body.column_mappings],
-    )
-    if is_fixed_width_run(file_format=file_format, delimiter=delimiter) and not fixed_width_config_dict:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail="fixed_width_config is required for fixed-width validation (date slice positions and formats)",
-        )
-    json_run = is_json_run(file_format=file_format, delimiter=delimiter)
+    detection_warnings: list[str] = []
+    materialized_cleanup: list[str] = []
+    use_detection = settings.validation_auto_detect_format or is_auto_format(body.file_format)
+    use_extract = settings.validation_auto_extract_archives
 
     job_id = uuid.uuid4()
     jobs_root = _validation_jobs_root(settings)
@@ -1007,6 +1002,47 @@ async def validate_csv_local_paths(
         cloud=target_cloud,
         destination_path=job_dir / "target.csv" if target_cloud is not None else None,
     )
+
+    resolved_source = source_input.path
+    resolved_target = target_input.path
+
+    if (use_detection or use_extract) and body.source_path and body.target_path:
+        try:
+            file_format, delimiter, fixed_width_config_dict, resolved_source, resolved_target, cleanup, detection_warnings = (
+                coerce_local_validate_fields_with_detection(
+                    file_format=body.file_format,
+                    delimiter=body.delimiter,
+                    fixed_width_config=body.fixed_width_config.model_dump()
+                    if body.fixed_width_config is not None
+                    else None,
+                    column_mappings=[m.model_dump() for m in body.column_mappings],
+                    source_path=resolved_source,
+                    target_path=resolved_target,
+                    auto_detect=use_detection,
+                    auto_extract=use_extract,
+                    work_dir=job_dir,
+                    max_extract_bytes=settings.validation_archive_max_extract_bytes,
+                )
+            )
+            materialized_cleanup = [str(p) for p in cleanup]
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    else:
+        file_format, delimiter, fixed_width_config_dict = coerce_local_validate_fields(
+            file_format=body.file_format,
+            delimiter=body.delimiter,
+            fixed_width_config=body.fixed_width_config.model_dump()
+            if body.fixed_width_config is not None
+            else None,
+            column_mappings=[m.model_dump() for m in body.column_mappings],
+        )
+    if is_fixed_width_run(file_format=file_format, delimiter=delimiter) and not fixed_width_config_dict:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="fixed_width_config is required for fixed-width validation (date slice positions and formats)",
+        )
+    json_run = is_json_run(file_format=file_format, delimiter=delimiter)
+    columnar_run = is_columnar_run(file_format=file_format)
 
     run_id: uuid.UUID | None = None
     if settings.enable_validation_persistence:
@@ -1075,14 +1111,16 @@ async def validate_csv_local_paths(
         "header_leading_rows": body.header_leading_rows,
         "memory_log_interval_seconds": settings.validation_memory_log_interval_seconds,
         "run_id": str(run_id) if run_id else None,
-        "source_path": str(source_input.path),
-        "target_path": str(target_input.path),
+        "source_path": str(resolved_source),
+        "target_path": str(resolved_target),
         "source_filename": source_input.display_name,
         "target_filename": target_input.display_name,
         "file_format": file_format,
         "fixed_width_config": fixed_width_config_dict,
         "test_mode": body.test_mode.value,
         "uid_gte": body.uid_gte,
+        "detection_warnings": detection_warnings,
+        "materialized_cleanup_paths": materialized_cleanup,
     }
     (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
 

@@ -169,10 +169,26 @@ GET /api/v1/validate/local/detect?path=/data/report.csv&file_format=csv
 
 Response includes `dataset_model`, `suggested_file_format`, per-layer `confidence`/`evidence`, and `warnings`.
 
+## Completed extensions
+
+| Gap | Implementation |
+|-----|----------------|
+| Auto-routing | `coerce_local_validate_fields_with_detection()`, `file_format=auto`, settings `validation_auto_detect_format` |
+| Archive extract | `archive_extract.materialize_validation_path()` with depth/size/entry limits; `validation_auto_extract_archives` |
+| Delimiter merge | `delimiter_bridge.resolve_auto_delimiter()` reuses detection prefix + structured delimiter hints |
+| Parquet/ORC/Avro/Excel | `readers/columnar_reader.py`, `validate_columnar_pair_sync()`, `is_columnar_run()` |
+| Plugin registry | `file_detection/plugins/registry.py` — `register_format_plugin()` for extensions |
+
+## Configuration
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `PEGASUS_VALIDATION_AUTO_DETECT_FORMAT` | `true` | Resolve `file_format=auto` from detection |
+| `PEGASUS_VALIDATION_AUTO_EXTRACT_ARCHIVES` | `true` | Decompress gzip/bzip2; extract first tabular zip/tar member |
+| `PEGASUS_VALIDATION_ARCHIVE_MAX_EXTRACT_BYTES` | 512 MiB | Per-member uncompressed cap |
+
 ## Future work
 
-- Plugin registry for new formats
-- Recursive archive walk with depth/size bombs guards
-- Wire `suggest_format_override()` into batch validate when `file_format=auto`
-- Merge delimiter sniff into structured layer to avoid second 512 KiB read
-- Parquet/ORC Avro readers behind `binary_asset` → `tabular` promotion
+- Recursive nested archive walk (depth-limited) beyond first tabular member
+- External-memory reconciliation for large Parquet pairs (today: in-memory columnar path)
+- Cloud path auto-detect at download time (GCS/S3)

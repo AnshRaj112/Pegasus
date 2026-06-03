@@ -214,12 +214,18 @@ def run_job_directory(job_dir: Path) -> int:
                 },
             )
 
-        from pegasus.validation.fixed_width_meta import is_json_run, resolve_fixed_width_config
+        from pegasus.validation.fixed_width_meta import (
+            is_columnar_run,
+            is_json_run,
+            resolve_fixed_width_config,
+        )
 
+        file_format_meta = str(meta.get("file_format") or "csv")
         json_run = is_json_run(
-            file_format=str(meta.get("file_format") or "csv"),
+            file_format=file_format_meta,
             delimiter=str(meta.get("delimiter") or ""),
         )
+        columnar_run = is_columnar_run(file_format=file_format_meta)
         fixed_width_config = resolve_fixed_width_config(
             file_format=str(meta.get("file_format") or "csv"),
             delimiter=str(meta.get("delimiter") or ""),
@@ -248,6 +254,26 @@ def run_job_directory(job_dir: Path) -> int:
                 tgt,
                 artifact_export_parent=job_dir,
                 progress_callback=_progress_cb,
+            )
+        elif columnar_run:
+            _write_json(
+                status_path,
+                {
+                    "status": "running",
+                    "phase": "validating",
+                    "message": f"Comparing {file_format_meta} datasets",
+                    "progress": {"started_at_epoch_s": start},
+                },
+            )
+            result = service.validate_columnar_pair_sync(
+                src,
+                tgt,
+                uid_column=uid_column,
+                file_format=file_format_meta,
+                column_mappings=column_mappings,
+                artifact_export_parent=job_dir,
+                progress_callback=_progress_cb,
+                uid_gte=uid_gte,
             )
         elif fixed_width_config is not None:
             _write_json(
@@ -385,6 +411,15 @@ def run_job_directory(job_dir: Path) -> int:
     finally:
         if monitor:
             monitor.stop()
+        for raw in meta.get("materialized_cleanup_paths") or []:
+            try:
+                p = Path(str(raw))
+                if p.is_dir():
+                    shutil.rmtree(p, ignore_errors=True)
+                else:
+                    p.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def run_job_directory_str(job_dir: str) -> int:

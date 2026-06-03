@@ -15,7 +15,8 @@ from pegasus.validation.file_detection.layers import (
     discover_schema_hint,
     select_validation_strategy,
 )
-from pegasus.validation.file_detection.models import FileDetectionReport
+from pegasus.validation.file_detection.models import DetectionStageResult, FileDetectionReport
+from pegasus.validation.file_detection.plugins.registry import detect_with_plugins
 from pegasus.validation.file_detection.sampling import read_file_sample
 
 
@@ -32,7 +33,15 @@ def detect_file(
     sample = read_file_sample(path, **kwargs)
 
     extension = detect_extension_hint(sample)
+    plugin_hit = detect_with_plugins(sample)
     magic = detect_magic_bytes(sample)
+    if plugin_hit is not None and plugin_hit.confidence > magic.confidence:
+        magic = DetectionStageResult(
+            plugin_hit.detected_type,
+            plugin_hit.confidence,
+            plugin_hit.evidence + magic.evidence,
+            {**magic.metadata, **plugin_hit.metadata},
+        )
     container = detect_container(sample, magic_result=magic)
     compression = detect_compression(sample, magic_result=magic)
     encoding = detect_encoding(sample, magic_result=magic)

@@ -266,6 +266,25 @@ class Settings(BaseSettings):
             "Disable to honor only the user-set max_concurrency."
         ),
     )
+    validation_auto_detect_format: bool = Field(
+        default=True,
+        description=(
+            "When true, local validation uses multi-layer file detection to resolve "
+            "file_format=auto and to warn when declared format disagrees with content."
+        ),
+    )
+    validation_auto_extract_archives: bool = Field(
+        default=True,
+        description=(
+            "When true, gzip/bzip2/zip/tar inputs are materialized to a bounded temp "
+            "file under the job directory before validation runs."
+        ),
+    )
+    validation_archive_max_extract_bytes: int = Field(
+        default=512 * 1024 * 1024,
+        ge=1024 * 1024,
+        description="Maximum uncompressed bytes per archive member when auto-extracting.",
+    )
 
     @model_validator(mode="after")
     def _validate_encryption_key(self) -> "Settings":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from pegasus.validation.delimiter_tokens import (
@@ -13,6 +14,8 @@ from pegasus.validation.delimiter_tokens import (
 
 _FIXED_WIDTH_FORMAT_ALIASES = frozenset({"fixed-width", "fixed_width", "fixedwidth"})
 _JSON_FORMAT_ALIASES = frozenset({"json"})
+_COLUMNAR_FORMAT_ALIASES = frozenset({"parquet", "orc", "avro", "excel", "xlsx"})
+_AUTO_FORMAT_ALIASES = frozenset({"auto", "detect", "infer"})
 
 _DRAFT_CONFIG_KEYS = (
     "source_date_start",
@@ -25,13 +28,22 @@ _DRAFT_CONFIG_KEYS = (
 
 
 def normalize_file_format(file_format: str | None) -> str:
-    """Return ``csv``, ``fixed-width``, or ``json``."""
+    """Return canonical format token for routing."""
     token = (file_format or "csv").strip().lower().replace("_", "-")
+    if token in _AUTO_FORMAT_ALIASES:
+        return "auto"
     if token in _JSON_FORMAT_ALIASES:
         return "json"
     if token in _FIXED_WIDTH_FORMAT_ALIASES or token == "fixed-width":
         return "fixed-width"
+    if token in _COLUMNAR_FORMAT_ALIASES or token == "xlsx":
+        return "excel" if token == "xlsx" else token
     return "csv"
+
+
+def is_columnar_run(file_format: str | None = None) -> bool:
+    """True when validation should use the columnar (Parquet/ORC/Avro/Excel) path."""
+    return normalize_file_format(file_format) in _COLUMNAR_FORMAT_ALIASES
 
 
 def is_json_run(*, file_format: str | None = None, delimiter: str | None = None) -> bool:
@@ -169,12 +181,32 @@ def coerce_local_validate_fields(
     delimiter: str,
     fixed_width_config: dict[str, Any] | None,
     column_mappings: list[Any] | None,
+    source_path: Path | None = None,
+    target_path: Path | None = None,
+    auto_detect: bool = False,
+    auto_extract: bool = False,
 ) -> tuple[str, str, dict[str, Any] | None]:
     """Normalize local-path validate request fields for fixed-width / JSON runs."""
+    if (auto_detect or auto_extract) and source_path is not None and target_path is not None:
+        from pegasus.validation.file_detection.routing import coerce_local_validate_fields_with_detection
+
+        fmt, delim, cfg, _src, _tgt, _cleanup, _warnings = coerce_local_validate_fields_with_detection(
+            file_format=file_format,
+            delimiter=delimiter,
+            fixed_width_config=fixed_width_config,
+            column_mappings=column_mappings,
+            source_path=Path(source_path),
+            target_path=Path(target_path),
+            auto_detect=auto_detect,
+            auto_extract=auto_extract,
+        )
+        return fmt, delim, cfg
     if is_json_run(file_format=file_format, delimiter=delimiter):
         return "json", JSON_DELIMITER, None
+    if is_columnar_run(file_format=file_format):
+        return normalize_file_format(file_format), ",", None
     if not is_fixed_width_run(file_format=file_format, delimiter=delimiter):
-        return file_format, delimiter, fixed_width_config
+        return normalize_file_format(file_format) if normalize_file_format(file_format) != "auto" else file_format, delimiter, fixed_width_config
     resolved = resolve_fixed_width_config(
         file_format="fixed-width",
         delimiter=delimiter,

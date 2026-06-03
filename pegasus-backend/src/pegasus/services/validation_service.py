@@ -1242,8 +1242,9 @@ class ValidationService:
         lowered = token.lower()
         if lowered in {"", "auto", "infer", "detect"}:
             try:
-                shared = resolve_shared_auto_delimiter(source_path, target_path)
-                return shared.delimiter
+                from pegasus.validation.file_detection.delimiter_bridge import resolve_auto_delimiter
+
+                return resolve_auto_delimiter(source_path, target_path)
             except ValueError as exc:
                 raise ValidationBadRequestError(str(exc)) from exc
 
@@ -1690,6 +1691,90 @@ class ValidationService:
             compared_column_count=len(compared_columns),
             compared_columns=compared_columns,
             mismatch_artifact_path=artifact_path,
+        )
+
+    def validate_columnar_pair_sync(
+        self,
+        source_path: Path,
+        target_path: Path,
+        uid_column: str,
+        file_format: str,
+        column_mappings: list[ColumnMapping] | None = None,
+        *,
+        artifact_export_parent: Path | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        uid_gte: str | None = None,
+    ) -> ValidationRunResult:
+        """Compare Parquet, ORC, Avro, or Excel inputs via in-memory UID reconciliation."""
+        from pegasus.validation.readers.columnar_reader import ColumnarReadError, read_columnar_file
+
+        uid = uid_column.strip()
+        if not uid:
+            raise ValidationBadRequestError("uid_column must be a non-empty string")
+
+        if progress_callback is not None:
+            progress_callback({
+                "phase": "validating",
+                "message": f"Loading {file_format} files",
+                "percent": 10,
+            })
+
+        try:
+            source_df = read_columnar_file(Path(source_path), file_format)
+            target_df = read_columnar_file(Path(target_path), file_format)
+        except ColumnarReadError as exc:
+            raise ValidationBadRequestError(str(exc)) from exc
+
+        if uid_gte is not None:
+            source_df = self._apply_uid_gte_filter(source_df, uid, uid_gte)
+            target_df = self._apply_uid_gte_filter(target_df, uid, uid_gte)
+
+        if uid not in source_df.columns:
+            raise ValidationBadRequestError(
+                f"uid_column {uid!r} not found in source columns: {list(source_df.columns)}"
+            )
+        if uid not in target_df.columns:
+            raise ValidationBadRequestError(
+                f"uid_column {uid!r} not found in target columns: {list(target_df.columns)}"
+            )
+
+        target_rename_map = self._resolve_target_rename_map(
+            source_columns=list(source_df.columns),
+            target_columns=list(target_df.columns),
+            uid_column=uid,
+            column_mappings=column_mappings or [],
+        )
+        if target_rename_map:
+            target_df = target_df.rename(target_rename_map)
+
+        compared_columns = sorted((set(source_df.columns) & set(target_df.columns)) - {uid})
+        compare_rules = build_rules_by_source_column(column_mappings)
+        comparator = UIDBasedComparator(stringify_null_in_report=True)
+        try:
+            report = comparator.compare_dataframes(
+                source_df,
+                target_df,
+                uid_column=uid,
+                compare_columns=None,
+                compare_rules=compare_rules,
+            )
+        except UIDComparisonError as exc:
+            raise ValidationUnprocessableError(str(exc)) from exc
+
+        if progress_callback is not None:
+            progress_callback({
+                "phase": "validating",
+                "message": f"{file_format} comparison complete",
+                "percent": 100,
+            })
+
+        return ValidationRunResult(
+            report=report,
+            source_row_count=source_df.height,
+            target_row_count=target_df.height,
+            compared_column_count=len(compared_columns),
+            compared_columns=compared_columns,
+            mismatch_artifact_path=report.mismatch_artifact_path,
         )
 
     def validate_json_pair_sync(

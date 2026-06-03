@@ -12,7 +12,11 @@ from pegasus.schemas.validation import BatchFailureMode, ColumnMapping
 from pegasus.services.exceptions import format_validation_job_error
 from pegasus.services.validation_service import ValidationRunResult, ValidationService
 from pegasus.validation.file_merge import merge_paths_for_format
-from pegasus.validation.fixed_width_meta import is_json_run, resolve_fixed_width_config
+from pegasus.validation.fixed_width_meta import (
+    is_columnar_run,
+    is_json_run,
+    resolve_fixed_width_config,
+)
 from pegasus.validation.job_worker import _resolve_job_mismatch_artifact, _write_json
 
 
@@ -60,6 +64,7 @@ def run_batch_job_directory(
 
     service = ValidationService(settings=settings)
     json_run = is_json_run(file_format=file_format, delimiter=delimiter)
+    columnar_run = is_columnar_run(file_format=file_format)
     start = time.time()
     unit_results: list[dict[str, Any]] = []
     failed_count = 0
@@ -153,6 +158,17 @@ def run_batch_job_directory(
                     merged_target,
                     artifact_export_parent=unit_dir,
                     progress_callback=progress_callback,
+                )
+            elif columnar_run:
+                result = service.validate_columnar_pair_sync(
+                    merged_source,
+                    merged_target,
+                    uid_column=uid_column,
+                    file_format=file_format,
+                    column_mappings=column_mappings,
+                    artifact_export_parent=unit_dir,
+                    progress_callback=progress_callback,
+                    uid_gte=uid_gte,
                 )
             elif fixed_width_config is not None:
                 result = service.validate_fixed_width_pair_sync(

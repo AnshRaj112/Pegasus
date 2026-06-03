@@ -8,7 +8,10 @@ from pegasus.validation.file_detection.models import (
     ValidationStrategyHint,
 )
 from pegasus.validation.file_detection.layers.compression import is_compressed_type
+from pegasus.validation.file_detection.plugins.registry import plugin_for_magic_type
 from pegasus.validation.file_detection.sampling import FileSample
+
+_COLUMNAR_TYPES = frozenset({"parquet", "orc", "avro", "excel", "ole_compound"})
 
 
 def select_validation_strategy(
@@ -117,14 +120,25 @@ def select_validation_strategy(
             str(delim),
         )
 
+    if fmt in _COLUMNAR_TYPES or (magic_result and magic_result.detected_type in _COLUMNAR_TYPES):
+        col_fmt = fmt if fmt in _COLUMNAR_TYPES else (magic_result.detected_type if magic_result else "parquet")
+        if col_fmt == "ole_compound":
+            col_fmt = "excel"
+        plugin = plugin_for_magic_type(col_fmt)
+        token = plugin.suggested_file_format() if plugin else col_fmt
+        return (
+            DetectionStageResult(
+                ValidationStrategyHint.CSV_TABULAR.value,
+                85,
+                [f"columnar format {col_fmt}"],
+                {"columnar_format": token},
+            ),
+            DatasetModel.TABULAR,
+            token,
+            ",",
+        )
+
     if text_binary and text_binary.detected_type == "binary":
-        if fmt in {"parquet", "orc", "avro"}:
-            return (
-                DetectionStageResult(ValidationStrategyHint.UNSUPPORTED.value, 80, [f"columnar {fmt} not yet supported"]),
-                DatasetModel.BINARY_ASSET,
-                None,
-                None,
-            )
         return (
             DetectionStageResult(ValidationStrategyHint.UNSUPPORTED.value, 60, ["binary asset"]),
             DatasetModel.BINARY_ASSET,
@@ -155,4 +169,7 @@ def _map_user_hint(
         return ValidationStrategyHint.JSON_DOCUMENT, DatasetModel.HIERARCHICAL, "json", "json"
     if hinted in {"fixed-width", "fixedwidth", "fixed_width"}:
         return ValidationStrategyHint.FIXED_WIDTH, DatasetModel.TABULAR, "fixed-width", "fixed"
+    if hinted in _COLUMNAR_TYPES:
+        token = "excel" if hinted == "ole_compound" else hinted
+        return ValidationStrategyHint.CSV_TABULAR, DatasetModel.TABULAR, token, ","
     return ValidationStrategyHint.CSV_TABULAR, DatasetModel.TABULAR, "csv", "auto"

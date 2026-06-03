@@ -269,7 +269,10 @@ class LocalPathValidateRequest(BaseModel):
     )
     file_format: str = Field(
         default="csv",
-        description="File format type: 'csv', 'fixed-width', or 'json'",
+        description=(
+            "File format: csv, fixed-width, json, parquet, orc, avro, excel, or auto "
+            "(multi-layer detection when auto_detect is enabled on the server)"
+        ),
     )
     fixed_width_config: FixedWidthConfig | None = Field(
         default=None,
