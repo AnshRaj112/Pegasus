@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, Form, Select, Input, Button, Modal, Row, Col, Space, Progress, Badge, Alert, Typography } from 'antd'
+import { Card, Form, Select, Input, Button, Modal, Row, Col, Space, Progress, Badge, Alert, Typography, Radio, Tag } from 'antd'
 import { PlayCircleOutlined, SettingOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
+import { Cloud, HardDrive } from 'lucide-react'
 import LocalPathBrowser from '../components/LocalPathBrowser'
+import { CloudFileBrowser } from '../components/CloudFileBrowser'
 import ParallelValidationResourceForm from '../components/ParallelValidationResourceForm'
 import { formatJobError } from '../api/formatError'
 import { absoluteApiUrl } from '../api/http'
@@ -21,6 +23,11 @@ function formatPercent(n: number) {
 export default function ValidationSelectorPage() {
   const navigate = useNavigate()
   const [form] = Form.useForm()
+
+  // Source type selection
+  const [sourceType, setSourceType] = useState<'local' | 'cloud'>('local')
+  const [cloudConnectionId, setCloudConnectionId] = useState('')
+  const [cloudBucket, setCloudBucket] = useState('')
 
   const [sourcePath, setSourcePath] = useState('')
   const [targetPath, setTargetPath] = useState('')
@@ -120,26 +127,37 @@ export default function ValidationSelectorPage() {
     setJobProgress({ phase: 'queued', jobId: null, message: '', progress: {} })
 
     try {
-      const res = await fetch(absoluteApiUrl('/api/v1/validate/local')!, {
+      // Choose endpoint based on source type
+      const endpoint = sourceType === 'cloud' ? '/api/v1/validate/cloud' : '/api/v1/validate/local'
+      const validationPayload =
+        fileFormat === 'json'
+          ? {
+              source_path: sourcePath.trim(),
+              target_path: targetPath.trim(),
+              file_format: 'json',
+              delimiter: 'json',
+              uid_column: 'document',
+              ...(sourceType === 'cloud' && {
+                connection_id: cloudConnectionId,
+                bucket: cloudBucket,
+              }),
+            }
+          : {
+              source_path: sourcePath.trim(),
+              target_path: targetPath.trim(),
+              uid_column: uidColumn.trim(),
+              delimiter: delimiter.trim() || 'auto',
+              file_format: 'csv',
+              ...(sourceType === 'cloud' && {
+                connection_id: cloudConnectionId,
+                bucket: cloudBucket,
+              }),
+            }
+
+      const res = await fetch(absoluteApiUrl(endpoint)!, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          fileFormat === 'json'
-            ? {
-                source_path: sourcePath.trim(),
-                target_path: targetPath.trim(),
-                file_format: 'json',
-                delimiter: 'json',
-                uid_column: 'document',
-              }
-            : {
-                source_path: sourcePath.trim(),
-                target_path: targetPath.trim(),
-                uid_column: uidColumn.trim(),
-                delimiter: delimiter.trim() || 'auto',
-                file_format: 'csv',
-              }
-        ),
+        body: JSON.stringify(validationPayload),
       })
 
       const raw = await res.text()
@@ -208,6 +226,35 @@ export default function ValidationSelectorPage() {
         <Col span={16}>
           <Card bordered={false} style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
             <form onSubmit={handleOpenParallelValidation} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Source Type Selector */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <Text strong style={{ fontSize: '13px' }}>Data Source</Text>
+                <Radio.Group
+                  value={sourceType}
+                  onChange={(e) => {
+                    setSourceType(e.target.value)
+                    setSourcePath('')
+                    setTargetPath('')
+                  }}
+                  disabled={running}
+                >
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Radio value="local">
+                      <Space size={6}>
+                        <HardDrive size={16} />
+                        <span>Local Device</span>
+                      </Space>
+                    </Radio>
+                    <Radio value="cloud">
+                      <Space size={6}>
+                        <Cloud size={16} />
+                        <span>GCS Cloud Storage</span>
+                      </Space>
+                    </Radio>
+                  </Space>
+                </Radio.Group>
+              </div>
+
               <Row gutter={16}>
                 <Col span={12}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -225,19 +272,44 @@ export default function ValidationSelectorPage() {
                 </Col>
               </Row>
 
-              <LocalPathBrowser
-                label={fileFormat === 'json' ? 'Source JSON (Expected)' : 'Source CSV (Expected)'}
-                value={sourcePath}
-                onChange={setSourcePath}
-                disabled={running}
-              />
+              {/* Conditional File Browser */}
+              {sourceType === 'local' ? (
+                <>
+                  <LocalPathBrowser
+                    label={fileFormat === 'json' ? 'Source JSON (Expected)' : 'Source CSV (Expected)'}
+                    value={sourcePath}
+                    onChange={setSourcePath}
+                    disabled={running}
+                  />
 
-              <LocalPathBrowser
-                label={fileFormat === 'json' ? 'Target JSON (Actual)' : 'Target CSV (Actual)'}
-                value={targetPath}
-                onChange={setTargetPath}
-                disabled={running}
-              />
+                  <LocalPathBrowser
+                    label={fileFormat === 'json' ? 'Target JSON (Actual)' : 'Target CSV (Actual)'}
+                    value={targetPath}
+                    onChange={setTargetPath}
+                    disabled={running}
+                  />
+                </>
+              ) : (
+                <>
+                  <CloudFileBrowser
+                    label={fileFormat === 'json' ? 'Source JSON (Expected)' : 'Source CSV (Expected)'}
+                    value={sourcePath}
+                    onChange={setSourcePath}
+                    disabled={running}
+                    onConnectionIdChange={setCloudConnectionId}
+                    onBucketChange={setCloudBucket}
+                  />
+
+                  <CloudFileBrowser
+                    label={fileFormat === 'json' ? 'Target JSON (Actual)' : 'Target CSV (Actual)'}
+                    value={targetPath}
+                    onChange={setTargetPath}
+                    disabled={running}
+                    onConnectionIdChange={setCloudConnectionId}
+                    onBucketChange={setCloudBucket}
+                  />
+                </>
+              )}
 
               {fileFormat === 'json' ? (
                 <Alert message="JSON comparisons are conducted on whole documents with keys and array orders re-sorted (order-agnostic matching)." type="info" showIcon />
