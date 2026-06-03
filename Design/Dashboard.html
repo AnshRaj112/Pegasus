@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>DataAudit Pro | Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-dim": "#dcd9d9",
+                      "surface-container-highest": "#e5e2e1",
+                      "on-background": "#1b1b1c",
+                      "on-surface": "#1b1b1c",
+                      "inverse-primary": "#afc6ff",
+                      "on-primary-fixed-variant": "#004398",
+                      "background": "#fcf9f8",
+                      "on-primary-fixed": "#001a43",
+                      "inverse-on-surface": "#f3f0ef",
+                      "on-tertiary-fixed-variant": "#464747",
+                      "on-secondary-fixed-variant": "#003bb0",
+                      "surface-variant": "#e5e2e1",
+                      "secondary-container": "#466ce4",
+                      "secondary-fixed": "#dce1ff",
+                      "error-container": "#ffdad6",
+                      "error": "#ba1a1a",
+                      "primary-fixed": "#d9e2ff",
+                      "primary": "#0057c2",
+                      "on-secondary-container": "#fffbff",
+                      "secondary": "#2752ca",
+                      "secondary-fixed-dim": "#b6c4ff",
+                      "surface": "#fcf9f8",
+                      "on-tertiary-fixed": "#1b1c1c",
+                      "primary-fixed-dim": "#afc6ff",
+                      "on-primary": "#ffffff",
+                      "tertiary-container": "#747475",
+                      "surface-container-lowest": "#ffffff",
+                      "on-error-container": "#93000a",
+                      "surface-container": "#f0eded",
+                      "surface-container-high": "#eae7e7",
+                      "tertiary": "#5b5c5c",
+                      "on-primary-container": "#fefcff",
+                      "surface-container-low": "#f6f3f2",
+                      "on-secondary": "#ffffff",
+                      "tertiary-fixed-dim": "#c7c6c6",
+                      "on-tertiary": "#ffffff",
+                      "outline-variant": "#c1c6d7",
+                      "on-surface-variant": "#414755",
+                      "on-tertiary-container": "#fefcfc",
+                      "inverse-surface": "#303030",
+                      "surface-bright": "#fcf9f8",
+                      "on-secondary-fixed": "#00164f",
+                      "tertiary-fixed": "#e3e2e2",
+                      "outline": "#727786",
+                      "surface-tint": "#0059c7",
+                      "primary-container": "#006ef2",
+                      "on-error": "#ffffff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "xl": "32px",
+                      "gutter": "24px",
+                      "base": "8px",
+                      "md": "16px",
+                      "container-max": "1440px",
+                      "margin": "24px",
+                      "sm": "8px",
+                      "lg": "24px",
+                      "xs": "4px"
+              },
+              "fontFamily": {
+                      "h1-mobile": ["Inter"],
+                      "body-md": ["Inter"],
+                      "h2": ["Inter"],
+                      "body-lg": ["Inter"],
+                      "h1": ["Inter"],
+                      "code-sm": ["JetBrains Mono"],
+                      "label-md": ["Inter"],
+                      "body-sm": ["Inter"],
+                      "h3": ["Inter"]
+              },
+              "fontSize": {
+                      "h1-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "600"}],
+                      "body-md": ["14px", {"lineHeight": "22px", "fontWeight": "400"}],
+                      "h2": ["30px", {"lineHeight": "38px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                      "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "h1": ["38px", {"lineHeight": "46px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                      "code-sm": ["12px", {"lineHeight": "18px", "fontWeight": "400"}],
+                      "label-md": ["14px", {"lineHeight": "22px", "fontWeight": "500"}],
+                      "body-sm": ["12px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "h3": ["24px", {"lineHeight": "32px", "fontWeight": "600"}]
+              }
+            },
+          },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .zebra-table tr:nth-child(even) {
+            background-color: #fafafa;
+        }
+        .shimmer {
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            background-size: 200% 100%;
+            animation: shimmer 2s infinite linear;
+        }
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #d9d9d9;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md text-body-md antialiased min-h-screen flex flex-col">
+<!-- TopNavBar Shell -->
+<nav class="bg-surface border-b border-surface-variant docked full-width top-0 z-50 sticky">
+<div class="flex justify-between items-center w-full px-gutter max-w-container-max mx-auto h-16">
+<div class="flex items-center gap-xl">
+<span class="font-h2 text-h2 font-black text-primary">DataAudit Pro</span>
+<div class="hidden md:flex gap-lg">
+<a class="text-primary border-b-2 border-primary pb-1 font-label-md text-label-md active:opacity-80 transition-all duration-200" href="#">Dashboard</a>
+<a class="text-on-surface-variant font-label-md text-label-md hover:text-secondary hover:bg-surface-container-low transition-colors" href="#">Validations</a>
+<a class="text-on-surface-variant font-label-md text-label-md hover:text-secondary hover:bg-surface-container-low transition-colors" href="#">Workspaces</a>
+<a class="text-on-surface-variant font-label-md text-label-md hover:text-secondary hover:bg-surface-container-low transition-colors" href="#">History</a>
+<a class="text-on-surface-variant font-label-md text-label-md hover:text-secondary hover:bg-surface-container-low transition-colors" href="#">Settings</a>
+</div>
+</div>
+<div class="flex items-center gap-md">
+<button class="bg-primary text-on-primary px-md py-xs rounded-lg font-label-md transition-all hover:opacity-90">Create New Task</button>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:bg-surface-container px-xs py-xs rounded-full">notifications</span>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:bg-surface-container px-xs py-xs rounded-full">help_outline</span>
+<img alt="Super User Admin Profile" class="w-8 h-8 rounded-full border border-surface-variant object-cover" data-alt="A professional headshot of a senior data executive with a focused and confident expression. The lighting is crisp and studio-grade, reflecting a corporate yet modern atmosphere. The background is a soft-focus office environment with subtle blue and grey architectural tones, ensuring a high-end and trustworthy aesthetic for a technical data platform." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAnnMKUZwpOZhEnLa09Msn6rLhg1PTYT5jrNPTxNFYa8ULeZ8erVpXnfxrd0k8cvCRABgs4qx4yovCQQGIflp3dN0fPIhEQLdixLIzSPBiuKi2I3toCqVcQqlhyXPBqWCILUSFQbpisnECaD0Xl4G7MoQcO4eqxI_TmBUKiCjFsk1apmfOLLgnuc4ENjFmVoCFtn2oqc-dxvDWvUmzO5llDpndp1rGdRMpTtGB7UWhqI7cTj9cZfYuGoCEqTz5s3xs1Xs0oHrh_W60"/>
+</div>
+</div>
+</nav>
+<main class="flex-grow w-full px-gutter max-w-container-max mx-auto py-xl space-y-lg">
+<!-- Row 1: Metrics and Chart -->
+<div class="grid grid-cols-24 gap-lg">
+<!-- Left Col: Metrics (8/24) -->
+<div class="col-span-24 md:col-span-8 flex flex-col gap-md">
+<div class="grid grid-cols-2 gap-md h-full">
+<!-- Pass Card -->
+<div class="bg-surface border border-surface-variant p-md rounded-lg flex flex-col justify-between hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all">
+<div class="flex items-center gap-xs text-on-surface-variant">
+<span class="material-symbols-outlined text-green-600">check_circle</span>
+<span class="font-label-md text-label-md">Pass</span>
+</div>
+<div class="mt-base">
+<span class="font-h2 text-h2 text-on-surface">1,248</span>
+<div class="text-body-sm text-green-600 font-medium">+12% vs last week</div>
+</div>
+</div>
+<!-- Fail Card -->
+<div class="bg-surface border border-surface-variant p-md rounded-lg flex flex-col justify-between hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all">
+<div class="flex items-center gap-xs text-on-surface-variant">
+<span class="material-symbols-outlined text-error">cancel</span>
+<span class="font-label-md text-label-md">Fail</span>
+</div>
+<div class="mt-base">
+<span class="font-h2 text-h2 text-on-surface">42</span>
+<div class="text-body-sm text-error font-medium">-4% vs last week</div>
+</div>
+</div>
+<!-- Total Validated -->
+<div class="bg-surface border border-surface-variant p-md rounded-lg flex flex-col justify-between hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all">
+<div class="flex items-center gap-xs text-on-surface-variant">
+<span class="material-symbols-outlined text-primary">data_usage</span>
+<span class="font-label-md text-label-md">Total Validated</span>
+</div>
+<div class="mt-base">
+<span class="font-h2 text-h2 text-on-surface">1.8M</span>
+<div class="text-body-sm text-on-surface-variant">Records across all files</div>
+</div>
+</div>
+<!-- Currently Running -->
+<div class="bg-surface border border-surface-variant p-md rounded-lg flex flex-col justify-between hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all">
+<div class="flex items-center gap-xs text-on-surface-variant">
+<span class="material-symbols-outlined text-orange-500 animate-spin" style="font-variation-settings: 'wght' 300">sync</span>
+<span class="font-label-md text-label-md">Running</span>
+</div>
+<div class="mt-base">
+<span class="font-h2 text-h2 text-on-surface">14</span>
+<div class="text-body-sm text-on-surface-variant">Active processing tasks</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Col: Chart (16/24) -->
+<div class="col-span-24 md:col-span-16 bg-surface border border-surface-variant p-lg rounded-lg hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all">
+<div class="flex justify-between items-start mb-lg">
+<div>
+<h3 class="font-h3 text-h3 text-on-surface">Validation Performance</h3>
+<p class="text-body-sm text-on-surface-variant">Historical analysis of data integrity scores (Last 7 Days)</p>
+</div>
+<div class="flex gap-sm">
+<div class="flex items-center gap-xs"><span class="w-3 h-3 rounded-full bg-primary"></span><span class="text-body-sm">Pass</span></div>
+<div class="flex items-center gap-xs"><span class="w-3 h-3 rounded-full bg-error"></span><span class="text-body-sm">Fail</span></div>
+</div>
+</div>
+<div class="h-64 w-full relative">
+<!-- SVG Area/Line Chart Mock -->
+<svg class="w-full h-full" viewbox="0 0 800 200">
+<defs>
+<lineargradient id="grad-pass" x1="0%" x2="0%" y1="0%" y2="100%">
+<stop offset="0%" style="stop-color:var(--primary);stop-opacity:0.2"></stop>
+<stop offset="100%" style="stop-color:var(--primary);stop-opacity:0"></stop>
+</lineargradient>
+</defs>
+<!-- Grid Lines -->
+<line stroke="#f0f0f0" stroke-width="1" x1="0" x2="800" y1="0" y2="0"></line>
+<line stroke="#f0f0f0" stroke-width="1" x1="0" x2="800" y1="50" y2="50"></line>
+<line stroke="#f0f0f0" stroke-width="1" x1="0" x2="800" y1="100" y2="100"></line>
+<line stroke="#f0f0f0" stroke-width="1" x1="0" x2="800" y1="150" y2="150"></line>
+<line stroke="#f0f0f0" stroke-width="1" x1="0" x2="800" y1="200" y2="200"></line>
+<!-- Area Fill -->
+<path d="M0,180 L133,160 L266,170 L400,120 L533,130 L666,90 L800,100 L800,200 L0,200 Z" fill="url(#grad-pass)"></path>
+<!-- Line - Pass -->
+<path d="M0,180 L133,160 L266,170 L400,120 L533,130 L666,90 L800,100" fill="none" stroke="#0057c2" stroke-linecap="round" stroke-linejoin="round" stroke-width="3"></path>
+<!-- Line - Fail (Red) -->
+<path d="M0,195 L133,190 L266,192 L400,185 L533,188 L666,182 L800,186" fill="none" stroke="#ba1a1a" stroke-dasharray="4" stroke-linecap="round" stroke-width="2"></path>
+<!-- Data Points -->
+<circle cx="0" cy="180" fill="#0057c2" r="4"></circle>
+<circle cx="133" cy="160" fill="#0057c2" r="4"></circle>
+<circle cx="266" cy="170" fill="#0057c2" r="4"></circle>
+<circle cx="400" cy="120" fill="#0057c2" r="4"></circle>
+<circle cx="533" cy="130" fill="#0057c2" r="4"></circle>
+<circle cx="666" cy="90" fill="#0057c2" r="4"></circle>
+<circle cx="800" cy="100" fill="#0057c2" r="4"></circle>
+</svg>
+<!-- Days -->
+<div class="flex justify-between mt-sm text-body-sm text-on-surface-variant px-base">
+<span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Row 2: Tables, Workspaces, and Customizer -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-lg">
+<!-- Column 1: Active Tasks (5/12) -->
+<div class="md:col-span-5 bg-surface border border-surface-variant rounded-lg flex flex-col h-[500px]">
+<div class="p-md border-b border-surface-variant flex justify-between items-center">
+<h3 class="font-label-md text-label-md text-on-surface">Active Tasks</h3>
+<button class="text-primary hover:underline text-body-sm">View All</button>
+</div>
+<div class="overflow-y-auto custom-scrollbar flex-grow">
+<table class="w-full text-left zebra-table border-collapse">
+<thead class="bg-surface-container-low sticky top-0">
+<tr>
+<th class="p-md font-label-md text-on-surface-variant border-b border-surface-variant">Task Name</th>
+<th class="p-md font-label-md text-on-surface-variant border-b border-surface-variant">Status</th>
+<th class="p-md font-label-md text-on-surface-variant border-b border-surface-variant">Progress</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="p-md">
+<div class="font-medium">GL_Sync_0924</div>
+<div class="text-body-sm text-on-surface-variant">2 mins ago</div>
+</td>
+<td class="p-md">
+<span class="px-sm py-xs bg-green-50 border border-green-200 text-green-700 rounded text-body-sm font-medium">Completed</span>
+</td>
+<td class="p-md">
+<div class="w-full bg-surface-container rounded-full h-1.5">
+<div class="bg-green-600 h-1.5 rounded-full" style="width: 100%"></div>
+</div>
+</td>
+</tr>
+<tr>
+<td class="p-md">
+<div class="font-medium">Payroll_Verify_Q3</div>
+<div class="text-body-sm text-on-surface-variant">Running...</div>
+</td>
+<td class="p-md">
+<div class="flex items-center gap-xs text-orange-600 font-medium text-body-sm">
+<span class="material-symbols-outlined animate-spin text-[18px]">sync</span>
+                                        Running
+                                    </div>
+</td>
+<td class="p-md">
+<div class="w-full bg-surface-container rounded-full h-1.5">
+<div class="bg-primary h-1.5 rounded-full" style="width: 64%"></div>
+</div>
+<div class="text-[10px] mt-xs text-on-surface-variant">64% Processing</div>
+</td>
+</tr>
+<tr>
+<td class="p-md">
+<div class="font-medium">Risk_Model_F2F</div>
+<div class="text-body-sm text-on-surface-variant">Scheduled: 14:00</div>
+</td>
+<td class="p-md">
+<span class="px-sm py-xs bg-surface-container-highest border border-outline-variant text-on-surface-variant rounded text-body-sm font-medium">Scheduled</span>
+</td>
+<td class="p-md">
+<div class="w-full bg-surface-container rounded-full h-1.5">
+<div class="bg-surface-dim h-1.5 rounded-full" style="width: 0%"></div>
+</div>
+</td>
+</tr>
+<tr>
+<td class="p-md">
+<div class="font-medium">Customer_360_Master</div>
+<div class="text-body-sm text-on-surface-variant">1 hour ago</div>
+</td>
+<td class="p-md">
+<span class="px-sm py-xs bg-error-container border border-error text-on-error-container rounded text-body-sm font-medium">Failed</span>
+</td>
+<td class="p-md">
+<div class="w-full bg-surface-container rounded-full h-1.5">
+<div class="bg-error h-1.5 rounded-full" style="width: 42%"></div>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Column 2: Workspaces (4/12) -->
+<div class="md:col-span-4 flex flex-col gap-md h-[500px]">
+<div class="bg-surface-container-low border border-dashed border-outline-variant p-md rounded-lg flex flex-col items-start gap-sm hover:bg-surface-container transition-colors cursor-pointer group">
+<span class="material-symbols-outlined text-primary group-hover:scale-110 transition-transform">add_box</span>
+<h4 class="font-label-md text-label-md text-on-surface">New Workspace</h4>
+<p class="text-body-sm text-on-surface-variant">Create a isolated environment for a specific audit period.</p>
+</div>
+<!-- Global Workspace -->
+<div class="bg-surface border border-surface-variant p-md rounded-lg flex flex-col gap-md hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-xs">
+<span class="material-symbols-outlined text-on-surface-variant" style="font-variation-settings: 'FILL' 1">lock</span>
+<span class="font-label-md text-label-md text-on-surface">Global Workspace</span>
+</div>
+<span class="text-[10px] uppercase font-bold tracking-wider px-sm py-xs bg-primary-fixed text-on-primary-fixed rounded">System Default</span>
+</div>
+<div class="space-y-sm">
+<div class="flex justify-between text-body-sm">
+<span class="text-on-surface-variant">Total Entities:</span>
+<span class="font-medium">24</span>
+</div>
+<div class="flex justify-between text-body-sm">
+<span class="text-on-surface-variant">Uptime:</span>
+<span class="font-medium text-green-600">99.9%</span>
+</div>
+</div>
+</div>
+<!-- Project Alpha -->
+<div class="bg-surface border border-surface-variant p-md rounded-lg flex flex-col gap-md hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-xs">
+<span class="material-symbols-outlined text-on-surface-variant">folder_shared</span>
+<span class="font-label-md text-label-md text-on-surface">Project Alpha</span>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer">more_vert</span>
+</div>
+<div class="flex -space-x-2">
+<img class="w-6 h-6 rounded-full border-2 border-surface object-cover" data-alt="Close-up portrait of a professional female data scientist in a brightly lit, modern minimalist tech workspace. High-key lighting highlights her thoughtful expression, while the background remains a blur of clean, cool-toned digital elements." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCX0kRU-zDo2PYNv5vPNBrpX0TsPsy_MDESXA9dXfYKQU6LONr7aBuPdNe_XZ-f_TDUwH0vFVHVyqiR9glWBCFUzEJ73GWQ1MMZALmMwZECjlb6z01OR0L_nqCnELDV3E0LDQIHi10LmEaVQ-6haZ5zHzwYGPFiL7qf19OgWiZNv3irOT0DB6pF9HtqDObychtDMjWlX9TiKnUKq9z6wK0rqLLGvrmbp_3XmGF9KgeR6JeQg3cdA03JJZZQVTiHlGl-ZpLTghpdpnE"/>
+<img class="w-6 h-6 rounded-full border-2 border-surface object-cover" data-alt="Portrait of a young male software engineer in a high-tech corporate setting. He is wearing a professional polo shirt and glasses, smiling confidently. The lighting is warm yet crisp, emphasizing clarity and transparency consistent with a data validation tool branding." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDqACb3sNgN8yJV-KZaG3HS66w1TbtXsw483I0VqQ4m_WFw0yrnyCxwpLmjs-qKoF1Y4rJ5DTf0w1myZ6rhjdiF6dkPc53PzIUWoICNygVuLKdjAydlr59lG1Lozcjztc3RdV4vU5p8PsLiO_e5i24ld48QoO4bi7OtCgIurJmUJ1rhHhGM-gESvhPa82e0q-2FS8w1j5ajlxMjK1W99CJz-OfCzf3MtgkU0ep_-hdMReMHWmkc4KFGseF-itMF5obuf7qhhiXL-DU"/>
+<div class="w-6 h-6 rounded-full border-2 border-surface bg-surface-container-highest flex items-center justify-center text-[8px] font-bold">+3</div>
+</div>
+</div>
+<!-- Q3 Audit -->
+<div class="bg-surface border border-surface-variant p-md rounded-lg flex flex-col gap-md hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-all">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-xs">
+<span class="material-symbols-outlined text-on-surface-variant">verified_user</span>
+<span class="font-label-md text-label-md text-on-surface">Q3 Audit</span>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer">more_vert</span>
+</div>
+<p class="text-body-sm text-on-surface-variant italic">Active until Oct 31st</p>
+</div>
+</div>
+<!-- Column 3: Entity Customizer (3/12) -->
+<div class="md:col-span-3 bg-surface border border-surface-variant p-lg rounded-lg flex flex-col gap-lg h-[500px]">
+<div class="space-y-sm">
+<h3 class="font-h3 text-h3 text-on-surface">Entity Customizer</h3>
+<p class="text-body-sm text-on-surface-variant">Tailor your data view for specific reporting entities.</p>
+</div>
+<!-- Search -->
+<div class="relative">
+<span class="material-symbols-outlined absolute left-sm top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px]">search</span>
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg pl-xl py-xs text-body-md focus:ring-2 focus:ring-primary focus:ring-opacity-10 focus:border-primary transition-all" placeholder="Search entities..." type="text"/>
+</div>
+<!-- Selector -->
+<div class="space-y-xs">
+<label class="font-label-md text-label-md text-on-surface">Entity Selector</label>
+<div class="relative">
+<select class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-md py-xs text-body-md appearance-none focus:ring-2 focus:ring-primary focus:border-primary">
+<option>Financial Records</option>
+<option>User Telemetry</option>
+<option>Supply Chain Logs</option>
+<option>HR Master Data</option>
+</select>
+<span class="material-symbols-outlined absolute right-sm top-1/2 -translate-y-1/2 pointer-events-none">expand_more</span>
+</div>
+</div>
+<!-- Toggle -->
+<div class="flex items-center justify-between p-md bg-surface-container-low rounded-lg">
+<div>
+<div class="font-label-md text-label-md text-on-surface">Incremental Tracking</div>
+<div class="text-[10px] text-on-surface-variant">Daily sync enabled</div>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-dim peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<div class="mt-auto space-y-md">
+<button class="w-full py-md bg-surface-container-highest text-on-surface font-label-md rounded-lg border border-outline-variant hover:bg-surface-variant transition-colors flex items-center justify-center gap-xs">
+<span class="material-symbols-outlined">dashboard_customize</span>
+                        Create Micro-Dashboard
+                    </button>
+<p class="text-[10px] text-center text-on-surface-variant">Configure custom widgets for your workspace view based on the selected entity.</p>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer Shell -->
+<footer class="bg-surface-container border-t border-surface-variant mt-xl">
+<div class="flex flex-col md:flex-row justify-between items-center w-full px-gutter py-md max-w-container-max mx-auto">
+<div class="flex flex-col gap-xs mb-md md:mb-0">
+<span class="font-h3 text-h3 text-on-surface">DataAudit Pro</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">© 2024 DataAudit Pro v2.4.1. Access Controls: Enabled.</span>
+</div>
+<div class="flex gap-lg">
+<a class="text-on-surface-variant font-label-md text-label-md hover:text-primary underline transition-all duration-200" href="#">Documentation</a>
+<a class="text-on-surface-variant font-label-md text-label-md hover:text-primary underline transition-all duration-200" href="#">System Status</a>
+<a class="text-on-surface-variant font-label-md text-label-md hover:text-primary underline transition-all duration-200" href="#">Privacy Policy</a>
+<a class="text-on-surface-variant font-label-md text-label-md hover:text-primary underline transition-all duration-200" href="#">Terms of Service</a>
+</div>
+</div>
+</footer>
+<script>
+        // Simple micro-interaction for active states
+        document.querySelectorAll('a, button').forEach(el => {
+            el.addEventListener('click', (e) => {
+                if(el.tagName === 'A' && !el.getAttribute('href').startsWith('#')) return;
+                e.preventDefault();
+                el.style.transform = 'scale(0.98)';
+                setTimeout(() => el.style.transform = 'scale(1)', 100);
+            });
+        });
+
+        // Simulating some live data movement
+        setInterval(() => {
+            const runningCount = document.querySelector('.animate-spin').parentElement.nextElementSibling.firstElementChild;
+            if(Math.random() > 0.8) {
+                const current = parseInt(runningCount.innerText);
+                const delta = Math.random() > 0.5 ? 1 : -1;
+                runningCount.innerText = Math.max(1, current + delta);
+            }
+        }, 5000);
+    </script>
+</body></html>

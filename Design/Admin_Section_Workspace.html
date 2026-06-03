@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Workspace Management | DataAudit Pro</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-fixed": "#e3e2e2",
+                        "surface-variant": "#e5e2e1",
+                        "on-secondary-fixed": "#00164f",
+                        "error-container": "#ffdad6",
+                        "background": "#fcf9f8",
+                        "surface-dim": "#dcd9d9",
+                        "on-secondary-container": "#fffbff",
+                        "inverse-on-surface": "#f3f0ef",
+                        "inverse-primary": "#afc6ff",
+                        "on-primary-fixed": "#001a43",
+                        "tertiary": "#5b5c5c",
+                        "on-error-container": "#93000a",
+                        "on-tertiary": "#ffffff",
+                        "on-tertiary-fixed-variant": "#464747",
+                        "on-tertiary-container": "#fefcfc",
+                        "surface": "#fcf9f8",
+                        "secondary": "#2752ca",
+                        "secondary-container": "#466ce4",
+                        "primary-fixed": "#d9e2ff",
+                        "outline-variant": "#c1c6d7",
+                        "primary-container": "#006ef2",
+                        "on-error": "#ffffff",
+                        "surface-container-high": "#eae7e7",
+                        "surface-tint": "#0059c7",
+                        "on-surface-variant": "#414755",
+                        "on-primary-fixed-variant": "#004398",
+                        "surface-container": "#f0eded",
+                        "surface-container-highest": "#e5e2e1",
+                        "secondary-fixed-dim": "#b6c4ff",
+                        "on-primary": "#ffffff",
+                        "inverse-surface": "#303030",
+                        "primary-fixed-dim": "#afc6ff",
+                        "outline": "#727786",
+                        "on-secondary": "#ffffff",
+                        "on-surface": "#1b1b1c",
+                        "tertiary-container": "#747475",
+                        "secondary-fixed": "#dce1ff",
+                        "on-primary-container": "#fefcff",
+                        "on-secondary-fixed-variant": "#003bb0",
+                        "surface-bright": "#fcf9f8",
+                        "on-tertiary-fixed": "#1b1c1c",
+                        "surface-container-low": "#f6f3f2",
+                        "primary": "#0057c2",
+                        "on-background": "#1b1b1c",
+                        "error": "#ba1a1a",
+                        "tertiary-fixed-dim": "#c7c6c6",
+                        "surface-container-lowest": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "xl": "32px",
+                        "gutter": "24px",
+                        "lg": "24px",
+                        "xs": "4px",
+                        "container-max": "1440px",
+                        "base": "8px",
+                        "md": "16px",
+                        "sm": "8px",
+                        "margin": "24px"
+                    },
+                    "fontFamily": {
+                        "label-md": ["Inter"],
+                        "h3": ["Inter"],
+                        "body-md": ["Inter"],
+                        "code-sm": ["JetBrains Mono"],
+                        "body-lg": ["Inter"],
+                        "h2": ["Inter"],
+                        "h1": ["Inter"],
+                        "h1-mobile": ["Inter"],
+                        "body-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "label-md": ["14px", {"lineHeight": "22px", "fontWeight": "500"}],
+                        "h3": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                        "body-md": ["14px", {"lineHeight": "22px", "fontWeight": "400"}],
+                        "code-sm": ["12px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "h2": ["30px", {"lineHeight": "38px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "h1": ["38px", {"lineHeight": "46px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                        "h1-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "600"}],
+                        "body-sm": ["12px", {"lineHeight": "20px", "fontWeight": "400"}]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            display: inline-block;
+            vertical-align: middle;
+            line-height: 1;
+        }
+        body { font-family: 'Inter', sans-serif; }
+        .data-table-row:hover { background-color: #fafafa; }
+    </style>
+</head>
+<body class="bg-background text-on-surface min-h-screen flex flex-col">
+<!-- TopNavBar -->
+<header class="bg-surface dark:bg-surface-container-highest shadow-sm border-b border-outline-variant dark:border-outline sticky top-0 z-50">
+<div class="flex justify-between items-center w-full px-lg h-16 max-w-container-max mx-auto">
+<div class="flex items-center gap-xl">
+<span class="font-h3 text-h3 font-semibold text-primary dark:text-primary-fixed-dim">DataAudit Pro</span>
+<nav class="hidden md:flex items-center gap-lg h-16">
+<a class="font-body-md text-body-md text-on-surface-variant dark:text-surface-variant hover:text-primary dark:hover:text-primary-fixed transition-colors cursor-pointer active:opacity-80" href="#">Dashboard</a>
+<a class="font-body-md text-body-md text-on-surface-variant dark:text-surface-variant hover:text-primary dark:hover:text-primary-fixed transition-colors cursor-pointer active:opacity-80" href="#">Validations</a>
+<a class="font-body-md text-body-md text-on-surface-variant dark:text-surface-variant hover:text-primary dark:hover:text-primary-fixed transition-colors cursor-pointer active:opacity-80" href="#">Reports</a>
+<a class="font-body-md text-body-md text-primary dark:text-primary-fixed border-b-2 border-primary dark:border-primary-fixed pb-1 cursor-pointer active:opacity-80" href="#">Admin</a>
+</nav>
+</div>
+<div class="flex items-center gap-md">
+<div class="relative hidden sm:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="pl-10 pr-4 py-2 bg-surface-container-low border border-outline-variant rounded-lg text-body-md focus:outline-none focus:ring-2 focus:ring-primary/10 focus:border-primary w-64 transition-all" placeholder="Quick Search..." type="text"/>
+</div>
+<button class="material-symbols-outlined text-on-surface-variant hover:bg-surface-variant p-2 rounded-full transition-colors">notifications</button>
+<button class="material-symbols-outlined text-on-surface-variant hover:bg-surface-variant p-2 rounded-full transition-colors">settings</button>
+<div class="h-8 w-8 rounded-full overflow-hidden border border-outline-variant">
+<img alt="User avatar" data-alt="A professional headshot of a senior data infrastructure engineer with a clean, modern aesthetic. The lighting is bright and even, reflecting a light-mode UI design. The background is a soft, out-of-focus technical office environment with hints of cool blue and neutral white tones, emphasizing precision and technical expertise." src="https://lh3.googleusercontent.com/aida-public/AB6AXuANDOubJvDEgnH0dWHJLqfJxybjwYX2PAQ94quTpKxb7fTNQkLeAaAZLsCc6neoCZb3HtdSpsf9pBXUMIzGNHXG96H3v7H__oaNA82baqn6Ojz4jECwtaHGAhFBtijpAWBY1UaN9QuavRdj6rqGVqoW-Ox-Hd9JPlXc8T54J69NEuu6WB4zEZX0IFJFACx2C3DVoERLq0jVdYBlglG9EEOcqmmaFvgZztvTxm1nA9c_tNjFiShVejtpk501vgMsjKxiZJkviuSMGxM"/>
+</div>
+</div>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden">
+<!-- SideNavBar -->
+<aside class="hidden md:flex flex-col h-[calc(100vh-64px)] w-64 bg-surface-container dark:bg-inverse-surface border-r border-outline-variant dark:border-outline py-lg px-md gap-sm sticky top-16 overflow-y-auto">
+<div class="px-md mb-lg">
+<div class="flex items-center gap-sm mb-xs">
+<div class="bg-primary p-1.5 rounded text-on-primary">
+<span class="material-symbols-outlined text-[20px]">admin_panel_settings</span>
+</div>
+<span class="font-h3 text-h3 font-bold text-on-surface">Admin Center</span>
+</div>
+<p class="font-label-md text-label-md text-on-surface-variant opacity-70">Technical Operations</p>
+</div>
+<nav class="flex flex-col gap-xs flex-1">
+<a class="flex items-center gap-md px-md py-3 bg-secondary-container dark:bg-secondary text-on-secondary-container dark:text-on-secondary font-medium rounded-lg transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">domain</span>
+<span class="font-label-md text-label-md">Workspace Management</span>
+</a>
+<a class="flex items-center gap-md px-md py-3 text-on-surface-variant dark:text-surface-variant hover:bg-surface-variant dark:hover:bg-on-surface-variant/10 rounded-lg transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">settings_input_component</span>
+<span class="font-label-md text-label-md">Configure Store</span>
+</a>
+<a class="flex items-center gap-md px-md py-3 text-on-surface-variant dark:text-surface-variant hover:bg-surface-variant dark:hover:bg-on-surface-variant/10 rounded-lg transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">lock_person</span>
+<span class="font-label-md text-label-md">Access Control</span>
+</a>
+<a class="flex items-center gap-md px-md py-3 text-on-surface-variant dark:text-surface-variant hover:bg-surface-variant dark:hover:bg-on-surface-variant/10 rounded-lg transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">history_edu</span>
+<span class="font-label-md text-label-md">Audit Logs</span>
+</a>
+<a class="flex items-center gap-md px-md py-3 text-on-surface-variant dark:text-surface-variant hover:bg-surface-variant dark:hover:bg-on-surface-variant/10 rounded-lg transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">dns</span>
+<span class="font-label-md text-label-md">System Health</span>
+</a>
+</nav>
+<button class="mt-auto w-full py-3 px-md bg-surface-container-highest border border-outline-variant text-on-surface font-label-md text-label-md rounded-lg flex items-center justify-center gap-sm hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[18px]">add</span>
+                New Configuration
+            </button>
+</aside>
+<!-- Main Content Canvas -->
+<main class="flex-1 overflow-y-auto bg-background p-lg">
+<div class="max-w-6xl mx-auto">
+<!-- Page Header -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-md mb-xl">
+<div>
+<h1 class="font-h2 text-h2 text-on-surface">Workspace Management</h1>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Organize environments and manage isolation boundaries for data validation workflows.</p>
+</div>
+<button class="inline-flex items-center justify-center gap-sm bg-primary text-on-primary px-lg py-2.5 rounded-lg font-label-md text-label-md shadow-sm hover:opacity-90 active:scale-[0.98] transition-all">
+<span class="material-symbols-outlined text-[20px]">add</span>
+                        Create New Workspace
+                    </button>
+</div>
+<!-- Metrics Overview (Bento Style Lite) -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-lg mb-xl">
+<div class="bg-surface border border-outline-variant p-md rounded-xl flex items-center gap-md">
+<div class="h-12 w-12 rounded-lg bg-primary-container/10 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined">groups</span>
+</div>
+<div>
+<p class="text-body-sm font-label-md text-on-surface-variant">Total Users</p>
+<p class="text-h3 font-h3">1,284</p>
+</div>
+</div>
+<div class="bg-surface border border-outline-variant p-md rounded-xl flex items-center gap-md">
+<div class="h-12 w-12 rounded-lg bg-secondary-container/10 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined">database</span>
+</div>
+<div>
+<p class="text-body-sm font-label-md text-on-surface-variant">Active Instances</p>
+<p class="text-h3 font-h3">12</p>
+</div>
+</div>
+<div class="bg-surface border border-outline-variant p-md rounded-xl flex items-center gap-md">
+<div class="h-12 w-12 rounded-lg bg-tertiary-container/10 flex items-center justify-center text-tertiary">
+<span class="material-symbols-outlined">storage</span>
+</div>
+<div>
+<p class="text-body-sm font-label-md text-on-surface-variant">Data Volume</p>
+<p class="text-h3 font-h3">4.2 TB</p>
+</div>
+</div>
+</div>
+<!-- Workspace Table -->
+<div class="bg-surface border border-outline-variant rounded-xl overflow-hidden shadow-sm">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-[#fafafa] border-b border-outline-variant">
+<th class="px-lg py-md font-label-md text-label-md text-on-surface-variant">Workspace Name</th>
+<th class="px-lg py-md font-label-md text-label-md text-on-surface-variant">Created Date</th>
+<th class="px-lg py-md font-label-md text-label-md text-on-surface-variant">Active User Counts</th>
+<th class="px-lg py-md font-label-md text-label-md text-on-surface-variant">Status</th>
+<th class="px-lg py-md font-label-md text-label-md text-on-surface-variant text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+<!-- Global Workspace (Root) -->
+<tr class="data-table-row transition-colors">
+<td class="px-lg py-md">
+<div class="flex items-center gap-md">
+<span class="font-label-md text-label-md font-semibold text-on-surface">Global Workspace</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-primary/10 text-primary border border-primary/20">Default/Global</span>
+</div>
+</td>
+<td class="px-lg py-md font-body-md text-body-md text-on-surface-variant">Jan 12, 2023</td>
+<td class="px-lg py-md font-body-md text-body-md text-on-surface-variant">842</td>
+<td class="px-lg py-md">
+<span class="inline-flex items-center gap-xs px-2 py-0.5 rounded-full text-body-sm bg-green-50 text-green-700 border border-green-200">
+<span class="w-1.5 h-1.5 rounded-full bg-green-600"></span> Active
+                                        </span>
+</td>
+<td class="px-lg py-md text-right">
+<div class="flex items-center justify-end gap-xs">
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors hover:bg-primary/5 rounded-lg" title="Edit">
+<span class="material-symbols-outlined text-[20px]">edit</span>
+</button>
+<button class="p-2 text-outline cursor-not-allowed opacity-40" disabled="" title="Root workspace cannot be deleted">
+<span class="material-symbols-outlined text-[20px]">delete</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Production Workspace -->
+<tr class="data-table-row transition-colors">
+<td class="px-lg py-md">
+<span class="font-label-md text-label-md text-on-surface">Production (US-East)</span>
+</td>
+<td class="px-lg py-md font-body-md text-body-md text-on-surface-variant">Mar 05, 2023</td>
+<td class="px-lg py-md font-body-md text-body-md text-on-surface-variant">215</td>
+<td class="px-lg py-md">
+<span class="inline-flex items-center gap-xs px-2 py-0.5 rounded-full text-body-sm bg-green-50 text-green-700 border border-green-200">
+<span class="w-1.5 h-1.5 rounded-full bg-green-600"></span> Active
+                                        </span>
+</td>
+<td class="px-lg py-md text-right">
+<div class="flex items-center justify-end gap-xs">
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors hover:bg-primary/5 rounded-lg" title="Edit">
+<span class="material-symbols-outlined text-[20px]">edit</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-error transition-colors hover:bg-error/5 rounded-lg" title="Delete">
+<span class="material-symbols-outlined text-[20px]">delete</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- QA Environment -->
+<tr class="data-table-row transition-colors">
+<td class="px-lg py-md">
+<span class="font-label-md text-label-md text-on-surface">Quality Assurance (Staging)</span>
+</td>
+<td class="px-lg py-md font-body-md text-body-md text-on-surface-variant">Jun 18, 2023</td>
+<td class="px-lg py-md font-body-md text-body-md text-on-surface-variant">42</td>
+<td class="px-lg py-md">
+<span class="inline-flex items-center gap-xs px-2 py-0.5 rounded-full text-body-sm bg-green-50 text-green-700 border border-green-200">
+<span class="w-1.5 h-1.5 rounded-full bg-green-600"></span> Active
+                                        </span>
+</td>
+<td class="px-lg py-md text-right">
+<div class="flex items-center justify-end gap-xs">
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors hover:bg-primary/5 rounded-lg" title="Edit">
+<span class="material-symbols-outlined text-[20px]">edit</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-error transition-colors hover:bg-error/5 rounded-lg" title="Delete">
+<span class="material-symbols-outlined text-[20px]">delete</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- External Client Sandbox -->
+<tr class="data-table-row transition-colors">
+<td class="px-lg py-md">
+<span class="font-label-md text-label-md text-on-surface">External Client Sandbox</span>
+</td>
+<td class="px-lg py-md font-body-md text-body-md text-on-surface-variant">Aug 22, 2023</td>
+<td class="px-lg py-md font-body-md text-body-md text-on-surface-variant">12</td>
+<td class="px-lg py-md">
+<span class="inline-flex items-center gap-xs px-2 py-0.5 rounded-full text-body-sm bg-amber-50 text-amber-700 border border-amber-200">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-600"></span> Restricted
+                                        </span>
+</td>
+<td class="px-lg py-md text-right">
+<div class="flex items-center justify-end gap-xs">
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors hover:bg-primary/5 rounded-lg" title="Edit">
+<span class="material-symbols-outlined text-[20px]">edit</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-error transition-colors hover:bg-error/5 rounded-lg" title="Delete">
+<span class="material-symbols-outlined text-[20px]">delete</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Legacy Data Audit -->
+<tr class="data-table-row transition-colors">
+<td class="px-lg py-md">
+<span class="font-label-md text-label-md text-on-surface">Legacy Audit (ReadOnly)</span>
+</td>
+<td class="px-lg py-md font-body-md text-body-md text-on-surface-variant">Dec 01, 2022</td>
+<td class="px-lg py-md font-body-md text-body-md text-on-surface-variant">4</td>
+<td class="px-lg py-md">
+<span class="inline-flex items-center gap-xs px-2 py-0.5 rounded-full text-body-sm bg-surface-variant text-on-surface-variant border border-outline-variant">
+<span class="w-1.5 h-1.5 rounded-full bg-outline"></span> Archived
+                                        </span>
+</td>
+<td class="px-lg py-md text-right">
+<div class="flex items-center justify-end gap-xs">
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors hover:bg-primary/5 rounded-lg" title="Edit">
+<span class="material-symbols-outlined text-[20px]">edit</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-error transition-colors hover:bg-error/5 rounded-lg" title="Delete">
+<span class="material-symbols-outlined text-[20px]">delete</span>
+</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Table Footer / Pagination -->
+<div class="px-lg py-md border-t border-outline-variant flex flex-col sm:flex-row items-center justify-between gap-md bg-[#fafafa]">
+<p class="font-body-sm text-body-sm text-on-surface-variant">Showing 1-5 of 12 Workspaces</p>
+<div class="flex items-center gap-sm">
+<button class="p-2 text-outline-variant cursor-not-allowed" disabled="">
+<span class="material-symbols-outlined">chevron_left</span>
+</button>
+<button class="w-8 h-8 flex items-center justify-center rounded-lg bg-primary text-on-primary font-label-md text-label-md">1</button>
+<button class="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-variant font-label-md text-label-md transition-colors">2</button>
+<button class="w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-variant font-label-md text-label-md transition-colors">3</button>
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Helper Tip Card -->
+<div class="mt-xl p-lg bg-primary-container/5 border border-primary/10 rounded-xl flex gap-lg items-start">
+<div class="p-2 rounded-lg bg-primary/10 text-primary">
+<span class="material-symbols-outlined">lightbulb</span>
+</div>
+<div>
+<h3 class="font-label-md text-label-md font-bold text-on-surface mb-1">Administrative Pro-Tip</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">Workspaces allow you to isolate validation rules and data source connections between different business units. Remember that the "Global Workspace" rules are inherited by all child workspaces unless explicitly overridden in the workspace configuration settings.</p>
+</div>
+</div>
+</div>
+</main>
+</div>
+<!-- Micro-interaction Scripts -->
+<script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Placeholder for row selection or specific interactions
+            const rows = document.querySelectorAll('.data-table-row');
+            rows.forEach(row => {
+                row.addEventListener('click', (e) => {
+                    if (!e.target.closest('button')) {
+                        // Action on row click if needed
+                        console.log('Row clicked');
+                    }
+                });
+            });
+
+            // Smooth fade-in for page content
+            const main = document.querySelector('main');
+            main.style.opacity = '0';
+            main.style.transition = 'opacity 400ms ease-in-out';
+            requestAnimationFrame(() => {
+                main.style.opacity = '1';
+            });
+        });
+    </script>
+</body></html>

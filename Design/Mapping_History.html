@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>History - DataAudit Pro</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "error-container": "#ffdad6",
+                      "error": "#ba1a1a",
+                      "primary-fixed": "#d9e2ff",
+                      "primary": "#0057c2",
+                      "on-secondary-container": "#fffbff",
+                      "secondary": "#2752ca",
+                      "secondary-fixed-dim": "#b6c4ff",
+                      "surface": "#fcf9f8",
+                      "on-tertiary-fixed": "#1b1c1c",
+                      "primary-fixed-dim": "#afc6ff",
+                      "tertiary-container": "#747475",
+                      "on-primary": "#ffffff",
+                      "surface-dim": "#dcd9d9",
+                      "surface-container-highest": "#e5e2e1",
+                      "on-background": "#1b1b1c",
+                      "on-surface": "#1b1b1c",
+                      "inverse-primary": "#afc6ff",
+                      "on-primary-fixed-variant": "#004398",
+                      "on-primary-fixed": "#001a43",
+                      "background": "#fcf9f8",
+                      "on-tertiary-fixed-variant": "#464747",
+                      "inverse-on-surface": "#f3f0ef",
+                      "surface-variant": "#e5e2e1",
+                      "secondary-container": "#466ce4",
+                      "on-secondary-fixed-variant": "#003bb0",
+                      "secondary-fixed": "#dce1ff",
+                      "inverse-surface": "#303030",
+                      "surface-bright": "#fcf9f8",
+                      "on-secondary-fixed": "#00164f",
+                      "tertiary-fixed": "#e3e2e2",
+                      "outline": "#727786",
+                      "surface-tint": "#0059c7",
+                      "primary-container": "#006ef2",
+                      "on-error": "#ffffff",
+                      "surface-container-lowest": "#ffffff",
+                      "on-error-container": "#93000a",
+                      "surface-container": "#f0eded",
+                      "tertiary": "#5b5c5c",
+                      "surface-container-high": "#eae7e7",
+                      "on-primary-container": "#fefcff",
+                      "surface-container-low": "#f6f3f2",
+                      "tertiary-fixed-dim": "#c7c6c6",
+                      "on-secondary": "#ffffff",
+                      "on-tertiary": "#ffffff",
+                      "outline-variant": "#c1c6d7",
+                      "on-tertiary-container": "#fefcfc",
+                      "on-surface-variant": "#414755"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "md": "16px",
+                      "base": "8px",
+                      "xl": "32px",
+                      "gutter": "24px",
+                      "xs": "4px",
+                      "sm": "8px",
+                      "lg": "24px",
+                      "margin": "24px",
+                      "container-max": "1440px"
+              },
+              "fontFamily": {
+                      "h3": ["Inter"],
+                      "body-sm": ["Inter"],
+                      "label-md": ["Inter"],
+                      "code-sm": ["JetBrains Mono"],
+                      "h1": ["Inter"],
+                      "h2": ["Inter"],
+                      "body-lg": ["Inter"],
+                      "h1-mobile": ["Inter"],
+                      "body-md": ["Inter"]
+              },
+              "fontSize": {
+                      "h3": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                      "body-sm": ["12px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "label-md": ["14px", {"lineHeight": "22px", "fontWeight": "500"}],
+                      "code-sm": ["12px", {"lineHeight": "18px", "fontWeight": "400"}],
+                      "h1": ["38px", {"lineHeight": "46px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                      "h2": ["30px", {"lineHeight": "38px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                      "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "h1-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "600"}],
+                      "body-md": ["14px", {"lineHeight": "22px", "fontWeight": "400"}]
+              }
+            },
+          },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .ant-table-row:hover {
+            background-color: #fafafa;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #d9d9d9;
+            border-radius: 10px;
+        }
+        .active-tab {
+            color: #0057c2;
+            border-bottom: 2px solid #0057c2;
+        }
+        .popover-hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-surface font-body-md text-on-surface">
+<!-- TopNavBar -->
+<header class="bg-surface dark:bg-surface-container border-b border-outline-variant dark:border-outline fixed full-width top-0 z-50 w-full h-16">
+<div class="flex justify-between items-center w-full px-gutter max-w-container-max mx-auto h-16">
+<div class="flex items-center gap-xl">
+<span class="font-h3 text-h3 font-semibold text-primary dark:text-primary-fixed">DataAudit Pro</span>
+<nav class="hidden md:flex items-center gap-lg">
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-primary dark:hover:text-primary-fixed transition-colors font-body-md text-body-md" href="#">Dashboard</a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-primary dark:hover:text-primary-fixed transition-colors font-body-md text-body-md" href="#">Validations</a>
+<a class="text-primary dark:text-primary-fixed font-bold border-b-2 border-primary dark:border-primary-fixed pb-1 font-body-md text-body-md" href="#">History</a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-primary dark:hover:text-primary-fixed transition-colors font-body-md text-body-md" href="#">Settings</a>
+</nav>
+</div>
+<div class="flex items-center gap-md">
+<button class="p-base hover:bg-surface-container-low dark:hover:bg-surface-container-high transition-colors rounded-full cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined text-on-surface-variant">notifications</span>
+</button>
+<button class="p-base hover:bg-surface-container-low dark:hover:bg-surface-container-high transition-colors rounded-full cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined text-on-surface-variant">help_outline</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-primary-fixed overflow-hidden border border-outline-variant">
+<img alt="User profile" class="w-full h-full object-cover" data-alt="A professional high-resolution headshot of a data engineer in a modern corporate setting. The lighting is soft and directional, typical of a high-end office. The color palette is clean with whites and blues, maintaining a sophisticated and trustworthy brand identity." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDBZhdsvY8UoOClzZZSWqP_e1f10fDQH3S329Fqt8U1mE_x0qkSmL0sqwzXd4UPavjsg7zyWEUECcr5AB-9lefgvfCCg3i7KCIbTh2dtc0YUvR9kph-I3RmAVuc0lAojPROCyebE38Llzj2Wh4Gf9Q43R-0x5dQ1EWSsUTpe0aUbJfwiEWN8iuE-JREpY7Chkx3m_n-W0kDTriINmZHMEUxcXfhPN_BMIh1bW3Cz4zvGsuhVcGvjikyD5Uh3rqPnx4uQgo0yu6GXVk"/>
+</div>
+</div>
+</div>
+</header>
+<main class="pt-24 pb-xl px-gutter max-w-container-max mx-auto">
+<!-- Header Section -->
+<div class="mb-lg flex flex-col md:flex-row md:items-end justify-between gap-md">
+<div>
+<h1 class="font-h1 text-h1 text-on-surface mb-xs">Execution History</h1>
+<p class="text-on-surface-variant font-body-md">Review historical validation results and schema mapping logs.</p>
+</div>
+<div class="flex gap-sm">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant">search</span>
+<input class="pl-10 pr-4 py-2 bg-surface border border-outline-variant rounded-lg focus:ring-2 focus:ring-primary/10 focus:border-primary outline-none transition-all text-body-md w-64" placeholder="Search logs..." type="text"/>
+</div>
+<button class="bg-surface border border-outline-variant text-on-surface px-4 py-2 rounded-lg font-label-md flex items-center gap-xs hover:bg-surface-container-low transition-all">
+<span class="material-symbols-outlined">filter_list</span> Filter
+                </button>
+</div>
+</div>
+<!-- Ant Design Styled Tabs -->
+<div class="bg-surface border border-outline-variant rounded-xl overflow-hidden shadow-sm">
+<div class="flex border-b border-outline-variant bg-surface-container-lowest">
+<button class="px-xl py-4 font-label-md transition-all flex items-center gap-sm text-on-surface-variant" id="tab-validation" onclick="switchTab('validation')">
+<span class="material-symbols-outlined">analytics</span> Validation History
+                </button>
+<button class="px-xl py-4 font-label-md transition-all hover:text-primary flex items-center gap-sm active-tab text-primary" id="tab-mapping" onclick="switchTab('mapping')">
+<span class="material-symbols-outlined">schema</span> Mapping History
+                </button>
+</div>
+<!-- Validation History Content -->
+<div class="custom-scrollbar overflow-x-auto hidden" id="content-validation">
+<table class="w-full text-left border-collapse min-w-[1000px]">
+<thead class="bg-surface-container-low text-on-surface-variant font-label-md border-b border-outline-variant">
+<tr>
+<th class="py-3 px-gutter font-medium">Source Details</th>
+<th class="py-3 px-gutter font-medium">Target Details</th>
+<th class="py-3 px-gutter font-medium">Mapping Counts</th>
+<th class="py-3 px-gutter font-medium text-center">Duration</th>
+<th class="py-3 px-gutter font-medium text-center">Status</th>
+<th class="py-3 px-gutter font-medium text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+<!-- Row 1 -->
+<tr class="ant-table-row transition-all group">
+<td class="py-4 px-gutter">
+<div class="flex flex-col">
+<span class="font-semibold text-on-surface">production_sales_v2.parquet</span>
+<span class="text-body-sm text-on-surface-variant font-code-sm truncate max-w-xs">s3://data-warehouse/raw/2024/05/22/sales/sales_v2.parquet</span>
+</div>
+</td>
+<td class="py-4 px-gutter">
+<div class="flex flex-col">
+<span class="font-semibold text-on-surface">dim_sales_fact</span>
+<span class="text-body-sm text-on-surface-variant font-code-sm truncate max-w-xs">snowflake://PROD_DB/TRANSFORMED/PUBLIC/DIM_SALES_FACT</span>
+</div>
+</td>
+<td class="py-4 px-gutter">
+<span class="bg-surface-container-highest px-2 py-1 rounded text-body-sm font-code-sm">42,109,221 rows</span>
+</td>
+<td class="py-4 px-gutter text-center">
+<span class="text-on-surface-variant font-code-sm">2m 14s</span>
+</td>
+<td class="py-4 px-gutter text-center">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-200">
+<span class="w-1.5 h-1.5 rounded-full bg-green-700"></span> Success
+                                </span>
+</td>
+<td class="py-4 px-gutter text-right">
+<div class="flex justify-end items-center gap-sm">
+<button class="text-primary hover:underline font-label-md">View Report</button>
+<div class="relative inline-block">
+<button class="text-error hover:text-error/80 font-label-md" onclick="togglePopover(this)">Delete</button>
+<div class="popover-hidden absolute right-0 bottom-full mb-2 w-48 bg-white border border-outline-variant shadow-lg rounded-lg p-3 z-20">
+<p class="text-body-sm text-on-surface mb-2">Are you sure you want to delete this record?</p>
+<div class="flex justify-end gap-2">
+<button class="text-body-sm px-2 py-1 hover:bg-surface-container-low rounded" onclick="closePopover(this)">Cancel</button>
+<button class="text-body-sm bg-error text-white px-2 py-1 rounded">Confirm</button>
+</div>
+</div>
+</div>
+</div>
+</td>
+</tr>
+<!-- Row 2 (Error State) -->
+<tr class="ant-table-row transition-all">
+<td class="py-4 px-gutter">
+<div class="flex flex-col">
+<span class="font-semibold text-on-surface">customer_master_full.csv</span>
+<span class="text-body-sm text-on-surface-variant font-code-sm truncate max-w-xs">gs://internal-audit/temp/customers_20240520.csv</span>
+</div>
+</td>
+<td class="py-4 px-gutter">
+<div class="flex flex-col">
+<span class="font-semibold text-on-surface">CRM_CORE_STAGING</span>
+<span class="text-body-sm text-on-surface-variant font-code-sm truncate max-w-xs">postgres://prod-cluster:5432/crm/staging/customer_master</span>
+</div>
+</td>
+<td class="py-4 px-gutter">
+<span class="bg-surface-container-highest px-2 py-1 rounded text-body-sm font-code-sm">1,244,000 rows</span>
+</td>
+<td class="py-4 px-gutter text-center">
+<span class="text-on-surface-variant font-code-sm">48s</span>
+</td>
+<td class="py-4 px-gutter text-center">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-200">
+<span class="w-1.5 h-1.5 rounded-full bg-red-700"></span> Fail
+                                </span>
+</td>
+<td class="py-4 px-gutter text-right">
+<div class="flex justify-end items-center gap-sm">
+<button class="text-primary hover:underline font-label-md">View Errors</button>
+<button class="text-error hover:text-error/80 font-label-md">Delete</button>
+</div>
+</td>
+</tr>
+<!-- More Rows... -->
+<tr class="ant-table-row transition-all">
+<td class="py-4 px-gutter">
+<div class="flex flex-col">
+<span class="font-semibold text-on-surface">inventory_snapshot.avro</span>
+<span class="text-body-sm text-on-surface-variant font-code-sm truncate max-w-xs">s3://supply-chain/snapshots/inventory_0521.avro</span>
+</div>
+</td>
+<td class="py-4 px-gutter">
+<div class="flex flex-col">
+<span class="font-semibold text-on-surface">STG_INVENTORY</span>
+<span class="text-body-sm text-on-surface-variant font-code-sm truncate max-w-xs">redshift://analytics-dw/sc_stg/inventory_records</span>
+</div>
+</td>
+<td class="py-4 px-gutter">
+<span class="bg-surface-container-highest px-2 py-1 rounded text-body-sm font-code-sm">850,200 rows</span>
+</td>
+<td class="py-4 px-gutter text-center">
+<span class="text-on-surface-variant font-code-sm">1m 05s</span>
+</td>
+<td class="py-4 px-gutter text-center">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-200">
+<span class="w-1.5 h-1.5 rounded-full bg-green-700"></span> Pass
+                                </span>
+</td>
+<td class="py-4 px-gutter text-right">
+<div class="flex justify-end items-center gap-sm">
+<button class="text-primary hover:underline font-label-md">View Report</button>
+<button class="text-error hover:text-error/80 font-label-md">Delete</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Mapping History Content (Hidden by default) -->
+<div class="custom-scrollbar overflow-x-auto block" id="content-mapping"><table class="w-full text-left border-collapse min-w-[1000px]"><thead class="bg-surface-container-low text-on-surface-variant font-label-md border-b border-outline-variant"><tr><th class="py-3 px-gutter font-medium">Source Details</th><th class="py-3 px-gutter font-medium">Target Details</th><th class="py-3 px-gutter font-medium text-center">Status/Result</th><th class="py-3 px-gutter font-medium text-right">Actions</th></tr></thead><tbody class="divide-y divide-outline-variant"><tr class="ant-table-row transition-all"><td class="py-4 px-gutter"><div class="flex flex-col"><span class="font-semibold text-on-surface">Legacy_Orders_Schema</span><span class="text-body-sm text-on-surface-variant font-code-sm truncate max-w-xs">mysql://legacy-orders/schema_v1_2</span></div></td><td class="py-4 px-gutter"><div class="flex flex-col"><span class="font-semibold text-on-surface">Modern_Unified_Orders</span><span class="text-body-sm text-on-surface-variant font-code-sm truncate max-w-xs">snowflake://UNIFIED/SCHEMAS/ORDERS_CORE</span></div></td><td class="py-4 px-gutter text-center"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-200">Active</span></td><td class="py-4 px-gutter text-right"><div class="flex justify-end items-center gap-sm"><button class="text-primary hover:underline font-label-md">View Schema</button><button class="text-error hover:text-error/80 font-label-md">Delete</button></div></td></tr><tr class="ant-table-row transition-all"><td class="py-4 px-gutter"><div class="flex flex-col"><span class="font-semibold text-on-surface">External_API_Payload_v4</span><span class="text-body-sm text-on-surface-variant font-code-sm truncate max-w-xs">json://api-gateway/docs/v4/users.json</span></div></td><td class="py-4 px-gutter"><div class="flex flex-col"><span class="font-semibold text-on-surface">USER_PROFILE_TRANSFORM</span><span class="text-body-sm text-on-surface-variant font-code-sm truncate max-w-xs">bigquery://prod-data/identity/users_v4</span></div></td><td class="py-4 px-gutter text-center"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 border border-blue-200">Draft</span></td><td class="py-4 px-gutter text-right"><div class="flex justify-end items-center gap-sm"><button class="text-primary hover:underline font-label-md">View Schema</button><button class="text-error hover:text-error/80 font-label-md">Delete</button></div></td></tr><tr class="ant-table-row transition-all"><td class="py-4 px-gutter"><div class="flex flex-col"><span class="font-semibold text-on-surface">Deprecated_Customer_Feed</span><span class="text-body-sm text-on-surface-variant font-code-sm truncate max-w-xs">ftp://legacy-reports/customer_v1.csv</span></div></td><td class="py-4 px-gutter"><div class="flex flex-col"><span class="font-semibold text-on-surface">ARCHIVED_CUSTOMERS</span><span class="text-body-sm text-on-surface-variant font-code-sm truncate max-w-xs">s3://archive-storage/2023/customers/</span></div></td><td class="py-4 px-gutter text-center"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-200">Archived</span></td><td class="py-4 px-gutter text-right"><div class="flex justify-end items-center gap-sm"><button class="text-primary hover:underline font-label-md">View Schema</button><button class="text-error hover:text-error/80 font-label-md">Delete</button></div></td></tr></tbody></table></div>
+</div>
+<!-- Pagination -->
+<div class="mt-lg flex justify-between items-center text-body-sm">
+<span class="text-on-surface-variant">Showing 1 to 10 of 2,451 records</span>
+<div class="flex items-center gap-xs">
+<button class="w-8 h-8 flex items-center justify-center border border-outline-variant rounded hover:bg-surface-container-low transition-all"><span class="material-symbols-outlined">chevron_left</span></button>
+<button class="w-8 h-8 flex items-center justify-center bg-primary text-white rounded font-medium shadow-sm">1</button>
+<button class="w-8 h-8 flex items-center justify-center border border-outline-variant rounded hover:bg-surface-container-low transition-all">2</button>
+<button class="w-8 h-8 flex items-center justify-center border border-outline-variant rounded hover:bg-surface-container-low transition-all">3</button>
+<span class="px-1">...</span>
+<button class="w-8 h-8 flex items-center justify-center border border-outline-variant rounded hover:bg-surface-container-low transition-all">246</button>
+<button class="w-8 h-8 flex items-center justify-center border border-outline-variant rounded hover:bg-surface-container-low transition-all"><span class="material-symbols-outlined">chevron_right</span></button>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="bg-surface-container-lowest dark:bg-surface-container border-t border-outline-variant dark:border-outline bottom-0 w-full mt-xl">
+<div class="flex justify-between items-center w-full px-gutter py-base max-w-container-max mx-auto h-12">
+<div class="flex items-center gap-md">
+<span class="font-label-md text-label-md font-bold text-on-surface">DataAudit Pro</span>
+<span class="font-body-sm text-body-sm text-secondary dark:text-secondary-fixed">© 2024 DataAudit Pro v2.4.1</span>
+</div>
+<div class="flex items-center gap-lg">
+<a class="font-body-sm text-body-sm text-on-tertiary-fixed-variant dark:text-on-tertiary-fixed hover:text-primary dark:hover:text-primary-fixed underline transition-all" href="#">System Status: Operational</a>
+<a class="font-body-sm text-body-sm text-on-tertiary-fixed-variant dark:text-on-tertiary-fixed hover:text-primary dark:hover:text-primary-fixed underline transition-all" href="#">Security Docs</a>
+<a class="font-body-sm text-body-sm text-on-tertiary-fixed-variant dark:text-on-tertiary-fixed hover:text-primary dark:hover:text-primary-fixed underline transition-all" href="#">Privacy Policy</a>
+</div>
+</div>
+</footer>
+<script>
+        function switchTab(tab) {
+            const valTab = document.getElementById('tab-validation');
+            const mapTab = document.getElementById('tab-mapping');
+            const valContent = document.getElementById('content-validation');
+            const mapContent = document.getElementById('content-mapping');
+
+            if (tab === 'validation') {
+                valTab.classList.add('active-tab', 'text-primary');
+                valTab.classList.remove('text-on-surface-variant');
+                mapTab.classList.remove('active-tab', 'text-primary');
+                mapTab.classList.add('text-on-surface-variant');
+                valContent.classList.remove('hidden');
+                valContent.classList.add('block');
+                mapContent.classList.add('hidden');
+            } else {
+                mapTab.classList.add('active-tab', 'text-primary');
+                mapTab.classList.remove('text-on-surface-variant');
+                valTab.classList.remove('active-tab', 'text-primary');
+                valTab.classList.add('text-on-surface-variant');
+                mapContent.classList.remove('hidden');
+                mapContent.classList.add('block');
+                valContent.classList.add('hidden');
+            }
+        }
+
+        function togglePopover(btn) {
+            const popover = btn.nextElementSibling;
+            const isHidden = popover.classList.contains('popover-hidden');
+            
+            // Close all other popovers
+            document.querySelectorAll('.popover-hidden').forEach(p => p.classList.add('popover-hidden'));
+            
+            if (isHidden) {
+                popover.classList.remove('popover-hidden');
+            } else {
+                popover.classList.add('popover-hidden');
+            }
+        }
+
+        function closePopover(btn) {
+            btn.closest('.popover-hidden').classList.add('popover-hidden');
+        }
+
+        // Close popovers on click outside
+        window.addEventListener('click', function(e) {
+            if (!e.target.matches('.text-error') && !e.target.closest('.popover-hidden')) {
+                document.querySelectorAll('.popover-hidden').forEach(p => p.classList.add('popover-hidden'));
+            }
+        });
+    </script>
+</body></html>
