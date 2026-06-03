@@ -1,6 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap');
-@import "tailwindcss";
-
 /* ── Design Tokens ──────────────────────────────────────────────── */
 :root {
   /* Surface */
@@ -44,36 +41,29 @@
 }
 
 /* ── Reset & Base ───────────────────────────────────────────────── */
-@layer base {
-  *, *::before, *::after { box-sizing: border-box; margin: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; }
 
-  html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; }
 
-  body {
-    background: var(--surface-0);
-    color: var(--text-1);
-    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-
-  code, kbd, pre {
-    font-family: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 0.8125em;
-  }
-
-  ::-webkit-scrollbar { width: 5px; height: 5px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 999px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--border-3); }
-
-  select {
-    -webkit-appearance: none;
-    appearance: none;
-  }
+body {
+  background: var(--surface-0);
+  color: var(--text-1);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+code, kbd, pre {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.8125em;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-3); }
 
 /* ── Keyframes ──────────────────────────────────────────────────── */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -185,7 +175,7 @@
 }
 
 .input-mono {
-  font-family: 'Geist Mono', monospace;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 /* ── Utility: Badge ─────────────────────────────────────────────── */
@@ -198,4 +188,125 @@
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+/* ── Ant Design Component Overrides ─────────────────────────────── */
+
+/* Tables */
+.ant-table {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.ant-table-thead > tr > th {
+  background-color: #f3f4f6 !important;
+  color: #111827 !important;
+  font-weight: 600;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background-color: #f9fafb !important;
+}
+
+.ant-table-cell {
+  border-color: #e5e7eb;
+}
+
+/* Cards */
+.ant-card {
+  border-color: #e5e7eb;
+  border-radius: 8px;
+}
+
+.ant-card-head {
+  background-color: #f9fafb;
+  border-bottom-color: #e5e7eb;
+}
+
+/* Buttons */
+.ant-btn-primary {
+  background-color: #1677ff;
+}
+
+.ant-btn-primary:hover {
+  background-color: #0958ca;
+}
+
+/* Inputs & Selects */
+.ant-input,
+.ant-input-number,
+.ant-select-selector,
+.ant-picker {
+  border-color: #d1d5db !important;
+  border-radius: 8px !important;
+}
+
+.ant-input:focus,
+.ant-input-number-focused .ant-input-number-input,
+.ant-select-focused .ant-select-selector,
+.ant-picker-focused .ant-picker-input {
+  border-color: #1677ff !important;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.1) !important;
+}
+
+/* Menus */
+.ant-menu-horizontal {
+  border-bottom: 0;
+}
+
+.ant-menu-item:hover {
+  color: #1677ff;
+}
+
+.ant-menu-item-selected {
+  color: #1677ff;
+  border-bottom: 2px solid #1677ff;
+}
+
+/* Tags */
+.ant-tag {
+  border-radius: 4px;
+}
+
+/* Modal */
+.ant-modal-header {
+  border-bottom-color: #e5e7eb;
+}
+
+.ant-modal-content {
+  border-radius: 8px;
+}
+
+/* Popover & Tooltip */
+.ant-popover-inner {
+  border-radius: 8px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);
+}
+
+.ant-tooltip-inner {
+  border-radius: 4px;
+}
+
+/* Pagination */
+.ant-pagination-item-active {
+  border-color: #1677ff;
+}
+
+.ant-pagination-item a:hover {
+  color: #1677ff;
+}
+
+/* Alerts */
+.ant-alert {
+  border-radius: 8px;
+}
+
+/* Loading spinner */
+.ant-spin-spinning {
+  color: #1677ff;
+}
+
+/* Divider */
+.ant-divider {
+  border-color: #e5e7eb;
 }

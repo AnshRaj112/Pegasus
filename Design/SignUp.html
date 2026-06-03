@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Sign Up | DataAudit Pro</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+                  "tertiary-container": "#747475",
+                  "secondary-fixed-dim": "#b6c4ff",
+                  "secondary-fixed": "#dce1ff",
+                  "secondary-container": "#466ce4",
+                  "on-tertiary-fixed": "#1b1c1c",
+                  "on-primary-container": "#fefcff",
+                  "inverse-primary": "#afc6ff",
+                  "surface-bright": "#fcf9f8",
+                  "inverse-on-surface": "#f3f0ef",
+                  "on-error": "#ffffff",
+                  "outline-variant": "#c1c6d7",
+                  "outline": "#727786",
+                  "on-tertiary": "#ffffff",
+                  "background": "#fcf9f8",
+                  "error": "#ba1a1a",
+                  "primary-container": "#006ef2",
+                  "primary": "#0057c2",
+                  "surface-container-high": "#eae7e7",
+                  "on-surface": "#1b1b1c",
+                  "inverse-surface": "#303030",
+                  "on-tertiary-fixed-variant": "#464747",
+                  "on-primary": "#ffffff",
+                  "surface-dim": "#dcd9d9",
+                  "primary-fixed": "#d9e2ff",
+                  "on-surface-variant": "#414755",
+                  "surface-tint": "#0059c7",
+                  "surface": "#fcf9f8",
+                  "tertiary-fixed-dim": "#c7c6c6",
+                  "surface-container": "#f0eded",
+                  "tertiary": "#5b5c5c",
+                  "on-secondary-container": "#fffbff",
+                  "surface-container-highest": "#e5e2e1",
+                  "on-secondary-fixed-variant": "#003bb0",
+                  "on-secondary-fixed": "#00164f",
+                  "on-background": "#1b1b1c",
+                  "secondary": "#2752ca",
+                  "error-container": "#ffdad6",
+                  "tertiary-fixed": "#e3e2e2",
+                  "primary-fixed-dim": "#afc6ff",
+                  "on-error-container": "#93000a",
+                  "surface-container-lowest": "#ffffff",
+                  "on-primary-fixed-variant": "#004398",
+                  "on-primary-fixed": "#001a43",
+                  "surface-variant": "#e5e2e1",
+                  "on-secondary": "#ffffff",
+                  "on-tertiary-container": "#fefcfc",
+                  "surface-container-low": "#f6f3f2"
+          },
+          "borderRadius": {
+                  "DEFAULT": "0.25rem",
+                  "lg": "0.5rem",
+                  "xl": "0.75rem",
+                  "full": "9999px"
+          },
+          "spacing": {
+                  "base": "8px",
+                  "margin": "24px",
+                  "xs": "4px",
+                  "sm": "8px",
+                  "xl": "32px",
+                  "gutter": "24px",
+                  "md": "16px",
+                  "lg": "24px",
+                  "container-max": "1440px"
+          },
+          "fontFamily": {
+                  "body-md": ["Inter"],
+                  "label-md": ["Inter"],
+                  "h1-mobile": ["Inter"],
+                  "body-lg": ["Inter"],
+                  "h2": ["Inter"],
+                  "h3": ["Inter"],
+                  "h1": ["Inter"],
+                  "code-sm": ["JetBrains Mono"],
+                  "body-sm": ["Inter"]
+          },
+          "fontSize": {
+                  "body-md": ["14px", {"lineHeight": "22px", "fontWeight": "400"}],
+                  "label-md": ["14px", {"lineHeight": "22px", "fontWeight": "500"}],
+                  "h1-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "600"}],
+                  "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                  "h2": ["30px", {"lineHeight": "38px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                  "h3": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                  "h1": ["38px", {"lineHeight": "46px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                  "code-sm": ["12px", {"lineHeight": "18px", "fontWeight": "400"}],
+                  "body-sm": ["12px", {"lineHeight": "20px", "fontWeight": "400"}]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+    .auth-gradient {
+      background: radial-gradient(circle at 0% 0%, rgba(0, 87, 194, 0.03) 0%, transparent 50%),
+                  radial-gradient(circle at 100% 100%, rgba(39, 82, 202, 0.03) 0%, transparent 50%);
+    }
+    .strength-bar { transition: width 0.3s ease, background-color 0.3s ease; }
+    .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+  </style>
+</head>
+<body class="bg-surface-bright min-h-screen flex flex-col auth-gradient">
+<!-- Header Section (Suppressed Shell for focused task) -->
+<header class="w-full h-16 flex items-center px-gutter max-w-container-max mx-auto">
+<div class="font-h3 text-h3 text-primary font-bold tracking-tight">DataAudit Pro</div>
+</header>
+<main class="flex-grow flex items-center justify-center px-gutter py-xl">
+<!-- Centered Signup Card -->
+<div class="w-full max-w-[480px] bg-surface-container-lowest border border-outline-variant rounded-xl shadow-sm p-xl">
+<div class="mb-xl">
+<h1 class="font-h2 text-h2 text-on-surface mb-xs">Create your account</h1>
+<p class="font-body-md text-body-md text-on-surface-variant">Precision data validation starts here.</p>
+</div>
+<form class="space-y-lg" id="signupForm" onsubmit="return false;">
+<!-- Full Name -->
+<div class="space-y-xs">
+<label class="font-label-md text-label-md text-on-surface" for="fullName">Full Name</label>
+<div class="relative">
+<input class="w-full h-11 px-md bg-surface-container-lowest border border-outline-variant rounded-lg font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary/10 focus:border-primary transition-all" id="fullName" placeholder="Enter your full name" type="text"/>
+</div>
+</div>
+<!-- Work Email -->
+<div class="space-y-xs">
+<label class="font-label-md text-label-md text-on-surface" for="email">Work Email</label>
+<div class="relative">
+<input class="w-full h-11 px-md bg-surface-container-lowest border border-outline-variant rounded-lg font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary/10 focus:border-primary transition-all" id="email" placeholder="name@company.com" type="email"/>
+</div>
+</div>
+<!-- Password -->
+<div class="space-y-xs">
+<div class="flex justify-between items-center">
+<label class="font-label-md text-label-md text-on-surface" for="password">Password</label>
+<span class="font-body-sm text-body-sm text-on-surface-variant" id="strengthText">Strength: -</span>
+</div>
+<div class="relative">
+<input class="w-full h-11 px-md bg-surface-container-lowest border border-outline-variant rounded-lg font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary/10 focus:border-primary transition-all" id="password" placeholder="Min. 12 characters" type="password"/>
+<button class="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary transition-colors" type="button">
+<span class="material-symbols-outlined text-[20px]">visibility</span>
+</button>
+</div>
+<!-- Strength Indicator -->
+<div class="h-1 w-full bg-surface-container-high rounded-full overflow-hidden mt-sm">
+<div class="strength-bar h-full w-0 bg-outline-variant" id="strengthBar"></div>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Use at least 12 characters with a mix of letters, numbers &amp; symbols.</p>
+</div>
+<!-- TOS Checkbox -->
+<div class="flex items-start gap-md pt-sm">
+<div class="flex items-center h-5">
+<input class="w-4 h-4 text-primary border-outline rounded focus:ring-primary/20" id="terms" type="checkbox"/>
+</div>
+<label class="font-body-md text-body-md text-on-surface-variant leading-5" for="terms">
+            I agree to the <a class="text-primary hover:underline transition-all" href="#">Terms of Service</a> and <a class="text-primary hover:underline transition-all" href="#">Privacy Policy</a>.
+          </label>
+</div>
+<!-- Action Button -->
+<button class="w-full h-11 bg-primary text-on-primary font-label-md text-label-md rounded-lg hover:bg-secondary transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-sm" type="submit">
+          Create Account
+          <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</form>
+<!-- Divider -->
+<div class="flex items-center my-xl">
+<div class="flex-grow border-t border-outline-variant"></div>
+<span class="px-md font-body-sm text-body-sm text-on-surface-variant">Already have an account?</span>
+<div class="flex-grow border-t border-outline-variant"></div>
+</div>
+<div class="text-center">
+<a class="inline-flex items-center justify-center w-full h-11 border border-outline-variant rounded-lg font-label-md text-label-md text-on-surface hover:bg-surface-container transition-all" href="#">
+          Sign in to DataAudit Pro
+        </a>
+</div>
+</div>
+</main>
+<!-- Footer Section -->
+<footer class="w-full py-lg mt-auto bg-surface-container-lowest border-t border-outline-variant">
+<div class="flex flex-col md:flex-row justify-between items-center px-gutter gap-md max-w-container-max mx-auto">
+<div class="font-label-md text-label-md font-bold text-on-surface">DataAudit Pro</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant">
+        © 2024 DataAudit Pro. All rights reserved.
+      </div>
+<div class="flex gap-lg">
+<a class="font-body-sm text-body-sm text-on-surface-variant hover:text-primary transition-colors" href="#">System Status</a>
+<a class="font-body-sm text-body-sm text-on-surface-variant hover:text-primary transition-colors" href="#">Terms of Service</a>
+<a class="font-body-sm text-body-sm text-on-surface-variant hover:text-primary transition-colors" href="#">Privacy Policy</a>
+</div>
+</div>
+</footer>
+<script>
+    // Password Strength Logic
+    const passwordInput = document.getElementById('password');
+    const strengthBar = document.getElementById('strengthBar');
+    const strengthText = document.getElementById('strengthText');
+
+    passwordInput.addEventListener('input', function() {
+      const val = this.value;
+      let score = 0;
+      
+      if (val.length > 0) score += 10;
+      if (val.length >= 8) score += 20;
+      if (val.length >= 12) score += 20;
+      if (/[A-Z]/.test(val)) score += 10;
+      if (/[a-z]/.test(val)) score += 10;
+      if (/[0-9]/.test(val)) score += 15;
+      if (/[^A-Za-z0-9]/.test(val)) score += 15;
+
+      strengthBar.style.width = score + '%';
+      
+      if (score < 40) {
+        strengthBar.className = 'strength-bar h-full bg-error';
+        strengthText.innerText = 'Strength: Weak';
+        strengthText.className = 'font-body-sm text-body-sm text-error';
+      } else if (score < 70) {
+        strengthBar.className = 'strength-bar h-full bg-secondary-container';
+        strengthText.innerText = 'Strength: Moderate';
+        strengthText.className = 'font-body-sm text-body-sm text-secondary-container';
+      } else {
+        strengthBar.className = 'strength-bar h-full bg-primary';
+        strengthText.innerText = 'Strength: Robust';
+        strengthText.className = 'font-body-sm text-body-sm text-primary';
+      }
+
+      if (val === '') {
+        strengthBar.style.width = '0%';
+        strengthText.innerText = 'Strength: -';
+        strengthText.className = 'font-body-sm text-body-sm text-on-surface-variant';
+        strengthBar.className = 'strength-bar h-full bg-outline-variant';
+      }
+    });
+
+    // Toggle Password Visibility
+    const toggleBtn = passwordInput.nextElementSibling;
+    toggleBtn.addEventListener('click', () => {
+      const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+      passwordInput.setAttribute('type', type);
+      toggleBtn.querySelector('span').innerText = type === 'password' ? 'visibility' : 'visibility_off';
+    });
+  </script>
+</body></html>
