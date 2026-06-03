@@ -1,5 +1,7 @@
 # Category 1 — Enterprise Tabular Reconciliation Architecture
 
+> **Single product:** API and UI are Pegasus (`pegasus-backend`, `pegasus-frontend`). Extended design docs: [enterprise-tabular/](enterprise-tabular/README.md). Reference engine code: `pegasus-backend/reference/category1_engine/`.
+
 ## Design Principles
 
 1. **Compute near data** — fingerprints and counts run at the source (SQL push-down or local streaming scan).

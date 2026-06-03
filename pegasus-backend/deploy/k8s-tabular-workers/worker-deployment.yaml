@@ -1,25 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: category1-worker
-  namespace: category1
+  name: pegasus-worker
+  namespace: pegasus
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: category1-worker
+      app: pegasus-worker
   template:
     metadata:
       labels:
-        app: category1-worker
+        app: pegasus-worker
     spec:
       containers:
         - name: worker
-          image: category1-backend:latest
+          image: pegasus-backend:latest
           command: ["python", "-m", "category1.workers.partition_worker"]
           envFrom:
             - configMapRef:
-                name: category1-config
+                name: pegasus-config
           volumeMounts:
             - name: work-data
               mountPath: /data/category1
@@ -35,4 +35,4 @@ spec:
       volumes:
         - name: work-data
           persistentVolumeClaim:
-            claimName: category1-work-data
+            claimName: pegasus-work-data

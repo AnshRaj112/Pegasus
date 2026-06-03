@@ -2,6 +2,8 @@
 
 A FastAPI-based data validation engine that compares CSV files and generates detailed mismatch reports. The backend provides REST APIs for running validations and retrieving validation results.
 
+This is the **only** backend for the Pegasus product. Enterprise Category-1 engine code kept for porting lives under [`reference/category1_engine/`](reference/category1_engine/README.md) (not a separate deployable API). Optional K8s worker manifests: [`deploy/k8s-tabular-workers/`](deploy/k8s-tabular-workers/README.md).
+
 ## Prerequisites
 
 - **Python**: 3.12 or higher

@@ -1,25 +1,29 @@
 # Operations Guide
 
+Pegasus is a **single product**: `pegasus-backend` + `pegasus-frontend`. The standalone Category-1 API/UI stack was removed; enterprise engine code lives under `pegasus-backend/reference/category1_engine/` for porting.
+
 ## Deployment Options
 
 ### Local Development
 ```bash
-cd category1-platform/backend
+cd pegasus-backend
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn category1.api.main:app --reload --port 8000
+alembic -c alembic.ini upgrade head   # if using PostgreSQL history
+uvicorn pegasus.main:app --reload --host 0.0.0.0 --port 8000
 
-cd category1-platform/frontend
+cd pegasus-frontend
 npm install && npm run dev
 ```
 
-### Docker Compose
+### Docker Compose (recommended)
 ```bash
-cd category1-platform
-docker compose up -d
+# From repository root
+docker compose up --build
 ```
-- Backend: http://localhost:8000
-- Frontend: http://localhost:3000
-- API docs: http://localhost:8000/docs
+- UI: http://127.0.0.1:8080 (nginx → API)
+- API: http://127.0.0.1:8000
+- API docs: http://127.0.0.1:8000/docs
 
 ## Configuration
 

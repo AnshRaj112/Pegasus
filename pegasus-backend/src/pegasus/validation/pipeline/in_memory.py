@@ -11,6 +11,8 @@ import polars as pl
 
 from pegasus.validation.adapters.base import TabularSourceAdapter
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+
+_HEADERLESS_ADAPTER_TYPES = frozenset({"FileDelimitedAdapter", "GcsDelimitedAdapter"})
 from pegasus.validation.flat_file import parse_lines, split_physical_lines
 from pegasus.validation.pipeline.result import ColumnDifference, MismatchSample, PipelineResult
 from pegasus.validation.readers.pyarrow_io import (
@@ -83,6 +85,44 @@ def should_try_in_memory_reconcile(
     return source_bytes + target_bytes <= auto_in_memory_max_bytes
 
 
+def _headerless_column_names(adapter: TabularSourceAdapter) -> list[str] | None:
+    if type(adapter).__name__ not in _HEADERLESS_ADAPTER_TYPES:
+        return None
+    if getattr(adapter, "_has_header", True):
+        return None
+    getter = getattr(adapter, "get_schema", None)
+    if not callable(getter):
+        return None
+    return list(getter().column_names)
+
+
+def _align_frame_to_schema(frame: pl.DataFrame, adapter: TabularSourceAdapter) -> pl.DataFrame:
+    """Match loaded column names to the adapter schema (streaming path uses the same names)."""
+    getter = getattr(adapter, "get_schema", None)
+    if not callable(getter):
+        return frame
+    schema_names = list(getter().column_names)
+    if not schema_names:
+        return frame
+
+    columns = list(frame.columns)
+    rename = {
+        columns[i]: schema_names[i]
+        for i in range(min(len(columns), len(schema_names)))
+        if columns[i] != schema_names[i]
+    }
+    if rename:
+        frame = frame.rename(rename)
+
+    for name in schema_names[len(columns) :]:
+        frame = frame.with_columns(pl.lit(None).cast(pl.Utf8).alias(name))
+
+    if len(columns) > len(schema_names):
+        return frame.select(schema_names)
+
+    return frame
+
+
 def _flat_parse_to_polars(
     source: BytesIO | Any,
     *,
@@ -110,23 +150,27 @@ def _flat_parse_to_polars(
 def _load_delimited_frame(
     adapter: FileDelimitedAdapter,
 ) -> pl.DataFrame:
+    column_names = _headerless_column_names(adapter)
     if pyarrow_supports_delimiter(adapter._delimiter):
-        return table_to_polars(
+        frame = table_to_polars(
             read_csv_table(
                 adapter.path,
                 delimiter=adapter._delimiter,
                 has_header=adapter._has_header,
                 skip_rows=adapter._skip_rows,
+                column_names=column_names,
             )
         )
+        return _align_frame_to_schema(frame, adapter)
 
     with open(adapter.path, "rb") as handle:
-        return _flat_parse_to_polars(
+        frame = _flat_parse_to_polars(
             handle,
             delimiter=adapter._delimiter,
             has_header=adapter._has_header,
             skip_rows=adapter._skip_rows,
         )
+    return _align_frame_to_schema(frame, adapter)
 
 
 def _load_gcs_delimited_frame(adapter: object) -> pl.DataFrame:
@@ -136,6 +180,7 @@ def _load_gcs_delimited_frame(adapter: object) -> pl.DataFrame:
     if not isinstance(adapter, GcsDelimitedAdapter):
         raise TypeError("expected GcsDelimitedAdapter")
 
+    column_names = _headerless_column_names(adapter)
     size = adapter.get_size_bytes()
     if adapter.cached_object_bytes() is None and size > 0:
         adapter._load_prefix_bytes(max_bytes=size)
@@ -143,37 +188,43 @@ def _load_gcs_delimited_frame(adapter: object) -> pl.DataFrame:
     if cached is not None and len(cached) >= size:
         payload = cached[:size]
         if pyarrow_supports_delimiter(adapter._delimiter):
-            return table_to_polars(
+            frame = table_to_polars(
                 read_csv_bytes(
                     payload,
                     delimiter=adapter._delimiter,
                     has_header=adapter._has_header,
                     skip_rows=adapter._skip_rows,
+                    column_names=column_names,
                 )
             )
-        return _flat_parse_to_polars(
+            return _align_frame_to_schema(frame, adapter)
+        frame = _flat_parse_to_polars(
             BytesIO(payload),
             delimiter=adapter._delimiter,
             has_header=adapter._has_header,
             skip_rows=adapter._skip_rows,
         )
+        return _align_frame_to_schema(frame, adapter)
 
     with open_gcs_binary(adapter._ref) as handle:
         if pyarrow_supports_delimiter(adapter._delimiter):
-            return table_to_polars(
+            frame = table_to_polars(
                 read_csv_binary(
                     handle,
                     delimiter=adapter._delimiter,
                     has_header=adapter._has_header,
                     skip_rows=adapter._skip_rows,
+                    column_names=column_names,
                 )
             )
-        return _flat_parse_to_polars(
+            return _align_frame_to_schema(frame, adapter)
+        frame = _flat_parse_to_polars(
             handle,
             delimiter=adapter._delimiter,
             has_header=adapter._has_header,
             skip_rows=adapter._skip_rows,
         )
+        return _align_frame_to_schema(frame, adapter)
 
 
 def _load_frame(adapter: TabularSourceAdapter) -> pl.DataFrame | None:
@@ -223,74 +274,74 @@ def try_in_memory_reconcile(
     try:
         src = _load_frame(source)
         tgt = _load_frame(target)
+        if src is None or tgt is None:
+            return None
+
+        src = src.with_columns(_fingerprint_expr(compare_columns).alias("_fp"))
+        tgt = tgt.with_columns(_fingerprint_expr(compare_columns).alias("_fp"))
+
+        src_keys = src.select([*identity_columns, *compare_columns, "_fp"])
+        tgt_keys = tgt.select([*identity_columns, *compare_columns, "_fp"])
+
+        missing_df = src_keys.join(
+            tgt_keys.select(identity_columns),
+            on=identity_columns,
+            how="anti",
+        )
+        extra_df = tgt_keys.join(
+            src_keys.select(identity_columns),
+            on=identity_columns,
+            how="anti",
+        )
+
+        inner = src_keys.join(
+            tgt_keys,
+            on=identity_columns,
+            how="inner",
+            suffix="_tgt",
+        )
+        changed_df = inner.filter(pl.col("_fp") != pl.col("_fp_tgt"))
+        matching = inner.height - changed_df.height
+
+        samples: list[MismatchSample] = []
+
+        def _append_samples(frame: pl.DataFrame, mtype: str, *, with_cols: bool = False) -> None:
+            nonlocal samples
+            if len(samples) >= sample_limit or frame.is_empty():
+                return
+            take = min(sample_limit - len(samples), frame.height)
+            for row in frame.head(take).iter_rows(named=True):
+                key = _identity_key_from_row(row, identity_columns)
+                if mtype == "changed" and with_cols:
+                    col_diffs: list[ColumnDifference] = []
+                    for col in compare_columns:
+                        sv = _canonical(row.get(col))
+                        tv = _canonical(row.get(f"{col}_tgt"))
+                        if sv != tv:
+                            col_diffs.append(ColumnDifference(col, sv, tv))
+                    samples.append(MismatchSample(key, mtype, col_diffs))
+                else:
+                    samples.append(MismatchSample(key, mtype))
+
+        _append_samples(missing_df, "missing")
+        _append_samples(extra_df, "extra")
+        _append_samples(changed_df, "changed", with_cols=enable_column_drilldown)
+
+        elapsed = time.perf_counter() - t0
+        return PipelineResult(
+            schema_valid=set(src.columns) == set(tgt.columns),
+            source_row_count=src.height,
+            target_row_count=tgt.height,
+            row_count_match=src.height == tgt.height,
+            missing_count=missing_df.height,
+            extra_count=extra_df.height,
+            changed_count=changed_df.height,
+            matching_count=matching,
+            partitions_processed=0,
+            mismatched_partitions=0,
+            sample_mismatches=samples,
+            compared_columns=list(compare_columns),
+            execution_seconds=elapsed,
+        )
     except Exception:
         return None
-    if src is None or tgt is None:
-        return None
-
-    src = src.with_columns(_fingerprint_expr(compare_columns).alias("_fp"))
-    tgt = tgt.with_columns(_fingerprint_expr(compare_columns).alias("_fp"))
-
-    src_keys = src.select([*identity_columns, *compare_columns, "_fp"])
-    tgt_keys = tgt.select([*identity_columns, *compare_columns, "_fp"])
-
-    missing_df = src_keys.join(
-        tgt_keys.select(identity_columns),
-        on=identity_columns,
-        how="anti",
-    )
-    extra_df = tgt_keys.join(
-        src_keys.select(identity_columns),
-        on=identity_columns,
-        how="anti",
-    )
-
-    inner = src_keys.join(
-        tgt_keys,
-        on=identity_columns,
-        how="inner",
-        suffix="_tgt",
-    )
-    changed_df = inner.filter(pl.col("_fp") != pl.col("_fp_tgt"))
-    matching = inner.height - changed_df.height
-
-    samples: list[MismatchSample] = []
-
-    def _append_samples(frame: pl.DataFrame, mtype: str, *, with_cols: bool = False) -> None:
-        nonlocal samples
-        if len(samples) >= sample_limit or frame.is_empty():
-            return
-        take = min(sample_limit - len(samples), frame.height)
-        for row in frame.head(take).iter_rows(named=True):
-            key = _identity_key_from_row(row, identity_columns)
-            if mtype == "changed" and with_cols:
-                col_diffs: list[ColumnDifference] = []
-                for col in compare_columns:
-                    sv = _canonical(row.get(col))
-                    tv = _canonical(row.get(f"{col}_tgt"))
-                    if sv != tv:
-                        col_diffs.append(ColumnDifference(col, sv, tv))
-                samples.append(MismatchSample(key, mtype, col_diffs))
-            else:
-                samples.append(MismatchSample(key, mtype))
-
-    _append_samples(missing_df, "missing")
-    _append_samples(extra_df, "extra")
-    _append_samples(changed_df, "changed", with_cols=enable_column_drilldown)
-
-    elapsed = time.perf_counter() - t0
-    return PipelineResult(
-        schema_valid=set(src.columns) == set(tgt.columns),
-        source_row_count=src.height,
-        target_row_count=tgt.height,
-        row_count_match=src.height == tgt.height,
-        missing_count=missing_df.height,
-        extra_count=extra_df.height,
-        changed_count=changed_df.height,
-        matching_count=matching,
-        partitions_processed=0,
-        mismatched_partitions=0,
-        sample_mismatches=samples,
-        compared_columns=list(compare_columns),
-        execution_seconds=elapsed,
-    )

@@ -35,7 +35,19 @@ def pyarrow_supports_delimiter(delimiter: str) -> bool:
     return polars_supports_csv_delimiter(delimiter)
 
 
-def _csv_read_options(*, has_header: bool, skip_rows: int) -> pacsv.ReadOptions:
+def _csv_read_options(
+    *,
+    has_header: bool,
+    skip_rows: int,
+    column_names: list[str] | None = None,
+) -> pacsv.ReadOptions:
+    if not has_header and column_names:
+        return pacsv.ReadOptions(
+            skip_rows=skip_rows,
+            column_names=column_names,
+            autogenerate_column_names=False,
+            encoding="UTF8",
+        )
     return pacsv.ReadOptions(
         skip_rows=skip_rows,
         autogenerate_column_names=not has_header,
@@ -61,12 +73,17 @@ def read_csv_binary(
     has_header: bool = True,
     skip_rows: int = 0,
     max_rows: int | None = None,
+    column_names: list[str] | None = None,
 ) -> pa.Table:
     """Read delimited bytes from an open binary stream (e.g. GCS object handle)."""
     if not pyarrow_supports_delimiter(delimiter):
         raise ValueError(f"PyArrow CSV does not support delimiter {delimiter!r}")
 
-    read_options = _csv_read_options(has_header=has_header, skip_rows=skip_rows)
+    read_options = _csv_read_options(
+        has_header=has_header,
+        skip_rows=skip_rows,
+        column_names=column_names,
+    )
     parse_options = _csv_parse_options(delimiter)
     convert_options = _csv_convert_options()
 
@@ -107,6 +124,7 @@ def read_csv_table(
     has_header: bool = True,
     skip_rows: int = 0,
     max_rows: int | None = None,
+    column_names: list[str] | None = None,
 ) -> pa.Table:
     """Read a delimited text file into a PyArrow table."""
     if not pyarrow_supports_delimiter(delimiter):
@@ -119,11 +137,16 @@ def read_csv_table(
                 delimiter=delimiter,
                 has_header=has_header,
                 skip_rows=skip_rows,
+                column_names=column_names,
             )
 
     reader = pacsv.open_csv(
         path,
-        read_options=_csv_read_options(has_header=has_header, skip_rows=skip_rows),
+        read_options=_csv_read_options(
+            has_header=has_header,
+            skip_rows=skip_rows,
+            column_names=column_names,
+        ),
         parse_options=_csv_parse_options(delimiter),
         convert_options=_csv_convert_options(),
     )
@@ -149,6 +172,7 @@ def read_csv_bytes(
     delimiter: str,
     has_header: bool = True,
     skip_rows: int = 0,
+    column_names: list[str] | None = None,
 ) -> pa.Table:
     """Parse in-memory CSV bytes (reuses a cached GCS prefix when the blob is small)."""
     return read_csv_binary(
@@ -156,6 +180,7 @@ def read_csv_bytes(
         delimiter=delimiter,
         has_header=has_header,
         skip_rows=skip_rows,
+        column_names=column_names,
     )
 
 

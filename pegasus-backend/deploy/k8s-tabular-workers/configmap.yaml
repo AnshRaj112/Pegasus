@@ -1,8 +1,8 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: category1-config
-  namespace: category1
+  name: pegasus-config
+  namespace: pegasus
 data:
   CATEGORY1_CHUNK_SIZE: "10000"
   CATEGORY1_NUM_PARTITIONS: "4096"
@@ -10,4 +10,4 @@ data:
   CATEGORY1_SPILL_THRESHOLD_PCT: "0.75"
   CATEGORY1_WORK_DIR: "/data/category1"
   CATEGORY1_MAX_CONCURRENT_PARTITIONS: "4"
-  REDIS_URL: "redis://category1-redis:6379/0"
+  REDIS_URL: "redis://pegasus-redis:6379/0"

@@ -1,26 +1,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: category1-api
-  namespace: category1
+  name: pegasus-api
+  namespace: pegasus
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: category1-api
+      app: pegasus-api
   template:
     metadata:
       labels:
-        app: category1-api
+        app: pegasus-api
     spec:
       containers:
         - name: api
-          image: category1-backend:latest
+          image: pegasus-backend:latest
           ports:
             - containerPort: 8000
           envFrom:
             - configMapRef:
-                name: category1-config
+                name: pegasus-config
           volumeMounts:
             - name: work-data
               mountPath: /data/category1
@@ -33,13 +33,13 @@ spec:
               memory: 4Gi
           livenessProbe:
             httpGet:
-              path: /api/health
+              path: /api/v1/health
               port: 8000
             initialDelaySeconds: 10
             periodSeconds: 30
           readinessProbe:
             httpGet:
-              path: /api/health
+              path: /api/v1/health
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -51,11 +51,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: category1-api
-  namespace: category1
+  name: pegasus-api
+  namespace: pegasus
 spec:
   selector:
-    app: category1-api
+    app: pegasus-api
   ports:
     - port: 8000
       targetPort: 8000
@@ -63,8 +63,8 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: category1-work-data
-  namespace: category1
+  name: pegasus-work-data
+  namespace: pegasus
 spec:
   accessModes:
     - ReadWriteOnce

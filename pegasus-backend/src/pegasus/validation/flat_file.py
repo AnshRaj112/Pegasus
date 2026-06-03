@@ -326,8 +326,10 @@ def parse_lines(
         headers = _fields(row_iter[0])
         data_lines = row_iter[1:]
     else:
+        from pegasus.validation.csv_header import synthetic_column_names
+
         first = _fields(row_iter[0])
-        headers = [f"column_{i}" for i in range(len(first))]
+        headers = synthetic_column_names(len(first))
         data_lines = row_iter
 
     expected = len(headers)

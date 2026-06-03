@@ -34,7 +34,7 @@
 ## Quick Deploy
 
 ```bash
-cd category1-platform/k8s
+cd pegasus-backend/deploy/k8s-tabular-workers
 kubectl apply -f namespace.yaml
 kubectl apply -f configmap.yaml
 kubectl apply -f redis.yaml

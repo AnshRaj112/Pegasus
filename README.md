@@ -11,13 +11,20 @@ Pegasus is a data validation and reconciliation platform that compares CSV datas
 
 ```
 Pegasus/
-├── pegasus-backend/        # FastAPI backend service (Python)
-├── pegasus-frontend/       # React + Vite frontend (JS/React)
+├── pegasus-backend/        # FastAPI backend (API, job queue, tabular reconciliation)
+│   ├── src/pegasus/        # Production code
+│   ├── reference/          # Category-1 engine prototype (port into src/pegasus/validation)
+│   └── deploy/             # Optional K8s manifests for partition workers
+├── pegasus-frontend/       # React + Vite UI (only frontend)
 ├── docs/                   # Documentation and diagrams
+│   ├── enterprise-tabular/ # Category-1 enterprise design & ops guides
 │   └── diagrams/           # Mermaid source files for diagrams
 ├── test-data/              # Sample CSVs and generated datasets
+├── docker-compose.yml      # Run backend + frontend together
 └── scripts/                # Utility scripts (data generation, helpers)
 ```
+
+There is **one product**: use `pegasus-backend` and `pegasus-frontend` only. Do not run a separate Category-1 API or UI stack.
 
 ## Quick start (dev)
 

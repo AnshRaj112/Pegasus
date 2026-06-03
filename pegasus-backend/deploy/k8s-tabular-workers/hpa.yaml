@@ -1,13 +1,13 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: category1-worker-hpa
-  namespace: category1
+  name: pegasus-worker-hpa
+  namespace: pegasus
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: category1-worker
+    name: pegasus-worker
   minReplicas: 2
   maxReplicas: 32
   metrics:

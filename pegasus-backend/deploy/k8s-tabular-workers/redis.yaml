@@ -1,39 +1,39 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: category1-frontend
-  namespace: category1
+  name: pegasus-redis
+  namespace: pegasus
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
-      app: category1-frontend
+      app: pegasus-redis
   template:
     metadata:
       labels:
-        app: category1-frontend
+        app: pegasus-redis
     spec:
       containers:
-        - name: frontend
-          image: category1-frontend:latest
+        - name: redis
+          image: redis:7-alpine
           ports:
-            - containerPort: 80
+            - containerPort: 6379
           resources:
             requests:
               cpu: 100m
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 256Mi
+              memory: 512Mi
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: category1-frontend
-  namespace: category1
+  name: pegasus-redis
+  namespace: pegasus
 spec:
   selector:
-    app: category1-frontend
+    app: pegasus-redis
   ports:
-    - port: 80
-      targetPort: 80
+    - port: 6379
+      targetPort: 6379

@@ -1,8 +1,10 @@
-# Category-1 Reconciliation Platform — Architecture
+# Category-1 Reconciliation — Architecture
+
+> **Single product:** Runtime validation and UI are **Pegasus** (`pegasus-backend`, `pegasus-frontend`, root `docker-compose.yml`). This document describes the enterprise tabular reconciliation design; the reference prototype implementation is under `pegasus-backend/reference/category1_engine/`.
 
 ## Overview
 
-The Category-1 Reconciliation Platform is an enterprise-grade system for validating tabular datasets between Source and Target systems. It performs all heavy computation within its own execution environment, minimizing impact on source systems.
+Category-1 tabular reconciliation is an enterprise-grade approach for validating datasets between Source and Target systems within Pegasus. It performs all heavy computation within its own execution environment, minimizing impact on source systems.
 
 ## Design Principles
 

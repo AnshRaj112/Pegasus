@@ -65,19 +65,23 @@ Pegasus/
 │   │   ├── models/          # SQLAlchemy relational models
 │   │   ├── repositories/    # Database abstraction layer (repositories)
 │   │   ├── services/        # Business logic, job queue, background runner
-│   │   └── validation/      # Polars-backed fast CSV reconciliation engines
+│   │   └── validation/      # Tabular reconciliation pipeline (Category-1)
+│   ├── reference/           # Category-1 engine prototype (DB adapters, native I/O, spill)
+│   ├── deploy/              # Optional K8s tabular worker manifests
 │   ├── tests/               # Backend Pytest test suite
 │   ├── alembic.ini          # Migration configuration
 │   ├── requirements.txt     # Main dependencies
 │   └── requirements-dev.txt # Dev & testing dependencies
-├── pegasus-frontend/        # React + Vite frontend (UI Dashboard)
+├── pegasus-frontend/        # React + Vite frontend (UI Dashboard) — only UI
 │   ├── src/                 # React frontend source code
 │   │   ├── components/      # UI components (concurrency panel, mismatches, etc.)
 │   │   ├── App.jsx          # Route management & dashboard shell
 │   │   └── main.jsx         # Application index entry-point
 │   └── package.json         # npm dependencies & dev scripts
 ├── docs/                    # Technical docs & visual flow charts
+│   ├── enterprise-tabular/  # Category-1 enterprise architecture & scaling guides
 │   └── diagrams/            # Mermaid diagram source files (.mmd)
+├── docker-compose.yml       # Backend + frontend (single deployable stack)
 ├── scripts/                 # Utility scripts (e.g. data generation)
 └── test-data/               # Sample CSV datasets
 ```
