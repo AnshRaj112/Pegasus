@@ -46,6 +46,8 @@ from pegasus.schemas.validation import (
     LocalBrowseResponse,
     LocalPathBrowseConfigResponse,
     FixedWidthLayoutPreviewResponse,
+    FileDetectionResponse,
+    FileDetectionStageResponse,
     LocalColumnPreviewResponse,
     LocalPathValidateRequest,
     MappingAnalyzeRequest,
@@ -82,6 +84,8 @@ from pegasus.validation.fixed_width_meta import (
     is_fixed_width_run,
     is_json_run,
 )
+from pegasus.validation.file_detection import detect_file
+from pegasus.validation.file_detection.models import DetectionStageResult
 from pegasus.validation.file_pairing import auto_match_files_by_name, list_files_in_directory
 from pegasus.validation.gcs_browse import browse_gcs_prefix, list_gcs_files_under_prefix
 
@@ -1509,6 +1513,64 @@ async def preview_local_csv_columns_body(
                     p.unlink(missing_ok=True)
                 except OSError as exc:
                     logger.warning("Failed to remove temp cloud input %s: %s", p, exc)
+
+def _stage_to_api(stage: DetectionStageResult | None) -> FileDetectionStageResponse | None:
+    if stage is None:
+        return None
+    return FileDetectionStageResponse(
+        detected_type=stage.detected_type,
+        confidence=stage.confidence,
+        evidence=list(stage.evidence),
+        metadata=dict(stage.metadata),
+    )
+
+
+def _report_to_api(report) -> FileDetectionResponse:
+    return FileDetectionResponse(
+        path=report.path,
+        file_size_bytes=report.file_size_bytes,
+        bytes_read=report.bytes_read,
+        dataset_model=report.dataset_model.value,
+        mime_type=report.mime_type,
+        suggested_file_format=report.suggested_file_format,
+        suggested_delimiter=report.suggested_delimiter,
+        warnings=list(report.warnings),
+        extension=_stage_to_api(report.extension),
+        magic_bytes=_stage_to_api(report.magic_bytes),
+        container=_stage_to_api(report.container),
+        compression=_stage_to_api(report.compression),
+        encoding=_stage_to_api(report.encoding),
+        text_binary=_stage_to_api(report.text_binary),
+        structured_format=_stage_to_api(report.structured_format),
+        schema_hint=_stage_to_api(report.schema),
+        validation_strategy=_stage_to_api(report.validation_strategy),
+    )
+
+
+@router.get(
+    "/validate/local/detect",
+    response_model=FileDetectionResponse,
+    summary="Multi-layer file type detection for a local path (bounded read, max 64 KiB)",
+    responses={
+        400: {"description": "Path not found or not a file"},
+        403: {"description": "Local path validation disabled"},
+    },
+)
+async def detect_local_file(
+    settings: AppSettings,
+    path: Annotated[str, Query(description="Absolute or configured local file path")],
+    file_format: Annotated[
+        str | None,
+        Query(description="Optional user-declared format hint (csv, json, fixed-width)"),
+    ] = None,
+) -> FileDetectionResponse:
+    _require_local_path_access(settings)
+    resolved = resolve_local_path_on_disk(path.strip(), settings)
+    if not resolved.is_file():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Path is not a file")
+    report = detect_file(resolved, user_format_hint=file_format)
+    return _report_to_api(report)
+
 
 @router.get(
     "/validate/local/browse/config",

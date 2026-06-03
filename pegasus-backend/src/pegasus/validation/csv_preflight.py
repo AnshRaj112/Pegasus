@@ -17,18 +17,14 @@ from pegasus.validation.readers.delimiter_detection import polars_supports_csv_d
 
 logger = logging.getLogger(__name__)
 
-GZIP_MAGIC = b"\x1f\x8b"
-UTF16_LE_BOM = b"\xff\xfe"
-UTF16_BE_BOM = b"\xfe\xff"
-UTF8_BOM = b"\xef\xbb\xbf"
+from pegasus.validation.file_detection.preflight_bridge import check_csv_prefix_bytes
 
 # Bound row scans so multi-million-row files stay predictable.
 _DEFAULT_MAX_ROWS_TO_SCAN = 50_000
 _MULTICHAR_PREFLIGHT_MAX_BYTES = 8 * 1024 * 1024
 
 
-class CsvPreflightError(ValueError):
-    """CSV structure is invalid for validation."""
+from pegasus.validation.preflight_errors import CsvPreflightError
 
 
 def _read_prefix(path: Path, n: int = 8) -> bytes:
@@ -37,16 +33,7 @@ def _read_prefix(path: Path, n: int = 8) -> bytes:
 
 
 def _detect_binary_or_wrong_encoding(prefix: bytes, *, label: str) -> None:
-    if prefix.startswith(GZIP_MAGIC):
-        raise CsvPreflightError(
-            f"{label}: file looks gzip-compressed (not plain CSV). Decompress before validating."
-        )
-    if prefix.startswith(UTF16_LE_BOM) or prefix.startswith(UTF16_BE_BOM):
-        raise CsvPreflightError(
-            f"{label}: UTF-16 byte order mark detected; save the file as UTF-8 before validating."
-        )
-    if prefix == UTF8_BOM:
-        raise CsvPreflightError(f"{label}: file contains only a UTF-8 BOM and no CSV content.")
+    check_csv_prefix_bytes(prefix, label=label)
 
 
 def _preflight_single_char(

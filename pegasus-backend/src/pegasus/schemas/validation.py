@@ -471,6 +471,41 @@ class FixedWidthLayoutPreviewResponse(BaseModel):
     target_sample: str = ""
 
 
+class FileDetectionStageResponse(BaseModel):
+    """One layer of the file detection pipeline."""
+
+    detected_type: str
+    confidence: int = Field(ge=0, le=100)
+    evidence: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class FileDetectionResponse(BaseModel):
+    """Full multi-layer detection report for a local file."""
+
+    path: str
+    file_size_bytes: int = Field(ge=0)
+    bytes_read: int = Field(ge=0)
+    dataset_model: str
+    mime_type: str | None = None
+    suggested_file_format: str | None = None
+    suggested_delimiter: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    extension: FileDetectionStageResponse | None = None
+    magic_bytes: FileDetectionStageResponse | None = None
+    container: FileDetectionStageResponse | None = None
+    compression: FileDetectionStageResponse | None = None
+    encoding: FileDetectionStageResponse | None = None
+    text_binary: FileDetectionStageResponse | None = None
+    structured_format: FileDetectionStageResponse | None = None
+    schema_hint: FileDetectionStageResponse | None = Field(
+        default=None,
+        serialization_alias="schema",
+        validation_alias="schema",
+    )
+    validation_strategy: FileDetectionStageResponse | None = None
+
+
 class LocalColumnPreviewResponse(BaseModel):
     """Header preview for the local-path mapping UI."""
 

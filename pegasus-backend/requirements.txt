@@ -22,3 +22,8 @@ more-itertools>=10.0.0
 joblib>=1.3.0
 google-cloud-storage>=3.0.0,<4.0.0
 cryptography>=42.0.0,<45.0.0
+
+# File type detection (optional libmagic at runtime; pure fallbacks included)
+python-magic>=0.4.27,<1.0.0
+filetype>=1.2.0,<2.0.0
+puremagic>=1.28,<2.0.0
