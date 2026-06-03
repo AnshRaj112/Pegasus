@@ -11,7 +11,10 @@ from typing import Any
 
 from pegasus.validation.adapters.base import TabularSourceAdapter, TabularSchema
 from pegasus.validation.pipeline.config import TabularPipelineConfig
-from pegasus.validation.pipeline.in_memory import try_in_memory_reconcile
+from pegasus.validation.pipeline.in_memory import (
+    should_try_in_memory_reconcile,
+    try_in_memory_reconcile,
+)
 from pegasus.validation.pipeline.result import (
     ColumnDifference,
     MismatchSample,
@@ -145,7 +148,14 @@ class TabularReconciliationPipeline:
         self._config = config
 
     def run(self, *, workspace: Path | None = None) -> PipelineResult:
-        if self._config.enable_in_memory_reconcile:
+        source_bytes = _adapter_size_bytes(self._source)
+        target_bytes = _adapter_size_bytes(self._target)
+        if should_try_in_memory_reconcile(
+            enable_in_memory_reconcile=self._config.enable_in_memory_reconcile,
+            auto_in_memory_max_bytes=self._config.auto_in_memory_max_bytes,
+            source_bytes=source_bytes,
+            target_bytes=target_bytes,
+        ):
             in_memory = try_in_memory_reconcile(
                 self._source,
                 self._target,

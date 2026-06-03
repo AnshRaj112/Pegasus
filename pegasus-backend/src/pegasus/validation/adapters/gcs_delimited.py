@@ -11,7 +11,8 @@ from pegasus.validation.adapters.base import TabularColumn, TabularSchema
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
 from pegasus.validation.csv_header import read_first_row_fields, synthetic_column_names
 from pegasus.validation.flat_file import split_line
-from pegasus.validation.gcs_object import GcsObjectRef, open_gcs_binary, read_gcs_prefix, sample_gcs_lines
+from pegasus.validation import gcs_object
+from pegasus.validation.gcs_object import GcsObjectRef
 from pegasus.validation.readers.delimiter_detection import polars_supports_csv_delimiter
 from pegasus.validation.readers.pyarrow_io import batch_to_dicts, pyarrow_supports_delimiter
 
@@ -27,6 +28,7 @@ class GcsDelimitedAdapter:
         "_encoding",
         "_column_names",
         "_size_bytes",
+        "_cached_prefix",
     )
 
     def __init__(
@@ -46,6 +48,7 @@ class GcsDelimitedAdapter:
         self._encoding = encoding
         self._column_names: list[str] | None = None
         self._size_bytes = size_bytes
+        self._cached_prefix: bytes | None = None
 
     @property
     def path(self) -> Path:
@@ -62,8 +65,37 @@ class GcsDelimitedAdapter:
             self._size_bytes = gcs_blob_size(self._ref)
         return self._size_bytes
 
+    def _load_prefix_bytes(self, *, max_bytes: int) -> bytes:
+        if self._cached_prefix is not None and len(self._cached_prefix) >= max_bytes:
+            return self._cached_prefix[:max_bytes]
+        size = self.get_size_bytes()
+        read_limit = min(max_bytes, size) if size > 0 else max_bytes
+        payload = gcs_object.read_gcs_prefix(self._ref, max_bytes=read_limit)
+        if self._cached_prefix is None or len(payload) > len(self._cached_prefix):
+            self._cached_prefix = payload
+        return payload
+
+    def cached_object_bytes(self) -> bytes | None:
+        """Return cached object bytes when the full blob was already read for header/sample."""
+        if self._cached_prefix is None:
+            return None
+        size = self.get_size_bytes()
+        if size > 0 and len(self._cached_prefix) >= size:
+            return self._cached_prefix
+        return None
+
     def sample_lines(self, *, max_lines: int = 500) -> list[str]:
-        return sample_gcs_lines(self._ref, max_lines=max_lines)
+        size = self.get_size_bytes()
+        max_bytes = min(512 * 1024, size) if size > 0 else 512 * 1024
+        prefix = self._load_prefix_bytes(max_bytes=max_bytes).decode(self._encoding, errors="replace")
+        out: list[str] = []
+        for line in prefix.splitlines():
+            stripped = line.strip()
+            if stripped:
+                out.append(stripped)
+            if len(out) >= max_lines:
+                break
+        return out
 
     def _effective_delimiter(self, physical_line: str) -> str:
         delim = self._delimiter
@@ -84,7 +116,9 @@ class GcsDelimitedAdapter:
         return split_line(physical, delim)
 
     def _read_header_from_prefix(self) -> list[str]:
-        prefix = read_gcs_prefix(self._ref, max_bytes=256 * 1024).decode(self._encoding, errors="replace")
+        size = self.get_size_bytes()
+        max_bytes = min(256 * 1024, size) if size > 0 else 256 * 1024
+        prefix = self._load_prefix_bytes(max_bytes=max_bytes).decode(self._encoding, errors="replace")
         if self._has_header:
             if polars_supports_csv_delimiter(self._delimiter):
                 reader = csv.reader(
@@ -122,7 +156,7 @@ class GcsDelimitedAdapter:
         return self._column_names
 
     def _iter_data_rows(self) -> Iterator[list[str]]:
-        with open_gcs_binary(self._ref) as handle:
+        with gcs_object.open_gcs_binary(self._ref) as handle:
             text = io.TextIOWrapper(handle, encoding=self._encoding, errors="replace", newline="")
             for _ in range(self._skip_rows):
                 text.readline()
@@ -151,7 +185,7 @@ class GcsDelimitedAdapter:
             _csv_read_options,
         )
 
-        with open_gcs_binary(self._ref) as handle:
+        with gcs_object.open_gcs_binary(self._ref) as handle:
             reader = pacsv.open_csv(
                 handle,
                 read_options=_csv_read_options(has_header=self._has_header, skip_rows=self._skip_rows),

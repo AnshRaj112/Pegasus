@@ -387,6 +387,16 @@ class Settings(BaseSettings):
             "Disabled by default; use the streaming partition/spill pipeline instead."
         ),
     )
+    validation_auto_in_memory_max_bytes: int = Field(
+        default=64 * 1024 * 1024,
+        ge=1024 * 1024,
+        le=512 * 1024 * 1024,
+        description=(
+            "When combined source+target size is at or below this threshold, "
+            "use the Polars in-memory reconcile fast path even if "
+            "validation_enable_in_memory_reconcile is false."
+        ),
+    )
     validation_global_memory_budget_bytes: int = Field(
         default=10 * 1024 * 1024 * 1024,
         ge=512 * 1024 * 1024,

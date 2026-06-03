@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -10,14 +11,19 @@ import polars as pl
 
 from pegasus.validation.adapters.base import TabularSourceAdapter
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+from pegasus.validation.flat_file import parse_lines, split_physical_lines
 from pegasus.validation.pipeline.result import ColumnDifference, MismatchSample, PipelineResult
 from pegasus.validation.readers.pyarrow_io import (
     pyarrow_supports_delimiter,
+    read_csv_binary,
+    read_csv_bytes,
     read_csv_table,
     read_orc_table,
     read_parquet_table,
     table_to_polars,
 )
+
+_DEFAULT_AUTO_IN_MEMORY_MAX_BYTES = 64 * 1024 * 1024
 
 
 def _canonical(value: Any) -> str:
@@ -33,61 +39,152 @@ def _identity_key_from_row(row: dict[str, Any], columns: list[str]) -> str:
     return "|".join(_canonical(row.get(c)) for c in columns)
 
 
+def _adapter_size_bytes(adapter: TabularSourceAdapter) -> int | None:
+    getter = getattr(adapter, "get_size_bytes", None)
+    if callable(getter):
+        try:
+            return int(getter())
+        except (OSError, ValueError):
+            return None
+    path = Path(getattr(adapter, "path", ""))
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
+
+
 def _should_use_in_memory(
-    source_path: Path,
-    target_path: Path,
+    source: TabularSourceAdapter,
+    target: TabularSourceAdapter,
     *,
     memory_budget_bytes: int,
     max_file_bytes: int = 512 * 1024 * 1024,
 ) -> bool:
-    try:
-        file_bytes = source_path.stat().st_size + target_path.stat().st_size
-    except OSError:
+    source_bytes = _adapter_size_bytes(source)
+    target_bytes = _adapter_size_bytes(target)
+    if source_bytes is None or target_bytes is None:
         return False
+    file_bytes = source_bytes + target_bytes
     if file_bytes > max_file_bytes:
         return False
-    # Two frames plus join overhead — keep a conservative headroom factor.
     return file_bytes * 4 < int(memory_budget_bytes * 0.65)
 
 
-def _load_delimited_frame(
-    path: Path,
+def should_try_in_memory_reconcile(
+    *,
+    enable_in_memory_reconcile: bool,
+    auto_in_memory_max_bytes: int,
+    source_bytes: int,
+    target_bytes: int,
+) -> bool:
+    """Return whether to attempt the Polars in-memory fast path."""
+    if enable_in_memory_reconcile:
+        return True
+    return source_bytes + target_bytes <= auto_in_memory_max_bytes
+
+
+def _flat_parse_to_polars(
+    source: BytesIO | Any,
     *,
     delimiter: str,
-    has_header: bool = True,
-    skip_rows: int = 0,
+    has_header: bool,
+    skip_rows: int,
 ) -> pl.DataFrame:
-    if pyarrow_supports_delimiter(delimiter):
+    payload = source.read()
+    text = payload.decode("utf-8", errors="replace") if isinstance(payload, bytes) else payload
+    if skip_rows:
+        lines = text.splitlines()
+        text = "\n".join(lines[skip_rows:])
+    parsed = parse_lines(
+        split_physical_lines(text),
+        delimiter,
+        has_header=has_header,
+    )
+    if not parsed.rows:
+        return pl.DataFrame()
+    columns = parsed.headers or [f"col_{i}" for i in range(len(parsed.rows[0]))]
+    records = [dict(zip(columns, row)) for row in parsed.rows]
+    return pl.DataFrame(records)
+
+
+def _load_delimited_frame(
+    adapter: FileDelimitedAdapter,
+) -> pl.DataFrame:
+    if pyarrow_supports_delimiter(adapter._delimiter):
         return table_to_polars(
             read_csv_table(
-                path,
-                delimiter=delimiter,
-                has_header=has_header,
-                skip_rows=skip_rows,
+                adapter.path,
+                delimiter=adapter._delimiter,
+                has_header=adapter._has_header,
+                skip_rows=adapter._skip_rows,
             )
         )
 
-    adapter = FileDelimitedAdapter(
-        path,
-        delimiter=delimiter,
-        has_header=has_header,
-        skip_rows=skip_rows,
-    )
-    rows: list[dict[str, Any]] = []
-    for chunk in adapter.stream_records(100_000):
-        rows.extend(chunk)
-    return pl.DataFrame(rows) if rows else pl.DataFrame()
-
-
-def _load_frame(adapter: TabularSourceAdapter) -> pl.DataFrame | None:
-    path = Path(adapter.path)
-    if isinstance(adapter, FileDelimitedAdapter):
-        return _load_delimited_frame(
-            path,
+    with open(adapter.path, "rb") as handle:
+        return _flat_parse_to_polars(
+            handle,
             delimiter=adapter._delimiter,
             has_header=adapter._has_header,
             skip_rows=adapter._skip_rows,
         )
+
+
+def _load_gcs_delimited_frame(adapter: object) -> pl.DataFrame:
+    from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
+    from pegasus.validation.gcs_object import open_gcs_binary
+
+    if not isinstance(adapter, GcsDelimitedAdapter):
+        raise TypeError("expected GcsDelimitedAdapter")
+
+    size = adapter.get_size_bytes()
+    if adapter.cached_object_bytes() is None and size > 0:
+        adapter._load_prefix_bytes(max_bytes=size)
+    cached = adapter.cached_object_bytes()
+    if cached is not None and len(cached) >= size:
+        payload = cached[:size]
+        if pyarrow_supports_delimiter(adapter._delimiter):
+            return table_to_polars(
+                read_csv_bytes(
+                    payload,
+                    delimiter=adapter._delimiter,
+                    has_header=adapter._has_header,
+                    skip_rows=adapter._skip_rows,
+                )
+            )
+        return _flat_parse_to_polars(
+            BytesIO(payload),
+            delimiter=adapter._delimiter,
+            has_header=adapter._has_header,
+            skip_rows=adapter._skip_rows,
+        )
+
+    with open_gcs_binary(adapter._ref) as handle:
+        if pyarrow_supports_delimiter(adapter._delimiter):
+            return table_to_polars(
+                read_csv_binary(
+                    handle,
+                    delimiter=adapter._delimiter,
+                    has_header=adapter._has_header,
+                    skip_rows=adapter._skip_rows,
+                )
+            )
+        return _flat_parse_to_polars(
+            handle,
+            delimiter=adapter._delimiter,
+            has_header=adapter._has_header,
+            skip_rows=adapter._skip_rows,
+        )
+
+
+def _load_frame(adapter: TabularSourceAdapter) -> pl.DataFrame | None:
+    if isinstance(adapter, FileDelimitedAdapter):
+        return _load_delimited_frame(adapter)
+
+    adapter_type = type(adapter).__name__
+    if adapter_type == "GcsDelimitedAdapter":
+        return _load_gcs_delimited_frame(adapter)
+
+    path = Path(adapter.path)
     fmt = getattr(adapter, "_file_format", "parquet")
     if fmt in ("parquet", "pq"):
         return table_to_polars(read_parquet_table(path))
@@ -119,9 +216,7 @@ def try_in_memory_reconcile(
     sample_limit: int = 1000,
 ) -> PipelineResult | None:
     """Return a :class:`PipelineResult` when both sides fit in memory; else ``None``."""
-    source_path = Path(source.path)
-    target_path = Path(target.path)
-    if not _should_use_in_memory(source_path, target_path, memory_budget_bytes=memory_budget_bytes):
+    if not _should_use_in_memory(source, target, memory_budget_bytes=memory_budget_bytes):
         return None
 
     t0 = time.perf_counter()

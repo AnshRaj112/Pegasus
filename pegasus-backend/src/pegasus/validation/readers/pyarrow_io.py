@@ -6,8 +6,9 @@ fall back to the flat-file parser in :mod:`pegasus.validation.flat_file`.
 
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, BinaryIO, Iterator
 
 import polars as pl
 import pyarrow as pa
@@ -21,6 +22,7 @@ __all__ = (
     "iter_csv_batches",
     "iter_parquet_batches",
     "pyarrow_supports_delimiter",
+    "read_csv_binary",
     "read_csv_table",
     "read_orc_table",
     "read_parquet_table",
@@ -52,15 +54,15 @@ def _csv_convert_options() -> pacsv.ConvertOptions:
     )
 
 
-def read_csv_table(
-    path: Path,
+def read_csv_binary(
+    source: BinaryIO,
     *,
     delimiter: str,
     has_header: bool = True,
     skip_rows: int = 0,
     max_rows: int | None = None,
 ) -> pa.Table:
-    """Read a delimited text file into a PyArrow table."""
+    """Read delimited bytes from an open binary stream (e.g. GCS object handle)."""
     if not pyarrow_supports_delimiter(delimiter):
         raise ValueError(f"PyArrow CSV does not support delimiter {delimiter!r}")
 
@@ -70,14 +72,14 @@ def read_csv_table(
 
     if max_rows is None:
         return pacsv.read_csv(
-            path,
+            source,
             read_options=read_options,
             parse_options=parse_options,
             convert_options=convert_options,
         )
 
     reader = pacsv.open_csv(
-        path,
+        source,
         read_options=read_options,
         parse_options=parse_options,
         convert_options=convert_options,
@@ -96,6 +98,65 @@ def read_csv_table(
     if not collected:
         return pa.table({})
     return pa.Table.from_batches(collected)
+
+
+def read_csv_table(
+    path: Path,
+    *,
+    delimiter: str,
+    has_header: bool = True,
+    skip_rows: int = 0,
+    max_rows: int | None = None,
+) -> pa.Table:
+    """Read a delimited text file into a PyArrow table."""
+    if not pyarrow_supports_delimiter(delimiter):
+        raise ValueError(f"PyArrow CSV does not support delimiter {delimiter!r}")
+
+    if max_rows is None:
+        with open(path, "rb") as handle:
+            return read_csv_binary(
+                handle,
+                delimiter=delimiter,
+                has_header=has_header,
+                skip_rows=skip_rows,
+            )
+
+    reader = pacsv.open_csv(
+        path,
+        read_options=_csv_read_options(has_header=has_header, skip_rows=skip_rows),
+        parse_options=_csv_parse_options(delimiter),
+        convert_options=_csv_convert_options(),
+    )
+    collected: list[pa.RecordBatch] = []
+    remaining = max_rows
+    for batch in reader:
+        if remaining <= 0:
+            break
+        if batch.num_rows > remaining:
+            collected.append(batch.slice(0, remaining))
+            remaining = 0
+        else:
+            collected.append(batch)
+            remaining -= batch.num_rows
+    if not collected:
+        return pa.table({})
+    return pa.Table.from_batches(collected)
+
+
+def read_csv_bytes(
+    data: bytes,
+    *,
+    delimiter: str,
+    has_header: bool = True,
+    skip_rows: int = 0,
+) -> pa.Table:
+    """Parse in-memory CSV bytes (reuses a cached GCS prefix when the blob is small)."""
+    return read_csv_binary(
+        BytesIO(data),
+        delimiter=delimiter,
+        has_header=has_header,
+        skip_rows=skip_rows,
+    )
 
 
 def iter_csv_batches(

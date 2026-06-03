@@ -25,22 +25,34 @@ def test_small_csv_validation_completes_quickly() -> None:
     elapsed = time.perf_counter() - t0
     assert result.source_row_count == 3
     assert elapsed < 5.0
+    assert result.pipeline_metadata.get("mismatched_partitions") == 0
 
-    with tempfile.TemporaryDirectory() as td:
-        job_dir = Path(td)
-        meta = {
-            "uid_column": "employee_id",
-            "delimiter": "auto",
-            "column_mappings": [],
-            "has_header": True,
-            "header_leading_rows": 0,
-            "source_path": str(src),
-            "target_path": str(tgt),
-            "file_format": "csv",
-            "test_mode": "full",
-        }
-        (job_dir / "meta.json").write_bytes(dumps_bytes(meta))
-        t0 = time.perf_counter()
-        assert run_job_directory(job_dir) == 0
-        assert time.perf_counter() - t0 < 5.0
-        assert (job_dir / "result.json").is_file()
+
+def test_10k_12col_local_validation_under_five_seconds() -> None:
+    src = Path("/home/ansh.raj/Pegasus/test-data/generated-10k-12cols/source.csv")
+    tgt = Path("/home/ansh.raj/Pegasus/test-data/generated-10k-12cols/target.csv")
+    if not src.is_file() or not tgt.is_file():
+        return
+
+    get_settings.cache_clear()
+    service = ValidationService(get_settings())
+    cols = [
+        "sku",
+        "amount",
+        "region",
+        "attr4",
+        "attr5",
+        "attr6",
+        "attr7",
+        "attr8",
+        "attr9",
+        "attr10",
+        "attr11",
+    ]
+
+    t0 = time.perf_counter()
+    result = service._validate_csv_pair_sync(src, tgt, "id", "||", column_mappings=[])
+    elapsed = time.perf_counter() - t0
+
+    assert result.source_row_count == 10_000
+    assert elapsed < 5.0

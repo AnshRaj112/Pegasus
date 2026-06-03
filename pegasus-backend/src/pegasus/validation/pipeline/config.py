@@ -19,6 +19,7 @@ class TabularPipelineConfig:
     partition_preset: str | None = "medium"
     enable_column_drilldown: bool = True
     enable_in_memory_reconcile: bool = False
+    auto_in_memory_max_bytes: int = 64 * 1024 * 1024
     memory_budget_bytes: int = 1_073_741_824
     disk_headroom_multiplier: float = 2.5
 

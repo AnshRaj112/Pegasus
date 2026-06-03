@@ -41,7 +41,8 @@ def test_default_pipeline_uses_streaming_not_in_memory() -> None:
         )
         result = pipeline.run(workspace=work / "spill")
         assert result.source_row_count == 3
-        assert result.partitions_processed > 0
+        # Small local files auto-select in-memory reconcile even when the flag is off.
+        assert result.partitions_processed == 0
 
 
 def test_in_memory_only_when_explicitly_enabled() -> None:

@@ -71,6 +71,7 @@ class ValidationService:
             partition_preset=preset,
             enable_column_drilldown=self._settings.validation_tabular_enable_column_drilldown,
             enable_in_memory_reconcile=self._settings.validation_enable_in_memory_reconcile,
+            auto_in_memory_max_bytes=self._settings.validation_auto_in_memory_max_bytes,
             memory_budget_bytes=memory_budget,
             disk_headroom_multiplier=float(
                 policy.get("disk_headroom_multiplier")

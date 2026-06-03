@@ -57,11 +57,11 @@ def test_cloud_column_preview_streams_without_download(tmp_path: Path) -> None:
     source_adapter = GcsDelimitedAdapter(ref, delimiter=",", size_bytes=src.stat().st_size)
     target_adapter = GcsDelimitedAdapter(target_ref, delimiter=",", size_bytes=tgt.stat().st_size)
 
-    with patch("pegasus.validation.adapters.gcs_delimited.read_gcs_prefix") as read_prefix:
+    with patch("pegasus.validation.gcs_object.read_gcs_prefix") as read_prefix:
         read_prefix.side_effect = lambda ref, **kwargs: (
             src.read_bytes() if ref.object_name.endswith("source.csv") else tgt.read_bytes()
         )
-        with patch("pegasus.validation.adapters.gcs_delimited.open_gcs_binary") as open_blob:
+        with patch("pegasus.validation.gcs_object.open_gcs_binary") as open_blob:
             open_blob.side_effect = lambda ref: open(
                 src if ref.object_name.endswith("source.csv") else tgt,
                 "rb",
