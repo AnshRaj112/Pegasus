@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: category1-redis
+  namespace: category1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: category1-redis
+  template:
+    metadata:
+      labels:
+        app: category1-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: category1-redis
+  namespace: category1
+spec:
+  selector:
+    app: category1-redis
+  ports:
+    - port: 6379
+      targetPort: 6379

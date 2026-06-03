@@ -1,0 +1,24 @@
+flowchart TB
+    subgraph ingest [Ingest]
+        SRC[Source Adapter]
+        TGT[Target Adapter]
+    end
+
+    SRC --> S1[Stage 1: Schema Validation]
+    TGT --> S1
+    S1 --> S2[Stage 2: Row Count]
+    S2 --> CAN[Canonicalization Engine]
+    CAN --> S3[Stage 3: Partition Fingerprints]
+    S3 --> S4[Stage 4: Bucket Compare]
+    S4 -->|match| DONE[Report OK]
+    S4 -->|mismatch| S5[Stage 5: Row Fingerprints]
+    S5 --> S6[Stage 6: Column Drilldown]
+    S6 --> RPT[VALIDATION_RESULTS.md]
+
+    subgraph pushdown [Compute Near Data]
+        SQL[Warehouse SQL GROUP BY partition_id]
+        SCAN[File streaming scan]
+    end
+
+    SQL -.-> S3
+    SCAN -.-> S3

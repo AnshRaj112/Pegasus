@@ -1,179 +1,167 @@
-"""Layer 7: lightweight structured format detection (sample only)."""
+"""Layer 7: structured format heuristics on a bounded sample."""
 
 from __future__ import annotations
 
+import csv
 import json
 import re
+from io import StringIO
 
-from pegasus.validation.file_detection.models import DetectionStageResult
-from pegasus.validation.file_detection.sampling import FileSample
+from pegasus.validation.file_detection.sample import FileSample
+from pegasus.validation.file_detection.types import DetectionStage
 
-_CSV_DELIMS = (",", "\t", "|", ";")
 _YAML_KEY_RE = re.compile(r"^[a-zA-Z_][\w.-]*\s*:", re.MULTILINE)
+_XML_RE = re.compile(rb"<\?xml|<[a-zA-Z][\w:-]*[\s>]")
+_JSONL_MIN_LINES = 2
 
 
-def detect_structured_format(
+def detect_structured(
     sample: FileSample,
-    *,
-    text_binary: DetectionStageResult | None = None,
-    extension_hint: DetectionStageResult | None = None,
-) -> DetectionStageResult:
+    text_binary: DetectionStage | None,
+    magic: DetectionStage | None,
+) -> DetectionStage:
     if text_binary and text_binary.detected_type == "binary":
-        ext = extension_hint.detected_type if extension_hint else "unknown"
-        if ext in {"parquet", "orc", "avro", "excel"}:
-            return DetectionStageResult(
-                ext,
-                extension_hint.confidence if extension_hint else 50,
-                [f"binary structured format {ext}"],
+        if magic and magic.detected_type in {"parquet", "orc", "avro", "png", "pdf"}:
+            return DetectionStage(
+                detected_type=magic.detected_type,
+                confidence=magic.confidence,
+                evidence=["binary structured format from magic"],
+                metadata=magic.metadata,
             )
-        return DetectionStageResult(
-            "unknown",
-            20,
-            ["binary payload; structured text formats skipped"],
+        return DetectionStage(
+            detected_type="binary",
+            confidence=75,
+            evidence=["classified as binary"],
+            metadata={},
         )
 
     text = _decode_text_sample(sample)
     if not text.strip():
-        return DetectionStageResult("empty", 90, ["no text content in sample"])
+        return DetectionStage("unknown", 20, evidence=["empty text sample"])
 
-    jsonl = _detect_jsonl(text)
-    if jsonl is not None:
-        return jsonl
+    stripped = text.lstrip()
+    if magic and magic.detected_type in {"json", "xml"}:
+        return DetectionStage(
+            detected_type=magic.detected_type,
+            confidence=magic.confidence,
+            evidence=["magic_bytes structured hint"],
+            metadata={},
+        )
 
-    json_doc = _detect_json(text)
-    if json_doc is not None:
-        return json_doc
+    json_stage = _detect_json(stripped)
+    if json_stage.confidence >= 75:
+        return json_stage
 
-    xml = _detect_xml(text)
-    if xml is not None:
-        return xml
+    xml_stage = _detect_xml(sample.raw)
+    if xml_stage.confidence >= 75:
+        return xml_stage
 
-    yaml_fmt = _detect_yaml(text)
-    if yaml_fmt is not None:
-        return yaml_fmt
+    yaml_stage = _detect_yaml(text)
+    if yaml_stage.confidence >= 70:
+        return yaml_stage
 
-    delim = _detect_delimited(text)
-    if delim is not None:
-        return delim
+    delim_stage = _detect_delimited(text)
+    if delim_stage.confidence >= 60:
+        return delim_stage
 
-    fixed = _detect_fixed_width(text)
-    if fixed is not None:
-        return fixed
+    fw_stage = _detect_fixed_width(text)
+    if fw_stage.confidence >= 65:
+        return fw_stage
 
-    return DetectionStageResult(
-        "unknown",
-        25,
-        ["no structured format matched in sample window"],
+    return DetectionStage(
+        detected_type="unknown",
+        confidence=25,
+        evidence=["no structured format heuristic matched"],
+        metadata={},
     )
 
 
 def _decode_text_sample(sample: FileSample) -> str:
-    return sample.prefix.decode("utf-8", errors="replace")
+    return sample.raw.decode("utf-8", errors="replace")
 
 
-def _detect_json(text: str) -> DetectionStageResult | None:
-    stripped = text.lstrip()
-    if not stripped.startswith(("{", "[")):
-        return None
-    try:
-        json.loads(stripped[: min(len(stripped), 256 * 1024)])
-    except json.JSONDecodeError:
-        return DetectionStageResult(
-            "json",
-            45,
-            ["starts with JSON token but full sample parse failed"],
-        )
-    return DetectionStageResult(
-        "json",
-        88,
-        ["valid JSON document in prefix sample"],
-    )
-
-
-def _detect_jsonl(text: str) -> DetectionStageResult | None:
-    lines = [ln for ln in text.splitlines()[:50] if ln.strip()]
-    if len(lines) < 2:
-        return None
-    ok = 0
-    for line in lines[:20]:
+def _detect_json(text: str) -> DetectionStage:
+    s = text.strip()
+    if not s:
+        return DetectionStage("unknown", 0, evidence=[])
+    if s[0] in "{[":
         try:
-            json.loads(line)
-            ok += 1
+            json.loads(s[: min(len(s), 32_000)])
+            return DetectionStage("json", 90, evidence=["valid JSON document in sample"])
         except json.JSONDecodeError:
-            break
-    if ok >= 2 and ok >= len(lines[:20]) * 0.8:
-        return DetectionStageResult(
-            "jsonl",
-            82,
-            [f"{ok} consecutive JSON lines in sample"],
-        )
-    return None
-
-
-def _detect_xml(text: str) -> DetectionStageResult | None:
-    stripped = text.lstrip()
-    if not stripped.startswith("<"):
-        return None
-    if re.search(r"<\?xml\s", stripped[:200], re.I) or re.search(
-        r"<[A-Za-z_][\w.-]*", stripped[:500]
-    ):
-        return DetectionStageResult(
-            "xml",
-            75,
-            ["XML declaration or element in sample"],
-        )
-    return None
-
-
-def _detect_yaml(text: str) -> DetectionStageResult | None:
-    if _YAML_KEY_RE.search(text[:4096]) and ":" in text[:4096]:
-        if not text.lstrip().startswith(("{", "[")):
-            return DetectionStageResult(
-                "yaml",
-                55,
-                ["key: value patterns in sample (heuristic)"],
+            pass
+    lines = [ln for ln in text.splitlines() if ln.strip()][:20]
+    if len(lines) >= _JSONL_MIN_LINES:
+        ok = 0
+        for ln in lines:
+            try:
+                json.loads(ln)
+                ok += 1
+            except json.JSONDecodeError:
+                break
+        if ok >= _JSONL_MIN_LINES:
+            return DetectionStage(
+                "json",
+                85,
+                evidence=[f"jsonl lines parsed={ok}"],
+                metadata={"variant": "jsonl"},
             )
-    return None
+    return DetectionStage("unknown", 10, evidence=[])
 
 
-def _detect_delimited(text: str) -> DetectionStageResult | None:
-    lines = [ln for ln in text.splitlines()[:30] if ln.strip()]
+def _detect_xml(raw: bytes) -> DetectionStage:
+    if _XML_RE.search(raw[:4096]):
+        return DetectionStage("xml", 82, evidence=["XML tag or declaration in prefix"])
+    return DetectionStage("unknown", 0, evidence=[])
+
+
+def _detect_yaml(text: str) -> DetectionStage:
+    if text.lstrip().startswith("---"):
+        return DetectionStage("yaml", 75, evidence=["YAML document start ---"])
+    matches = _YAML_KEY_RE.findall(text[:4096])
+    if len(matches) >= 3:
+        return DetectionStage(
+            "yaml",
+            68,
+            evidence=[f"yaml key lines={len(matches)}"],
+            metadata={},
+        )
+    return DetectionStage("unknown", 0, evidence=[])
+
+
+def _detect_delimited(text: str) -> DetectionStage:
+    lines = [ln for ln in text.splitlines() if ln.strip()][:30]
     if len(lines) < 2:
-        return None
-    best_delim: str | None = None
-    best_score = 0
-    for delim in _CSV_DELIMS:
-        counts = [line.count(delim) for line in lines[:15]]
-        if min(counts) <= 0:
-            continue
-        if max(counts) - min(counts) > 2:
-            continue
-        score = min(counts)
-        if score > best_score:
-            best_score = score
-            best_delim = delim
-    if best_delim is None:
-        return None
-    name = {"\t": "tsv", "|": "psv", ";": "csv", ",": "csv"}[best_delim]
-    return DetectionStageResult(
-        name,
-        min(90, 50 + best_score * 5),
-        [f"consistent delimiter {best_delim!r} across sample lines"],
-        {"delimiter": best_delim},
-    )
+        return DetectionStage("unknown", 0, evidence=[])
+
+    for delim, name, conf in ((",", "csv", 85), ("\t", "tsv", 88), ("|", "psv", 80)):
+        counts = [ln.count(delim) for ln in lines[:15]]
+        if min(counts) > 0 and len(set(counts)) <= 2:
+            try:
+                reader = csv.reader(StringIO("\n".join(lines[:10])), delimiter=delim)
+                rows = list(reader)
+                if rows and all(len(r) == len(rows[0]) for r in rows[1:6] if r):
+                    return DetectionStage(
+                        name,
+                        conf,
+                        evidence=[f"consistent {name!r} delimiter counts"],
+                        metadata={"delimiter": delim},
+                    )
+            except csv.Error:
+                continue
+    return DetectionStage("unknown", 0, evidence=[])
 
 
-def _detect_fixed_width(text: str) -> DetectionStageResult | None:
-    lines = [ln for ln in text.splitlines()[:10] if ln.strip()]
+def _detect_fixed_width(text: str) -> DetectionStage:
+    lines = [ln for ln in text.splitlines() if ln.strip()][:20]
     if len(lines) < 3:
-        return None
-    lengths = {len(ln) for ln in lines[:8]}
-    if len(lengths) == 1 and next(iter(lengths)) >= 20:
-        if all(" " in ln and "," not in ln for ln in lines[:5]):
-            return DetectionStageResult(
-                "fixed_width",
-                60,
-                ["uniform line lengths without delimiters"],
-                {"line_length": next(iter(lengths))},
-            )
-    return None
+        return DetectionStage("unknown", 0, evidence=[])
+    lengths = [len(ln) for ln in lines]
+    if len(set(lengths)) == 1 and lengths[0] > 20 and "," not in lines[0]:
+        return DetectionStage(
+            "fixed-width",
+            70,
+            evidence=[f"uniform line length={lengths[0]}"],
+            metadata={"line_length": lengths[0]},
+        )
+    return DetectionStage("unknown", 0, evidence=[])

@@ -1,157 +1,112 @@
-"""Layer 8: schema hints from sample windows only."""
+"""Layer 8: schema hints from bounded sample only."""
 
 from __future__ import annotations
 
 import csv
-import io
 import json
+from io import StringIO
 
-from pegasus.validation.file_detection.models import DetectionStageResult
-from pegasus.validation.file_detection.sampling import FileSample
+from pegasus.validation.file_detection.sample import FileSample
+from pegasus.validation.file_detection.types import DetectionStage
 
 
-def discover_schema_hint(
+def detect_schema_hint(
     sample: FileSample,
-    *,
-    structured: DetectionStageResult | None = None,
-) -> DetectionStageResult:
-    if structured is None or structured.detected_type in {"unknown", "empty"}:
-        return DetectionStageResult(
-            "unavailable",
-            0,
-            ["structured format unknown; schema not inferred"],
+    structured: DetectionStage | None,
+) -> DetectionStage:
+    if not structured or structured.confidence < 50:
+        return DetectionStage(
+            detected_type="none",
+            confidence=80,
+            evidence=["no structured format to infer schema from"],
+            metadata={},
         )
 
     fmt = structured.detected_type
-    if fmt in {"csv", "tsv", "psv"}:
-        return _tabular_schema(sample, structured)
-    if fmt == "json":
-        return _json_schema(sample)
-    if fmt == "jsonl":
-        return _jsonl_schema(sample)
-    if fmt == "fixed_width":
-        return DetectionStageResult(
-            "inferred_positions",
-            40,
-            ["fixed-width: column positions require layout rules"],
-            {"schema_available": False},
-        )
+    text = sample.raw.decode("utf-8", errors="replace")
 
-    return DetectionStageResult(
-        "unavailable",
-        10,
-        [f"schema discovery not implemented for {fmt}"],
+    if fmt in {"csv", "tsv", "psv"}:
+        return _tabular_schema(text, structured.metadata.get("delimiter", ","), fmt)
+    if fmt == "json":
+        return _json_schema(text, structured.metadata.get("variant"))
+    if fmt == "fixed-width":
+        return DetectionStage(
+            detected_type="fixed-width",
+            confidence=60,
+            evidence=["fixed-width layout inference deferred"],
+            metadata={"columns": []},
+        )
+    return DetectionStage(
+        detected_type="none",
+        confidence=70,
+        evidence=[f"schema discovery not implemented for {fmt!r}"],
+        metadata={},
     )
 
 
-def _tabular_schema(
-    sample: FileSample,
-    structured: DetectionStageResult,
-) -> DetectionStageResult:
-    delim = structured.metadata.get("delimiter", ",")
-    text = sample.prefix.decode("utf-8", errors="replace")
-    lines = [ln for ln in text.splitlines()[:5] if ln.strip()]
+def _tabular_schema(text: str, delimiter: str, fmt: str) -> DetectionStage:
+    lines = [ln for ln in text.splitlines() if ln.strip()][:15]
     if not lines:
-        return DetectionStageResult("unavailable", 0, ["no lines"])
-
+        return DetectionStage("none", 30, evidence=["no lines in sample"])
     try:
-        reader = csv.reader(io.StringIO("\n".join(lines[:3])), delimiter=str(delim))
-        rows = list(reader)
-    except csv.Error:
-        return DetectionStageResult("unavailable", 20, ["csv parse failed on sample"])
-
-    if not rows:
-        return DetectionStageResult("unavailable", 0, ["no rows parsed"])
-
-    header = rows[0]
-    data_rows = rows[1:] if len(rows) > 1 else []
+        reader = csv.reader(StringIO(lines[0]), delimiter=delimiter)
+        header = next(reader)
+    except (csv.Error, StopIteration):
+        return DetectionStage("none", 30, evidence=["could not parse header row"])
     columns = [
-        {
-            "name": name or f"col_{i}",
-            "inferred_type": _infer_cell_type(
-                [r[i] if i < len(r) else "" for r in data_rows[:5]]
-            ),
-            "nullable": True,
-        }
+        {"name": name.strip() or f"col_{i}", "inferred_type": "string", "nullable": True}
         for i, name in enumerate(header)
     ]
-    has_header = _looks_like_header(header, data_rows)
-    return DetectionStageResult(
-        "tabular_columns",
-        65 if has_header else 45,
-        [
-            f"{len(columns)} columns from sample",
-            f"header_row={'yes' if has_header else 'uncertain'}",
-        ],
-        {
-            "schema_available": True,
-            "columns": columns[:50],
-            "column_count": len(columns),
-            "has_header": has_header,
-        },
+    return DetectionStage(
+        detected_type=fmt,
+        confidence=72,
+        evidence=[f"inferred {len(columns)} columns from header row"],
+        metadata={"columns": columns, "has_header": True},
     )
 
 
-def _json_schema(sample: FileSample) -> DetectionStageResult:
-    text = sample.prefix.decode("utf-8", errors="replace").lstrip()
+def _json_schema(text: str, variant: str | None) -> DetectionStage:
+    if variant == "jsonl":
+        keys: set[str] = set()
+        for ln in text.splitlines()[:20]:
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                obj = json.loads(ln)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict):
+                keys.update(obj.keys())
+        return DetectionStage(
+            detected_type="json",
+            confidence=70,
+            evidence=[f"jsonl key union size={len(keys)}"],
+            metadata={"top_level_keys": sorted(keys)[:50]},
+        )
     try:
-        doc = json.loads(text[: min(len(text), 512 * 1024)])
+        obj = json.loads(text[: min(len(text), 32_000)])
     except json.JSONDecodeError:
-        return DetectionStageResult("unavailable", 15, ["JSON sample parse failed"])
-    keys = list(doc.keys())[:30] if isinstance(doc, dict) else []
-    return DetectionStageResult(
-        "hierarchical_keys",
-        70 if keys else 50,
-        [f"top-level keys: {len(keys)}"],
-        {"schema_available": bool(keys), "top_level_keys": keys},
+        return DetectionStage("none", 30, evidence=["json parse failed for schema"])
+    if isinstance(obj, dict):
+        keys = list(obj.keys())[:50]
+        return DetectionStage(
+            detected_type="json",
+            confidence=75,
+            evidence=[f"top-level object keys={len(keys)}"],
+            metadata={"top_level_keys": keys},
+        )
+    if isinstance(obj, list) and obj and isinstance(obj[0], dict):
+        keys = list(obj[0].keys())[:50]
+        return DetectionStage(
+            detected_type="json",
+            confidence=72,
+            evidence=["array of objects; schema from first element"],
+            metadata={"top_level_keys": keys},
+        )
+    return DetectionStage(
+        detected_type="json",
+        confidence=50,
+        evidence=["json without object schema"],
+        metadata={},
     )
-
-
-def _jsonl_schema(sample: FileSample) -> DetectionStageResult:
-    keys: set[str] = set()
-    for line in sample.prefix.decode("utf-8", errors="replace").splitlines()[:10]:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(row, dict):
-            keys.update(row.keys())
-    return DetectionStageResult(
-        "hierarchical_keys",
-        60 if keys else 30,
-        [f"union of keys across sample lines: {len(keys)}"],
-        {"schema_available": bool(keys), "top_level_keys": sorted(keys)[:30]},
-    )
-
-
-def _looks_like_header(header: list[str], data_rows: list[list[str]]) -> bool:
-    if not header or not data_rows:
-        return False
-    numeric_header = sum(1 for h in header if h.replace(".", "", 1).isdigit())
-    if numeric_header > len(header) // 2:
-        return False
-    return any(h and not h.isdigit() for h in header)
-
-
-def _infer_cell_type(values: list[str]) -> str:
-    if not values:
-        return "unknown"
-    cleaned = [v.strip() for v in values if v.strip()]
-    if not cleaned:
-        return "null"
-    if all(v.isdigit() for v in cleaned):
-        return "integer"
-    if all(_is_float(v) for v in cleaned):
-        return "float"
-    return "string"
-
-
-def _is_float(s: str) -> bool:
-    try:
-        float(s)
-        return True
-    except ValueError:
-        return False

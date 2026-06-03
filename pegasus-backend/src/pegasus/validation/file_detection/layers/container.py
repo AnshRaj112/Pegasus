@@ -1,154 +1,121 @@
-"""Layer 3: container/archive detection (metadata only, no full extract)."""
+"""Layer 3: container/archive metadata (no full extract)."""
 
 from __future__ import annotations
 
 import tarfile
 import zipfile
-from dataclasses import dataclass
 
-from pegasus.validation.file_detection.models import DetectionStageResult
-from pegasus.validation.file_detection.sampling import FileSample
+from pegasus.validation.file_detection.sample import FileSample
+from pegasus.validation.file_detection.types import DetectionStage
 
-DEFAULT_MAX_ARCHIVE_DEPTH = 5
-DEFAULT_MAX_ARCHIVE_ENTRIES = 1000
-DEFAULT_MAX_LISTED_BYTES = 64 * 1024 * 1024  # uncompressed size sum cap (estimate)
+MAX_ARCHIVE_ENTRIES = 1000
+MAX_LIST_NAME_BYTES = 256
 
 
-@dataclass(slots=True)
-class ArchiveEntryInfo:
-    name: str
-    compressed_size: int
-    is_dir: bool
+def detect_container(sample: FileSample, magic: DetectionStage | None) -> DetectionStage:
+    prefix = sample.prefix_4k
+    kind = (magic.detected_type if magic else "") or ""
 
-
-def detect_container(
-    sample: FileSample,
-    *,
-    magic_result: DetectionStageResult | None = None,
-    max_depth: int = DEFAULT_MAX_ARCHIVE_DEPTH,
-    max_entries: int = DEFAULT_MAX_ARCHIVE_ENTRIES,
-) -> DetectionStageResult:
-    prefix = sample.prefix_8k
-    container_type = _container_type_from_magic(prefix, magic_result)
-    if container_type is None:
-        return DetectionStageResult(
-            detected_type="none",
-            confidence=75,
-            evidence=["not a known archive container"],
+    if prefix.startswith(b"PK") or kind == "zip":
+        return _inspect_zip(sample)
+    if kind == "tar" or _tar_header_in_prefix(prefix):
+        return _inspect_tar(sample)
+    if kind in {"7z", "rar"}:
+        return DetectionStage(
+            detected_type=kind,
+            confidence=magic.confidence if magic else 85,
+            evidence=[f"{kind} magic identified; deep listing deferred"],
+            metadata={"listing": "deferred", "strategy_hint": "container"},
         )
-
-    if container_type == "zip" and _is_zip_readable(sample.path):
-        entries, nested = _inspect_zip(sample.path, max_entries=max_entries, max_depth=max_depth)
-        return _container_result(container_type, entries, nested, confidence=90)
-
-    if container_type == "tar" and tarfile.is_tarfile(sample.path):
-        entries, nested = _inspect_tar(sample.path, max_entries=max_entries)
-        return _container_result(container_type, entries, nested, confidence=88)
-
-    return DetectionStageResult(
-        detected_type=container_type,
-        confidence=70,
-        evidence=[f"container signature {container_type} (metadata scan skipped or unavailable)"],
-        metadata={"entry_count": 0},
+    return DetectionStage(
+        detected_type="none",
+        confidence=85,
+        evidence=["not a container format"],
+        metadata={},
     )
 
 
-def _container_type_from_magic(
-    prefix: bytes,
-    magic_result: DetectionStageResult | None,
-) -> str | None:
-    if prefix.startswith(b"PK\x03\x04") or prefix.startswith(b"PK\x05\x06"):
-        return "zip"
-    if magic_result and magic_result.detected_type in {"zip", "7z", "rar", "tar", "tar_ustar"}:
-        t = magic_result.detected_type
-        return "tar" if t == "tar_ustar" else t
-    if len(prefix) >= 262 and prefix[257:262] == b"ustar":
-        return "tar"
-    if prefix.startswith(b"Rar!\x1a\x07"):
-        return "rar"
-    if prefix.startswith(b"7z\xbc\xaf\x27\x1c"):
-        return "7z"
-    return None
-
-
-def _is_zip_readable(path) -> bool:
-    try:
-        return zipfile.is_zipfile(path)
-    except OSError:
+def _tar_header_in_prefix(prefix: bytes) -> bool:
+    if len(prefix) < 262:
         return False
+    return prefix[257:262] in (b"ustar", b"ustar\x00")
 
 
-def _inspect_zip(
-    path,
-    *,
-    max_entries: int,
-    max_depth: int,
-) -> tuple[list[ArchiveEntryInfo], bool]:
-    entries: list[ArchiveEntryInfo] = []
+def _inspect_zip(sample: FileSample) -> DetectionStage:
+    evidence: list[str] = []
+    names: list[str] = []
     nested = False
+    truncated = False
     try:
-        with zipfile.ZipFile(path, "r") as zf:
-            for info in zf.infolist():
-                if len(entries) >= max_entries:
-                    break
-                name = info.filename
-                entries.append(
-                    ArchiveEntryInfo(
-                        name=name,
-                        compressed_size=info.compress_size,
-                        is_dir=name.endswith("/"),
-                    )
-                )
-                lower = name.lower()
-                if any(lower.endswith(ext) for ext in (".zip", ".tar", ".gz", ".7z", ".rar")):
+        with zipfile.ZipFile(sample.path, "r") as zf:
+            infos = zf.infolist()
+            if len(infos) > MAX_ARCHIVE_ENTRIES:
+                truncated = True
+                infos = infos[:MAX_ARCHIVE_ENTRIES]
+            for info in infos:
+                name = info.filename[:MAX_LIST_NAME_BYTES]
+                names.append(name)
+                low = name.lower()
+                if low.endswith((".zip", ".tar", ".gz", ".7z", ".rar")):
                     nested = True
-    except (zipfile.BadZipFile, OSError):
-        return [], False
-    _ = max_depth  # reserved for recursive nested walk (depth-limited)
-    return entries, nested
-
-
-def _inspect_tar(path, *, max_entries: int) -> tuple[list[ArchiveEntryInfo], bool]:
-    entries: list[ArchiveEntryInfo] = []
-    nested = False
-    try:
-        with tarfile.open(path, "r:*") as tf:
-            for member in tf.getmembers():
-                if len(entries) >= max_entries:
-                    break
-                entries.append(
-                    ArchiveEntryInfo(
-                        name=member.name,
-                        compressed_size=member.size,
-                        is_dir=member.isdir(),
-                    )
-                )
-                lower = member.name.lower()
-                if any(lower.endswith(ext) for ext in (".zip", ".tar", ".gz", ".7z", ".rar")):
-                    nested = True
-    except (tarfile.TarError, OSError):
-        return [], False
-    return entries, nested
-
-
-def _container_result(
-    container_type: str,
-    entries: list[ArchiveEntryInfo],
-    nested: bool,
-    *,
-    confidence: int,
-) -> DetectionStageResult:
-    names = [e.name for e in entries[:20]]
-    evidence = [f"archive type {container_type}", f"listed {len(entries)} entries (cap applied)"]
-    if nested:
-        evidence.append("nested archive members detected")
-    return DetectionStageResult(
-        detected_type=container_type,
-        confidence=confidence,
+            evidence.append(f"zip entries={len(infos)}")
+    except (zipfile.BadZipFile, OSError) as exc:
+        return DetectionStage(
+            detected_type="zip",
+            confidence=60,
+            evidence=[f"zip magic but listing failed: {exc}"],
+            metadata={"error": str(exc)},
+        )
+    return DetectionStage(
+        detected_type="zip",
+        confidence=92,
         evidence=evidence,
         metadata={
-            "entry_count": len(entries),
-            "sample_entries": names,
-            "nested_archives": nested,
+            "entry_count": len(names),
+            "entries_truncated": truncated,
+            "nested_archive_hint": nested,
+            "entry_names_sample": names[:20],
+            "strategy_hint": "container",
+        },
+    )
+
+
+def _inspect_tar(sample: FileSample) -> DetectionStage:
+    evidence: list[str] = []
+    names: list[str] = []
+    nested = False
+    truncated = False
+    try:
+        with tarfile.open(sample.path, "r:*") as tf:
+            members = tf.getmembers()
+            if len(members) > MAX_ARCHIVE_ENTRIES:
+                truncated = True
+                members = members[:MAX_ARCHIVE_ENTRIES]
+            for m in members:
+                if not m.isfile():
+                    continue
+                name = m.name[:MAX_LIST_NAME_BYTES]
+                names.append(name)
+                low = name.lower()
+                if low.endswith((".zip", ".tar", ".gz", ".7z", ".rar")):
+                    nested = True
+            evidence.append(f"tar file members={len(names)}")
+    except (tarfile.TarError, OSError) as exc:
+        return DetectionStage(
+            detected_type="tar",
+            confidence=60,
+            evidence=[f"tar open failed: {exc}"],
+            metadata={"error": str(exc)},
+        )
+    return DetectionStage(
+        detected_type="tar",
+        confidence=90,
+        evidence=evidence,
+        metadata={
+            "entry_count": len(names),
+            "entries_truncated": truncated,
+            "nested_archive_hint": nested,
+            "entry_names_sample": names[:20],
+            "strategy_hint": "container",
         },
     )

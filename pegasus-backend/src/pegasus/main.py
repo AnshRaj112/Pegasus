@@ -49,10 +49,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     dotenv_list = [str(p) for p in loaded_dotenv_files()]
     logger.info(
-        "POST /validate upload limit (per file): %s bytes (~%s). Dotenv files: %s. "
-        "Shell env PEGASUS_VALIDATION_MAX_UPLOAD_BYTES overrides .env. Remove 52428800 (50 MiB) from .env or export.",
-        settings.validation_max_upload_bytes,
-        _fmt_upload_limit(settings.validation_max_upload_bytes),
+        "Pegasus API starting. Dotenv files: %s.",
         dotenv_list or "(none — code defaults only)",
     )
     application = FastAPI(

@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: category1-worker
+  namespace: category1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: category1-worker
+  template:
+    metadata:
+      labels:
+        app: category1-worker
+    spec:
+      containers:
+        - name: worker
+          image: category1-backend:latest
+          command: ["python", "-m", "category1.workers.partition_worker"]
+          envFrom:
+            - configMapRef:
+                name: category1-config
+          volumeMounts:
+            - name: work-data
+              mountPath: /data/category1
+          resources:
+            requests:
+              cpu: 2
+              memory: 4Gi
+              ephemeral-storage: 50Gi
+            limits:
+              cpu: 4
+              memory: 10Gi
+              ephemeral-storage: 200Gi
+      volumes:
+        - name: work-data
+          persistentVolumeClaim:
+            claimName: category1-work-data

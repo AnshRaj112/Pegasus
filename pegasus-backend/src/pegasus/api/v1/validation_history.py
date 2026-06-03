@@ -25,7 +25,7 @@ from pegasus.services.entity_inference_service import (
     infer_entity_from_filenames,
     normalize_entity_name,
 )
-from pegasus.validation.delimiter_tokens import normalize_delimiter_for_storage
+from pegasus.core.delimiter_tokens import normalize_delimiter_for_storage
 from pegasus.schemas.validation import ColumnMapping, ColumnMappingFormatCheck, FooterValidationResult, MismatchCounts
 from pegasus.schemas.validation_history import (
     SaveDraftRequest,

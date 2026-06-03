@@ -647,6 +647,10 @@ class ValidateResponse(BaseModel):
         default=None,
         description="Present when test_mode is litmus.",
     )
+    pipeline_metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Category-1 six-stage pipeline metrics (partition counts, timings, etc.).",
+    )
 
 
 class ValidationJobAcceptedResponse(BaseModel):

@@ -1,175 +1,136 @@
-"""Layer 9: validation strategy selection from detection evidence."""
+"""Layer 9: validation strategy and dataset model selection."""
 
 from __future__ import annotations
 
-from pegasus.validation.file_detection.models import (
-    DatasetModel,
-    DetectionStageResult,
-    ValidationStrategyHint,
-)
-from pegasus.validation.file_detection.layers.compression import is_compressed_type
-from pegasus.validation.file_detection.plugins.registry import plugin_for_magic_type
-from pegasus.validation.file_detection.sampling import FileSample
+from pegasus.validation.file_detection.plugins.registry import apply_format_plugins
+from pegasus.validation.file_detection.types import DetectionStage
+from pegasus.validation.file_format import is_columnar_format, normalize_file_format
 
-_COLUMNAR_TYPES = frozenset({"parquet", "orc", "avro", "excel", "ole_compound"})
+_COLUMNAR = frozenset({"parquet", "orc", "avro", "excel"})
+_HIERARCHICAL = frozenset({"json"})
+_TABULAR = frozenset({"csv", "tsv", "psv", "fixed-width"})
+_CONTAINERS = frozenset({"zip", "tar", "7z", "rar"})
+_COMPRESSION = frozenset({"gzip", "bzip2", "xz", "zstd", "lz4"})
 
 
 def select_validation_strategy(
-    sample: FileSample,
     *,
-    compression: DetectionStageResult | None,
-    container: DetectionStageResult | None,
-    encoding: DetectionStageResult | None,
-    structured: DetectionStageResult | None,
-    text_binary: DetectionStageResult | None,
-    schema: DetectionStageResult | None,
-    user_format_hint: str | None = None,
-) -> tuple[DetectionStageResult, DatasetModel, str | None, str | None]:
-    """Return strategy stage, dataset model, suggested file_format, suggested delimiter."""
-
+    extension: DetectionStage | None,
+    magic: DetectionStage | None,
+    container: DetectionStage | None,
+    compression: DetectionStage | None,
+    encoding: DetectionStage | None,
+    structured: DetectionStage | None,
+    user_format_hint: str | None,
+) -> tuple[DetectionStage, str, str | None, str | None, list[str]]:
+    """Return (strategy stage, dataset_model, suggested_file_format, delimiter, warnings)."""
     warnings: list[str] = []
+    candidates: list[tuple[str, int, str]] = []
 
-    if compression and is_compressed_type(compression.detected_type):
-        return (
-            DetectionStageResult(
-                ValidationStrategyHint.DECOMPRESS_FIRST.value,
-                90,
-                [f"compressed: {compression.detected_type}"],
-            ),
-            DatasetModel.CONTAINER,
-            None,
-            None,
+    def add(kind: str, conf: int, source: str) -> None:
+        if conf > 0:
+            candidates.append((kind, conf, source))
+
+    if structured and structured.confidence >= 60:
+        add(structured.detected_type, structured.confidence, "structured")
+        if structured.metadata.get("delimiter"):
+            pass
+    if magic and magic.confidence >= 70:
+        add(magic.detected_type, magic.confidence, "magic")
+    if compression and compression.detected_type != "none" and compression.confidence >= 80:
+        add(compression.detected_type, compression.confidence, "compression")
+    if container and container.detected_type not in {"none"} and container.confidence >= 70:
+        add(container.detected_type, container.confidence, "container")
+    if extension and extension.confidence >= 20:
+        add(extension.detected_type, extension.confidence, "extension")
+
+    plugin = apply_format_plugins(candidates)
+    if plugin:
+        candidates.append((plugin.detected_type, plugin.confidence, "plugin"))
+
+    hint = normalize_file_format(user_format_hint) if user_format_hint else None
+    if hint and hint != "auto":
+        candidates.append((hint, 45, "user_hint"))
+
+    if not candidates:
+        stage = DetectionStage("unknown", 15, evidence=["insufficient signals"])
+        return stage, "unknown", None, None, warnings
+
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    best_kind, best_conf, best_src = candidates[0]
+
+    if extension and extension.detected_type != best_kind and extension.confidence >= 30:
+        if best_conf >= 70:
+            warnings.append(
+                f"extension suggests {extension.detected_type!r} but content suggests {best_kind!r}"
+            )
+
+    if best_conf < 50:
+        stage = DetectionStage(
+            "unknown",
+            best_conf,
+            evidence=[f"low confidence best={best_kind!r} from {best_src}"],
         )
+        return stage, "unknown", None, None, warnings
 
-    if container and container.detected_type not in {"none", "unknown"}:
-        return (
-            DetectionStageResult(
-                ValidationStrategyHint.CONTAINER_INSPECT.value,
-                85,
-                [f"archive container: {container.detected_type}"],
-                {"entry_count": container.metadata.get("entry_count")},
-            ),
-            DatasetModel.CONTAINER,
-            None,
-            None,
+    if compression and compression.detected_type in _COMPRESSION and best_kind in _COMPRESSION:
+        stage = DetectionStage(
+            "decompress_first",
+            compression.confidence,
+            evidence=["compressed payload must be decompressed before validation"],
+            metadata={"compression": compression.detected_type},
         )
+        return stage, "binary_asset", None, None, warnings
 
-    if encoding and encoding.detected_type in {"utf-16-le", "utf-16-be", "utf-16", "utf-32-le", "utf-32-be"}:
-        return (
-            DetectionStageResult(
-                ValidationStrategyHint.TRANSCODE_FIRST.value,
-                88,
-                [f"encoding {encoding.detected_type} not supported for direct CSV validation"],
-            ),
-            DatasetModel.BINARY_ASSET,
-            None,
-            None,
+    if encoding and encoding.metadata.get("strategy_hint") == "transcode_first":
+        stage = DetectionStage(
+            "transcode_first",
+            encoding.confidence,
+            evidence=[f"encoding={encoding.detected_type}"],
+            metadata={},
         )
+        return stage, "binary_asset", None, None, warnings
 
-    if encoding and encoding.detected_type in {"hex", "base64", "url_encoded"}:
-        warnings.append("encoded payload; decode before validation")
-
-    fmt = structured.detected_type if structured else "unknown"
-    conf = structured.confidence if structured else 0
-
-    if user_format_hint:
-        hinted = user_format_hint.strip().lower().replace("_", "-")
-        strategy, model, out_fmt, delim = _map_user_hint(hinted)
-        return (
-            DetectionStageResult(
-                strategy.value,
-                95,
-                [f"user hint file_format={hinted!r}"],
-            ),
-            model,
-            out_fmt,
-            delim,
+    if best_kind in _CONTAINERS or (container and container.detected_type not in {"none", ""}):
+        stage = DetectionStage(
+            "container",
+            max(best_conf, container.confidence if container else 0),
+            evidence=["archive container — inspect entries before validation"],
+            metadata=container.metadata if container else {},
         )
+        return stage, "container", None, None, warnings
 
-    if fmt == "json" and conf >= 50:
-        return (
-            DetectionStageResult(ValidationStrategyHint.JSON_DOCUMENT.value, conf, ["structured JSON"]),
-            DatasetModel.HIERARCHICAL,
-            "json",
-            "json",
+    if best_kind in _COLUMNAR or is_columnar_format(best_kind):
+        fmt = "excel" if best_kind in {"excel-ole", "xlsx"} else best_kind
+        if fmt == "excel-ole":
+            fmt = "excel"
+        stage = DetectionStage(
+            fmt,
+            best_conf,
+            evidence=[f"columnar route {fmt!r} from {best_src}"],
+            metadata={"pegasus_route": fmt},
         )
+        return stage, "binary_asset", fmt, None, warnings
 
-    if fmt == "jsonl" and conf >= 50:
-        warnings.append("jsonl not natively validated; treating as json hint")
-        return (
-            DetectionStageResult(ValidationStrategyHint.JSON_DOCUMENT.value, conf - 10, ["JSONL sample"]),
-            DatasetModel.HIERARCHICAL,
-            "json",
-            "json",
-        )
+    if best_kind in _HIERARCHICAL or best_kind == "json":
+        stage = DetectionStage("json", best_conf, evidence=[f"resolved from {best_src}"])
+        return stage, "hierarchical", "json", None, warnings
 
-    if fmt == "fixed_width" and conf >= 50:
-        return (
-            DetectionStageResult(ValidationStrategyHint.FIXED_WIDTH.value, conf, ["fixed-width heuristic"]),
-            DatasetModel.TABULAR,
-            "fixed-width",
-            "fixed",
-        )
+    if best_kind == "fixed-width":
+        stage = DetectionStage("fixed-width", best_conf, evidence=[f"resolved from {best_src}"])
+        return stage, "tabular", "fixed-width", None, warnings
 
-    if fmt in {"csv", "tsv", "psv"} and conf >= 40:
-        delim = structured.metadata.get("delimiter", "\t" if fmt == "tsv" else "|" if fmt == "psv" else ",")
-        return (
-            DetectionStageResult(ValidationStrategyHint.CSV_TABULAR.value, conf, [f"delimited {fmt}"]),
-            DatasetModel.TABULAR,
-            "csv",
-            str(delim),
-        )
+    if best_kind in _TABULAR or best_kind in {"csv", "tsv", "psv", "text"}:
+        fmt = best_kind if best_kind in {"csv", "tsv", "psv"} else "csv"
+        delim = None
+        if structured and structured.metadata.get("delimiter"):
+            delim = structured.metadata["delimiter"]
+        stage = DetectionStage(fmt, best_conf, evidence=[f"tabular route from {best_src}"])
+        return stage, "tabular", fmt, delim, warnings
 
-    if fmt in _COLUMNAR_TYPES or (magic_result and magic_result.detected_type in _COLUMNAR_TYPES):
-        col_fmt = fmt if fmt in _COLUMNAR_TYPES else (magic_result.detected_type if magic_result else "parquet")
-        if col_fmt == "ole_compound":
-            col_fmt = "excel"
-        plugin = plugin_for_magic_type(col_fmt)
-        token = plugin.suggested_file_format() if plugin else col_fmt
-        return (
-            DetectionStageResult(
-                ValidationStrategyHint.CSV_TABULAR.value,
-                85,
-                [f"columnar format {col_fmt}"],
-                {"columnar_format": token},
-            ),
-            DatasetModel.TABULAR,
-            token,
-            ",",
-        )
+    if best_kind == "xml" or best_kind == "yaml":
+        stage = DetectionStage("unknown", 40, evidence=[f"{best_kind} not yet supported for validation"])
+        return stage, "unknown", None, None, warnings + [f"{best_kind} validation not implemented"]
 
-    if text_binary and text_binary.detected_type == "binary":
-        return (
-            DetectionStageResult(ValidationStrategyHint.UNSUPPORTED.value, 60, ["binary asset"]),
-            DatasetModel.BINARY_ASSET,
-            None,
-            None,
-        )
-
-    if conf < 40:
-        return (
-            DetectionStageResult(ValidationStrategyHint.UNKNOWN.value, conf, ["insufficient confidence"]),
-            DatasetModel.UNKNOWN,
-            None,
-            None,
-        )
-
-    return (
-        DetectionStageResult(ValidationStrategyHint.CSV_TABULAR.value, 35, ["default csv fallback"]),
-        DatasetModel.TABULAR,
-        "csv",
-        "auto",
-    )
-
-
-def _map_user_hint(
-    hinted: str,
-) -> tuple[ValidationStrategyHint, DatasetModel, str, str | None]:
-    if hinted == "json":
-        return ValidationStrategyHint.JSON_DOCUMENT, DatasetModel.HIERARCHICAL, "json", "json"
-    if hinted in {"fixed-width", "fixedwidth", "fixed_width"}:
-        return ValidationStrategyHint.FIXED_WIDTH, DatasetModel.TABULAR, "fixed-width", "fixed"
-    if hinted in _COLUMNAR_TYPES:
-        token = "excel" if hinted == "ole_compound" else hinted
-        return ValidationStrategyHint.CSV_TABULAR, DatasetModel.TABULAR, token, ","
-    return ValidationStrategyHint.CSV_TABULAR, DatasetModel.TABULAR, "csv", "auto"
+    stage = DetectionStage("unknown", best_conf, evidence=[f"unmapped kind={best_kind!r}"])
+    return stage, "unknown", None, None, warnings

@@ -1,0 +1,225 @@
+"""Stream delimited objects from GCS without downloading the full file."""
+
+from __future__ import annotations
+
+import csv
+import io
+from pathlib import Path
+from typing import Any, Iterator
+
+from pegasus.validation.adapters.base import TabularColumn, TabularSchema
+from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+from pegasus.validation.csv_header import read_first_row_fields, synthetic_column_names
+from pegasus.validation.flat_file import split_line
+from pegasus.validation.gcs_object import GcsObjectRef, open_gcs_binary, read_gcs_prefix, sample_gcs_lines
+from pegasus.validation.readers.delimiter_detection import polars_supports_csv_delimiter
+from pegasus.validation.readers.pyarrow_io import batch_to_dicts, pyarrow_supports_delimiter
+
+
+class GcsDelimitedAdapter:
+    """Streams a GCS object as delimited rows (chunked reads only)."""
+
+    __slots__ = (
+        "_ref",
+        "_delimiter",
+        "_has_header",
+        "_skip_rows",
+        "_encoding",
+        "_column_names",
+        "_size_bytes",
+    )
+
+    def __init__(
+        self,
+        ref: GcsObjectRef,
+        *,
+        delimiter: str = ",",
+        has_header: bool = True,
+        skip_rows: int = 0,
+        encoding: str = "utf-8",
+        size_bytes: int | None = None,
+    ) -> None:
+        self._ref = ref
+        self._delimiter = delimiter
+        self._has_header = has_header
+        self._skip_rows = skip_rows
+        self._encoding = encoding
+        self._column_names: list[str] | None = None
+        self._size_bytes = size_bytes
+
+    @property
+    def path(self) -> Path:
+        return self._ref.display_path
+
+    @property
+    def gcs_uri(self) -> str:
+        return self._ref.uri
+
+    def get_size_bytes(self) -> int:
+        if self._size_bytes is None:
+            from pegasus.validation.gcs_object import gcs_blob_size
+
+            self._size_bytes = gcs_blob_size(self._ref)
+        return self._size_bytes
+
+    def sample_lines(self, *, max_lines: int = 500) -> list[str]:
+        return sample_gcs_lines(self._ref, max_lines=max_lines)
+
+    def _effective_delimiter(self, physical_line: str) -> str:
+        delim = self._delimiter
+        if delim == "xx" and "xx" not in physical_line and r"~\^|~" in physical_line:
+            return r"~\^|~"
+        return delim
+
+    def _split_physical_line(self, line: str) -> list[str]:
+        physical = line.rstrip("\r\n")
+        if not physical:
+            return []
+        delim = self._effective_delimiter(physical)
+        if polars_supports_csv_delimiter(delim):
+            try:
+                return next(csv.reader([physical], delimiter=delim, quotechar='"', doublequote=True))
+            except csv.Error:
+                pass
+        return split_line(physical, delim)
+
+    def _read_header_from_prefix(self) -> list[str]:
+        prefix = read_gcs_prefix(self._ref, max_bytes=256 * 1024).decode(self._encoding, errors="replace")
+        if self._has_header:
+            if polars_supports_csv_delimiter(self._delimiter):
+                reader = csv.reader(
+                    io.StringIO(prefix),
+                    delimiter=self._delimiter,
+                    quotechar='"',
+                    doublequote=True,
+                )
+                for _ in range(self._skip_rows):
+                    next(reader, None)
+                first = next(reader, None)
+                if not first:
+                    return []
+                return [cell.strip() for cell in first]
+            lines = prefix.splitlines()
+            idx = self._skip_rows
+            while idx < len(lines) and not lines[idx].strip():
+                idx += 1
+            if idx >= len(lines):
+                return []
+            return [cell.strip() for cell in self._split_physical_line(lines[idx])]
+
+        # Headerless: count columns from first data row in prefix.
+        lines = [line for line in prefix.splitlines() if line.strip()]
+        data_idx = self._skip_rows
+        if data_idx >= len(lines):
+            return synthetic_column_names(1)
+        fields = self._split_physical_line(lines[data_idx])
+        return synthetic_column_names(max(1, len(fields)))
+
+    def _read_header(self) -> list[str]:
+        if self._column_names is not None:
+            return self._column_names
+        self._column_names = self._read_header_from_prefix()
+        return self._column_names
+
+    def _iter_data_rows(self) -> Iterator[list[str]]:
+        with open_gcs_binary(self._ref) as handle:
+            text = io.TextIOWrapper(handle, encoding=self._encoding, errors="replace", newline="")
+            for _ in range(self._skip_rows):
+                text.readline()
+            if self._has_header:
+                text.readline()
+            if polars_supports_csv_delimiter(self._delimiter):
+                reader = csv.reader(text, delimiter=self._delimiter, quotechar='"', doublequote=True)
+                for row in reader:
+                    if not row or (len(row) == 1 and not row[0].strip()):
+                        continue
+                    yield row
+                return
+            for line in text:
+                if not line.strip():
+                    continue
+                fields = self._split_physical_line(line)
+                if fields:
+                    yield fields
+
+    def _stream_records_pyarrow(self, chunk_rows: int) -> Iterator[list[dict[str, Any]]]:
+        import pyarrow.csv as pacsv
+
+        from pegasus.validation.readers.pyarrow_io import (
+            _csv_convert_options,
+            _csv_parse_options,
+            _csv_read_options,
+        )
+
+        with open_gcs_binary(self._ref) as handle:
+            reader = pacsv.open_csv(
+                handle,
+                read_options=_csv_read_options(has_header=self._has_header, skip_rows=self._skip_rows),
+                parse_options=_csv_parse_options(self._delimiter),
+                convert_options=_csv_convert_options(),
+            )
+            target = max(1, chunk_rows)
+            for batch in reader:
+                if batch.num_rows == 0:
+                    continue
+                if batch.num_rows <= target:
+                    records = batch_to_dicts(batch)
+                    if records:
+                        yield records
+                    continue
+                offset = 0
+                while offset < batch.num_rows:
+                    size = min(target, batch.num_rows - offset)
+                    slice_batch = batch.slice(offset, size)
+                    records = batch_to_dicts(slice_batch)
+                    if records:
+                        yield records
+                    offset += size
+
+    def get_schema(self) -> TabularSchema:
+        names = self._read_header()
+        return TabularSchema(columns=[TabularColumn(name=n, data_type="string") for n in names])
+
+    def get_row_count(self) -> int | None:
+        return None
+
+    def stream_records(self, chunk_rows: int) -> Iterator[list[dict[str, Any]]]:
+        if pyarrow_supports_delimiter(self._delimiter):
+            yield from self._stream_records_pyarrow(chunk_rows)
+            return
+
+        names = self._read_header()
+        chunk: list[dict[str, Any]] = []
+        for row in self._iter_data_rows():
+            record = {names[i]: (row[i] if i < len(row) else None) for i in range(len(names))}
+            chunk.append(record)
+            if len(chunk) >= chunk_rows:
+                yield chunk
+                chunk = []
+        if chunk:
+            yield chunk
+
+
+def create_delimited_adapter(
+    *,
+    path: Path | None,
+    ref: GcsObjectRef | None,
+    delimiter: str,
+    has_header: bool,
+    skip_rows: int,
+) -> FileDelimitedAdapter | GcsDelimitedAdapter:
+    if ref is not None:
+        return GcsDelimitedAdapter(
+            ref,
+            delimiter=delimiter,
+            has_header=has_header,
+            skip_rows=skip_rows,
+        )
+    if path is None:
+        raise ValueError("path or GCS reference is required")
+    return FileDelimitedAdapter(
+        path,
+        delimiter=delimiter,
+        has_header=has_header,
+        skip_rows=skip_rows,
+    )

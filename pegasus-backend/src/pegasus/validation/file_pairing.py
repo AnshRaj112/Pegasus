@@ -7,52 +7,14 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from pegasus.validation.fixed_width_meta import normalize_file_format
-
-_CSV_EXTENSIONS = frozenset({".csv", ".tsv", ".txt", ".dat"})
-_JSON_EXTENSIONS = frozenset({".json", ".ndjson"})
-_FIXED_WIDTH_EXTENSIONS = frozenset({".txt", ".dat", ".fw", ".fixed"})
-_PARQUET_EXTENSIONS = frozenset({".parquet"})
-_ORC_EXTENSIONS = frozenset({".orc"})
-_AVRO_EXTENSIONS = frozenset({".avro"})
-_EXCEL_EXTENSIONS = frozenset({".xlsx", ".xls"})
-_ARCHIVE_EXTENSIONS = frozenset({".zip", ".tar", ".gz", ".gzip", ".bz2"})
-
-
-def extensions_for_format(file_format: str | None) -> frozenset[str]:
-    fmt = normalize_file_format(file_format)
-    if fmt == "json":
-        return _JSON_EXTENSIONS
-    if fmt == "fixed-width":
-        return _FIXED_WIDTH_EXTENSIONS
-    if fmt == "parquet":
-        return _PARQUET_EXTENSIONS
-    if fmt == "orc":
-        return _ORC_EXTENSIONS
-    if fmt == "avro":
-        return _AVRO_EXTENSIONS
-    if fmt == "excel":
-        return _EXCEL_EXTENSIONS
-    if fmt == "auto":
-        return (
-            _CSV_EXTENSIONS
-            | _JSON_EXTENSIONS
-            | _PARQUET_EXTENSIONS
-            | _ORC_EXTENSIONS
-            | _AVRO_EXTENSIONS
-            | _EXCEL_EXTENSIONS
-            | _ARCHIVE_EXTENSIONS
-        )
-    return _CSV_EXTENSIONS
+from pegasus.validation.file_format import extensions_for_format
 
 
 def _file_matches_format(path: Path, allowed: frozenset[str]) -> bool:
     suffix = path.suffix.lower()
     if suffix and suffix in allowed:
         return True
-    if not suffix:
-        return True
-    return False
+    return not suffix
 
 
 def list_files_in_directory(

@@ -140,11 +140,35 @@ class Settings(BaseSettings):
     validation_reconciliation_partition_buckets: int = Field(
         default_factory=recommended_reconciliation_partition_buckets,
         ge=1,
-        le=4096,
+        le=8192,
         description=(
-            "Hash buckets for HASH_PARTITION and AUTO-unsorted spill mode. "
-            "Default is host-sized (typically 16-64 on 4-core / <= 16 GiB RAM). "
-            "Values above the host cap are clamped at runtime to limit memory pressure."
+            "Hash buckets for HASH_PARTITION, AUTO spill, and Category-1 tabular pipeline. "
+            "Default is host-sized. Values above the host cap are clamped at runtime."
+        ),
+    )
+    validation_tabular_partition_preset: str | None = Field(
+        default=None,
+        description="Optional pipeline preset: small|medium|large|xlarge (1024–8192 buckets).",
+    )
+    validation_tabular_enable_column_drilldown: bool = Field(
+        default=True,
+        description="Stage 6 column-level diff for changed rows in the tabular pipeline.",
+    )
+    validation_tabular_decimal_equivalence: bool = Field(
+        default=True,
+        description="Treat 100 and 100.00 as equal when canonicalizing for fingerprints.",
+    )
+    validation_tabular_decimal_scale: int = Field(default=2, ge=0, le=18)
+    validation_tabular_enable_hll_precheck: bool = Field(
+        default=False,
+        description="Use HyperLogLog sketch in Stage 3 for fast inequality detection (approximate).",
+    )
+    validation_columnar_spill_threshold_bytes: int = Field(
+        default=50 * 1024 * 1024,
+        ge=0,
+        description=(
+            "When combined columnar file size exceeds this, spill Parquet batches to hash "
+            "partitions before compare (uses pipeline adapters when enabled)."
         ),
     )
     validation_reconciliation_sliding_window: int = Field(
@@ -355,6 +379,13 @@ class Settings(BaseSettings):
     validation_enable_merkle_fast_path: bool = Field(
         default=True,
         description="Enable streaming Merkle precheck to skip full reconciliation when files are identical.",
+    )
+    validation_enable_in_memory_reconcile: bool = Field(
+        default=False,
+        description=(
+            "Load both files into RAM for a Polars join fast path. "
+            "Disabled by default; use the streaming partition/spill pipeline instead."
+        ),
     )
     validation_global_memory_budget_bytes: int = Field(
         default=10 * 1024 * 1024 * 1024,

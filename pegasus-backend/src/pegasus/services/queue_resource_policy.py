@@ -5,17 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from pegasus.core.resource_tuning import (
-    align_partition_buckets_to_threads,
-    cap_partition_buckets,
-    effective_local_thread_cap,
-    physical_cpu_count,
-    physical_ram_bytes,
-)
+from pegasus.core.resource_tuning import effective_local_thread_cap, physical_cpu_count
 
 if TYPE_CHECKING:
     from pegasus.core.config import Settings
-    from pegasus.validation.reconciliation.config import ReconciliationRuntimeConfig
 
 
 @dataclass(frozen=True)
@@ -89,34 +82,3 @@ class QueueResourcePolicy:
         return effective_local_thread_cap(self.threads_per_job, ncpu=cores)
 
 
-def apply_queue_policy_to_reconciliation_config(
-    rcfg: ReconciliationRuntimeConfig,
-    policy: QueueResourcePolicy,
-    *,
-    cpu_cores: int | None = None,
-) -> ReconciliationRuntimeConfig:
-    """Merge queue policy into reconciliation runtime config for a single job."""
-    cores = max(1, cpu_cores if cpu_cores is not None else physical_cpu_count())
-    policy = policy.clamp(cpu_cores=cores)
-    ram = physical_ram_bytes()
-
-    updates: dict[str, Any] = {}
-    if policy.disk_headroom_multiplier != rcfg.disk_headroom_multiplier:
-        updates["disk_headroom_multiplier"] = policy.disk_headroom_multiplier
-    if policy.memory_budget_bytes != rcfg.memory_budget_bytes:
-        updates["memory_budget_bytes"] = policy.memory_budget_bytes
-    if policy.target_duration_seconds != rcfg.target_duration_seconds:
-        updates["target_duration_seconds"] = policy.target_duration_seconds
-
-    effective_threads = policy.effective_threads(cpu_cores=cores)
-    if policy.threads_per_job > 0:
-        updates["max_parallel_workers"] = effective_threads
-        orig_pb = rcfg.partition_buckets
-        pb = cap_partition_buckets(orig_pb, ncpu=effective_threads, ram_bytes=ram)
-        pb = align_partition_buckets_to_threads(pb, effective_threads)
-        if pb != orig_pb:
-            updates["partition_buckets"] = pb
-
-    if not updates:
-        return rcfg
-    return rcfg.model_copy(update=updates)

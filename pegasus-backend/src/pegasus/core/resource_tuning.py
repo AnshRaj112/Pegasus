@@ -91,9 +91,13 @@ def max_reconciliation_partition_buckets(
         cap = min(48, max(16, cores * 8))
     elif gib < 32:
         cap = min(64, max(16, cores * 12))
+    elif gib < 64:
+        cap = min(256, max(16, cores * 16))
+    elif gib < 128:
+        cap = min(1024, max(16, cores * 32))
     else:
-        cap = min(128, max(16, cores * 16))
-    return max(16, min(cap, max(16, cores * 16)))
+        cap = min(8192, max(16, cores * 64))
+    return max(16, min(cap, max(16, cores * 64)))
 
 
 def recommended_reconciliation_partition_buckets() -> int:

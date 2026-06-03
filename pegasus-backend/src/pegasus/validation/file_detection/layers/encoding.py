@@ -1,154 +1,154 @@
-"""Layer 5: encoding detection (heuristics, sample-only decode)."""
+"""Layer 5: character encoding and transform detection."""
 
 from __future__ import annotations
 
 import base64
+import binascii
 import re
 from urllib.parse import unquote_to_bytes
 
-from pegasus.validation.file_detection.models import DetectionStageResult
-from pegasus.validation.file_detection.sampling import FileSample
+from pegasus.validation.file_detection.layers import magic_bytes as magic_layer
+from pegasus.validation.file_detection.sample import FileSample
+from pegasus.validation.file_detection.types import DetectionStage
 
 _HEX_RE = re.compile(rb"^[0-9a-fA-F\s]+$")
 _B64_RE = re.compile(rb"^[A-Za-z0-9+/=\s]+$")
 
 
-def detect_encoding(
-    sample: FileSample,
-    *,
-    magic_result: DetectionStageResult | None = None,
-) -> DetectionStageResult:
-    prefix = sample.prefix_8k
-    if not prefix:
-        return DetectionStageResult("utf-8", 50, ["empty file defaults to utf-8"])
+def detect_encoding(sample: FileSample) -> DetectionStage:
+    raw = sample.prefix_8k
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return _utf_stage("utf-8-sig", 92, ["UTF-8 BOM"])
+    if raw.startswith(b"\xff\xfe\x00\x00") or raw.startswith(b"\x00\x00\xfe\xff"):
+        endian = "le" if raw.startswith(b"\xff\xfe") else "be"
+        return _utf_stage(f"utf-32-{endian}", 85, [f"UTF-32 {endian} BOM"])
+    if raw.startswith(b"\xff\xfe"):
+        return _utf_stage("utf-16-le", 88, ["UTF-16 LE BOM"])
+    if raw.startswith(b"\xfe\xff"):
+        return _utf_stage("utf-16-be", 88, ["UTF-16 BE BOM"])
 
-    if magic_result:
-        dt = magic_result.detected_type
-        if dt == "utf16_le_bom":
-            return DetectionStageResult("utf-16-le", 90, ["UTF-16 LE BOM"], {"bom": True})
-        if dt == "utf16_be_bom":
-            return DetectionStageResult("utf-16-be", 90, ["UTF-16 BE BOM"], {"bom": True})
-        if dt == "utf32_le_bom":
-            return DetectionStageResult("utf-32-le", 88, ["UTF-32 LE BOM"], {"bom": True})
-        if dt == "utf32_be_bom":
-            return DetectionStageResult("utf-32-be", 88, ["UTF-32 BE BOM"], {"bom": True})
-        if dt == "utf8_bom":
-            return DetectionStageResult("utf-8-sig", 85, ["UTF-8 BOM"], {"bom": True})
+    stripped = raw.lstrip()
+    if stripped and _HEX_RE.match(stripped[: min(512, len(stripped))]):
+        decoded = _try_hex_decode(stripped[:4096])
+        if decoded:
+            inner = magic_layer.detect_magic_bytes(
+                _sample_with_bytes(sample, decoded)
+            )
+            return DetectionStage(
+                detected_type="hex",
+                confidence=80,
+                evidence=["hexadecimal prefix", f"decoded inner={inner.detected_type!r}"],
+                metadata={"inner_type": inner.detected_type, "decode_sample_bytes": len(decoded)},
+            )
 
-    hex_result = _detect_hex_encoding(prefix)
-    if hex_result is not None:
-        return hex_result
+    if stripped and _B64_RE.match(stripped[: min(512, len(stripped))]) and len(stripped) % 4 == 0:
+        decoded = _try_b64_decode(stripped[:4096])
+        if decoded:
+            inner = magic_layer.detect_magic_bytes(_sample_with_bytes(sample, decoded))
+            return DetectionStage(
+                detected_type="base64",
+                confidence=78,
+                evidence=["base64-like prefix", f"decoded inner={inner.detected_type!r}"],
+                metadata={"inner_type": inner.detected_type, "decode_sample_bytes": len(decoded)},
+            )
 
-    b64_result = _detect_base64_encoding(prefix)
-    if b64_result is not None:
-        return b64_result
+    if b"%" in raw[:256] and _looks_url_encoded(raw[:512]):
+        try:
+            decoded = unquote_to_bytes(raw[:2048].decode("ascii", errors="ignore"))
+            if decoded:
+                return DetectionStage(
+                    detected_type="url-encoded",
+                    confidence=70,
+                    evidence=["percent-encoding in prefix"],
+                    metadata={"decode_sample_bytes": len(decoded)},
+                )
+        except ValueError:
+            pass
 
-    url_result = _detect_url_encoding(prefix)
-    if url_result is not None:
-        return url_result
-
-    utf8_conf = _utf8_confidence(prefix)
-    if utf8_conf >= 70:
-        return DetectionStageResult(
-            "utf-8",
-            utf8_conf,
-            [f"valid UTF-8 ratio high ({utf8_conf}%)"],
-        )
-
-    if _looks_utf16(prefix):
-        return DetectionStageResult(
-            "utf-16",
-            55,
-            ["alternating zero bytes suggest UTF-16"],
-        )
-
-    return DetectionStageResult(
-        "unknown",
-        30,
-        ["encoding could not be determined confidently"],
+    ratio = _utf8_valid_ratio(raw)
+    if ratio >= 0.98:
+        return _utf_stage("utf-8", 85, [f"utf-8 valid ratio={ratio:.2f}"])
+    if ratio >= 0.85:
+        return _utf_stage("utf-8", 65, [f"utf-8 mostly valid ratio={ratio:.2f}"])
+    return DetectionStage(
+        detected_type="binary",
+        confidence=55,
+        evidence=[f"low utf-8 validity ratio={ratio:.2f}"],
+        metadata={"utf8_valid_ratio": ratio},
     )
 
 
-def _detect_hex_encoding(prefix: bytes) -> DetectionStageResult | None:
-    sample = prefix[:512].strip()
-    if len(sample) < 16 or len(sample) % 2 != 0:
-        return None
-    if not _HEX_RE.match(sample):
-        return None
-    try:
-        bytes.fromhex(sample.decode("ascii"))
-    except ValueError:
-        return None
-    return DetectionStageResult(
-        "hex",
-        75,
-        ["prefix looks hexadecimal-encoded"],
-        {"decoded_sample_bytes": min(len(sample) // 2, 256)},
+def _utf_stage(name: str, confidence: int, evidence: list[str]) -> DetectionStage:
+    meta = {}
+    if name.startswith("utf-16") or name.startswith("utf-32"):
+        meta["strategy_hint"] = "transcode_first"
+    return DetectionStage(
+        detected_type=name,
+        confidence=confidence,
+        evidence=evidence,
+        metadata=meta,
     )
 
 
-def _detect_base64_encoding(prefix: bytes) -> DetectionStageResult | None:
-    sample = prefix[:1024].strip()
-    if len(sample) < 24 or len(sample) % 4 != 0:
-        return None
-    if not _B64_RE.match(sample):
-        return None
-    try:
-        decoded = base64.b64decode(sample, validate=True)
-    except Exception:
-        return None
-    if len(decoded) < 4:
-        return None
-    return DetectionStageResult(
-        "base64",
-        70,
-        ["prefix decodes as valid base64"],
-        {"decoded_prefix_len": len(decoded)},
-    )
-
-
-def _detect_url_encoding(prefix: bytes) -> DetectionStageResult | None:
-    try:
-        text = prefix[:512].decode("ascii", errors="strict")
-    except UnicodeDecodeError:
-        return None
-    if "%" not in text or text.count("%") < 3:
-        return None
-    try:
-        unquote_to_bytes(text)
-    except Exception:
-        return None
-    return DetectionStageResult(
-        "url_encoded",
-        60,
-        ["percent-escapes in ASCII prefix"],
-    )
-
-
-def _utf8_confidence(data: bytes) -> int:
+def _utf8_valid_ratio(data: bytes) -> float:
     if not data:
-        return 50
+        return 1.0
     try:
         data.decode("utf-8")
-        return 95
+        return 1.0
     except UnicodeDecodeError:
         pass
-    # Partial: count decodable chunks
-    ok = 0
-    step = 4096
-    for i in range(0, len(data), step):
-        chunk = data[i : i + step]
-        try:
-            chunk.decode("utf-8")
-            ok += len(chunk)
-        except UnicodeDecodeError:
-            pass
-    return int(100 * ok / len(data)) if data else 0
+    valid = 0
+    i = 0
+    n = len(data)
+    while i < n:
+        b = data[i]
+        if b < 0x80:
+            valid += 1
+            i += 1
+        elif b < 0xE0 and i + 1 < n:
+            valid += 1
+            i += 2
+        elif b < 0xF0 and i + 2 < n:
+            valid += 1
+            i += 3
+        elif b < 0xF8 and i + 3 < n:
+            valid += 1
+            i += 4
+        else:
+            i += 1
+    return valid / max(n, 1)
 
 
-def _looks_utf16(data: bytes) -> bool:
-    if len(data) < 8:
-        return False
-    zeros_even = sum(1 for i in range(0, min(64, len(data)), 2) if data[i] == 0)
-    zeros_odd = sum(1 for i in range(1, min(64, len(data)), 2) if data[i] == 0)
-    return zeros_even > 20 or zeros_odd > 20
+def _try_hex_decode(data: bytes) -> bytes | None:
+    try:
+        cleaned = re.sub(rb"\s+", b"", data)
+        if len(cleaned) < 4 or len(cleaned) % 2:
+            return None
+        return binascii.unhexlify(cleaned[:4096])
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _try_b64_decode(data: bytes) -> bytes | None:
+    try:
+        cleaned = re.sub(rb"\s+", b"", data)
+        return base64.b64decode(cleaned, validate=True)[:4096]
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _looks_url_encoded(data: bytes) -> bool:
+    text = data.decode("ascii", errors="ignore")
+    return text.count("%") >= 2 and "%20" in text or "%3D" in text
+
+
+def _sample_with_bytes(sample: FileSample, decoded: bytes):
+    from pegasus.validation.file_detection.sample import FileSample as FS
+
+    return FS(
+        path=sample.path,
+        file_size_bytes=sample.file_size_bytes,
+        raw=decoded[: sample.bytes_read],
+        bytes_read=min(len(decoded), sample.bytes_read),
+    )

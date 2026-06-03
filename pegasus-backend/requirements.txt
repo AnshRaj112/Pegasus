@@ -29,3 +29,7 @@ filetype>=1.2.0,<2.0.0
 puremagic>=1.28,<2.0.0
 openpyxl>=3.1.0,<4.0.0
 fastavro>=1.9.0,<2.0.0
+
+# Optional warehouse connectors (install per deployment)
+sqlalchemy>=2.0.36,<3.0.0
+# psycopg2-binary, pymysql, pyodbc, snowflake-connector-python, teradatasql, etc.

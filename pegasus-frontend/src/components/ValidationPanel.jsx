@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import LocalPathBrowser from './LocalPathBrowser'
 import ParallelValidationResourceForm from './ParallelValidationResourceForm'
 import { formatJobError } from '../api/formatError.js'
+import { formatDuration } from '../api/validationHistory.js'
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
 const pollTimeoutRaw = Number(import.meta.env.VITE_VALIDATION_POLL_TIMEOUT_MS ?? 0)
@@ -457,6 +458,11 @@ export function ValidationPanel() {
             </ul>
 
             {result.run_id ? <p className="mt-4 text-sm text-slate-700">Run id: <code>{result.run_id}</code></p> : null}
+            {result.durations?.validation_seconds != null ? (
+              <p className="mt-2 text-sm text-slate-700">
+                Validation time: <strong>{formatDuration(result.durations.validation_seconds)}</strong>
+              </p>
+            ) : null}
 
             <button
               type="button"

@@ -14,7 +14,7 @@ import { buildMappingRows, mappingRowFromApi, toColumnMappingPayload } from './c
 import { buildAnalyzePayload, formatCheckBySource } from './mappingAnalyze'
 import MappingColumnPreview from './MappingColumnPreview'
 import ResolvedDelimiterNotice from './ResolvedDelimiterNotice'
-import { saveValidationDraft } from '../../api/validationHistory'
+import { saveValidationDraft, formatDuration } from '../../api/validationHistory'
 import {
   buildBatchValidatePayload,
   matchFilePairs,
@@ -3796,11 +3796,12 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                   </svg>
                   Validation complete
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
                   <StatCard label="Match" value={result.summary?.is_match ? 'Yes' : 'No'} accent={result.summary?.is_match ? 'var(--success)' : 'var(--danger)'} />
                   <StatCard label={fileFormat === 'fixed-width' ? 'Lines compared' : fileFormat === 'json' ? 'Documents' : 'Source rows'} value={result.summary?.source_row_count ?? '—'} />
                   <StatCard label={fileFormat === 'fixed-width' ? 'Target lines' : fileFormat === 'json' ? 'Compared' : 'Target rows'} value={result.summary?.target_row_count ?? '—'} />
                   <StatCard label="Mismatches" value={result.summary?.total_mismatch_records ?? '—'} accent={result.summary?.total_mismatch_records > 0 ? 'var(--danger)' : undefined} />
+                  <StatCard label="Validation time" value={formatDuration(result.durations?.validation_seconds)} />
                 </div>
                 {result.test_mode === 'litmus' && result.litmus && (
                   <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-3)' }}>

@@ -17,7 +17,7 @@ from pegasus.models import MismatchReport, ValidationRun
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.services.validation_service import ValidationRunDurations, ValidationRunResult
 from pegasus.validation.comparators.models import MismatchType
-from pegasus.validation.delimiter_tokens import normalize_delimiter_for_storage
+from pegasus.core.delimiter_tokens import normalize_delimiter_for_storage
 
 logger = logging.getLogger(__name__)
 

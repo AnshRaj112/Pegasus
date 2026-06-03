@@ -1,0 +1,6 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: category1
+  labels:
+    app: category1-reconciliation

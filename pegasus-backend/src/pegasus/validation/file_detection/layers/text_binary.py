@@ -5,88 +5,53 @@ from __future__ import annotations
 import math
 from collections import Counter
 
-from pegasus.validation.file_detection.models import DetectionStageResult, TextBinaryClass
-from pegasus.validation.file_detection.sampling import FileSample
+from pegasus.validation.file_detection.sample import FileSample
+from pegasus.validation.file_detection.types import DetectionStage
 
 
-def classify_text_binary(
-    sample: FileSample,
-    *,
-    compression_result: DetectionStageResult | None = None,
-    magic_result: DetectionStageResult | None = None,
-) -> DetectionStageResult:
-    if compression_result and compression_result.detected_type not in {"none", "unknown"}:
-        return DetectionStageResult(
-            TextBinaryClass.BINARY.value,
-            85,
-            [f"compressed ({compression_result.detected_type})"],
+def detect_text_binary(sample: FileSample, encoding: DetectionStage | None) -> DetectionStage:
+    raw = sample.raw
+    if not raw:
+        return DetectionStage("unknown", 10, evidence=["empty sample"])
+
+    if encoding and encoding.detected_type.startswith("utf"):
+        return DetectionStage(
+            detected_type="text",
+            confidence=min(95, encoding.confidence),
+            evidence=["encoding layer indicates text"],
+            metadata={"entropy": _shannon_entropy(raw)},
         )
 
-    if magic_result and magic_result.detected_type in {
-        "parquet",
-        "orc",
-        "avro",
-        "png",
-        "pdf",
-        "elf",
-        "gzip",
-        "zip",
-        "7z",
-        "rar",
-    }:
-        return DetectionStageResult(
-            TextBinaryClass.BINARY.value,
-            magic_result.confidence,
-            [f"magic indicates binary ({magic_result.detected_type})"],
+    null_ratio = raw.count(0) / len(raw)
+    printable = sum(1 for b in raw if 32 <= b <= 126 or b in (9, 10, 13)) / len(raw)
+    entropy = _shannon_entropy(raw)
+
+    if null_ratio > 0.05:
+        return DetectionStage(
+            detected_type="binary",
+            confidence=90,
+            evidence=[f"null_byte_ratio={null_ratio:.3f}"],
+            metadata={"printable_ratio": printable, "entropy": entropy},
         )
-
-    data = sample.prefix_8k
-    if not data:
-        return DetectionStageResult(TextBinaryClass.UNKNOWN.value, 50, ["empty"])
-
-    null_ratio = data.count(0) / len(data)
-    printable = sum(1 for b in data if 32 <= b <= 126 or b in (9, 10, 13))
-    printable_ratio = printable / len(data)
-    entropy = _shannon_entropy(data)
-
-    evidence = [
-        f"printable_ratio={printable_ratio:.3f}",
-        f"null_ratio={null_ratio:.3f}",
-        f"entropy={entropy:.2f}",
-    ]
-
-    if null_ratio > 0.05 and printable_ratio < 0.7:
-        return DetectionStageResult(
-            TextBinaryClass.BINARY.value,
-            80,
-            evidence + ["elevated null bytes"],
+    if printable >= 0.85 and entropy < 6.5:
+        return DetectionStage(
+            detected_type="text",
+            confidence=82,
+            evidence=[f"printable_ratio={printable:.3f}", f"entropy={entropy:.2f}"],
+            metadata={"null_byte_ratio": null_ratio},
         )
-
-    if printable_ratio >= 0.85 and null_ratio < 0.01:
-        return DetectionStageResult(
-            TextBinaryClass.TEXT.value,
-            min(95, int(printable_ratio * 100)),
-            evidence,
+    if printable < 0.4:
+        return DetectionStage(
+            detected_type="binary",
+            confidence=80,
+            evidence=[f"low printable_ratio={printable:.3f}"],
+            metadata={"entropy": entropy},
         )
-
-    if entropy > 7.5 and printable_ratio < 0.5:
-        return DetectionStageResult(
-            TextBinaryClass.BINARY.value,
-            70,
-            evidence + ["high entropy"],
-        )
-
-    if printable_ratio >= 0.6:
-        return DetectionStageResult(
-            TextBinaryClass.TEXT.value,
-            int(printable_ratio * 80),
-            evidence,
-        )
-
-    return DetectionStageResult(
-        TextBinaryClass.UNKNOWN.value,
-        40,
-        evidence,
+    return DetectionStage(
+        detected_type="unknown",
+        confidence=40,
+        evidence=[f"ambiguous printable={printable:.3f} entropy={entropy:.2f}"],
+        metadata={"null_byte_ratio": null_ratio},
     )
 
 

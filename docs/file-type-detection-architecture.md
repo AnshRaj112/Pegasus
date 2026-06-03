@@ -1,6 +1,8 @@
 # File Type Detection Architecture
 
-Pegasus validates datasets from databases, object stores, and local paths. Validation logic must run on **dataset models**, not file extensions. The `pegasus.validation.file_detection` package implements a bounded, multi-layer pipeline that identifies file type, container, compression, encoding, structure, schema hints, and validation strategy—without reading entire files.
+Pegasus validates datasets from databases, object stores, and local paths. Validation logic must run on **dataset models**, not file extensions. The `pegasus.validation.file_detection` package (under `pegasus-backend/src/pegasus/validation/file_detection/`) implements a bounded, multi-layer pipeline that identifies file type, container, compression, encoding, structure, schema hints, and validation strategy—without reading entire files.
+
+See [file-detection-audit.md](file-detection-audit.md) for the pre/post upgrade audit summary.
 
 ## Goals
 
