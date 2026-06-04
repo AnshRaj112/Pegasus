@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-04T12:06:25+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Fast prechecks before full reconciliation (metadata, content digest, partition hashes)."""
 
 from __future__ import annotations

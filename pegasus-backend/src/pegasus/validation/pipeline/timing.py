@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-04T12:06:25+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Pipeline stage timing for performance profiling."""
 
 from __future__ import annotations
