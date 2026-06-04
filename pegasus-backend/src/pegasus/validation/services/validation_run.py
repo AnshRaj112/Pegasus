@@ -61,5 +61,9 @@ def pipeline_result_to_run_result(result: PipelineResult) -> ValidationRunResult
             "schema_valid": result.schema_valid,
             "mismatched_partitions": result.mismatched_partitions,
             "execution_seconds": result.execution_seconds,
+            "path": (result.extra_stats or {}).get("path"),
+            "timings": (result.extra_stats or {}).get("timings"),
+            "lazy_column_drilldown": (result.extra_stats or {}).get("lazy_column_drilldown"),
+            "columnar_spill": (result.extra_stats or {}).get("columnar_spill"),
         },
     )

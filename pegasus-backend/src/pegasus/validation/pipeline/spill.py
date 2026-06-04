@@ -17,15 +17,25 @@ _COL_VALUE_LEN = struct.Struct(">H")
 _FP_SIZE = 8
 _FLUSH_THRESHOLD_BYTES = 256 * 1024
 _COMPARE_PAYLOAD_MAGIC = b"\xcb\x01"
+_COLUMNAR_MAGIC = b"CBL2"
+_U32 = struct.Struct(">I")
 
 
 def encode_compare_payload(ordered_columns: list[str], values: dict[str, str]) -> bytes:
     """Compact column-ordered payload (no JSON) for drilldown compare columns."""
+    return encode_compare_payload_values(
+        ordered_columns,
+        [str(values.get(col, "")) for col in ordered_columns],
+    )
+
+
+def encode_compare_payload_values(ordered_columns: list[str], values: list[str]) -> bytes:
+    """Encode compare values in column order without building a dict."""
     parts = [_COMPARE_PAYLOAD_MAGIC, _COL_COUNT.pack(len(ordered_columns))]
-    for col in ordered_columns:
-        value_b = str(values.get(col, "")).encode("utf-8")
+    for value in values:
+        value_b = value.encode("utf-8")
         if len(value_b) > 65535:
-            raise ValueError(f"compare column value too large: {col}")
+            raise ValueError("compare column value exceeds 65535 bytes")
         parts.append(_COL_VALUE_LEN.pack(len(value_b)) + value_b)
     return b"".join(parts)
 
@@ -48,6 +58,46 @@ def decode_compare_payload(data: bytes, ordered_columns: list[str]) -> dict[str,
         if idx < len(ordered_columns):
             out[ordered_columns[idx]] = value
     return out
+
+
+def encode_columnar_partition(
+    identities: list[str],
+    hashes: list[int],
+    *,
+    col_lists: list[list[str]] | None = None,
+) -> bytes:
+    """Batch-encode one partition (CBL2). *col_lists* is column-major compare values."""
+    n = len(identities)
+    if n != len(hashes):
+        raise ValueError("identity/hash length mismatch")
+
+    buf = bytearray()
+    buf.extend(_COLUMNAR_MAGIC)
+    buf.extend(_U32.pack(n))
+
+    for ident in identities:
+        key_b = ident.encode("utf-8")
+        if len(key_b) > 65535:
+            raise ValueError("identity key exceeds 65535 bytes")
+        buf.extend(_KEY_LEN.pack(len(key_b)))
+        buf.extend(key_b)
+
+    for value in hashes:
+        buf.extend(int(value).to_bytes(_FP_SIZE, "big", signed=False))
+
+    if col_lists:
+        buf.extend(_COL_COUNT.pack(len(col_lists)))
+        for column_values in col_lists:
+            if len(column_values) != n:
+                raise ValueError("column value count mismatch")
+            for cell in column_values:
+                value_b = str(cell).encode("utf-8")
+                if len(value_b) > 65535:
+                    raise ValueError("compare column value exceeds 65535 bytes")
+                buf.extend(_COL_VALUE_LEN.pack(len(value_b)))
+                buf.extend(value_b)
+
+    return bytes(buf)
 
 
 def encode_record(
@@ -162,6 +212,40 @@ class PartitionWriter:
         self._buffers.clear()
 
 
+def _iter_columnar_partition(
+    f: Any,
+    *,
+    compare_columns: list[str] | None,
+) -> Iterator[tuple[str, bytes, dict[str, Any] | None]]:
+    row_count = _U32.unpack(f.read(4))[0]
+    keys: list[str] = []
+    for _ in range(row_count):
+        key_len = _KEY_LEN.unpack(f.read(_KEY_LEN.size))[0]
+        keys.append(f.read(key_len).decode("utf-8"))
+    fingerprints = [f.read(_FP_SIZE) for _ in range(row_count)]
+
+    payloads: list[dict[str, Any] | None] = [None] * row_count
+    ncol_raw = f.read(_COL_COUNT.size)
+    if len(ncol_raw) == _COL_COUNT.size:
+        ncol = _COL_COUNT.unpack(ncol_raw)[0]
+        if ncol > 0 and compare_columns:
+            col_values: list[list[str]] = []
+            for _ in range(ncol):
+                column: list[str] = []
+                for _ in range(row_count):
+                    value_len = _COL_VALUE_LEN.unpack(f.read(_COL_VALUE_LEN.size))[0]
+                    column.append(f.read(value_len).decode("utf-8"))
+                col_values.append(column)
+            for i in range(row_count):
+                payloads[i] = {
+                    compare_columns[j]: col_values[j][i]
+                    for j in range(min(ncol, len(compare_columns)))
+                }
+
+    for i in range(row_count):
+        yield keys[i], fingerprints[i], payloads[i]
+
+
 def iter_partition(
     path: Path,
     *,
@@ -171,6 +255,14 @@ def iter_partition(
         return
     with open(path, "rb") as f:
         while True:
+            pos = f.tell()
+            magic = f.read(4)
+            if len(magic) < 4:
+                break
+            if magic == _COLUMNAR_MAGIC:
+                yield from _iter_columnar_partition(f, compare_columns=compare_columns)
+                continue
+            f.seek(pos)
             header = f.read(4)
             if len(header) < 4:
                 break

@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from pegasus.validation.pipeline.fingerprint import canonical
-from pegasus.validation.pipeline.spill import PartitionWriter, encode_compare_payload, encode_record
+from pegasus.validation.pipeline.drilldown_cache import DrilldownCache
+from pegasus.validation.pipeline.spill import PartitionWriter, encode_columnar_partition
 from pegasus.validation.pipeline.timing import PipelineTimings, StageTimer
 from pegasus.validation.readers.pyarrow_io import pyarrow_supports_delimiter, read_csv_table, table_to_polars
 
@@ -76,33 +77,64 @@ def _write_frame_partitions(
     compare_columns: list[str],
     store_payload: bool,
     timings: PipelineTimings,
+    drilldown_cache: DrilldownCache | None = None,
+    cache_side: str | None = None,
+    lazy_drilldown: bool = False,
+    use_columnar_spill: bool = True,
 ) -> int:
     if frame.is_empty():
         return 0
 
-    payload_cols = compare_columns if store_payload else []
+    if lazy_drilldown and drilldown_cache is not None and cache_side:
+        drilldown_cache.register_side(cache_side, frame)
+
+    embed_payload = store_payload and not lazy_drilldown
+    payload_cols = compare_columns if embed_payload else []
     select_cols = ["_identity", "_fp_hash", "_pid", *payload_cols]
     subset = frame.select(select_cols)
 
+    buckets: dict[int, dict[str, Any]] = {}
+    for group in subset.partition_by("_pid", maintain_order=True):
+        pid = int(group["_pid"][0])
+        bucket = buckets.setdefault(
+            pid,
+            {
+                "identities": [],
+                "hashes": [],
+                "col_lists": [[] for _ in payload_cols] if payload_cols else None,
+            },
+        )
+        bucket["identities"].extend(group["_identity"].to_list())
+        bucket["hashes"].extend(group["_fp_hash"].to_list())
+        if payload_cols:
+            for idx, col in enumerate(payload_cols):
+                bucket["col_lists"][idx].extend(group[col].to_list())
+
     with StageTimer(timings, "serialization_seconds"):
-        for group in subset.partition_by("_pid", maintain_order=True):
-            pid = int(group["_pid"][0])
+        for pid, bucket in buckets.items():
+            identities = bucket["identities"]
+            hashes = bucket["hashes"]
+            col_lists = bucket["col_lists"]
+            if use_columnar_spill:
+                batch = encode_columnar_partition(identities, hashes, col_lists=col_lists)
+                writer.write_bytes(pid, batch)
+                continue
+
+            from pegasus.validation.pipeline.spill import encode_record, encode_compare_payload_values
+
             batch = bytearray()
-            identities = group["_identity"].to_list()
-            hashes = group["_fp_hash"].to_list()
-            if store_payload and payload_cols:
-                col_lists = {c: group[c].to_list() for c in payload_cols}
+            if col_lists:
                 n = len(identities)
                 for i in range(n):
-                    payload = {c: col_lists[c][i] for c in payload_cols}
-                    payload_b = encode_compare_payload(payload_cols, payload)
+                    values = [col_lists[j][i] for j in range(len(payload_cols))]
+                    payload_b = encode_compare_payload_values(payload_cols, values)
                     batch.extend(
                         encode_record(identities[i], _fp_hash_to_bytes(hashes[i]), payload=payload_b)
                     )
             else:
                 for identity, fp_hash in zip(identities, hashes, strict=True):
                     batch.extend(encode_record(identity, _fp_hash_to_bytes(fp_hash)))
-            writer.write_bytes(pid, batch)
+            writer.write_bytes(pid, bytes(batch))
     return frame.height
 
 
@@ -116,6 +148,9 @@ def partition_side_polars(
     store_payload: bool,
     timings: PipelineTimings,
     is_source: bool,
+    drilldown_cache: DrilldownCache | None = None,
+    lazy_drilldown: bool = False,
+    use_columnar_spill: bool = True,
 ) -> int:
     read_field = "source_read_seconds" if is_source else "target_read_seconds"
     part_field = "source_partition_seconds" if is_source else "target_partition_seconds"
@@ -130,9 +165,11 @@ def partition_side_polars(
                     skip_rows=adapter._skip_rows,
                 )
             )
+        canon_cols = compare_columns if (store_payload or lazy_drilldown) else []
         frame = frame.with_columns([
             _identity_expr(identity_columns),
             _fingerprint_expr(compare_columns),
+            *([_canonical_expr(c).alias(c) for c in canon_cols]),
         ]).with_columns(_partition_expr(num_partitions))
         return _write_frame_partitions(
             frame,
@@ -140,6 +177,10 @@ def partition_side_polars(
             compare_columns=compare_columns,
             store_payload=store_payload,
             timings=timings,
+            drilldown_cache=drilldown_cache,
+            cache_side="source" if is_source else "target",
+            lazy_drilldown=lazy_drilldown,
+            use_columnar_spill=use_columnar_spill,
         )
 
 
@@ -153,6 +194,9 @@ def try_partition_side_polars(
     store_payload: bool,
     timings: PipelineTimings,
     is_source: bool,
+    drilldown_cache: DrilldownCache | None = None,
+    lazy_drilldown: bool = False,
+    use_columnar_spill: bool = True,
 ) -> int | None:
     """Load via in-memory frame loader (supports multi-char delimiters) and spill vectorized."""
     read_field = "source_read_seconds" if is_source else "target_read_seconds"
@@ -164,9 +208,11 @@ def try_partition_side_polars(
                 frame = _load_frame(adapter)
             if frame is None or frame.is_empty():
                 return None
+            canon_cols = compare_columns if (store_payload or lazy_drilldown) else []
             frame = frame.with_columns([
                 _identity_expr(identity_columns),
                 _fingerprint_expr(compare_columns),
+                *([_canonical_expr(c).alias(c) for c in canon_cols]),
             ]).with_columns(_partition_expr(num_partitions))
             return _write_frame_partitions(
                 frame,
@@ -174,6 +220,10 @@ def try_partition_side_polars(
                 compare_columns=compare_columns,
                 store_payload=store_payload,
                 timings=timings,
+                drilldown_cache=drilldown_cache,
+                cache_side="source" if is_source else "target",
+                lazy_drilldown=lazy_drilldown,
+                use_columnar_spill=use_columnar_spill,
             )
     except Exception:
         return None

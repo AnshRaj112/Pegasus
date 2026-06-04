@@ -11,7 +11,13 @@ from pegasus.validation.pipeline.fingerprint import (
     row_fingerprint_bytes,
     row_fingerprint_hex,
 )
-from pegasus.validation.pipeline.spill import PartitionWriter, decode_record, encode_record, iter_partition
+from pegasus.validation.pipeline.spill import (
+    PartitionWriter,
+    decode_record,
+    encode_columnar_partition,
+    encode_record,
+    iter_partition,
+)
 
 
 def test_canonical_null_literals() -> None:
@@ -52,3 +58,19 @@ def test_spill_writer_and_reader() -> None:
 def test_identity_key() -> None:
     record = {"id": " 42 ", "name": "x"}
     assert identity_key(record, ["id"]) == "42"
+
+
+def test_columnar_spill_roundtrip() -> None:
+    payload = encode_columnar_partition(
+        ["k1", "k2"],
+        [111, 222],
+        col_lists=[["a", "b"], ["1", "2"]],
+    )
+    assert payload.startswith(b"CBL2")
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "part_00001.bin"
+        path.write_bytes(payload)
+        rows = list(iter_partition(path, compare_columns=["c1", "c2"]))
+    assert len(rows) == 2
+    assert rows[0][0] == "k1"
+    assert rows[1][2] == {"c1": "b", "c2": "2"}

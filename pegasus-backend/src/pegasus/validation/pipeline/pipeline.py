@@ -15,9 +15,13 @@ from typing import Any
 from pegasus.validation.adapters.base import TabularSourceAdapter, TabularSchema
 from pegasus.validation.pipeline.config import TabularPipelineConfig
 from pegasus.validation.pipeline.fingerprint import (
+    filter_compare_columns,
     identity_key,
+    identity_key_from_parts,
     partition_id,
     row_fingerprint_bytes,
+    row_fingerprint_from_parts,
+    _canonical_parts,
 )
 from pegasus.validation.pipeline.in_memory import (
     should_try_in_memory_reconcile,
@@ -27,6 +31,7 @@ from pegasus.validation.pipeline.precheck import (
     spill_partitions_identical,
     try_identical_precheck,
 )
+from pegasus.validation.pipeline.drilldown_cache import DrilldownCache
 from pegasus.validation.pipeline.polars_spill import (
     can_use_polars_spill,
     partition_side_polars,
@@ -44,6 +49,10 @@ from pegasus.validation.pipeline.spill import (
     list_partition_ids,
 )
 from pegasus.validation.pipeline.timing import PipelineTimings, StageTimer
+
+
+def _adapter_network_seconds(adapter: object) -> float:
+    return float(getattr(adapter, "network_transfer_seconds", 0.0) or 0.0)
 
 
 def _adapter_size_bytes(adapter: object) -> int:
@@ -111,15 +120,19 @@ class TabularReconciliationPipeline:
         self._compare_columns = compare_columns
         self._config = config
 
+    def _resolved_compare_columns(self, schema_names: list[str]) -> list[str]:
+        return filter_compare_columns(self._compare_columns, schema_names)
+
     def run(self, *, workspace: Path | None = None) -> PipelineResult:
         source_bytes = _adapter_size_bytes(self._source)
         target_bytes = _adapter_size_bytes(self._target)
+        compare_columns = self._resolved_compare_columns(self._source.get_schema().column_names)
 
         if self._config.enable_merkle_fast_path:
             prechecked = try_identical_precheck(
                 self._source,
                 self._target,
-                compare_columns=self._compare_columns,
+                compare_columns=compare_columns,
                 enable_metadata=True,
                 enable_content_digest=self._config.enable_content_digest_precheck,
             )
@@ -136,7 +149,7 @@ class TabularReconciliationPipeline:
                 self._source,
                 self._target,
                 identity_columns=self._identity_columns,
-                compare_columns=self._compare_columns,
+                compare_columns=compare_columns,
                 memory_budget_bytes=self._config.memory_budget_bytes,
                 enable_column_drilldown=self._config.enable_column_drilldown,
             )
@@ -153,7 +166,7 @@ class TabularReconciliationPipeline:
                 self._source,
                 self._target,
                 identity_columns=self._identity_columns,
-                compare_columns=self._compare_columns,
+                compare_columns=compare_columns,
                 memory_budget_bytes=self._config.memory_budget_bytes,
                 enable_column_drilldown=self._config.enable_column_drilldown,
             )
@@ -170,7 +183,7 @@ class TabularReconciliationPipeline:
             requested=self._config.resolved_partition_count(),
         )
         chunk_rows = self._config.chunk_rows
-        store_payload = self._config.enable_column_drilldown
+        enable_drilldown = self._config.enable_column_drilldown
         algo = self._config.fingerprint_algorithm
 
         src_schema = self._source.get_schema()
@@ -179,20 +192,28 @@ class TabularReconciliationPipeline:
 
         work = workspace or Path("/tmp/pegasus_reconcile")
         work.mkdir(parents=True, exist_ok=True)
+
+        use_polars = combined_bytes <= self._config.polars_spill_max_bytes
+        lazy_drilldown = (
+            enable_drilldown
+            and self._config.lazy_column_drilldown
+            and use_polars
+        )
+        drilldown_cache = DrilldownCache(compare_columns) if lazy_drilldown else None
+        spill_payload = enable_drilldown and not lazy_drilldown
+
         src_writer = PartitionWriter(
             work,
             "source",
-            store_payload=store_payload,
-            compare_columns=self._compare_columns,
+            store_payload=spill_payload,
+            compare_columns=compare_columns,
         )
         tgt_writer = PartitionWriter(
             work,
             "target",
-            store_payload=store_payload,
-            compare_columns=self._compare_columns,
+            store_payload=spill_payload,
+            compare_columns=compare_columns,
         )
-
-        use_polars = combined_bytes <= self._config.polars_spill_max_bytes
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = {
@@ -202,9 +223,12 @@ class TabularReconciliationPipeline:
                     src_writer,
                     chunk_rows,
                     num_partitions,
-                    store_payload,
+                    spill_payload,
                     algo,
                     timings,
+                    compare_columns,
+                    drilldown_cache,
+                    lazy_drilldown,
                     is_source=True,
                     use_polars=use_polars,
                 ): "source",
@@ -214,9 +238,12 @@ class TabularReconciliationPipeline:
                     tgt_writer,
                     chunk_rows,
                     num_partitions,
-                    store_payload,
+                    spill_payload,
                     algo,
                     timings,
+                    compare_columns,
+                    drilldown_cache,
+                    lazy_drilldown,
                     is_source=False,
                     use_polars=use_polars,
                 ): "target",
@@ -285,62 +312,53 @@ class TabularReconciliationPipeline:
                 src_path = work / "source" / f"part_{pid:05d}.bin"
                 tgt_path = work / "target" / f"part_{pid:05d}.bin"
 
-                if store_payload:
-                    src_map: dict[str, tuple[bytes, dict[str, Any]]] = {}
-                    with StageTimer(timings, "disk_read_seconds"):
-                        for key, fp, payload in iter_partition(
-                            src_path, compare_columns=self._compare_columns
-                        ):
-                            src_map[key] = (fp, payload or {})
-                else:
-                    src_fp: dict[str, bytes] = {}
-                    with StageTimer(timings, "disk_read_seconds"):
-                        for key, fp, _ in iter_partition(src_path):
-                            src_fp[key] = fp
+                use_spill_payload = enable_drilldown and drilldown_cache is None
+                src_fp_map: dict[str, bytes] = {}
+                src_payload_map: dict[str, dict[str, Any]] = {}
+                with StageTimer(timings, "disk_read_seconds"):
+                    for key, fp, payload in iter_partition(
+                        src_path,
+                        compare_columns=compare_columns if use_spill_payload else None,
+                    ):
+                        src_fp_map[key] = fp
+                        if use_spill_payload and payload:
+                            src_payload_map[key] = payload
 
                 tgt_keys: set[str] = set()
                 part_changed = part_missing = part_extra = 0
 
                 with StageTimer(timings, "disk_read_seconds"):
                     for key, fp, payload in iter_partition(
-                        tgt_path, compare_columns=self._compare_columns
+                        tgt_path,
+                        compare_columns=compare_columns if use_spill_payload else None,
                     ):
                         tgt_keys.add(key)
-                        if store_payload:
-                            src_entry = src_map.get(key)
-                            if src_entry is None:
-                                part_extra += 1
-                                if len(samples) < sample_limit:
-                                    samples.append(MismatchSample(key, "extra"))
-                            elif not _fp_equal(src_entry[0], fp):
-                                part_changed += 1
+                        src_fp = src_fp_map.get(key)
+                        if src_fp is None:
+                            part_extra += 1
+                            if len(samples) < sample_limit:
+                                samples.append(MismatchSample(key, "extra"))
+                        elif not _fp_equal(src_fp, fp):
+                            part_changed += 1
+                            if enable_drilldown and len(samples) < sample_limit:
                                 col_diffs: list[ColumnDifference] = []
-                                _, src_data = src_entry
-                                tgt_data = payload or {}
+                                if drilldown_cache is not None:
+                                    src_data = drilldown_cache.source_values(key)
+                                    tgt_data = drilldown_cache.target_values(key)
+                                else:
+                                    src_data = src_payload_map.get(key, {})
+                                    tgt_data = payload or {}
                                 with StageTimer(timings, "column_comparison_seconds"):
-                                    for col in self._compare_columns:
+                                    for col in compare_columns:
                                         sv = src_data.get(col)
                                         tv = tgt_data.get(col)
                                         if sv != tv:
                                             col_diffs.append(ColumnDifference(col, sv, tv))
-                                if len(samples) < sample_limit:
-                                    samples.append(MismatchSample(key, "changed", col_diffs))
-                            else:
-                                matching += 1
+                                samples.append(MismatchSample(key, "changed", col_diffs))
                         else:
-                            src_val = src_fp.get(key)
-                            if src_val is None:
-                                part_extra += 1
-                                if len(samples) < sample_limit:
-                                    samples.append(MismatchSample(key, "extra"))
-                            elif not _fp_equal(src_val, fp):
-                                part_changed += 1
-                                if len(samples) < sample_limit:
-                                    samples.append(MismatchSample(key, "changed"))
-                            else:
-                                matching += 1
+                            matching += 1
 
-                key_source = src_map if store_payload else src_fp
+                key_source = src_fp_map
                 for key in key_source:
                     if key not in tgt_keys:
                         part_missing += 1
@@ -354,6 +372,14 @@ class TabularReconciliationPipeline:
                     mismatched_partitions += 1
 
         timings.total_seconds = time.perf_counter() - t0
+        timings.network_transfer_seconds = (
+            _adapter_network_seconds(self._source) + _adapter_network_seconds(self._target)
+        )
+        spill_path = "spill_binary"
+        if lazy_drilldown:
+            spill_path = "spill_binary_lazy_drilldown"
+        elif self._config.use_columnar_spill:
+            spill_path = "spill_columnar"
         return PipelineResult(
             schema_valid=len(schema_diffs) == 0,
             schema_differences=schema_diffs,
@@ -367,14 +393,16 @@ class TabularReconciliationPipeline:
             partitions_processed=len(active_pids),
             mismatched_partitions=mismatched_partitions,
             sample_mismatches=samples,
-            compared_columns=list(self._compare_columns),
+            compared_columns=list(compare_columns),
             execution_seconds=timings.total_seconds,
             extra_stats={
-                "path": "spill_binary",
+                "path": spill_path,
                 "timings": timings.to_dict(),
                 "fingerprint_algorithm": algo,
                 "num_partitions": num_partitions,
                 "active_partitions": len(active_pids),
+                "lazy_column_drilldown": lazy_drilldown,
+                "columnar_spill": self._config.use_columnar_spill,
             },
         )
 
@@ -387,31 +415,41 @@ class TabularReconciliationPipeline:
         store_payload: bool,
         algorithm: str,
         timings: PipelineTimings,
+        compare_columns: list[str],
+        drilldown_cache: DrilldownCache | None,
+        lazy_drilldown: bool,
         *,
         is_source: bool,
         use_polars: bool,
     ) -> int:
+        spill_flags = {
+            "drilldown_cache": drilldown_cache,
+            "lazy_drilldown": lazy_drilldown,
+            "use_columnar_spill": self._config.use_columnar_spill,
+        }
         if use_polars:
             if can_use_polars_spill(adapter):
                 return partition_side_polars(
                     adapter,  # type: ignore[arg-type]
                     writer,
                     identity_columns=self._identity_columns,
-                    compare_columns=self._compare_columns,
+                    compare_columns=compare_columns,
                     num_partitions=num_partitions,
                     store_payload=store_payload,
                     timings=timings,
                     is_source=is_source,
+                    **spill_flags,
                 )
             polars_rows = try_partition_side_polars(
                 adapter,
                 writer,
                 identity_columns=self._identity_columns,
-                compare_columns=self._compare_columns,
+                compare_columns=compare_columns,
                 num_partitions=num_partitions,
                 store_payload=store_payload,
                 timings=timings,
                 is_source=is_source,
+                **spill_flags,
             )
             if polars_rows is not None:
                 return polars_rows
@@ -424,6 +462,7 @@ class TabularReconciliationPipeline:
             store_payload,
             algorithm,
             timings,
+            compare_columns,
             is_source=is_source,
         )
 
@@ -436,6 +475,7 @@ class TabularReconciliationPipeline:
         store_payload: bool,
         algorithm: str,
         timings: PipelineTimings,
+        compare_columns: list[str],
         *,
         is_source: bool,
     ) -> int:
@@ -446,18 +486,17 @@ class TabularReconciliationPipeline:
         with StageTimer(timings, part_field):
             with StageTimer(timings, read_field):
                 chunks = adapter.stream_records(chunk_rows)
+            id_cols = self._identity_columns
+            cmp_cols = compare_columns
             for chunk in chunks:
                 for record in chunk:
                     with StageTimer(timings, "canonicalization_seconds"):
-                        pass
+                        id_parts = _canonical_parts(record, id_cols)
+                        cmp_parts = _canonical_parts(record, cmp_cols)
                     with StageTimer(timings, "identity_generation_seconds"):
-                        identity = identity_key(record, self._identity_columns)
+                        identity = identity_key_from_parts(id_parts)
                     with StageTimer(timings, "fingerprint_generation_seconds"):
-                        fp = row_fingerprint_bytes(
-                            record,
-                            self._compare_columns,
-                            algorithm=algorithm,
-                        )
+                        fp = row_fingerprint_from_parts(cmp_parts, algorithm=algorithm)
                     with StageTimer(timings, "partition_calculation_seconds"):
                         pid = partition_id(identity, num_partitions)
                     with StageTimer(timings, "serialization_seconds"):

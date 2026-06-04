@@ -32,11 +32,21 @@ def canonical(value: Any) -> str:
 
 
 def identity_key(record: dict[str, Any], columns: list[str]) -> str:
-    return "|".join(canonical(record.get(c)) for c in columns)
+    return identity_key_from_parts(_canonical_parts(record, columns))
+
+
+def identity_key_from_parts(parts: list[str]) -> str:
+    return "|".join(parts)
 
 
 def _canonical_parts(record: dict[str, Any], columns: list[str]) -> list[str]:
     return [canonical(record.get(c)) for c in columns]
+
+
+def filter_compare_columns(compare_columns: list[str], available: list[str]) -> list[str]:
+    """Keep only compare columns present in the loaded frame/schema."""
+    available_set = set(available)
+    return [col for col in compare_columns if col in available_set]
 
 
 def _fingerprint_sha256(parts: list[str]) -> bytes:
@@ -87,8 +97,17 @@ def row_fingerprint_bytes(
     """Return an 8-byte (or 32-byte for sha256) fingerprint digest."""
     if not columns:
         return b""
-    hasher = _select_hasher(algorithm)
-    return hasher(_canonical_parts(record, columns))
+    return row_fingerprint_from_parts(_canonical_parts(record, columns), algorithm=algorithm)
+
+
+def row_fingerprint_from_parts(
+    parts: list[str],
+    *,
+    algorithm: str = DEFAULT_ALGORITHM,
+) -> bytes:
+    if not parts:
+        return b""
+    return _select_hasher(algorithm)(parts)
 
 
 def row_fingerprint_hex(
@@ -101,6 +120,8 @@ def row_fingerprint_hex(
 
 
 def partition_id(key: str, num_partitions: int) -> int:
+    if _HAS_XXHASH:
+        return _xxhash.xxh64(key.encode()).intdigest() % num_partitions
     h = hashlib.md5(key.encode()).digest()
     return int.from_bytes(h[:4], "big") % num_partitions
 

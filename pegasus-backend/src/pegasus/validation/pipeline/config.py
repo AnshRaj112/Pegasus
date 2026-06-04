@@ -23,6 +23,8 @@ class TabularPipelineConfig:
     partition_count: int = 2048
     partition_preset: str | None = "medium"
     enable_column_drilldown: bool = True
+    lazy_column_drilldown: bool = True
+    use_columnar_spill: bool = True
     enable_in_memory_reconcile: bool = False
     auto_in_memory_max_bytes: int = 256 * 1024 * 1024
     memory_budget_bytes: int = 1_073_741_824

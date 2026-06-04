@@ -36,12 +36,16 @@ def _run(source: Path, target: Path, *, force_spill: bool, drilldown: bool) -> d
     )
     src_ad = FileDelimitedAdapter(source, delimiter="||")
     tgt_ad = FileDelimitedAdapter(target, delimiter="||")
+    schema_cols = src_ad.get_schema().column_names
+    compare_columns = [c for c in COMPARE_COLS if c in schema_cols] or [
+        c for c in schema_cols if c != "id"
+    ]
     with tempfile.TemporaryDirectory() as td:
         pipe = TabularReconciliationPipeline(
             src_ad,
             tgt_ad,
             identity_columns=["id"],
-            compare_columns=COMPARE_COLS,
+            compare_columns=compare_columns,
             config=cfg,
         )
         t0 = time.perf_counter()

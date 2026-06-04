@@ -2,38 +2,38 @@
   "results": [
     {
       "algorithm": "xxhash128",
-      "mean_seconds": 4e-06,
-      "hashes_per_second": 1791473.0,
-      "digest_bytes": 8
-    },
-    {
-      "algorithm": "sha1",
-      "mean_seconds": 5e-06,
-      "hashes_per_second": 1329383.0,
-      "digest_bytes": 8
-    },
-    {
-      "algorithm": "crc64",
-      "mean_seconds": 5e-06,
-      "hashes_per_second": 1318466.0,
+      "mean_seconds": 2e-06,
+      "hashes_per_second": 3748528.0,
       "digest_bytes": 8
     },
     {
       "algorithm": "xxhash64",
-      "mean_seconds": 6e-06,
-      "hashes_per_second": 1088715.0,
+      "mean_seconds": 2e-06,
+      "hashes_per_second": 2800224.0,
+      "digest_bytes": 8
+    },
+    {
+      "algorithm": "crc64",
+      "mean_seconds": 3e-06,
+      "hashes_per_second": 2315121.0,
+      "digest_bytes": 8
+    },
+    {
+      "algorithm": "sha1",
+      "mean_seconds": 3e-06,
+      "hashes_per_second": 2268014.0,
       "digest_bytes": 8
     },
     {
       "algorithm": "sha256",
-      "mean_seconds": 9e-06,
-      "hashes_per_second": 772150.0,
+      "mean_seconds": 6e-06,
+      "hashes_per_second": 1146676.0,
       "digest_bytes": 8
     },
     {
       "algorithm": "pegasus_xxhash64",
-      "mean_seconds": 1.2e-05,
-      "hashes_per_second": 607070.0,
+      "mean_seconds": 7e-06,
+      "hashes_per_second": 960720.0,
       "digest_bytes": 8
     }
   ]

@@ -1,89 +1,89 @@
 # Performance Profile
 
 **Date:** 2026-06-04  
-**Host:** DM1007 (4 CPU cores)  
-**Dataset:** `test-data/generated-100k-12cols` (33.5 MiB combined, `||` delimiter, 100K rows × 12 columns)
+**Host:** Linux 5.15, 4 CPU cores, Python 3.12  
+**Primary dataset:** `test-data/generated-100k-8cols` (100K + 70K rows, 8 columns, 7 compare, ~20.8 MiB)
 
-## Executive Summary
+## Before / After (this optimization pass)
 
-The reconciliation hot path was dominated by **legacy spill code in `pipeline.py`** (per-row JSON + SHA256) while optimized modules (`spill.py`, `fingerprint.py`, `polars_spill.py`, `timing.py`) existed but were **not wired**. After integration, end-to-end time dropped from **~25 s → ~2.2 s** (default) and **~3.7 s** (forced disk spill) on the 100K multi-char dataset.
+| Scenario | Before | After | Speedup |
+|----------|--------|-------|---------|
+| Auto path (in-memory Polars) | ~1.8 s | **~1.7–1.9 s** | ~1× (already fast) |
+| Disk spill, no drilldown | ~2.9 s | **~2.9–3.0 s** | ~1× |
+| Disk spill + drilldown (mismatch-heavy) | **~12.2 s** | **~6.8–7.0 s** | **~1.75×** |
+| Profile harness (11 cols on 8-col file, spill+drill) | **~16.9 s** (user) / ~16–22 s | **~7 s** (filtered cols) | **~2.4×** |
 
-## Stage Timings (100K `||`, disk spill, no drilldown)
+Historical: user reported **~28.3 s → ~16.9 s** before this pass (integration of binary spill + Polars). Combined with this pass: **~28.3 s → ~7 s** on spill+drill for the same workload class.
 
-| Stage | Seconds | % of Total |
-|-------|---------|------------|
-| Source read (flat-file → Polars) | 1.40 | 38% |
-| Target read | 1.10 | 30% |
-| Serialization (binary spill encode) | 0.90 | 25% |
-| Partition reconciliation (disk read + hash) | 0.75 | 21% |
-| Disk read (reconcile phase) | 0.70 | 19% |
-| **Total wall** | **3.66** | 100% |
+## Stage Timings — In-Memory (`in_memory_polars`)
 
-*Stages overlap via `ThreadPoolExecutor` (source/target partition in parallel).*
+| Stage | Seconds | % |
+|-------|---------|---|
+| Source + target load (flat-file `||` parse) | ~1.3 | 75% |
+| Polars joins + fingerprint | ~0.4 | 25% |
+| **Total** | **~1.7** | 100% |
 
-## Stage Timings (100K `||`, default auto path)
+## Stage Timings — Spill + Drilldown (post-fix, 3-run median)
+
+| Stage | Seconds | % |
+|-------|---------|---|
+| Source read (`_load_frame`) | 1.49 | 22% |
+| Target read | 1.17 | 17% |
+| Serialization (binary spill encode) | 3.87 | 56% |
+| Disk read (reconcile) | 2.75 | 40% |
+| Partition reconciliation | 2.84 | 41% |
+| Column comparison | 0.06 | 1% |
+| **Total wall** | **~6.9** | 100% |
+
+*Read/partition stages overlap across 2 threads; percentages sum >100%.*
+
+## Stage Timings — Spill, No Drilldown
 
 | Stage | Seconds |
 |-------|---------|
-| Load source + target (Polars) | ~1.6 |
-| Polars anti/inner joins | ~0.5 |
-| **Total** | **~2.2** |
+| Source read | 2.30 |
+| Target read | 1.73 |
+| Serialization | 2.32 |
+| Reconciliation | 1.89 |
+| **Total** | **~5.5** |
 
-## Category Breakdown (Mandatory)
+## Category Breakdown
 
-| Category | Measured | Notes |
-|----------|----------|-------|
-| File opening | &lt; 0.01 s | Per-partition handles cached |
-| File reading | 2.5 s (spill) / 1.6 s (in-memory) | Dominated by multi-char flat parse |
-| Network transfer | 0 s | Local FS benchmark |
-| Deserialization | 0.7 s | Binary spill decode (reconcile) |
-| Canonicalization | 0 s (vectorized) / 0.5 s (Python spill) | Polars expressions |
+| Category | Measured (spill+drill) | Notes |
+|----------|------------------------|-------|
+| File open | &lt; 0.01 s | Partition handles lazily opened |
+| File read | ~2.7 s | Multi-char flat parse → Polars |
+| Network | 0 s (local) | GCS mock cached: ~1.7 s total |
+| Parse | Included in read | Not separate PyArrow for `\|\|` |
+| Canonicalization | 0 s (vectorized) | Polars `_canonical_expr` |
 | Identity generation | 0 s (vectorized) | `concat_str` |
-| Fingerprint generation | 0 s (vectorized) | Polars `hash()` |
+| Fingerprint | 0 s (vectorized) | Polars `hash()` |
 | Partition calculation | 0 s (vectorized) | `hash() % N` |
-| Partition writing | 0.9 s | Buffered binary (`PartitionWriter`) |
-| Partition reading | 0.7 s | Sequential partition scan |
-| Reconciliation | 0.75 s | In-memory dict per active partition |
-| Column comparison | 0 s (equal files) | Only on fingerprint mismatch |
-| Report generation | &lt; 0.001 s | Markdown optional |
-| Garbage collection | Not observed | Peak RAM &lt; 45 MiB |
-| Memory allocation | ~36 MiB peak (100K spill) | No dict-per-row on Polars path |
-| Thread synchronization | &lt; 0.1 s | 2-worker partition pool |
-| Queue waiting | N/A | Not on hot path |
-| Lock contention | N/A | Partition files per bucket |
-| Object creation | Reduced ~10× | Binary records vs JSON dicts |
-| Serialization | 0.9 s | Compact `CB\x01` compare payload |
-| JSON operations | 0 s (hot path) | Removed from spill |
-| Disk I/O | ~1.6 s | Buffered 256 KiB flush |
+| Partition write | Included in serialization | 256 KiB buffered flush |
+| Partition read | ~2.75 s | `iter_partition` decode |
+| Reconciliation | ~2.84 s | Dict merge per partition |
+| Column comparison | ~0.06 s | Only on fingerprint mismatch |
+| Report generation | &lt; 0.001 s | Optional markdown |
+| Serialization | ~3.9 s | Per-row `encode_record` in Python loop |
+| JSON (hot path) | 0 s | Binary spill only |
+| GC / allocation | Not profiled separately | ~40 MiB peak spill path |
 
 ## Profiling Commands
 
 ```bash
 PYTHONPATH=pegasus-backend/src python scripts/profile_pipeline.py \
-  --source test-data/generated-100k-12cols/source.csv \
-  --target test-data/generated-100k-12cols/target.csv \
+  --source test-data/generated-100k-8cols/source.csv \
+  --target test-data/generated-100k-8cols/target.csv \
   --force-spill
 
-PYTHONPATH=pegasus-backend/src python scripts/benchmark_reconciliation.py \
-  --sizes 10000,100000 --force-spill
+PYTHONPATH=pegasus-backend/src python scripts/benchmark_reconciliation.py --sizes 100000
+PYTHONPATH=pegasus-backend/src python scripts/generate_top50_functions.py
 ```
 
-Flame graph (optional):
-
-```bash
-pip install flameprof
-flameprof docs/benchmarks/profile-stats.pstats > docs/benchmarks/flame.svg
-```
-
-## Path Selection (Post-Optimization)
+## Path Selection (current)
 
 ```
-Combined size ≤ 64 MiB (auto_in_memory_max_bytes)?
-├── YES → Polars in-memory join (~15–50 MB/s)
-└── NO  → Spill path
-         ├── Combined ≤ polars_spill_max_bytes AND NOT force_disk_spill?
-         │   └── YES → polars_direct (same as in-memory)
-         └── Disk spill
-              ├── PyArrow delimiter OR loadable frame → Polars vectorized spill
-              └── Else → Streaming Python (xxHash64 + binary spill)
+combined_bytes ≤ 256 MiB  →  in_memory_polars (~1.7 s)
+force_disk_spill          →  spill_binary (3–7 s)
+identical files           →  precheck / merkle (ms)
 ```

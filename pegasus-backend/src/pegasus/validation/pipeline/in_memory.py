@@ -19,7 +19,8 @@ from pegasus.validation.adapters.base import TabularSourceAdapter
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
 
 _HEADERLESS_ADAPTER_TYPES = frozenset({"FileDelimitedAdapter", "GcsDelimitedAdapter"})
-from pegasus.validation.flat_file import parse_lines, split_physical_lines
+from pegasus.validation.readers.clevercsv_io import clevercsv_to_polars, flat_file_to_polars
+from pegasus.validation.pipeline.fingerprint import filter_compare_columns
 from pegasus.validation.pipeline.result import ColumnDifference, MismatchSample, PipelineResult
 from pegasus.validation.readers.pyarrow_io import (
     pyarrow_supports_delimiter,
@@ -149,24 +150,24 @@ def _flat_parse_to_polars(
     has_header: bool,
     skip_rows: int,
 ) -> pl.DataFrame:
-    payload = source.read()
-    text = payload.decode("utf-8", errors="replace") if isinstance(payload, bytes) else payload
-    if skip_rows:
-        lines = text.splitlines()
-        text = "\n".join(lines[skip_rows:])
-    parsed = parse_lines(
-        split_physical_lines(text),
-        delimiter,
+    if hasattr(source, "seek"):
+        source.seek(0)
+    frame = clevercsv_to_polars(
+        source,
+        delimiter=delimiter,
         has_header=has_header,
+        skip_rows=skip_rows,
     )
-    if not parsed.rows:
-        return pl.DataFrame()
-    columns = parsed.headers or [f"col_{i}" for i in range(len(parsed.rows[0]))]
-    column_data: dict[str, list[str | None]] = {name: [] for name in columns}
-    for row in parsed.rows:
-        for idx, name in enumerate(columns):
-            column_data[name].append(row[idx] if idx < len(row) else None)
-    return pl.DataFrame(column_data)
+    if frame is not None:
+        return frame
+    if hasattr(source, "seek"):
+        source.seek(0)
+    return flat_file_to_polars(
+        source,
+        delimiter=delimiter,
+        has_header=has_header,
+        skip_rows=skip_rows,
+    )
 
 
 def _load_delimited_frame(
@@ -341,6 +342,10 @@ def try_in_memory_reconcile(
             src = src_fut.result()
             tgt = tgt_fut.result()
         if src is None or tgt is None:
+            return None
+
+        compare_columns = filter_compare_columns(compare_columns, src.columns)
+        if not compare_columns:
             return None
 
         src = src.with_columns(_fingerprint_expr(compare_columns).alias("_fp"))

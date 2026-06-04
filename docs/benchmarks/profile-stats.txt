@@ -1,40 +1,40 @@
-Thu Jun  4 12:05:26 2026    /home/ansh.raj/Pegasus/docs/benchmarks/profile-stats.pstats
+Thu Jun  4 12:18:27 2026    /home/ansh.raj/Pegasus/docs/benchmarks/profile-stats.pstats
 
-         54035034 function calls (53583751 primitive calls) in 103.551 seconds
+         18606505 function calls (18335321 primitive calls) in 25.365 seconds
 
    Ordered by: cumulative time
-   List reduced from 581 to 30 due to restriction <30>
+   List reduced from 593 to 30 due to restriction <30>
 
    ncalls  tottime  percall  cumtime  percall filename:lineno(function)
-        3    0.000    0.000  164.737   54.912 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/concurrent/futures/_base.py:199(as_completed)
-        4    0.000    0.000  164.737   41.184 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:637(wait)
-        6    0.000    0.000  164.736   27.456 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:323(wait)
-170000/68961    6.904    0.000  113.711    0.002 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/fingerprint.py:81(row_fingerprint_bytes)
-        1    0.001    0.001  103.564  103.564 /home/ansh.raj/Pegasus/scripts/profile_pipeline.py:29(_run)
-        1    0.994    0.994  103.543  103.543 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/pipeline.py:114(run)
-        1    0.000    0.000   89.629   89.629 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/concurrent/futures/_base.py:646(__exit__)
-        1    0.000    0.000   89.629   89.629 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/concurrent/futures/thread.py:220(shutdown)
-        2    0.000    0.000   89.628   44.814 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:1117(join)
-    36/28    0.000    0.000   89.628    3.201 {method 'acquire' of '_thread.lock' objects}
-        2    0.000    0.000   89.628   44.814 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:1155(_wait_for_tstate_lock)
-      2/1    0.000    0.000   89.628   89.628 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:1018(_bootstrap)
-      2/1    0.000    0.000   89.628   89.628 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:1058(_bootstrap_inner)
-      2/1    0.000    0.000   89.628   89.628 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:1001(run)
-      2/1    0.000    0.000   89.628   89.628 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/concurrent/futures/thread.py:70(_worker)
-      2/1    0.000    0.000   89.628   89.628 {method 'get' of '_queue.SimpleQueue' objects}
-      2/1    0.011    0.005   89.627   89.627 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/concurrent/futures/thread.py:54(run)
-170000/166425    3.736    0.000   53.108    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/spill.py:124(write)
-170000/168267   10.689    0.000   19.696    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/spill.py:22(encode_compare_payload)
-      2/1    0.022    0.011   14.518   14.518 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/pipeline.py:381(_partition_side)
-      2/1    1.644    0.822   14.505   14.505 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/pipeline.py:430(_partition_side_streaming)
-   170128    0.811    0.000   12.394    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/spill.py:165(iter_partition)
-170002/160174    1.847    0.000   11.286    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/adapters/file_delimited.py:80(_iter_data_rows)
-   170000    1.077    0.000   10.881    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/spill.py:70(decode_record)
-3910000/3884078    7.508    0.000   10.859    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/fingerprint.py:24(canonical)
-170000/70221    4.456    0.000   10.458    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/fingerprint.py:46(_fingerprint_xxhash64)
-170000/168825    3.788    0.000   10.123    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/fingerprint.py:108(compare_columns_payload)
-      2/1    0.000    0.000    9.787    9.787 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/polars_spill.py:146(try_partition_side_polars)
-170000/168791    3.073    0.000    9.632    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/fingerprint.py:38(_canonical_parts)
-      2/1    0.000    0.000    9.545    9.545 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/polars_spill.py:53(_load_frame)
+        4    0.000    0.000   25.842    6.461 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:637(wait)
+        3    0.000    0.000   25.842    8.614 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/concurrent/futures/_base.py:199(as_completed)
+        6    0.001    0.000   25.842    4.307 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:323(wait)
+        1    0.004    0.004   25.379   25.379 /home/ansh.raj/Pegasus/scripts/profile_pipeline.py:29(_run)
+        1    0.883    0.883   25.355   25.355 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/pipeline.py:121(run)
+        1    0.000    0.000   14.283   14.283 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/concurrent/futures/_base.py:646(__exit__)
+        1    0.000    0.000   14.283   14.283 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/concurrent/futures/thread.py:220(shutdown)
+    36/28    0.000    0.000   14.283    0.510 {method 'acquire' of '_thread.lock' objects}
+        2    0.000    0.000   14.283    7.141 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:1117(join)
+        2    0.000    0.000   14.282    7.141 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:1155(_wait_for_tstate_lock)
+      2/1    0.000    0.000   14.282   14.282 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:1018(_bootstrap)
+      2/1    0.000    0.000   14.282   14.282 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:1058(_bootstrap_inner)
+      2/1    0.000    0.000   14.282   14.282 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/threading.py:1001(run)
+      2/1    0.000    0.000   14.282   14.282 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/concurrent/futures/thread.py:70(_worker)
+      2/1    0.000    0.000   14.282   14.282 {method 'get' of '_queue.SimpleQueue' objects}
+      2/1    0.000    0.000   14.282   14.282 /home/ansh.raj/.pyenv/versions/3.12.13/lib/python3.12/concurrent/futures/thread.py:54(run)
+   170128    0.772    0.000    9.685    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/spill.py:173(iter_partition)
+170000/94142    4.134    0.000    8.738    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/spill.py:30(encode_compare_payload_values)
+   170000    1.088    0.000    8.247    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/spill.py:78(decode_record)
+   170000    3.844    0.000    6.600    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/spill.py:41(decode_compare_payload)
+      2/1    0.000    0.000    3.589    3.589 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/polars_spill.py:57(_load_frame)
+      2/1    0.000    0.000    3.589    3.589 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/in_memory.py:271(_load_frame)
+170000/144746    1.423    0.000    3.206    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/spill.py:61(encode_record)
+      2/1    0.000    0.000    2.721    2.721 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/pipeline.py:391(_partition_side)
+      2/1    0.107    0.053    2.721    2.721 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/polars_spill.py:152(try_partition_side_polars)
+      2/1    0.369    0.185    2.720    2.720 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/pipeline/polars_spill.py:76(_write_frame_partitions)
+7051684/7051681    2.014    0.000    2.014    0.000 {built-in method builtins.len}
+      2/1    0.234    0.117    1.984    1.984 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/flat_file.py:296(parse_lines)
+170002/82795    0.214    0.000    1.515    0.000 /home/ansh.raj/Pegasus/pegasus-backend/src/pegasus/validation/flat_file.py:321(_fields)
+  1700000    1.363    0.000    1.363    0.000 {method 'unpack_from' of '_struct.Struct' objects}
 
 

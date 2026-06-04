@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Iterator
@@ -49,6 +50,10 @@ def inherit_gcs_cache(
         target._size_bytes = source._size_bytes
     target._crc32c = source._crc32c
     target._md5_hex = source._md5_hex
+    target._network_transfer_seconds = max(
+        target._network_transfer_seconds,
+        source._network_transfer_seconds,
+    )
 
 
 def _digest_payload(payload: bytes) -> str:
@@ -104,6 +109,7 @@ class GcsDelimitedAdapter:
         "_digest_hex",
         "_crc32c",
         "_md5_hex",
+        "_network_transfer_seconds",
     )
 
     def __init__(
@@ -128,6 +134,11 @@ class GcsDelimitedAdapter:
         self._digest_hex: str | None = None
         self._crc32c: str | None = None
         self._md5_hex: str | None = None
+        self._network_transfer_seconds: float = 0.0
+
+    @property
+    def network_transfer_seconds(self) -> float:
+        return self._network_transfer_seconds
 
     @property
     def path(self) -> Path:
@@ -169,7 +180,9 @@ class GcsDelimitedAdapter:
         size = self.get_size_bytes()
         if size <= 0 or size > max_cache_bytes:
             return None
+        t0 = time.perf_counter()
         payload = read_gcs_object_bytes(self._ref)
+        self._network_transfer_seconds += time.perf_counter() - t0
         self._cached_full = payload
         self._cached_prefix = payload
         self._digest_hex = _digest_payload(payload)
@@ -186,7 +199,9 @@ class GcsDelimitedAdapter:
             if full is not None:
                 return full
         read_limit = min(max_bytes, size) if size > 0 else max_bytes
+        t0 = time.perf_counter()
         payload = read_gcs_prefix(self._ref, max_bytes=read_limit)
+        self._network_transfer_seconds += time.perf_counter() - t0
         if self._cached_prefix is None or len(payload) > len(self._cached_prefix):
             self._cached_prefix = payload
         return payload

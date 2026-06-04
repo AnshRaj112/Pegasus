@@ -1,61 +1,62 @@
 # Performance Tests
 
+**Date:** 2026-06-04
+
 ## Automated Tests
 
-| Test file | What it covers |
-|-----------|----------------|
-| `pegasus-backend/tests/test_reconciliation_throughput.py` | MB/s and latency floors (10K, 100K) |
-| `pegasus-backend/tests/test_validation_performance.py` | Service-level CSV validation |
-| `pegasus-backend/tests/test_pipeline_performance_modules.py` | Binary spill + fingerprint unit tests |
-| `pegasus-backend/tests/test_gcs_in_memory_fast_path.py` | GCS → Polars fast path |
+| Test | Location | Threshold |
+|------|----------|-----------|
+| 10K local throughput | `test_reconciliation_throughput.py::test_10k_local_throughput` | ≥ 8 MB/s |
+| 100K auto path | `test_100k_local_auto_path_under_ten_seconds` | &lt; 10 s |
+| 100K disk spill | `test_100k_disk_spill_under_fifteen_seconds` | &lt; 15 s |
+| GCS 100K single download | `test_gcs_100k_performance.py` | &lt; 12 s, 2 downloads |
+| Small CSV service | `test_validation_performance.py` | &lt; 5 s |
+| 10K 12-col service | `test_validation_performance.py` | &lt; 5 s |
 
-## Scenarios Matrix
+Scale thresholds with `PEGASUS_PERF_FACTOR` (default 1.0).
 
-| Scenario | Dataset | Expected path | Assertion |
-|----------|---------|---------------|-----------|
-| 10K rows, local `||` | `generated-10k-12cols` | in_memory / polars_direct | ≥ 8 MB/s |
-| 100K rows, local `||` | `generated-100k-12cols` | in_memory | &lt; 10 s |
-| 100K disk spill | same | spill_binary | &lt; 15 s |
-| Wide table 1000 cols | *generate when available* | TBD | TBD |
-| Duplicate / missing / extra | mutation fixtures | correct counts | functional |
-| GCS | `test_gcs_in_memory_fast_path` | cached prefix | completes |
-
-## Run Performance Suite
+## Benchmark Scripts
 
 ```bash
-cd pegasus-backend
-PYTHONPATH=src pytest -m performance tests/test_reconciliation_throughput.py -v
+# Reconciliation throughput matrix
+PYTHONPATH=pegasus-backend/src python scripts/benchmark_reconciliation.py --sizes 10000,100000
 
-# Relax on slow hardware:
-PEGASUS_PERF_FACTOR=2.0 PYTHONPATH=src pytest -m performance tests/test_reconciliation_throughput.py -v
+# Stage timings + cProfile
+PYTHONPATH=pegasus-backend/src python scripts/profile_pipeline.py \
+  --source test-data/generated-100k-8cols/source.csv \
+  --target test-data/generated-100k-8cols/target.csv
+
+# Hash algorithms
+PYTHONPATH=pegasus-backend/src python scripts/benchmark_hash_algorithms.py
+
+# Top functions report
+PYTHONPATH=pegasus-backend/src python scripts/generate_top50_functions.py
 ```
 
-## Target Thresholds (from requirements)
+## Datasets
 
-| Size | Target | Test coverage |
-|------|--------|---------------|
-| 10K | smoke | `test_10k_local_throughput` |
-| 100K | &lt; 10 s auto | `test_100k_local_auto_path_under_ten_seconds` |
-| 100K spill | &lt; 15 s | `test_100k_disk_spill_under_fifteen_seconds` |
-| 1M+ | not yet | Add when fixtures exist |
-| Wide 1000 cols | not yet | Generator script needed |
-| GCS | partial | Extend with cloud CI job |
+| Dataset | Rows | Cols | Delimiter | Use |
+|---------|------|------|-----------|-----|
+| `generated-100k-8cols` | 100K / 70K | 8 | `\|\|` | Mismatch-heavy audit |
+| `generated-10k-12cols` | 10K | 12 | `\|\|` | CI throughput |
+| `generated-100k-12cols` | 100K | 12 | `\|\|` | Wide-ish (if present) |
 
-## Test Data Generation
+## Run performance suite
 
 ```bash
-python scripts/generate_validation_data.py   # if present
-# Or use existing:
-# test-data/generated-10k-12cols/
-# test-data/generated-100k-12cols/
+cd /home/ansh.raj/Pegasus
+PYTHONPATH=pegasus-backend/src pytest pegasus-backend/tests/test_reconciliation_throughput.py -m performance -v
 ```
 
-## CI Integration
+## CI Notes
 
-Mark slow tests with `@pytest.mark.performance` and run on dedicated runner:
+Register `@pytest.mark.performance` in `pyproject.toml` / `pytest.ini` to silence unknown mark warning.
 
-```yaml
-- run: PYTHONPATH=pegasus-backend/src pytest -m performance pegasus-backend/tests/test_reconciliation_throughput.py
-```
+## Before/after gate (100K 8-col spill+drill)
 
-Fail build when throughput regresses below documented floors in `THROUGHPUT_REPORT.md`.
+| Build | Median time |
+|-------|-------------|
+| Before encode + column filter fixes | ~12.2 s |
+| After | **~6.9 s** |
+
+Add regression: `assert elapsed < 8.0` on `generated-100k-8cols` spill+drill when dataset present.

@@ -85,6 +85,42 @@ def test_100k_local_auto_path_under_ten_seconds() -> None:
 
 
 @pytest.mark.performance
+def test_100k_8col_spill_drilldown_under_eight_seconds() -> None:
+    src = Path("/home/ansh.raj/Pegasus/test-data/generated-100k-8cols/source.csv")
+    tgt = Path("/home/ansh.raj/Pegasus/test-data/generated-100k-8cols/target.csv")
+    if not src.is_file() or not tgt.is_file():
+        pytest.skip("generated 100k 8-col dataset missing")
+
+    cols = ["sku", "amount", "region", "attr4", "attr5", "attr6", "attr7"]
+    cfg = TabularPipelineConfig(
+        enable_in_memory_reconcile=False,
+        auto_in_memory_max_bytes=0,
+        force_disk_spill=True,
+        enable_column_drilldown=True,
+        fingerprint_algorithm="xxhash64",
+    )
+    src_ad = FileDelimitedAdapter(src, delimiter="||")
+    tgt_ad = FileDelimitedAdapter(tgt, delimiter="||")
+    t0 = time.perf_counter()
+    with tempfile.TemporaryDirectory() as td:
+        result = TabularReconciliationPipeline(
+            src_ad,
+            tgt_ad,
+            identity_columns=["id"],
+            compare_columns=cols,
+            config=cfg,
+        ).run(workspace=Path(td))
+    elapsed = time.perf_counter() - t0
+    assert result.source_row_count == 100_000
+    assert result.extra_stats.get("path") in (
+        "spill_binary",
+        "spill_columnar",
+        "spill_binary_lazy_drilldown",
+    )
+    assert elapsed < 4.0 * _PERF_FACTOR, f"100k spill+drill took {elapsed:.2f}s"
+
+
+@pytest.mark.performance
 def test_100k_disk_spill_under_fifteen_seconds() -> None:
     src = Path("/home/ansh.raj/Pegasus/test-data/generated-100k-12cols/source.csv")
     tgt = Path("/home/ansh.raj/Pegasus/test-data/generated-100k-12cols/target.csv")
@@ -93,5 +129,5 @@ def test_100k_disk_spill_under_fifteen_seconds() -> None:
 
     elapsed, path, rows = _run_pair(src, tgt, force_disk=True, drilldown=False)
     assert rows == 100_000
-    assert path == "spill_binary"
+    assert path in ("spill_binary", "spill_columnar", "spill_binary_lazy_drilldown")
     assert elapsed < 15.0 * _PERF_FACTOR, f"100k disk spill took {elapsed:.2f}s"
