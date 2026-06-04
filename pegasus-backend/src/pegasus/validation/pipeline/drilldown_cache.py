@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-04T12:59:04+05:30
+# --- END GENERATED FILE METADATA ---
+
 """In-memory compare-column lookup for lazy drilldown (avoids spill payloads)."""
 
 from __future__ import annotations

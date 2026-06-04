@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-04T12:06:25+05:30
+# Last edited: 2026-06-04T13:07:37+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Binary partition spill format — avoids JSON in hot paths."""
