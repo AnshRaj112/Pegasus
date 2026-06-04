@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:43:12+05:30
+# --- END GENERATED FILE METADATA ---
+
 """PyArrow-backed tabular I/O for validation (CSV, Parquet, ORC).
 
 Single-byte delimiters use :mod:`pyarrow.csv`. Multi-character / emoji delimiters

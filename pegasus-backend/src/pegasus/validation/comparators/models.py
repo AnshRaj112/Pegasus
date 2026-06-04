@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:13:31+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Structured mismatch report types (retained for API/history compatibility)."""
 
 from __future__ import annotations

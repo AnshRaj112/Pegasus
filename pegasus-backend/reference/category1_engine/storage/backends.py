@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:43:12+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Pluggable partition storage backends."""
 
 from abc import ABC, abstractmethod

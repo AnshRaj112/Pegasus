@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-05-14T13:20:32+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Tests for :mod:`pegasus.core.resource_tuning`."""
 
 from pegasus.core import resource_tuning as rt

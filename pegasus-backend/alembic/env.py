@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-05-19T10:22:08+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Alembic environment (async SQLAlchemy + asyncpg)."""
 
 from __future__ import annotations

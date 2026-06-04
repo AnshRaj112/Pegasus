@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-05-18T17:24:38+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Database health check utility for startup verification."""
 
 from __future__ import annotations

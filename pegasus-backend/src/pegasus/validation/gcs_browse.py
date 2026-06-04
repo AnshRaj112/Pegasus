@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-05-27T15:32:12+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Google Cloud Storage prefix browsing for the validation file picker."""
 
 from __future__ import annotations

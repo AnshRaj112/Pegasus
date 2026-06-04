@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-05-25T16:05:46+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Tests for Docker host ↔ container local path translation."""
 
 from __future__ import annotations

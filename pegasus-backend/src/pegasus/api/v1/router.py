@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:43:12+05:30
+# --- END GENERATED FILE METADATA ---
+
 from fastapi import APIRouter
 
 from pegasus.api.v1.admin_auth import router as admin_auth_router

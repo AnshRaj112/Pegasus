@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-02T17:10:43+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Create cloud connections table.
 
 Revision ID: 20260602_0006

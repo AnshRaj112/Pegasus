@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-05-11T13:54:13+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Add row_detail JSON column to mismatch_reports.
 
 Revision ID: 20260511_0002

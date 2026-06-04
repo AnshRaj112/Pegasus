@@ -1,0 +1,22 @@
+{
+  "elapsed_seconds": 103.5627,
+  "rows": 100000,
+  "path": "spill_binary",
+  "timings": {
+    "source_read_seconds": 9.5774,
+    "target_read_seconds": 6.3032,
+    "canonicalization_seconds": 0.3598,
+    "identity_generation_seconds": 5.6076,
+    "fingerprint_generation_seconds": 67.4769,
+    "partition_calculation_seconds": 5.2426,
+    "serialization_seconds": 42.4441,
+    "disk_write_seconds": 0.4746,
+    "disk_read_seconds": 13.6704,
+    "partition_reconciliation_seconds": 13.8301,
+    "column_comparison_seconds": 0.4622,
+    "report_generation_seconds": 0.0,
+    "network_transfer_seconds": 0.0,
+    "total_seconds": 103.5426
+  },
+  "bytes": 20789980
+}

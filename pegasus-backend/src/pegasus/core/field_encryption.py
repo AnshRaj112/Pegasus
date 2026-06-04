@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-05-21T10:53:24+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Application-level encryption helpers for persisted validation metadata."""
 
 from __future__ import annotations

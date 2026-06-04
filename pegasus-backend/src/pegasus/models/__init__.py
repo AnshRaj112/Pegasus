@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-02T17:10:43+05:30
+# --- END GENERATED FILE METADATA ---
+
 from pegasus.models.base import Base
 from pegasus.models.admin_session import AdminSession
 from pegasus.models.admin_user import AdminUser

@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-05-28T16:44:10+05:30
+# --- END GENERATED FILE METADATA ---
+
 """ORM model for user-managed validation entities inferred from filenames."""
 
 from __future__ import annotations

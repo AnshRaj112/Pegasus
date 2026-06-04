@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-02T14:24:09+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Budget-aware runtime tuning for large CSV reconciliation jobs."""
 
 from __future__ import annotations

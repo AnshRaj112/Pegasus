@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj, AnshRaj112, Vidit Tiwari
+# Last edited: 2026-06-03T15:30:26+05:30
+# --- END GENERATED FILE METADATA ---
+
 from functools import lru_cache
 from pathlib import Path
 
@@ -388,7 +393,7 @@ class Settings(BaseSettings):
         ),
     )
     validation_auto_in_memory_max_bytes: int = Field(
-        default=64 * 1024 * 1024,
+        default=256 * 1024 * 1024,
         ge=1024 * 1024,
         le=512 * 1024 * 1024,
         description=(

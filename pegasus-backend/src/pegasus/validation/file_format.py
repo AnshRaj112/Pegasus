@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:13:31+05:30
+# --- END GENERATED FILE METADATA ---
+
 """File format normalization and path-based inference."""
 
 from __future__ import annotations

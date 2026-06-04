@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj, AnshRaj112
+# Last edited: 2026-06-03T15:13:31+05:30
+# --- END GENERATED FILE METADATA ---
+
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager

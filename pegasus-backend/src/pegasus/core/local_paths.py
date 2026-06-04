@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-05-25T16:05:46+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Host ↔ container path translation for local CSV validation (Docker bind mounts)."""
 
 from __future__ import annotations

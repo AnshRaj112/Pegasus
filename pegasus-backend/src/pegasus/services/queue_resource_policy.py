@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:13:31+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Runtime resource policy for the validation job queue (parallel jobs, threads, disk)."""
 
 from __future__ import annotations

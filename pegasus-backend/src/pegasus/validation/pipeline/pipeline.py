@@ -1,19 +1,36 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:30:26+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Six-stage tabular reconciliation pipeline."""
 
 from __future__ import annotations
 
-import hashlib
-import json
-import struct
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 from pegasus.validation.adapters.base import TabularSourceAdapter, TabularSchema
 from pegasus.validation.pipeline.config import TabularPipelineConfig
+from pegasus.validation.pipeline.fingerprint import (
+    identity_key,
+    partition_id,
+    row_fingerprint_bytes,
+)
 from pegasus.validation.pipeline.in_memory import (
     should_try_in_memory_reconcile,
     try_in_memory_reconcile,
+)
+from pegasus.validation.pipeline.precheck import (
+    spill_partitions_identical,
+    try_identical_precheck,
+)
+from pegasus.validation.pipeline.polars_spill import (
+    can_use_polars_spill,
+    partition_side_polars,
+    try_partition_side_polars,
 )
 from pegasus.validation.pipeline.result import (
     ColumnDifference,
@@ -21,31 +38,12 @@ from pegasus.validation.pipeline.result import (
     PipelineResult,
     SchemaDifference,
 )
-
-
-def _canonical(value: Any) -> str:
-    if value is None:
-        return "__NULL__"
-    text = str(value).strip()
-    if text.lower() in ("", "null", "none", "na", "n/a"):
-        return "__NULL__"
-    return text
-
-
-def _identity_key(record: dict[str, Any], columns: list[str]) -> str:
-    return "|".join(_canonical(record.get(c)) for c in columns)
-
-
-def _row_fingerprint(record: dict[str, Any], columns: list[str]) -> str:
-    if not columns:
-        return ""
-    parts = [_canonical(record.get(c)) for c in columns]
-    return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
-
-
-def _partition_id(key: str, num_partitions: int) -> int:
-    h = hashlib.md5(key.encode()).digest()
-    return int.from_bytes(h[:4], "big") % num_partitions
+from pegasus.validation.pipeline.spill import (
+    PartitionWriter,
+    iter_partition,
+    list_partition_ids,
+)
+from pegasus.validation.pipeline.timing import PipelineTimings, StageTimer
 
 
 def _adapter_size_bytes(adapter: object) -> int:
@@ -72,44 +70,6 @@ def _adaptive_partition_count(
     return requested
 
 
-class _PartitionWriter:
-    def __init__(self, base: Path, side: str, *, store_payload: bool) -> None:
-        self.base = base / side
-        self.base.mkdir(parents=True, exist_ok=True)
-        self._handles: dict[int, Any] = {}
-        self._store_payload = store_payload
-
-    def write(self, partition_id: int, identity: str, fingerprint: str, raw: dict) -> None:
-        path = self.base / f"part_{partition_id:05d}.bin"
-        if partition_id not in self._handles:
-            self._handles[partition_id] = open(path, "ab")  # noqa: SIM115
-        payload: dict[str, Any] = {"k": identity, "f": fingerprint}
-        if self._store_payload:
-            payload["d"] = raw
-        data = json.dumps(payload, separators=(",", ":"), default=str).encode()
-        self._handles[partition_id].write(struct.pack(">I", len(data)) + data)
-
-    def close(self) -> None:
-        for h in self._handles.values():
-            h.close()
-        self._handles.clear()
-
-
-def _iter_partition(path: Path):
-    if not path.exists():
-        return
-    with open(path, "rb") as f:
-        while True:
-            header = f.read(4)
-            if len(header) < 4:
-                break
-            length = struct.unpack(">I", header)[0]
-            body = f.read(length)
-            if len(body) < length:
-                break
-            yield json.loads(body)
-
-
 def _compare_schemas(source: TabularSchema, target: TabularSchema) -> list[SchemaDifference]:
     diffs: list[SchemaDifference] = []
     src = {c.name: c for c in source.columns}
@@ -125,6 +85,10 @@ def _compare_schemas(source: TabularSchema, target: TabularSchema) -> list[Schem
         if name not in src:
             diffs.append(SchemaDifference(name, "extra_in_target", target_value=name))
     return diffs
+
+
+def _fp_equal(a: bytes, b: bytes) -> bool:
+    return a == b
 
 
 class TabularReconciliationPipeline:
@@ -150,6 +114,18 @@ class TabularReconciliationPipeline:
     def run(self, *, workspace: Path | None = None) -> PipelineResult:
         source_bytes = _adapter_size_bytes(self._source)
         target_bytes = _adapter_size_bytes(self._target)
+
+        if self._config.enable_merkle_fast_path:
+            prechecked = try_identical_precheck(
+                self._source,
+                self._target,
+                compare_columns=self._compare_columns,
+                enable_metadata=True,
+                enable_content_digest=self._config.enable_content_digest_precheck,
+            )
+            if prechecked is not None:
+                return prechecked
+
         if should_try_in_memory_reconcile(
             enable_in_memory_reconcile=self._config.enable_in_memory_reconcile,
             auto_in_memory_max_bytes=self._config.auto_in_memory_max_bytes,
@@ -165,16 +141,37 @@ class TabularReconciliationPipeline:
                 enable_column_drilldown=self._config.enable_column_drilldown,
             )
             if in_memory is not None:
+                in_memory.extra_stats["path"] = "in_memory_polars"
                 return in_memory
 
+        combined_bytes = source_bytes + target_bytes
+        if (
+            not self._config.force_disk_spill
+            and combined_bytes <= self._config.polars_spill_max_bytes
+        ):
+            direct = try_in_memory_reconcile(
+                self._source,
+                self._target,
+                identity_columns=self._identity_columns,
+                compare_columns=self._compare_columns,
+                memory_budget_bytes=self._config.memory_budget_bytes,
+                enable_column_drilldown=self._config.enable_column_drilldown,
+            )
+            if direct is not None:
+                direct.extra_stats["path"] = "polars_direct"
+                return direct
+
+        timings = PipelineTimings()
         t0 = time.perf_counter()
+
         num_partitions = _adaptive_partition_count(
-            source_bytes=_adapter_size_bytes(self._source),
-            target_bytes=_adapter_size_bytes(self._target),
+            source_bytes=source_bytes,
+            target_bytes=target_bytes,
             requested=self._config.resolved_partition_count(),
         )
         chunk_rows = self._config.chunk_rows
         store_payload = self._config.enable_column_drilldown
+        algo = self._config.fingerprint_algorithm
 
         src_schema = self._source.get_schema()
         tgt_schema = self._target.get_schema()
@@ -182,86 +179,181 @@ class TabularReconciliationPipeline:
 
         work = workspace or Path("/tmp/pegasus_reconcile")
         work.mkdir(parents=True, exist_ok=True)
-        src_writer = _PartitionWriter(work, "source", store_payload=store_payload)
-        tgt_writer = _PartitionWriter(work, "target", store_payload=store_payload)
+        src_writer = PartitionWriter(
+            work,
+            "source",
+            store_payload=store_payload,
+            compare_columns=self._compare_columns,
+        )
+        tgt_writer = PartitionWriter(
+            work,
+            "target",
+            store_payload=store_payload,
+            compare_columns=self._compare_columns,
+        )
 
-        src_rows = self._partition_side(self._source, src_writer, chunk_rows, num_partitions)
-        tgt_rows = self._partition_side(self._target, tgt_writer, chunk_rows, num_partitions)
+        use_polars = combined_bytes <= self._config.polars_spill_max_bytes
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = {
+                pool.submit(
+                    self._partition_side,
+                    self._source,
+                    src_writer,
+                    chunk_rows,
+                    num_partitions,
+                    store_payload,
+                    algo,
+                    timings,
+                    is_source=True,
+                    use_polars=use_polars,
+                ): "source",
+                pool.submit(
+                    self._partition_side,
+                    self._target,
+                    tgt_writer,
+                    chunk_rows,
+                    num_partitions,
+                    store_payload,
+                    algo,
+                    timings,
+                    is_source=False,
+                    use_polars=use_polars,
+                ): "target",
+            }
+            counts: dict[str, int] = {}
+            for fut in as_completed(futures):
+                counts[futures[fut]] = fut.result()
+
         src_writer.close()
         tgt_writer.close()
+        src_rows = counts.get("source", 0)
+        tgt_rows = counts.get("target", 0)
 
         missing = extra = changed = matching = 0
         mismatched_partitions = 0
         samples: list[MismatchSample] = []
         sample_limit = 1000
 
-        for pid in range(num_partitions):
-            src_path = work / "source" / f"part_{pid:05d}.bin"
-            tgt_path = work / "target" / f"part_{pid:05d}.bin"
-            if not src_path.exists() and not tgt_path.exists():
-                continue
+        active_pids = list_partition_ids(work, "source") | list_partition_ids(work, "target")
 
-            if store_payload:
-                src_map: dict[str, tuple[str, dict]] = {}
-                for rec in _iter_partition(src_path):
-                    src_map[rec["k"]] = (rec["f"], rec.get("d") or {})
-            else:
-                src_fp: dict[str, str] = {}
-                for rec in _iter_partition(src_path):
-                    src_fp[rec["k"]] = rec["f"]
+        spill_bytes = 0
+        for pid in active_pids:
+            sp = work / "source" / f"part_{pid:05d}.bin"
+            tp = work / "target" / f"part_{pid:05d}.bin"
+            if sp.is_file():
+                spill_bytes += sp.stat().st_size
+            if tp.is_file():
+                spill_bytes += tp.stat().st_size
 
-            tgt_keys: set[str] = set()
-            part_changed = part_missing = part_extra = 0
+        if (
+            self._config.enable_merkle_fast_path
+            and src_rows == tgt_rows
+            and active_pids
+            and len(active_pids) <= 64
+            and spill_bytes <= self._config.spill_merkle_max_bytes
+            and spill_partitions_identical(
+                work,
+                active_pids,
+                max_bytes_to_hash=self._config.spill_merkle_max_bytes,
+            )
+        ):
+            timings.total_seconds = time.perf_counter() - t0
+            return PipelineResult(
+                schema_valid=len(schema_diffs) == 0,
+                schema_differences=schema_diffs,
+                source_row_count=src_rows,
+                target_row_count=tgt_rows,
+                row_count_match=True,
+                missing_count=0,
+                extra_count=0,
+                changed_count=0,
+                matching_count=src_rows,
+                partitions_processed=len(active_pids),
+                mismatched_partitions=0,
+                compared_columns=list(self._compare_columns),
+                execution_seconds=timings.total_seconds,
+                extra_stats={
+                    "path": "precheck_spill_partitions",
+                    "precheck_method": "partition_digest",
+                    "timings": timings.to_dict(),
+                },
+            )
 
-            for rec in _iter_partition(tgt_path):
-                key = rec["k"]
-                tgt_keys.add(key)
+        with StageTimer(timings, "partition_reconciliation_seconds"):
+            for pid in sorted(active_pids):
+                src_path = work / "source" / f"part_{pid:05d}.bin"
+                tgt_path = work / "target" / f"part_{pid:05d}.bin"
+
                 if store_payload:
-                    src_entry = src_map.get(key)
-                    if src_entry is None:
-                        part_extra += 1
-                        if len(samples) < sample_limit:
-                            samples.append(MismatchSample(key, "extra"))
-                    elif src_entry[0] != rec["f"]:
-                        part_changed += 1
-                        col_diffs: list[ColumnDifference] = []
-                        _, src_data = src_entry
-                        for col in self._compare_columns:
-                            sv = _canonical(src_data.get(col))
-                            tv = _canonical((rec.get("d") or {}).get(col))
-                            if sv != tv:
-                                col_diffs.append(ColumnDifference(col, sv, tv))
-                        if len(samples) < sample_limit:
-                            samples.append(MismatchSample(key, "changed", col_diffs))
-                    else:
-                        matching += 1
+                    src_map: dict[str, tuple[bytes, dict[str, Any]]] = {}
+                    with StageTimer(timings, "disk_read_seconds"):
+                        for key, fp, payload in iter_partition(
+                            src_path, compare_columns=self._compare_columns
+                        ):
+                            src_map[key] = (fp, payload or {})
                 else:
-                    fp = src_fp.get(key)
-                    if fp is None:
-                        part_extra += 1
+                    src_fp: dict[str, bytes] = {}
+                    with StageTimer(timings, "disk_read_seconds"):
+                        for key, fp, _ in iter_partition(src_path):
+                            src_fp[key] = fp
+
+                tgt_keys: set[str] = set()
+                part_changed = part_missing = part_extra = 0
+
+                with StageTimer(timings, "disk_read_seconds"):
+                    for key, fp, payload in iter_partition(
+                        tgt_path, compare_columns=self._compare_columns
+                    ):
+                        tgt_keys.add(key)
+                        if store_payload:
+                            src_entry = src_map.get(key)
+                            if src_entry is None:
+                                part_extra += 1
+                                if len(samples) < sample_limit:
+                                    samples.append(MismatchSample(key, "extra"))
+                            elif not _fp_equal(src_entry[0], fp):
+                                part_changed += 1
+                                col_diffs: list[ColumnDifference] = []
+                                _, src_data = src_entry
+                                tgt_data = payload or {}
+                                with StageTimer(timings, "column_comparison_seconds"):
+                                    for col in self._compare_columns:
+                                        sv = src_data.get(col)
+                                        tv = tgt_data.get(col)
+                                        if sv != tv:
+                                            col_diffs.append(ColumnDifference(col, sv, tv))
+                                if len(samples) < sample_limit:
+                                    samples.append(MismatchSample(key, "changed", col_diffs))
+                            else:
+                                matching += 1
+                        else:
+                            src_val = src_fp.get(key)
+                            if src_val is None:
+                                part_extra += 1
+                                if len(samples) < sample_limit:
+                                    samples.append(MismatchSample(key, "extra"))
+                            elif not _fp_equal(src_val, fp):
+                                part_changed += 1
+                                if len(samples) < sample_limit:
+                                    samples.append(MismatchSample(key, "changed"))
+                            else:
+                                matching += 1
+
+                key_source = src_map if store_payload else src_fp
+                for key in key_source:
+                    if key not in tgt_keys:
+                        part_missing += 1
                         if len(samples) < sample_limit:
-                            samples.append(MismatchSample(key, "extra"))
-                    elif fp != rec["f"]:
-                        part_changed += 1
-                        if len(samples) < sample_limit:
-                            samples.append(MismatchSample(key, "changed"))
-                    else:
-                        matching += 1
+                            samples.append(MismatchSample(key, "missing"))
 
-            key_source = src_map if store_payload else src_fp
-            for key in key_source:
-                if key not in tgt_keys:
-                    part_missing += 1
-                    if len(samples) < sample_limit:
-                        samples.append(MismatchSample(key, "missing"))
+                missing += part_missing
+                extra += part_extra
+                changed += part_changed
+                if part_missing or part_extra or part_changed:
+                    mismatched_partitions += 1
 
-            missing += part_missing
-            extra += part_extra
-            changed += part_changed
-            if part_missing or part_extra or part_changed:
-                mismatched_partitions += 1
-
-        elapsed = time.perf_counter() - t0
+        timings.total_seconds = time.perf_counter() - t0
         return PipelineResult(
             schema_valid=len(schema_diffs) == 0,
             schema_differences=schema_diffs,
@@ -272,26 +364,105 @@ class TabularReconciliationPipeline:
             extra_count=extra,
             changed_count=changed,
             matching_count=matching,
-            partitions_processed=num_partitions,
+            partitions_processed=len(active_pids),
             mismatched_partitions=mismatched_partitions,
             sample_mismatches=samples,
             compared_columns=list(self._compare_columns),
-            execution_seconds=elapsed,
+            execution_seconds=timings.total_seconds,
+            extra_stats={
+                "path": "spill_binary",
+                "timings": timings.to_dict(),
+                "fingerprint_algorithm": algo,
+                "num_partitions": num_partitions,
+                "active_partitions": len(active_pids),
+            },
         )
 
     def _partition_side(
         self,
         adapter: TabularSourceAdapter,
-        writer: _PartitionWriter,
+        writer: PartitionWriter,
         chunk_rows: int,
         num_partitions: int,
+        store_payload: bool,
+        algorithm: str,
+        timings: PipelineTimings,
+        *,
+        is_source: bool,
+        use_polars: bool,
     ) -> int:
+        if use_polars:
+            if can_use_polars_spill(adapter):
+                return partition_side_polars(
+                    adapter,  # type: ignore[arg-type]
+                    writer,
+                    identity_columns=self._identity_columns,
+                    compare_columns=self._compare_columns,
+                    num_partitions=num_partitions,
+                    store_payload=store_payload,
+                    timings=timings,
+                    is_source=is_source,
+                )
+            polars_rows = try_partition_side_polars(
+                adapter,
+                writer,
+                identity_columns=self._identity_columns,
+                compare_columns=self._compare_columns,
+                num_partitions=num_partitions,
+                store_payload=store_payload,
+                timings=timings,
+                is_source=is_source,
+            )
+            if polars_rows is not None:
+                return polars_rows
+
+        return self._partition_side_streaming(
+            adapter,
+            writer,
+            chunk_rows,
+            num_partitions,
+            store_payload,
+            algorithm,
+            timings,
+            is_source=is_source,
+        )
+
+    def _partition_side_streaming(
+        self,
+        adapter: TabularSourceAdapter,
+        writer: PartitionWriter,
+        chunk_rows: int,
+        num_partitions: int,
+        store_payload: bool,
+        algorithm: str,
+        timings: PipelineTimings,
+        *,
+        is_source: bool,
+    ) -> int:
+        part_field = "source_partition_seconds" if is_source else "target_partition_seconds"
+        read_field = "source_read_seconds" if is_source else "target_read_seconds"
         total = 0
-        for chunk in adapter.stream_records(chunk_rows):
-            for record in chunk:
-                identity = _identity_key(record, self._identity_columns)
-                fp = _row_fingerprint(record, self._compare_columns)
-                pid = _partition_id(identity, num_partitions)
-                writer.write(pid, identity, fp, record)
-                total += 1
+
+        with StageTimer(timings, part_field):
+            with StageTimer(timings, read_field):
+                chunks = adapter.stream_records(chunk_rows)
+            for chunk in chunks:
+                for record in chunk:
+                    with StageTimer(timings, "canonicalization_seconds"):
+                        pass
+                    with StageTimer(timings, "identity_generation_seconds"):
+                        identity = identity_key(record, self._identity_columns)
+                    with StageTimer(timings, "fingerprint_generation_seconds"):
+                        fp = row_fingerprint_bytes(
+                            record,
+                            self._compare_columns,
+                            algorithm=algorithm,
+                        )
+                    with StageTimer(timings, "partition_calculation_seconds"):
+                        pid = partition_id(identity, num_partitions)
+                    with StageTimer(timings, "serialization_seconds"):
+                        writer.write(pid, identity, fp, record)
+                    with StageTimer(timings, "disk_write_seconds"):
+                        pass
+                    total += 1
         return total

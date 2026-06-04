@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:43:12+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Pure Python Snappy block decompression (RFC-inspired, no external deps)."""
 
 import struct

@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:30:26+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Validation service — routes tabular full validation through Category-1 pipeline."""
 
 from __future__ import annotations
@@ -77,6 +82,8 @@ class ValidationService:
                 policy.get("disk_headroom_multiplier")
                 or self._settings.validation_reconciliation_disk_headroom_multiplier
             ),
+            enable_merkle_fast_path=self._settings.validation_enable_merkle_fast_path,
+            enable_content_digest_precheck=True,
         )
 
     def _resolve_delimiter(
@@ -99,13 +106,17 @@ class ValidationService:
         skip_rows: int,
     ) -> FileDelimitedAdapter | GcsDelimitedAdapter:
         if isinstance(adapter, GcsDelimitedAdapter):
-            return GcsDelimitedAdapter(
+            from pegasus.validation.adapters.gcs_delimited import inherit_gcs_cache
+
+            rebuilt = GcsDelimitedAdapter(
                 adapter._ref,
                 delimiter=delimiter,
                 has_header=has_header,
                 skip_rows=skip_rows,
                 size_bytes=adapter.get_size_bytes(),
             )
+            inherit_gcs_cache(adapter, rebuilt)
+            return rebuilt
         return FileDelimitedAdapter(
             adapter.path,
             delimiter=delimiter,
@@ -156,6 +167,14 @@ class ValidationService:
         )
         target = self._rebuild_delimited_adapter(
             target, delimiter=sep, has_header=has_header, skip_rows=header_leading_rows
+        )
+
+        from pegasus.validation.adapters.gcs_delimited import prefetch_gcs_delimited_pair
+
+        prefetch_gcs_delimited_pair(
+            source,
+            target,
+            max_cache_bytes=self._settings.validation_auto_in_memory_max_bytes,
         )
 
         schema = source.get_schema()

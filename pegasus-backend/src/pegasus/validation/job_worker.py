@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj, AnshRaj112
+# Last edited: 2026-06-03T15:13:31+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Subprocess / pool entrypoint: run one validation job from files under *job_dir*."""
 
 from __future__ import annotations

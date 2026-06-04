@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:13:31+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Multi-layer bounded file type detection for Pegasus validation."""
 
 from pegasus.validation.file_detection.coerce import (

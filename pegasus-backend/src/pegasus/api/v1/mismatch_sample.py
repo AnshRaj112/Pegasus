@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-05-21T12:58:53+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Stratified sampling of mismatch rows for API responses."""
 
 from __future__ import annotations

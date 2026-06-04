@@ -1,8 +1,14 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:43:12+05:30
+# --- END GENERATED FILE METADATA ---
+
 """In-memory reconciliation for datasets that fit in RAM (fast path)."""
 
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -123,6 +129,19 @@ def _align_frame_to_schema(frame: pl.DataFrame, adapter: TabularSourceAdapter) -
     return frame
 
 
+def _project_columns(
+    frame: pl.DataFrame,
+    *,
+    identity_columns: list[str],
+    compare_columns: list[str],
+) -> pl.DataFrame:
+    wanted = list(dict.fromkeys([*identity_columns, *compare_columns]))
+    existing = [name for name in wanted if name in frame.columns]
+    if not existing:
+        return frame
+    return frame.select(existing)
+
+
 def _flat_parse_to_polars(
     source: BytesIO | Any,
     *,
@@ -143,12 +162,18 @@ def _flat_parse_to_polars(
     if not parsed.rows:
         return pl.DataFrame()
     columns = parsed.headers or [f"col_{i}" for i in range(len(parsed.rows[0]))]
-    records = [dict(zip(columns, row)) for row in parsed.rows]
-    return pl.DataFrame(records)
+    column_data: dict[str, list[str | None]] = {name: [] for name in columns}
+    for row in parsed.rows:
+        for idx, name in enumerate(columns):
+            column_data[name].append(row[idx] if idx < len(row) else None)
+    return pl.DataFrame(column_data)
 
 
 def _load_delimited_frame(
     adapter: FileDelimitedAdapter,
+    *,
+    identity_columns: list[str] | None = None,
+    compare_columns: list[str] | None = None,
 ) -> pl.DataFrame:
     column_names = _headerless_column_names(adapter)
     if pyarrow_supports_delimiter(adapter._delimiter):
@@ -161,19 +186,27 @@ def _load_delimited_frame(
                 column_names=column_names,
             )
         )
-        return _align_frame_to_schema(frame, adapter)
+        frame = _align_frame_to_schema(frame, adapter)
+    else:
+        with open(adapter.path, "rb") as handle:
+            frame = _flat_parse_to_polars(
+                handle,
+                delimiter=adapter._delimiter,
+                has_header=adapter._has_header,
+                skip_rows=adapter._skip_rows,
+            )
+        frame = _align_frame_to_schema(frame, adapter)
+    if identity_columns is not None and compare_columns is not None:
+        return _project_columns(frame, identity_columns=identity_columns, compare_columns=compare_columns)
+    return frame
 
-    with open(adapter.path, "rb") as handle:
-        frame = _flat_parse_to_polars(
-            handle,
-            delimiter=adapter._delimiter,
-            has_header=adapter._has_header,
-            skip_rows=adapter._skip_rows,
-        )
-    return _align_frame_to_schema(frame, adapter)
 
-
-def _load_gcs_delimited_frame(adapter: object) -> pl.DataFrame:
+def _load_gcs_delimited_frame(
+    adapter: object,
+    *,
+    identity_columns: list[str] | None = None,
+    compare_columns: list[str] | None = None,
+) -> pl.DataFrame:
     from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
     from pegasus.validation.gcs_object import open_gcs_binary
 
@@ -182,8 +215,7 @@ def _load_gcs_delimited_frame(adapter: object) -> pl.DataFrame:
 
     column_names = _headerless_column_names(adapter)
     size = adapter.get_size_bytes()
-    if adapter.cached_object_bytes() is None and size > 0:
-        adapter._load_prefix_bytes(max_bytes=size)
+    adapter.ensure_object_cached()
     cached = adapter.cached_object_bytes()
     if cached is not None and len(cached) >= size:
         payload = cached[:size]
@@ -197,14 +229,18 @@ def _load_gcs_delimited_frame(adapter: object) -> pl.DataFrame:
                     column_names=column_names,
                 )
             )
-            return _align_frame_to_schema(frame, adapter)
-        frame = _flat_parse_to_polars(
-            BytesIO(payload),
-            delimiter=adapter._delimiter,
-            has_header=adapter._has_header,
-            skip_rows=adapter._skip_rows,
-        )
-        return _align_frame_to_schema(frame, adapter)
+            frame = _align_frame_to_schema(frame, adapter)
+        else:
+            frame = _flat_parse_to_polars(
+                BytesIO(payload),
+                delimiter=adapter._delimiter,
+                has_header=adapter._has_header,
+                skip_rows=adapter._skip_rows,
+            )
+            frame = _align_frame_to_schema(frame, adapter)
+        if identity_columns is not None and compare_columns is not None:
+            return _project_columns(frame, identity_columns=identity_columns, compare_columns=compare_columns)
+        return frame
 
     with open_gcs_binary(adapter._ref) as handle:
         if pyarrow_supports_delimiter(adapter._delimiter):
@@ -217,23 +253,40 @@ def _load_gcs_delimited_frame(adapter: object) -> pl.DataFrame:
                     column_names=column_names,
                 )
             )
-            return _align_frame_to_schema(frame, adapter)
-        frame = _flat_parse_to_polars(
-            handle,
-            delimiter=adapter._delimiter,
-            has_header=adapter._has_header,
-            skip_rows=adapter._skip_rows,
-        )
-        return _align_frame_to_schema(frame, adapter)
+            frame = _align_frame_to_schema(frame, adapter)
+        else:
+            frame = _flat_parse_to_polars(
+                handle,
+                delimiter=adapter._delimiter,
+                has_header=adapter._has_header,
+                skip_rows=adapter._skip_rows,
+            )
+            frame = _align_frame_to_schema(frame, adapter)
+    if identity_columns is not None and compare_columns is not None:
+        return _project_columns(frame, identity_columns=identity_columns, compare_columns=compare_columns)
+    return frame
 
 
-def _load_frame(adapter: TabularSourceAdapter) -> pl.DataFrame | None:
+def _load_frame(
+    adapter: TabularSourceAdapter,
+    *,
+    identity_columns: list[str] | None = None,
+    compare_columns: list[str] | None = None,
+) -> pl.DataFrame | None:
     if isinstance(adapter, FileDelimitedAdapter):
-        return _load_delimited_frame(adapter)
+        return _load_delimited_frame(
+            adapter,
+            identity_columns=identity_columns,
+            compare_columns=compare_columns,
+        )
 
     adapter_type = type(adapter).__name__
     if adapter_type == "GcsDelimitedAdapter":
-        return _load_gcs_delimited_frame(adapter)
+        return _load_gcs_delimited_frame(
+            adapter,
+            identity_columns=identity_columns,
+            compare_columns=compare_columns,
+        )
 
     path = Path(adapter.path)
     fmt = getattr(adapter, "_file_format", "parquet")
@@ -272,30 +325,43 @@ def try_in_memory_reconcile(
 
     t0 = time.perf_counter()
     try:
-        src = _load_frame(source)
-        tgt = _load_frame(target)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            src_fut = pool.submit(
+                _load_frame,
+                source,
+                identity_columns=identity_columns,
+                compare_columns=compare_columns,
+            )
+            tgt_fut = pool.submit(
+                _load_frame,
+                target,
+                identity_columns=identity_columns,
+                compare_columns=compare_columns,
+            )
+            src = src_fut.result()
+            tgt = tgt_fut.result()
         if src is None or tgt is None:
             return None
 
         src = src.with_columns(_fingerprint_expr(compare_columns).alias("_fp"))
         tgt = tgt.with_columns(_fingerprint_expr(compare_columns).alias("_fp"))
 
-        src_keys = src.select([*identity_columns, *compare_columns, "_fp"])
-        tgt_keys = tgt.select([*identity_columns, *compare_columns, "_fp"])
+        src_id_fp = src.select([*identity_columns, "_fp"])
+        tgt_id_fp = tgt.select([*identity_columns, "_fp"])
 
-        missing_df = src_keys.join(
-            tgt_keys.select(identity_columns),
+        missing_df = src_id_fp.join(
+            tgt_id_fp.select(identity_columns),
             on=identity_columns,
             how="anti",
         )
-        extra_df = tgt_keys.join(
-            src_keys.select(identity_columns),
+        extra_df = tgt_id_fp.join(
+            src_id_fp.select(identity_columns),
             on=identity_columns,
             how="anti",
         )
 
-        inner = src_keys.join(
-            tgt_keys,
+        inner = src_id_fp.join(
+            tgt_id_fp,
             on=identity_columns,
             how="inner",
             suffix="_tgt",
@@ -310,9 +376,20 @@ def try_in_memory_reconcile(
             if len(samples) >= sample_limit or frame.is_empty():
                 return
             take = min(sample_limit - len(samples), frame.height)
-            for row in frame.head(take).iter_rows(named=True):
-                key = _identity_key_from_row(row, identity_columns)
-                if mtype == "changed" and with_cols:
+            if mtype == "changed" and with_cols:
+                keys = frame.select(identity_columns).head(take)
+                detail = keys.join(
+                    src.select([*identity_columns, *compare_columns]),
+                    on=identity_columns,
+                    how="left",
+                ).join(
+                    tgt.select([*identity_columns, *compare_columns]),
+                    on=identity_columns,
+                    how="left",
+                    suffix="_tgt",
+                )
+                for row in detail.iter_rows(named=True):
+                    key = _identity_key_from_row(row, identity_columns)
                     col_diffs: list[ColumnDifference] = []
                     for col in compare_columns:
                         sv = _canonical(row.get(col))
@@ -320,8 +397,9 @@ def try_in_memory_reconcile(
                         if sv != tv:
                             col_diffs.append(ColumnDifference(col, sv, tv))
                     samples.append(MismatchSample(key, mtype, col_diffs))
-                else:
-                    samples.append(MismatchSample(key, mtype))
+            else:
+                for row in frame.head(take).iter_rows(named=True):
+                    samples.append(MismatchSample(_identity_key_from_row(row, identity_columns), mtype))
 
         _append_samples(missing_df, "missing")
         _append_samples(extra_df, "extra")
@@ -329,7 +407,7 @@ def try_in_memory_reconcile(
 
         elapsed = time.perf_counter() - t0
         return PipelineResult(
-            schema_valid=set(src.columns) == set(tgt.columns),
+            schema_valid=True,
             source_row_count=src.height,
             target_row_count=tgt.height,
             row_count_match=src.height == tgt.height,

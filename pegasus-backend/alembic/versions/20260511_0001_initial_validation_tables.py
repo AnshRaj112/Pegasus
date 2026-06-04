@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-05-11T13:54:13+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Initial validation_runs and mismatch_reports tables.
 
 Revision ID: 20260511_0001

@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:13:31+05:30
+# --- END GENERATED FILE METADATA ---
+
 """GCS object references and bounded streaming reads (no full download)."""
 
 from __future__ import annotations
@@ -8,7 +13,6 @@ from pathlib import Path
 from typing import IO, Any
 
 from pegasus.schemas.validation import GoogleCloudStorageConfig
-from pegasus.validation.cloud_credentials import resolve_cloud_credentials
 
 _DEFAULT_PREFIX_BYTES = 512 * 1024
 _DEFAULT_PREFIX_LINES = 500
@@ -32,6 +36,8 @@ class GcsObjectRef:
 
 
 def gcs_object_ref_from_config(cloud: GoogleCloudStorageConfig) -> GcsObjectRef:
+    from pegasus.validation.cloud_credentials import resolve_cloud_credentials
+
     info = resolve_cloud_credentials(cloud.credentials_json or "")
     bucket = (cloud.bucket or "").strip()
     if not bucket:
@@ -100,12 +106,19 @@ def _blob(ref: GcsObjectRef):
 
 
 def gcs_blob_size(ref: GcsObjectRef) -> int:
+    return gcs_blob_fingerprints(ref)[0]
+
+
+def gcs_blob_fingerprints(ref: GcsObjectRef) -> tuple[int, str | None, str | None]:
+    """Return ``(size_bytes, crc32c, md5_hex)`` from GCS object metadata."""
     blob = _blob(ref)
     blob.reload()
     size = blob.size
     if size is None:
         raise ValueError(f"Could not determine size for {ref.uri}")
-    return int(size)
+    crc = getattr(blob, "crc32c", None)
+    md5 = getattr(blob, "md5_hash", None)
+    return int(size), str(crc) if crc else None, str(md5) if md5 else None
 
 
 def open_gcs_binary(ref: GcsObjectRef) -> IO[bytes]:
@@ -119,6 +132,15 @@ def read_gcs_prefix(
 ) -> bytes:
     with open_gcs_binary(ref) as handle:
         return handle.read(max_bytes)
+
+
+def read_gcs_object_bytes(ref: GcsObjectRef) -> bytes:
+    """Download the full object in one request (preferred for objects that fit in RAM)."""
+    blob = _blob(ref)
+    payload = blob.download_as_bytes()
+    if not payload:
+        return b""
+    return payload
 
 
 def sample_gcs_lines(

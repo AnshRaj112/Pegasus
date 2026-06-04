@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-03T15:30:26+05:30
+# --- END GENERATED FILE METADATA ---
+
 """GCS small-file validation uses in-memory reconcile (not line-by-line spill)."""
 
 from __future__ import annotations
@@ -27,9 +32,9 @@ def test_gcs_load_delimited_frame_from_cached_prefix() -> None:
     )
     adapter = GcsDelimitedAdapter(ref, delimiter="||", size_bytes=src.stat().st_size)
 
-    with patch("pegasus.validation.gcs_object.read_gcs_prefix") as read_prefix:
-        read_prefix.side_effect = lambda r, **kwargs: src.read_bytes()
-        adapter._load_prefix_bytes(max_bytes=adapter.get_size_bytes())
+    payload = src.read_bytes()
+    with patch("pegasus.validation.adapters.gcs_delimited.read_gcs_object_bytes", return_value=payload):
+        adapter.ensure_object_cached()
         frame = in_memory_module._load_gcs_delimited_frame(adapter)
 
     assert frame.height == 10_000
@@ -68,16 +73,17 @@ def test_gcs_small_files_use_in_memory_without_explicit_flag() -> None:
     source_adapter = GcsDelimitedAdapter(ref, delimiter="||", size_bytes=src.stat().st_size)
     target_adapter = GcsDelimitedAdapter(target_ref, delimiter="||", size_bytes=tgt.stat().st_size)
 
-    cfg = TabularPipelineConfig(enable_in_memory_reconcile=False, auto_in_memory_max_bytes=64 * 1024 * 1024)
+    cfg = TabularPipelineConfig(enable_in_memory_reconcile=False, auto_in_memory_max_bytes=256 * 1024 * 1024)
 
     def _open_local(r: GcsObjectRef):
         return open(src if r.object_name.endswith("source.csv") else tgt, "rb")
 
-    with patch("pegasus.validation.gcs_object.open_gcs_binary", side_effect=_open_local):
-        with patch("pegasus.validation.gcs_object.read_gcs_prefix") as read_prefix:
-            read_prefix.side_effect = lambda r, **kwargs: (
-                src.read_bytes() if r.object_name.endswith("source.csv") else tgt.read_bytes()
-            )
+    def _full_download(ref: GcsObjectRef) -> bytes:
+        return src.read_bytes() if ref.object_name.endswith("source.csv") else tgt.read_bytes()
+
+    with patch("pegasus.validation.adapters.gcs_delimited.read_gcs_object_bytes", side_effect=_full_download):
+        with patch("pegasus.validation.adapters.gcs_delimited.read_gcs_prefix") as read_prefix:
+            read_prefix.side_effect = lambda r, **kwargs: _full_download(r)[: kwargs.get("max_bytes", 512 * 1024)]
             t0 = time.perf_counter()
             result = TabularReconciliationPipeline(
                 source_adapter,
@@ -119,11 +125,12 @@ def test_validation_service_gcs_delimited_under_five_seconds() -> None:
     def _open_local(r: GcsObjectRef):
         return open(src if r.object_name.endswith("source.csv") else tgt, "rb")
 
-    with patch("pegasus.validation.gcs_object.open_gcs_binary", side_effect=_open_local):
-        with patch("pegasus.validation.gcs_object.read_gcs_prefix") as read_prefix:
-            read_prefix.side_effect = lambda r, **kwargs: (
-                src.read_bytes() if r.object_name.endswith("source.csv") else tgt.read_bytes()
-            )
+    def _full_download(ref: GcsObjectRef) -> bytes:
+        return src.read_bytes() if ref.object_name.endswith("source.csv") else tgt.read_bytes()
+
+    with patch("pegasus.validation.adapters.gcs_delimited.read_gcs_object_bytes", side_effect=_full_download):
+        with patch("pegasus.validation.adapters.gcs_delimited.read_gcs_prefix") as read_prefix:
+            read_prefix.side_effect = lambda r, **kwargs: _full_download(r)[: kwargs.get("max_bytes", 512 * 1024)]
             t0 = time.perf_counter()
             result = service._validate_delimited_adapters_sync(  # noqa: SLF001
                 source_adapter,

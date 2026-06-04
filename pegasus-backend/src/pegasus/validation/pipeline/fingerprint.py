@@ -1,0 +1,113 @@
+"""Fast row fingerprinting for reconciliation."""
+
+from __future__ import annotations
+
+import hashlib
+from typing import Any, Callable
+
+try:
+    import xxhash as _xxhash  # type: ignore[import-not-found]
+
+    _HAS_XXHASH = True
+except ImportError:
+    _HAS_XXHASH = False
+    _xxhash = None  # type: ignore[assignment]
+
+# Separator between canonicalized column values (matches in-memory Polars path).
+_FIELD_SEP = "\x1f"
+
+# xxHash64 provides ~16x throughput vs SHA256 with negligible collision risk for
+# reconciliation (birthday bound ~2^32 records before ~50% collision).
+DEFAULT_ALGORITHM = "xxhash64"
+
+
+def canonical(value: Any) -> str:
+    """Normalize a cell value for deterministic comparison."""
+    if value is None:
+        return "__NULL__"
+    text = str(value).strip()
+    if text.lower() in ("", "null", "none", "na", "n/a"):
+        return "__NULL__"
+    return text
+
+
+def identity_key(record: dict[str, Any], columns: list[str]) -> str:
+    return "|".join(canonical(record.get(c)) for c in columns)
+
+
+def _canonical_parts(record: dict[str, Any], columns: list[str]) -> list[str]:
+    return [canonical(record.get(c)) for c in columns]
+
+
+def _fingerprint_sha256(parts: list[str]) -> bytes:
+    return hashlib.sha256(_FIELD_SEP.join(parts).encode()).digest()
+
+
+def _fingerprint_xxhash64(parts: list[str]) -> bytes:
+    h = _xxhash.xxh64(_FIELD_SEP.join(parts).encode())
+    return h.digest()
+
+
+def _fingerprint_xxhash128(parts: list[str]) -> bytes:
+    h = _xxhash.xxh128(_FIELD_SEP.join(parts).encode())
+    return h.digest()[:8]
+
+
+def _fingerprint_crc64(parts: list[str]) -> bytes:
+    # zlib.crc32 is 32-bit; use first 8 bytes of sha256 truncated as fallback
+    # when xxhash unavailable — callers should prefer xxhash64.
+    return hashlib.sha256(_FIELD_SEP.join(parts).encode()).digest()[:8]
+
+
+def _select_hasher(algorithm: str) -> Callable[[list[str]], bytes]:
+    algo = algorithm.lower()
+    if algo == "sha256":
+        return _fingerprint_sha256
+    if algo in ("xxhash64", "xxhash"):
+        if not _HAS_XXHASH:
+            return _fingerprint_sha256
+        return _fingerprint_xxhash64
+    if algo == "xxhash128":
+        if not _HAS_XXHASH:
+            return _fingerprint_sha256
+        return _fingerprint_xxhash128
+    if algo == "crc64":
+        return _fingerprint_crc64
+    if not _HAS_XXHASH:
+        return _fingerprint_sha256
+    return _fingerprint_xxhash64
+
+
+def row_fingerprint_bytes(
+    record: dict[str, Any],
+    columns: list[str],
+    *,
+    algorithm: str = DEFAULT_ALGORITHM,
+) -> bytes:
+    """Return an 8-byte (or 32-byte for sha256) fingerprint digest."""
+    if not columns:
+        return b""
+    hasher = _select_hasher(algorithm)
+    return hasher(_canonical_parts(record, columns))
+
+
+def row_fingerprint_hex(
+    record: dict[str, Any],
+    columns: list[str],
+    *,
+    algorithm: str = DEFAULT_ALGORITHM,
+) -> str:
+    return row_fingerprint_bytes(record, columns, algorithm=algorithm).hex()
+
+
+def partition_id(key: str, num_partitions: int) -> int:
+    h = hashlib.md5(key.encode()).digest()
+    return int.from_bytes(h[:4], "big") % num_partitions
+
+
+def compare_columns_payload(
+    record: dict[str, Any],
+    columns: list[str],
+) -> dict[str, str]:
+    """Extract only compare columns (canonicalized) for drilldown storage."""
+    return {col: canonical(record.get(col)) for col in columns}
