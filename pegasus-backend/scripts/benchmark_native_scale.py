@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-05T14:54:26+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Benchmark native multichar spill + full reconciliation at scale."""
 
 from __future__ import annotations

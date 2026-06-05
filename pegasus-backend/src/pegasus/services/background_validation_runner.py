@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: github-actions[bot]
-# Last edited: 2026-06-04T06:59:09Z
+# Last edited: 2026-06-04T07:38:07Z
 # --- END GENERATED FILE METADATA ---
 
 """Spawn isolated OS processes (or a process pool) to run validation without blocking the API."""

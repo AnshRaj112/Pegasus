@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
-# Authors: github-actions[bot]
-# Last edited: 2026-06-04T06:59:09Z
+# Authors: Ansh Raj
+# Last edited: 2026-06-05T15:00:33+05:30
 # --- END GENERATED FILE METADATA ---
 
 """GCS small-file validation streams into Polars (no full-object cache)."""

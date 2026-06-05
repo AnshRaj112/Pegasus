@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
-# Authors: Ansh Raj
-# Last edited: 2026-06-04T13:07:37+05:30
+# Authors: github-actions[bot]
+# Last edited: 2026-06-04T07:38:07Z
 # --- END GENERATED FILE METADATA ---
 
 """Binary partition spill format — avoids JSON in hot paths."""
