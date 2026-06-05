@@ -22,6 +22,7 @@ UI = {
         "missing": "UIDs only in source (removed from target)",
         "extra": "UIDs only in target (extra rows)",
         "columns": "Total columns per file",
+        "mismatches": "Overlap UIDs with mismatched values in target",
         "value_uids": "How many overlap UIDs get wrong cells in target",
         "value_cols": "How many compared columns differ per mismatched UID",
         "delimiter": "Field separator (can be an emoji like 🚀, or standard like ||)",
@@ -217,12 +218,11 @@ def main() -> int:
     missing = get_input("missing", default=0, is_int=True, min_val=0, max_val=n)
     extra = get_input("extra", default=0, is_int=True, min_val=0)
     columns = get_input("columns", default=5, is_int=True, min_val=2)
-    
+
     max_overlap = n - missing
-    value_uids = get_input("value_uids", default=0, is_int=True, min_val=0, max_val=max_overlap)
-    
-    max_value_cols = max(1, columns - 1)
-    value_cols = get_input("value_cols", default=1, is_int=True, min_val=1, max_val=max_value_cols)
+    mismatches = get_input("mismatches", default=0, is_int=True, min_val=0, max_val=max_overlap)
+    value_uids = mismatches
+    value_cols = 1
     
     delimiter = get_input("delimiter", default="🚀")
     uid_column = get_input("uid_column", default="id")

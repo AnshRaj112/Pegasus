@@ -22,6 +22,7 @@ from pegasus.schemas.validation import ColumnMapping, ValidationTestMode
 from pegasus.services.exceptions import format_validation_job_error
 from pegasus.services.validation_service import ValidationRunResult, ValidationService
 from pegasus.validation.comparators.models import MismatchType
+from pegasus.validation.lifecycle_profiler import get_active_profiler, lifecycle_job, lifecycle_span
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,10 @@ def _resolve_job_mismatch_artifact(
 
     mismatches = result.report.mismatches
     if mismatches.is_empty():
+        return None
+
+    sample_cap = int(get_settings().validation_mismatch_sample_limit or 0)
+    if sample_cap <= 0:
         return None
 
     export_path.parent.mkdir(parents=True, exist_ok=True)
@@ -176,6 +181,83 @@ def run_job_directory(job_dir: Path) -> int:
 
     signal.signal(signal.SIGTERM, _on_term)
 
+    lifecycle_path = job_dir / "lifecycle_timings.json"
+    prior_epochs: dict[str, float] = {}
+    if lifecycle_path.is_file():
+        try:
+            prior = loads_str(lifecycle_path.read_text(encoding="utf-8"))
+            raw_epochs = prior.get("epochs") if isinstance(prior, dict) else None
+            if isinstance(raw_epochs, dict):
+                for key, value in raw_epochs.items():
+                    if isinstance(value, (int, float)):
+                        prior_epochs[str(key)] = float(value)
+        except (OSError, ValueError, TypeError):
+            prior_epochs = {}
+
+    try:
+        with lifecycle_job(job_dir) as lifecycle:
+            if prior_epochs.get("http_request_start_epoch_s") is not None:
+                lifecycle.http_request_start_epoch_s = prior_epochs["http_request_start_epoch_s"]
+            if prior_epochs.get("job_enqueued_epoch_s") is not None:
+                lifecycle.job_enqueued_epoch_s = prior_epochs["job_enqueued_epoch_s"]
+            lifecycle.mark_worker_started()
+            return _run_job_body(
+                job_dir=job_dir,
+                meta=meta,
+                meta_path=meta_path,
+                status_path=status_path,
+                uid_column=uid_column,
+                delimiter=delimiter,
+                column_mappings=column_mappings,
+                has_header=has_header,
+                header_leading_rows=header_leading_rows,
+                test_mode=test_mode,
+                file_format=file_format,
+                source_input=source_input,
+                target_input=target_input,
+                uses_cloud=uses_cloud,
+                src=src,
+                tgt=tgt,
+                lifecycle=lifecycle,
+            )
+    except Exception as exc:
+        err_msg = format_validation_job_error(exc)
+        logger.exception("validation job failed: %s", err_msg)
+        _write_json(
+            status_path,
+            {
+                "status": "failed",
+                "phase": "failed",
+                "message": err_msg,
+                "error": err_msg,
+                "traceback": traceback.format_exc(),
+                "progress": {"failed_at_epoch_s": time.time()},
+            },
+        )
+        _cleanup_partial(job_dir)
+        return 1
+
+
+def _run_job_body(
+    *,
+    job_dir: Path,
+    meta: dict[str, object],
+    meta_path: Path,
+    status_path: Path,
+    uid_column: str,
+    delimiter: str,
+    column_mappings: list[ColumnMapping],
+    has_header: bool,
+    header_leading_rows: int,
+    test_mode: str,
+    file_format: str,
+    source_input: object,
+    target_input: object,
+    uses_cloud: bool,
+    src: object,
+    tgt: object,
+    lifecycle: object,
+) -> int:
     try:
         start = time.time()
         _write_json(
@@ -187,30 +269,73 @@ def run_job_directory(job_dir: Path) -> int:
                 "progress": {"started_at_epoch_s": start},
             },
         )
-        get_settings.cache_clear()
-        settings = get_settings()
-        service = ValidationService(settings=settings)
+        with lifecycle_span("Worker Init (pre-validation)"):
+            settings = get_settings()
+            service = ValidationService(settings=settings)
+        progress_interval = float(settings.validation_progress_status_interval_seconds or 2.5)
         last_emit = 0.0
+        last_stage_emit = 0.0
+        progress_seq = 0
 
         def _progress_cb(event: dict[str, Any]) -> None:
-            nonlocal last_emit
+            nonlocal last_emit, last_stage_emit, progress_seq
             now = time.time()
-            if now - last_emit < 2.5 and event.get("percent") not in {100, 99}:
+            is_stage = event.get("phase") == "stage"
+            is_terminal = event.get("percent") in {100, 99}
+            stage_payload = event.get("stage")
+            stage_name = (
+                stage_payload.get("name")
+                if isinstance(stage_payload, dict)
+                else str(stage_payload) if stage_payload is not None else None
+            )
+            is_total_stage = stage_name == "Total"
+            if is_stage:
+                if (
+                    not is_total_stage
+                    and not is_terminal
+                    and now - last_stage_emit < progress_interval
+                ):
+                    return
+                last_stage_emit = now
+            elif not is_terminal and now - last_emit < progress_interval:
                 return
             last_emit = now
+            progress_seq += 1
+            progress: dict[str, Any] = {
+                "started_at_epoch_s": start,
+                "progress_seq": progress_seq,
+                "percent": float(event.get("percent")) if event.get("percent") is not None else None,
+                **(event.get("progress") if isinstance(event.get("progress"), dict) else {}),
+            }
+            if stage_payload is not None:
+                progress["stage"] = stage_payload
             _write_json(
                 status_path,
                 {
                     "status": "running",
                     "phase": str(event.get("phase") or "validating"),
                     "message": str(event.get("message") or "Running reconciliation"),
-                    "progress": {
-                        "started_at_epoch_s": start,
-                        "percent": float(event.get("percent")) if event.get("percent") is not None else None,
-                        **(event.get("progress") if isinstance(event.get("progress"), dict) else {}),
-                    },
+                    "progress": progress,
                 },
             )
+
+        try:
+            src_bytes = src.stat().st_size if isinstance(src, Path) else None
+            tgt_bytes = tgt.stat().st_size if isinstance(tgt, Path) else None
+        except OSError:
+            src_bytes = tgt_bytes = None
+        logger.info(
+            "validation inputs src=%s tgt=%s src_bytes=%s tgt_bytes=%s delimiter=%r format=%s",
+            src,
+            tgt,
+            src_bytes,
+            tgt_bytes,
+            delimiter,
+            file_format,
+        )
+
+        raw_policy = meta.get("resource_policy")
+        resource_policy = raw_policy if isinstance(raw_policy, dict) else None
 
         if test_mode == ValidationTestMode.LITMUS.value:
             result = service.validate_csv_litmus_sync(
@@ -240,6 +365,7 @@ def run_job_directory(job_dir: Path) -> int:
                 has_header=has_header,
                 header_leading_rows=header_leading_rows,
                 file_format=file_format,
+                resource_policy=resource_policy,
             )
         else:
             result = service._validate_csv_pair_sync(  # noqa: SLF001
@@ -253,12 +379,17 @@ def run_job_directory(job_dir: Path) -> int:
                 has_header=has_header,
                 header_leading_rows=header_leading_rows,
                 file_format=file_format,
+                resource_policy=resource_policy,
             )
 
         end = time.time()
         validation_duration = end - start
-        artifact = result.mismatch_artifact_path or result.report.mismatch_artifact_path
-        artifact = _resolve_job_mismatch_artifact(job_dir, result, artifact)
+        profiler = get_active_profiler()
+        if profiler is not None:
+            profiler.mark_worker_finished()
+        with lifecycle_span("Mismatch Export"):
+            artifact = result.mismatch_artifact_path or result.report.mismatch_artifact_path
+            artifact = _resolve_job_mismatch_artifact(job_dir, result, artifact)
         artifact_rel = None
         artifact_abs = None
         if artifact is not None and artifact.is_file():
@@ -286,14 +417,23 @@ def run_job_directory(job_dir: Path) -> int:
                 "total_seconds": validation_duration,
             },
         }
+        reconcile_path = (getattr(result, "pipeline_metadata", None) or {}).get("path")
         logger.info(
-            "validation completed in %.2fs (source_rows=%d target_rows=%d mismatches=%d)",
+            "validation completed in %.2fs path=%s (source_rows=%d target_rows=%d mismatches=%d)",
             validation_duration,
+            reconcile_path or "unknown",
             result.source_row_count,
             result.target_row_count,
             int(sum(_normalize_summary(dict(result.report.summary)).values())),
         )
-        _write_json(job_dir / "result.json", out, indent=True)
+        lifecycle_summary = None
+        if profiler is not None:
+            profiler.record("Job Finalization", wall_seconds=time.time() - end, accumulate=False)
+            profiler.write_artifacts()
+            lifecycle_summary = profiler.summarize()
+            out["lifecycle"] = lifecycle_summary
+        with lifecycle_span("Result Serialization"):
+            _write_json(job_dir / "result.json", out, indent=True)
         _write_json(
             status_path,
             {
@@ -312,21 +452,17 @@ def run_job_directory(job_dir: Path) -> int:
         )
         return 0
     except Exception as exc:
-        err_msg = format_validation_job_error(exc)
-        logger.exception("validation job failed: %s", err_msg)
-        _write_json(
-            status_path,
-            {
-                "status": "failed",
-                "phase": "failed",
-                "message": err_msg,
-                "error": err_msg,
-                "traceback": traceback.format_exc(),
-                "progress": {"failed_at_epoch_s": time.time()},
-            },
-        )
-        _cleanup_partial(job_dir)
-        return 1
+        raise exc
+    finally:
+        if uses_cloud:
+            from pegasus.validation.gcs_stream import clear_gcs_stream_sessions
+
+            clear_gcs_stream_sessions()
+
+
+def run_job_directory_str(job_dir: str) -> int:
+    """Pool entrypoint (picklable) for :func:`run_job_directory`."""
+    return run_job_directory(Path(job_dir))
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from pathlib import Path
 from typing import Annotated
@@ -69,6 +70,7 @@ from .validation_helpers import (
     completed_job_cache_get,
     completed_job_cache_put,
     maybe_persist_completed_job,
+    record_poll_lifecycle,
     run_result_from_job_dir,
     validation_jobs_root,
 )
@@ -540,6 +542,13 @@ async def validate_csv_local_paths(
         meta["target_path"] = str(resolved_target)
     (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
 
+    from pegasus.validation.lifecycle_profiler import LifecycleProfiler
+
+    enqueue_profiler = LifecycleProfiler(job_dir=job_dir)
+    enqueue_profiler.mark_http_request_start()
+    enqueue_profiler.mark_job_enqueued()
+    enqueue_profiler.write_artifacts()
+
     queue = get_validation_queue(settings)
     queued_job = queue.enqueue(job_id, job_dir)
     poll = f"{settings.api_v1_prefix.rstrip('/')}/validate/jobs/{job_id}"
@@ -631,9 +640,20 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
     if cached is not None:
         return cached
 
+    import time
+
     run_result, rid, job_meta = run_result_from_job_dir(job_dir)
-    await maybe_persist_completed_job(settings, run_id=rid, run_result=run_result, job_meta=job_meta)
+    db_wall = await maybe_persist_completed_job(
+        settings, run_id=rid, run_result=run_result, job_meta=job_meta
+    )
+    t_build = time.perf_counter()
     payload = build_validate_response(settings=settings, run_result=run_result, run_id=rid)
+    response_wall = time.perf_counter() - t_build
+    record_poll_lifecycle(
+        job_dir,
+        database_wall_seconds=db_wall,
+        response_build_wall_seconds=response_wall,
+    )
     detail = ValidationJobDetailResponse(
         status="completed",
         phase=phase,

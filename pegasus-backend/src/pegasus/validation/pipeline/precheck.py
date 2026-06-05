@@ -94,15 +94,7 @@ def _estimate_row_count(adapter: TabularSourceAdapter) -> int:
         count = getter()
         if isinstance(count, int) and count >= 0:
             return count
-    getter = getattr(adapter, "cached_object_bytes", None)
-    cached = getter() if callable(getter) else None
-    if not cached:
-        return 0
-    text = cached.decode("utf-8", errors="replace")
-    lines = [line for line in text.splitlines() if line.strip()]
-    if getattr(adapter, "_has_header", True):
-        return max(0, len(lines) - 1 - int(getattr(adapter, "_skip_rows", 0)))
-    return max(0, len(lines) - int(getattr(adapter, "_skip_rows", 0)))
+    return 0
 
 
 def try_identical_precheck(
@@ -115,8 +107,7 @@ def try_identical_precheck(
 ) -> PipelineResult | None:
     """Skip full reconcile when blobs are byte-identical.
 
-    Never hashes full file contents here — only compares sizes and digests
-    already computed during prefetch/download.
+    Never hashes full file contents here — only compares sizes and GCS metadata digests.
     """
     src_size = _adapter_size_bytes(source)
     tgt_size = _adapter_size_bytes(target)

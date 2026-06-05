@@ -41,11 +41,14 @@ def write_validation_results(
         f"| Changed Records | {result.changed_count} |",
         f"| Matching Records | {result.matching_count} |",
         "",
-        f"**Execution time:** {result.execution_seconds:.2f}s",
+        f"**Execution time:** {result.execution_seconds:.4f} s",
         f"**Source:** {source_label}",
         f"**Target:** {target_label}",
         "",
     ]
+    stage_report = (result.extra_stats or {}).get("stage_report")
+    if stage_report:
+        lines.extend(["## Stage Metrics", "", "```", stage_report, "```", ""])
     if stats:
         lines.extend(["## Runtime Configuration", ""])
         for k, v in stats.items():

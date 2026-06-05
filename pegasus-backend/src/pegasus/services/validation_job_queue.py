@@ -510,6 +510,19 @@ class ValidationJobQueue:
             running_jobs=running,
         )
         try:
+            if status_path.is_file():
+                existing = loads_str(status_path.read_text(encoding="utf-8"))
+                prog = existing.get("progress") if isinstance(existing, dict) else None
+                if (
+                    isinstance(existing, dict)
+                    and existing.get("status") == "queued"
+                    and isinstance(prog, dict)
+                    and prog.get("queue_position") == job.position
+                    and prog.get("pending_ahead") == job.position
+                    and prog.get("running_jobs") == running
+                    and prog.get("effective_max_concurrency") == eff
+                ):
+                    return
             _atomic_write_json(
                 status_path,
                 {

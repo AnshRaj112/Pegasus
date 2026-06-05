@@ -6,11 +6,23 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential curl pkg-config \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && rm -rf /var/lib/apt/lists/*
+ENV PATH="/root/.cargo/bin:${PATH}"
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir "maturin>=1.7,<2"
 
+COPY pyproject.toml /app/pyproject.toml
+COPY native/ /app/native/
 COPY src/ /app/src/
+RUN maturin build --release --interpreter python3 -o /tmp/wheels \
+    && pip install --no-cache-dir /tmp/wheels/*.whl
+
 COPY alembic.ini /app/alembic.ini
 COPY alembic /app/alembic
 

@@ -269,13 +269,38 @@ class Settings(BaseSettings):
         le=3600,
         description="RSS logging interval in validation worker subprocesses; 0 disables the memory monitor thread.",
     )
+    validation_partition_reconcile_workers: int = Field(
+        default=1,
+        ge=0,
+        le=32,
+        description=(
+            "Process pool size for partition reconcile (0=auto only above 64 partitions, 1=sequential)."
+        ),
+    )
+    validation_skip_artifact_report: bool = Field(
+        default=True,
+        description="Skip writing VALIDATION_RESULTS.md under job_dir (saves I/O on background jobs).",
+    )
+    validation_progress_status_interval_seconds: float = Field(
+        default=2.5,
+        ge=0.5,
+        le=60.0,
+        description=(
+            "Minimum seconds between status.json progress writes during validation "
+            "(stage metrics still go to worker.log and stage_metrics.log)."
+        ),
+    )
+    validation_enable_content_digest_precheck: bool = Field(
+        default=False,
+        description="Compare precomputed content digests before reconcile (GCS prefetch only).",
+    )
     validation_worker_pool_size: int = Field(
-        default=0,
+        default=2,
         ge=0,
         le=32,
         description=(
             "When >0, reuse a ProcessPoolExecutor of that size for validation jobs (warmer imports). "
-            "When 0 (default), spawn a fresh subprocess per job."
+            "When 0, spawn a fresh subprocess per job (slow cold start)."
         ),
     )
     validation_max_concurrency: int = Field(
@@ -386,10 +411,16 @@ class Settings(BaseSettings):
         description="Enable streaming Merkle precheck to skip full reconciliation when files are identical.",
     )
     validation_enable_in_memory_reconcile: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "Load both files into RAM for a Polars join fast path. "
-            "Disabled by default; use the streaming partition/spill pipeline instead."
+            "Load both files into RAM for a Polars join fast path when size allows. "
+            "Set false to prefer disk spill for all workloads."
+        ),
+    )
+    validation_gcs_streaming_only: bool = Field(
+        default=True,
+        description=(
+            "When true (default), GCS validation streams objects via open_gcs_binary / PyArrow CSV only."
         ),
     )
     validation_auto_in_memory_max_bytes: int = Field(

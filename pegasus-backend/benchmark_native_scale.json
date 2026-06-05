@@ -1,0 +1,65 @@
+{
+  "100k-8cols": {
+    "native_spill": {
+      "rows": 100000,
+      "seconds": 0.52,
+      "mb_per_s": 22.26,
+      "chunk_rows": 500000
+    },
+    "full_pipeline": {
+      "rows": 100000,
+      "seconds": 3.19,
+      "mb_per_s": 6.22,
+      "path": "spill_arrow_ipc",
+      "matching": 40000,
+      "changed": 10000,
+      "missing": 50000,
+      "extra": 20000,
+      "serialization_s": 0.0,
+      "reconcile_s": 1.4186,
+      "chunk_rows": 500000
+    }
+  },
+  "1m": {
+    "native_spill": {
+      "rows": 1000000,
+      "seconds": 2.16,
+      "mb_per_s": 18.4,
+      "chunk_rows": 500000
+    },
+    "full_pipeline": {
+      "rows": 1000000,
+      "seconds": 10.9,
+      "mb_per_s": 7.45,
+      "path": "spill_arrow_ipc",
+      "matching": 10000,
+      "changed": 0,
+      "missing": 490000,
+      "extra": 490000,
+      "serialization_s": 0.0,
+      "reconcile_s": 7.9479,
+      "chunk_rows": 500000
+    }
+  },
+  "10m": {
+    "native_spill": {
+      "rows": 10000000,
+      "seconds": 24.68,
+      "mb_per_s": 16.53,
+      "chunk_rows": 1000000
+    },
+    "full_pipeline": {
+      "rows": 10000000,
+      "seconds": 48.88,
+      "mb_per_s": 17.02,
+      "path": "spill_arrow_ipc",
+      "matching": 0,
+      "changed": 0,
+      "missing": 1000000,
+      "extra": 1000000,
+      "serialization_s": 0.0,
+      "reconcile_s": 15.8023,
+      "chunk_rows": 1000000
+    }
+  }
+}

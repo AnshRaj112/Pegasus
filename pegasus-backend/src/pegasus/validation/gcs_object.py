@@ -8,9 +8,10 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, Iterator
 
 from pegasus.schemas.validation import GoogleCloudStorageConfig
 
@@ -93,16 +94,15 @@ def cloud_config_to_meta(cloud: GoogleCloudStorageConfig) -> dict[str, object]:
 
 
 def _storage_client(ref: GcsObjectRef):
-    from google.cloud import storage as gcs_storage
-    from google.oauth2 import service_account
+    from pegasus.validation.gcs_stream import get_storage_client
 
-    credentials = service_account.Credentials.from_service_account_info(ref.credentials_info)
-    return gcs_storage.Client(credentials=credentials, project=ref.project_id)
+    return get_storage_client(ref)
 
 
 def _blob(ref: GcsObjectRef):
-    client = _storage_client(ref)
-    return client.bucket(ref.bucket.strip()).blob(ref.object_name.strip().lstrip("/"))
+    from pegasus.validation.gcs_stream import get_blob
+
+    return get_blob(ref)
 
 
 def gcs_blob_size(ref: GcsObjectRef) -> int:
@@ -121,8 +121,14 @@ def gcs_blob_fingerprints(ref: GcsObjectRef) -> tuple[int, str | None, str | Non
     return int(size), str(crc) if crc else None, str(md5) if md5 else None
 
 
-def open_gcs_binary(ref: GcsObjectRef) -> IO[bytes]:
-    return _blob(ref).open("rb")
+@contextmanager
+def open_gcs_binary(ref: GcsObjectRef) -> Iterator[IO[bytes]]:
+    """Stream object bytes (chunked read-ahead, cached GCS client)."""
+    from pegasus.validation.gcs_stream import get_gcs_stream_session
+
+    session = get_gcs_stream_session(ref)
+    with session.open_binary() as handle:
+        yield handle
 
 
 def read_gcs_prefix(
@@ -130,17 +136,17 @@ def read_gcs_prefix(
     *,
     max_bytes: int = _DEFAULT_PREFIX_BYTES,
 ) -> bytes:
-    with open_gcs_binary(ref) as handle:
-        return handle.read(max_bytes)
+    from pegasus.validation.gcs_stream import get_gcs_stream_session
+
+    return get_gcs_stream_session(ref).read_prefix(max_bytes=max_bytes)
 
 
 def read_gcs_object_bytes(ref: GcsObjectRef) -> bytes:
-    """Download the full object in one request (preferred for objects that fit in RAM)."""
-    blob = _blob(ref)
-    payload = blob.download_as_bytes()
-    if not payload:
-        return b""
-    return payload
+    """Deprecated: full-object download is disabled for validation paths."""
+    raise RuntimeError(
+        f"Full-object GCS download is disabled for {ref.uri}. "
+        "Use open_gcs_binary() or GcsStreamSession streaming APIs."
+    )
 
 
 def sample_gcs_lines(

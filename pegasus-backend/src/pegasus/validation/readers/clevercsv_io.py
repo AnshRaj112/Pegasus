@@ -8,6 +8,7 @@ from typing import Any
 import polars as pl
 
 from pegasus.validation.flat_file import parse_lines, split_physical_lines
+from pegasus.validation.readers.multichar_csv import can_use_fast_multichar_load, load_multichar_csv_fast
 
 
 def clevercsv_to_polars(
@@ -54,8 +55,12 @@ def flat_file_to_polars(
     delimiter: str,
     has_header: bool,
     skip_rows: int,
+    path: Path | None = None,
 ) -> pl.DataFrame:
     """Fallback flat-file parser when clevercsv is unavailable or fails."""
+    if path is not None and can_use_fast_multichar_load(path, delimiter):
+        return load_multichar_csv_fast(path, delimiter=delimiter, has_header=has_header, skip_rows=skip_rows)
+
     if hasattr(source, "read"):
         payload = source.read()
         text = payload.decode("utf-8", errors="replace") if isinstance(payload, bytes) else payload

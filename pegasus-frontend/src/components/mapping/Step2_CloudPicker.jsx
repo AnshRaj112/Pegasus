@@ -160,8 +160,8 @@ export default function Step2_CloudPicker({
           {error && <div style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</div>}
 
           {hasListed && (
-            <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 8, maxHeight: 360, overflow: 'hidden' }}>
-              <div style={{ border: '1px solid var(--border-1)', borderRadius: 8, overflow: 'auto' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 8, height: 360, overflow: 'hidden' }}>
+              <div style={{ minHeight: 0, border: '1px solid var(--border-1)', borderRadius: 8, overflowY: 'auto' }}>
                 {folders.map(f => (
                   <button
                     key={f.path}
@@ -177,7 +177,7 @@ export default function Step2_CloudPicker({
                   </button>
                 ))}
               </div>
-              <div style={{ border: '1px solid var(--border-1)', borderRadius: 8, overflow: 'auto', padding: 8 }}>
+              <div style={{ minHeight: 0, border: '1px solid var(--border-1)', borderRadius: 8, overflowY: 'auto', padding: 8 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 6 }}>
                   {files.map(f => {
                     const selected = selectionMode === 'multi'

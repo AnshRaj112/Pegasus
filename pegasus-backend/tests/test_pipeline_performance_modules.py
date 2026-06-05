@@ -65,6 +65,59 @@ def test_identity_key() -> None:
     assert identity_key(record, ["id"]) == "42"
 
 
+def test_arrow_ipc_spill_roundtrip() -> None:
+    from pegasus.validation.pipeline.arrow_spill import encode_arrow_partition, read_arrow_partition
+
+    block = encode_arrow_partition(["k1", "k2"], [100, 200])
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "part_00001.bin"
+        path.write_bytes(block)
+        frame = read_arrow_partition(path)
+    assert frame is not None
+    assert frame.height == 2
+    assert frame["identity"].to_list() == ["k1", "k2"]
+
+
+def test_stage_report_format() -> None:
+    from pegasus.validation.pipeline.timing import (
+        PipelineIoStats,
+        PipelineTimings,
+        build_stage_metrics,
+        format_stage_report,
+    )
+
+    timings = PipelineTimings(
+        source_read_seconds=1.0,
+        source_partition_seconds=3.0,
+        target_read_seconds=0.5,
+        target_partition_seconds=2.5,
+        partition_reconciliation_seconds=2.0,
+        total_seconds=9.0,
+        total_cpu_seconds=8.0,
+        source_read_cpu_seconds=0.9,
+        source_partition_cpu_seconds=2.5,
+        target_read_cpu_seconds=0.4,
+        target_partition_cpu_seconds=2.0,
+        partition_reconciliation_cpu_seconds=1.8,
+    )
+    io = PipelineIoStats(
+        source_input_bytes=100,
+        target_input_bytes=80,
+        source_spill_bytes=50,
+        target_spill_bytes=40,
+        reconcile_spill_bytes_read=90,
+    )
+    report = format_stage_report(build_stage_metrics(timings, io))
+    assert "Read Source:" in report
+    assert "Wall Time: 1.0000 s" in report
+    assert "CPU Time: 0.9000 s" in report
+    assert "Bytes Read: 100" in report
+    assert "Partition Source:" in report
+    assert "Wall Time: 2.0000 s" in report
+    assert "Bytes Written: 50" in report
+    assert "%" not in report
+
+
 def test_columnar_spill_roundtrip() -> None:
     payload = encode_columnar_partition(
         ["k1", "k2"],

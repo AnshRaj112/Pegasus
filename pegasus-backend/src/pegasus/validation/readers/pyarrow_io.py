@@ -64,11 +64,17 @@ def _csv_parse_options(delimiter: str) -> pacsv.ParseOptions:
     return pacsv.ParseOptions(delimiter=delimiter)
 
 
-def _csv_convert_options() -> pacsv.ConvertOptions:
-    return pacsv.ConvertOptions(
-        strings_can_be_null=True,
-        null_values=["", "NULL", "null", "NA", "N/A", "na", "n/a"],
-    )
+def _csv_convert_options(
+    *,
+    include_columns: list[str] | None = None,
+) -> pacsv.ConvertOptions:
+    kwargs: dict[str, Any] = {
+        "strings_can_be_null": True,
+        "null_values": ["", "NULL", "null", "NA", "N/A", "na", "n/a"],
+    }
+    if include_columns:
+        kwargs["include_columns"] = list(include_columns)
+    return pacsv.ConvertOptions(**kwargs)
 
 
 def read_csv_binary(
@@ -79,6 +85,7 @@ def read_csv_binary(
     skip_rows: int = 0,
     max_rows: int | None = None,
     column_names: list[str] | None = None,
+    include_columns: list[str] | None = None,
 ) -> pa.Table:
     """Read delimited bytes from an open binary stream (e.g. GCS object handle)."""
     if not pyarrow_supports_delimiter(delimiter):
@@ -90,7 +97,7 @@ def read_csv_binary(
         column_names=column_names,
     )
     parse_options = _csv_parse_options(delimiter)
-    convert_options = _csv_convert_options()
+    convert_options = _csv_convert_options(include_columns=include_columns)
 
     if max_rows is None:
         return pacsv.read_csv(
@@ -130,6 +137,7 @@ def read_csv_table(
     skip_rows: int = 0,
     max_rows: int | None = None,
     column_names: list[str] | None = None,
+    include_columns: list[str] | None = None,
 ) -> pa.Table:
     """Read a delimited text file into a PyArrow table."""
     if not pyarrow_supports_delimiter(delimiter):
@@ -143,6 +151,7 @@ def read_csv_table(
                 has_header=has_header,
                 skip_rows=skip_rows,
                 column_names=column_names,
+                include_columns=include_columns,
             )
 
     reader = pacsv.open_csv(
@@ -153,7 +162,7 @@ def read_csv_table(
             column_names=column_names,
         ),
         parse_options=_csv_parse_options(delimiter),
-        convert_options=_csv_convert_options(),
+        convert_options=_csv_convert_options(include_columns=include_columns),
     )
     collected: list[pa.RecordBatch] = []
     remaining = max_rows
@@ -196,6 +205,7 @@ def iter_csv_batches(
     chunk_rows: int,
     has_header: bool = True,
     skip_rows: int = 0,
+    include_columns: list[str] | None = None,
 ) -> Iterator[pa.RecordBatch]:
     """Stream a delimited file as PyArrow record batches."""
     if not pyarrow_supports_delimiter(delimiter):
@@ -205,7 +215,7 @@ def iter_csv_batches(
         path,
         read_options=_csv_read_options(has_header=has_header, skip_rows=skip_rows),
         parse_options=_csv_parse_options(delimiter),
-        convert_options=_csv_convert_options(),
+        convert_options=_csv_convert_options(include_columns=include_columns),
     )
     target = max(1, chunk_rows)
     for batch in reader:

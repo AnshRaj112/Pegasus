@@ -47,14 +47,26 @@ class ValidationService:
         source_bytes: int,
         target_bytes: int,
         compare_column_count: int,
+        identity_column_count: int = 1,
         resource_policy: dict[str, Any] | None = None,
     ) -> TabularPipelineConfig:
         import os
+
+        from pegasus.core.workload_budget import _estimated_row_bytes
+        from pegasus.validation.readers import native_multichar
 
         policy = resource_policy or {}
         memory_budget = int(
             policy.get("memory_budget_bytes") or self._settings.validation_memory_budget_bytes
         )
+        inline_native = native_multichar.native_extension_available()
+        row_width = _estimated_row_bytes(
+            compare_column_count=compare_column_count,
+            identity_column_count=identity_column_count,
+            inline_native_spill=inline_native,
+        )
+        source_row_estimate = max(1, source_bytes // row_width)
+        target_row_estimate = max(1, target_bytes // row_width)
         budget = plan_workload_budget(
             source_bytes=source_bytes,
             target_bytes=target_bytes,
@@ -68,6 +80,10 @@ class ValidationService:
             ),
             requested_max_workers=policy.get("threads_per_job"),
             requested_sub_partition_buckets=self._settings.validation_reconciliation_sub_partition_buckets,
+            source_row_estimate=source_row_estimate,
+            target_row_estimate=target_row_estimate,
+            identity_column_count=identity_column_count,
+            inline_native_spill=inline_native,
         )
         preset = self._settings.validation_tabular_partition_preset
         return TabularPipelineConfig(
@@ -83,7 +99,12 @@ class ValidationService:
                 or self._settings.validation_reconciliation_disk_headroom_multiplier
             ),
             enable_merkle_fast_path=self._settings.validation_enable_merkle_fast_path,
-            enable_content_digest_precheck=True,
+            enable_content_digest_precheck=self._settings.validation_enable_content_digest_precheck,
+            lazy_column_drilldown=True,
+            fingerprint_only_spill=True,
+            use_arrow_ipc_spill=True,
+            partition_reconcile_workers=self._settings.validation_partition_reconcile_workers,
+            gcs_streaming_only=self._settings.validation_gcs_streaming_only,
         )
 
     def _resolve_delimiter(
@@ -106,7 +127,7 @@ class ValidationService:
         skip_rows: int,
     ) -> FileDelimitedAdapter | GcsDelimitedAdapter:
         if isinstance(adapter, GcsDelimitedAdapter):
-            from pegasus.validation.adapters.gcs_delimited import inherit_gcs_cache
+            from pegasus.validation.adapters.gcs_delimited import inherit_gcs_metadata
 
             rebuilt = GcsDelimitedAdapter(
                 adapter._ref,
@@ -115,7 +136,7 @@ class ValidationService:
                 skip_rows=skip_rows,
                 size_bytes=adapter.get_size_bytes(),
             )
-            inherit_gcs_cache(adapter, rebuilt)
+            inherit_gcs_metadata(adapter, rebuilt)
             return rebuilt
         return FileDelimitedAdapter(
             adapter.path,
@@ -169,15 +190,24 @@ class ValidationService:
             target, delimiter=sep, has_header=has_header, skip_rows=header_leading_rows
         )
 
-        from pegasus.validation.adapters.gcs_delimited import prefetch_gcs_delimited_pair
+        from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter, prefetch_gcs_delimited_pair
+        from pegasus.validation.lifecycle_profiler import get_active_profiler, lifecycle_span
 
-        prefetch_gcs_delimited_pair(
-            source,
-            target,
-            max_cache_bytes=self._settings.validation_auto_in_memory_max_bytes,
+        needs_warm = any(
+            isinstance(adapter, GcsDelimitedAdapter)
+            and (
+                adapter._crc32c is None
+                or adapter._md5_hex is None
+                or adapter._size_bytes is None
+            )
+            for adapter in (source, target)
         )
+        if needs_warm:
+            with lifecycle_span("GCS Prefetch"):
+                prefetch_gcs_delimited_pair(source, target)
 
-        schema = source.get_schema()
+        with lifecycle_span("Schema And Planning"):
+            schema = source.get_schema()
         compare_columns = [c for c in schema.column_names if c != uid_column]
         if column_mappings:
             compare_columns = list(dict.fromkeys(m.source_column for m in column_mappings))
@@ -186,7 +216,19 @@ class ValidationService:
             source_bytes=source.get_size_bytes(),
             target_bytes=target.get_size_bytes(),
             compare_column_count=len(compare_columns),
+            identity_column_count=1,
             resource_policy=resource_policy,
+        )
+        logger.info(
+            "reconciliation delimiter=%r source_bytes=%s target_bytes=%s in_memory=%s",
+            sep,
+            source.get_size_bytes(),
+            target.get_size_bytes(),
+            cfg.enable_in_memory_reconcile
+            or (
+                source.get_size_bytes() + target.get_size_bytes()
+                <= cfg.auto_in_memory_max_bytes
+            ),
         )
 
         workspace = None
@@ -197,7 +239,16 @@ class ValidationService:
         if progress_callback:
             progress_callback({"phase": "reconciling", "message": "Running streaming reconciliation"})
 
-        t0 = time.time()
+        if artifact_export_parent is not None:
+            from pegasus.validation.pipeline.timing import configure_stage_metrics_log
+
+            configure_stage_metrics_log(artifact_export_parent / "stage_metrics.log")
+
+        profiler = get_active_profiler()
+        if profiler is not None:
+            profiler.mark_validation_started()
+
+        t0 = time.perf_counter()
         pipeline = TabularReconciliationPipeline(
             source,
             target,
@@ -205,21 +256,55 @@ class ValidationService:
             compare_columns=compare_columns,
             config=cfg,
         )
-        result = pipeline.run(workspace=workspace)
-        elapsed = time.perf_counter() - t0
+        try:
+            result = pipeline.run(workspace=workspace, progress_callback=progress_callback)
+        finally:
+            if artifact_export_parent is not None:
+                from pegasus.validation.pipeline.timing import configure_stage_metrics_log
 
-        if artifact_export_parent is not None:
-            write_validation_results(
-                artifact_export_parent / "VALIDATION_RESULTS.md",
-                result,
-                source_label=source_label,
-                target_label=target_label,
-                extra_stats={
-                    "memory_budget_bytes": cfg.memory_budget_bytes,
-                    "chunk_rows": cfg.chunk_rows,
-                    "partition_count": cfg.resolved_partition_count(),
-                },
-            )
+                configure_stage_metrics_log(None)
+        elapsed = time.perf_counter() - t0
+        if profiler is not None:
+            extra = result.extra_stats or {}
+            profiler.ingest_pipeline_stages(list(extra.get("stages") or []))
+
+        if artifact_export_parent is not None and not self._settings.validation_skip_artifact_report:
+            report_cpu_start = time.thread_time()
+            report_wall_start = time.perf_counter()
+            with lifecycle_span("Report Generation"):
+                write_validation_results(
+                    artifact_export_parent / "VALIDATION_RESULTS.md",
+                    result,
+                    source_label=source_label,
+                    target_label=target_label,
+                    extra_stats={
+                        "memory_budget_bytes": cfg.memory_budget_bytes,
+                        "chunk_rows": cfg.chunk_rows,
+                        "partition_count": cfg.resolved_partition_count(),
+                    },
+                )
+            extra = result.extra_stats or {}
+            if extra.get("timings"):
+                from pegasus.validation.pipeline.timing import refresh_report_stage
+
+                refresh_report_stage(
+                    extra,
+                    wall_seconds=time.perf_counter() - report_wall_start,
+                    cpu_seconds=time.thread_time() - report_cpu_start,
+                )
+                from pegasus.validation.pipeline.timing import (
+                    _io_from_mapping,
+                    _timings_from_mapping,
+                    build_stage_metrics,
+                    publish_stage,
+                )
+
+                timings = _timings_from_mapping(dict(extra.get("timings") or {}))
+                io = _io_from_mapping(dict(extra.get("io") or {}))
+                for stage in build_stage_metrics(timings, io):
+                    if stage.name in ("Report", "Total"):
+                        publish_stage(stage, progress_callback=progress_callback)
+                result.extra_stats = extra
 
         run_result = pipeline_result_to_run_result(result)
         run_result.durations = ValidationRunDurations(validation_seconds=elapsed)
@@ -321,6 +406,7 @@ class ValidationService:
             source_bytes=source_path.stat().st_size,
             target_bytes=target_path.stat().st_size,
             compare_column_count=len(compare_columns),
+            identity_column_count=1,
             resource_policy=resource_policy,
         )
         workspace = None

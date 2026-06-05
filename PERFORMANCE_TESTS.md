@@ -7,9 +7,12 @@
 | Test | Location | Threshold |
 |------|----------|-----------|
 | 10K local throughput | `test_reconciliation_throughput.py::test_10k_local_throughput` | ≥ 8 MB/s |
-| 100K auto path | `test_100k_local_auto_path_under_ten_seconds` | &lt; 10 s |
-| 100K disk spill | `test_100k_disk_spill_under_fifteen_seconds` | &lt; 15 s |
-| GCS 100K single download | `test_gcs_100k_performance.py` | &lt; 12 s, 2 downloads |
+| 100K auto path | `test_100k_local_auto_path_under_ten_seconds` | &lt; 3 s |
+| 100K spill + drilldown | `test_100k_8col_spill_drilldown_under_eight_seconds` | &lt; 3.5 s |
+| 100K disk spill | `test_100k_disk_spill_under_fifteen_seconds` | &lt; 8 s |
+| GCS 100K no full download | `test_gcs_100k_performance.py` | &lt; 15 s, 0× `read_gcs_object_bytes` |
+| 1M scale (optional) | `test_reconciliation_scale.py` | &lt; 5 s with `PEGASUS_RUN_SCALE_TESTS=1` |
+| GCS TextIOWrapper | `test_gcs_stream_io.py` | must pass |
 | Small CSV service | `test_validation_performance.py` | &lt; 5 s |
 | 10K 12-col service | `test_validation_performance.py` | &lt; 5 s |
 

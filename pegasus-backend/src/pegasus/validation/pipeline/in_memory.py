@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -22,6 +23,8 @@ _HEADERLESS_ADAPTER_TYPES = frozenset({"FileDelimitedAdapter", "GcsDelimitedAdap
 from pegasus.validation.readers.clevercsv_io import clevercsv_to_polars, flat_file_to_polars
 from pegasus.validation.pipeline.fingerprint import filter_compare_columns
 from pegasus.validation.pipeline.result import ColumnDifference, MismatchSample, PipelineResult
+from pegasus.validation.pipeline.row_sanity import assert_reasonable_row_counts
+from pegasus.validation.pipeline.timing import PipelineIoStats, PipelineTimings, attach_stage_report
 from pegasus.validation.readers.pyarrow_io import (
     pyarrow_supports_delimiter,
     read_csv_binary,
@@ -33,6 +36,8 @@ from pegasus.validation.readers.pyarrow_io import (
 )
 
 _DEFAULT_AUTO_IN_MEMORY_MAX_BYTES = 64 * 1024 * 1024
+
+logger = logging.getLogger(__name__)
 
 
 def _canonical(value: Any) -> str:
@@ -67,6 +72,7 @@ def _should_use_in_memory(
     target: TabularSourceAdapter,
     *,
     memory_budget_bytes: int,
+    auto_in_memory_max_bytes: int = _DEFAULT_AUTO_IN_MEMORY_MAX_BYTES,
     max_file_bytes: int = 512 * 1024 * 1024,
 ) -> bool:
     source_bytes = _adapter_size_bytes(source)
@@ -74,6 +80,8 @@ def _should_use_in_memory(
     if source_bytes is None or target_bytes is None:
         return False
     file_bytes = source_bytes + target_bytes
+    if file_bytes <= auto_in_memory_max_bytes:
+        return True
     if file_bytes > max_file_bytes:
         return False
     return file_bytes * 4 < int(memory_budget_bytes * 0.65)
@@ -162,11 +170,13 @@ def _flat_parse_to_polars(
         return frame
     if hasattr(source, "seek"):
         source.seek(0)
+    path = getattr(source, "name", None)
     return flat_file_to_polars(
         source,
         delimiter=delimiter,
         has_header=has_header,
         skip_rows=skip_rows,
+        path=Path(path) if path else None,
     )
 
 
@@ -189,13 +199,23 @@ def _load_delimited_frame(
         )
         frame = _align_frame_to_schema(frame, adapter)
     else:
-        with open(adapter.path, "rb") as handle:
-            frame = _flat_parse_to_polars(
-                handle,
+        from pegasus.validation.readers.multichar_csv import can_use_fast_multichar_load, load_multichar_csv_fast
+
+        if can_use_fast_multichar_load(adapter.path, adapter._delimiter):
+            frame = load_multichar_csv_fast(
+                adapter.path,
                 delimiter=adapter._delimiter,
                 has_header=adapter._has_header,
                 skip_rows=adapter._skip_rows,
             )
+        else:
+            with open(adapter.path, "rb") as handle:
+                frame = _flat_parse_to_polars(
+                    handle,
+                    delimiter=adapter._delimiter,
+                    has_header=adapter._has_header,
+                    skip_rows=adapter._skip_rows,
+                )
         frame = _align_frame_to_schema(frame, adapter)
     if identity_columns is not None and compare_columns is not None:
         return _project_columns(frame, identity_columns=identity_columns, compare_columns=compare_columns)
@@ -209,60 +229,58 @@ def _load_gcs_delimited_frame(
     compare_columns: list[str] | None = None,
 ) -> pl.DataFrame:
     from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
-    from pegasus.validation.gcs_object import open_gcs_binary
 
     if not isinstance(adapter, GcsDelimitedAdapter):
         raise TypeError("expected GcsDelimitedAdapter")
 
-    column_names = _headerless_column_names(adapter)
-    size = adapter.get_size_bytes()
-    adapter.ensure_object_cached()
-    cached = adapter.cached_object_bytes()
-    if cached is not None and len(cached) >= size:
-        payload = cached[:size]
-        if pyarrow_supports_delimiter(adapter._delimiter):
-            frame = table_to_polars(
-                read_csv_bytes(
-                    payload,
-                    delimiter=adapter._delimiter,
-                    has_header=adapter._has_header,
-                    skip_rows=adapter._skip_rows,
-                    column_names=column_names,
-                )
-            )
-            frame = _align_frame_to_schema(frame, adapter)
-        else:
-            frame = _flat_parse_to_polars(
-                BytesIO(payload),
-                delimiter=adapter._delimiter,
-                has_header=adapter._has_header,
-                skip_rows=adapter._skip_rows,
-            )
-            frame = _align_frame_to_schema(frame, adapter)
-        if identity_columns is not None and compare_columns is not None:
-            return _project_columns(frame, identity_columns=identity_columns, compare_columns=compare_columns)
-        return frame
+    from pegasus.validation.gcs_stream import get_gcs_stream_session
 
-    with open_gcs_binary(adapter._ref) as handle:
-        if pyarrow_supports_delimiter(adapter._delimiter):
-            frame = table_to_polars(
-                read_csv_binary(
-                    handle,
-                    delimiter=adapter._delimiter,
-                    has_header=adapter._has_header,
-                    skip_rows=adapter._skip_rows,
-                    column_names=column_names,
-                )
-            )
-            frame = _align_frame_to_schema(frame, adapter)
-        else:
-            frame = _flat_parse_to_polars(
-                handle,
+    from io import BytesIO
+
+    from pegasus.validation.readers.multichar_csv import (
+        can_use_fast_multichar_load_bytes,
+        load_multichar_csv_fast,
+    )
+
+    column_names = _headerless_column_names(adapter)
+    adapter.warm_metadata()
+    session = get_gcs_stream_session(adapter._ref)
+    with session.open_binary() as handle:
+        data = handle.read()
+    session.store_cached_object_body(data)
+    stream = BytesIO(data)
+    if pyarrow_supports_delimiter(adapter._delimiter):
+        frame = table_to_polars(
+            read_csv_binary(
+                stream,
                 delimiter=adapter._delimiter,
                 has_header=adapter._has_header,
                 skip_rows=adapter._skip_rows,
+                column_names=column_names,
             )
-            frame = _align_frame_to_schema(frame, adapter)
+        )
+        frame = _align_frame_to_schema(frame, adapter)
+    elif can_use_fast_multichar_load_bytes(data, adapter._delimiter):
+        frame = load_multichar_csv_fast(
+            stream,
+            delimiter=adapter._delimiter,
+            has_header=adapter._has_header,
+            skip_rows=adapter._skip_rows,
+        )
+        frame = _align_frame_to_schema(frame, adapter)
+    else:
+        stream.seek(0)
+        frame = _flat_parse_to_polars(
+            stream,
+            delimiter=adapter._delimiter,
+            has_header=adapter._has_header,
+            skip_rows=adapter._skip_rows,
+        )
+        frame = _align_frame_to_schema(frame, adapter)
+    adapter._network_transfer_seconds = max(
+        adapter._network_transfer_seconds,
+        session.network_transfer_seconds,
+    )
     if identity_columns is not None and compare_columns is not None:
         return _project_columns(frame, identity_columns=identity_columns, compare_columns=compare_columns)
     return frame
@@ -318,10 +336,16 @@ def try_in_memory_reconcile(
     compare_columns: list[str],
     memory_budget_bytes: int,
     enable_column_drilldown: bool,
+    auto_in_memory_max_bytes: int = _DEFAULT_AUTO_IN_MEMORY_MAX_BYTES,
     sample_limit: int = 1000,
 ) -> PipelineResult | None:
     """Return a :class:`PipelineResult` when both sides fit in memory; else ``None``."""
-    if not _should_use_in_memory(source, target, memory_budget_bytes=memory_budget_bytes):
+    if not _should_use_in_memory(
+        source,
+        target,
+        memory_budget_bytes=memory_budget_bytes,
+        auto_in_memory_max_bytes=auto_in_memory_max_bytes,
+    ):
         return None
 
     t0 = time.perf_counter()
@@ -346,7 +370,16 @@ def try_in_memory_reconcile(
 
         compare_columns = filter_compare_columns(compare_columns, src.columns)
         if not compare_columns:
+            logger.warning("in_memory reconcile: no compare columns in loaded frame")
             return None
+
+        assert_reasonable_row_counts(
+            source,
+            target,
+            source_rows=src.height,
+            target_rows=tgt.height,
+            compare_column_count=len(compare_columns),
+        )
 
         src = src.with_columns(_fingerprint_expr(compare_columns).alias("_fp"))
         tgt = tgt.with_columns(_fingerprint_expr(compare_columns).alias("_fp"))
@@ -411,6 +444,13 @@ def try_in_memory_reconcile(
         _append_samples(changed_df, "changed", with_cols=enable_column_drilldown)
 
         elapsed = time.perf_counter() - t0
+        extra_stats: dict[str, Any] = {"path": "in_memory_polars"}
+        timings = PipelineTimings(total_seconds=elapsed, total_cpu_seconds=elapsed)
+        io = PipelineIoStats(
+            source_input_bytes=_adapter_size_bytes(source) or 0,
+            target_input_bytes=_adapter_size_bytes(target) or 0,
+        )
+        attach_stage_report(extra_stats, timings, io)
         return PipelineResult(
             schema_valid=True,
             source_row_count=src.height,
@@ -425,6 +465,12 @@ def try_in_memory_reconcile(
             sample_mismatches=samples,
             compared_columns=list(compare_columns),
             execution_seconds=elapsed,
+            extra_stats=extra_stats,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "in_memory reconcile failed (%s); falling back to spill",
+            exc,
+            exc_info=True,
+        )
         return None

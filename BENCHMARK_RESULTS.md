@@ -1,55 +1,53 @@
 # Benchmark Results
 
-**Date:** 2026-06-04  
+**Date:** 2026-06-04 (Phase 4)  
 **Machine:** 4-core Linux, Python 3.12
 
-## 100K × 8 columns (`generated-100k-8cols`, `||` delimiter, mismatch-heavy)
+## Phase 4 Summary
+
+| Change | Effect |
+|--------|--------|
+| Arrow IPC spill (ARW1) | Fingerprint-only blocks; faster serialize/decode |
+| Polars partition reconcile | Replaces per-partition Python `dict` merge |
+| Batch lazy drilldown | Payload lookup only for changed keys |
+| Column projection (spill read) | PyArrow `include_columns` on single-byte delimiters |
+
+## 100K × 12 columns (benchmark script, `\|` delimiter)
 
 | Configuration | Wall time | Rows/s | Path |
 |---------------|-----------|--------|------|
-| **After** — auto (default) | 1.70 s | 58,824 | `in_memory_polars` |
-| **After** — spill, no drilldown | 2.94 s | 34,014 | `spill_binary` |
-| **After Phase 1** — spill + drilldown | **6.95 s** (median of 3) | 14,388 | `spill_binary` |
-| **After Phase 2** — spill + drilldown | **~5.0 s** (median of 3) | ~20,000 | `spill_binary_lazy_drilldown` |
-| **Before** — spill + drilldown | 12.24 s | 8,170 | `spill_binary` |
-| User-reported (prior) | 16.9 s | 5,917 | Likely spill+drill + overhead |
-| User-reported (older) | 28.3 s | 3,534 | Pre binary-spill integration |
+| Auto | **0.50 s** | 199,774 | `in_memory_polars` |
+| Spill, no drilldown | **2.37 s** | 42,204 | `spill_arrow_ipc` |
+| Spill + drilldown | **1.11 s** | 90,364 | `spill_arrow_ipc` / lazy drilldown |
 
-## 100K × 12 columns (generated in benchmark script, `\|` delimiter)
+## 100K × 8 columns (`generated-100k-8cols`, `||`, mismatch-heavy)
 
-| Configuration | Wall time | Rows/s |
-|---------------|-----------|--------|
-| Auto | 0.72 s | 138,530 |
-| Spill | 3.79 s | 26,387 |
-| Spill + drilldown | ~21.6 s | 4,633 |
+| Configuration | Wall time | Rows/s | Path |
+|---------------|-----------|--------|------|
+| Auto | ~1.7–2.8 s | 35K–59K | `in_memory_polars` |
+| **Phase 4** spill + drilldown | **~3.0–3.5 s** | ~29K | `spill_arrow_ipc` |
+| Phase 2 spill + drilldown | ~5.0 s | ~20K | `spill_binary_lazy_drilldown` |
+| Phase 1 spill + drilldown | ~7.0 s | ~14K | `spill_columnar` |
+| Before optimization | 12.24 s | 8,170 | `spill_binary` |
 
-## ValidationService E2E (100K 8-col local)
+**Improvement (8-col mismatch spill+drill): ~12 s → ~3 s (~4×)**
 
-| Metric | Value |
-|--------|-------|
-| Wall time | 1.77 s |
-| Rows/s | 56,497 |
+## Regression gates (`pytest -m performance`)
 
-## GCS (mocked, cached, 100K 8-col)
-
-| Metric | Value |
-|--------|-------|
-| Downloads | 2 |
-| Wall time | 1.67 s |
-| Path | `in_memory_polars` |
+| Test | Threshold |
+|------|-----------|
+| 100K auto | < 3.0 s |
+| 100K spill (no drill) | < 8.0 s |
+| 100K spill + drill (8-col) | < 3.5 s |
 
 ## Artifacts
 
 - `docs/benchmarks/reconciliation-results.json`
-- `docs/benchmarks/profile-timings.json`
-- `docs/benchmarks/hash-benchmark.json`
-- `docs/benchmarks/profile-stats.pstats`
+- Architecture: `CURRENT_WORKFLOW.md`, `TARGET_WORKFLOW.md`, `ARCHITECTURE_DIFF.md`
 
 ## Commands
 
 ```bash
 PYTHONPATH=pegasus-backend/src python scripts/benchmark_reconciliation.py --sizes 100000
-PYTHONPATH=pegasus-backend/src python scripts/profile_pipeline.py \
-  --source test-data/generated-100k-8cols/source.csv \
-  --target test-data/generated-100k-8cols/target.csv
+cd pegasus-backend && PYTHONPATH=src python -m pytest tests/test_reconciliation_throughput.py -m performance -v
 ```

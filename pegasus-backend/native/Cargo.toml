@@ -1,0 +1,14 @@
+[package]
+name = "pegasus_native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "pegasus_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
+memmap2 = "0.9"
+memchr = "2"
+xxhash-rust = { version = "0.8", features = ["xxh64"] }

@@ -18,6 +18,19 @@ _pool: ProcessPoolExecutor | None = None
 _pool_workers: int = 0
 
 
+def _validation_pool_initializer() -> None:
+    """Import heavy deps once per pool worker (avoids 10–15s cold start per job)."""
+    import pyarrow  # noqa: F401
+    import polars  # noqa: F401
+
+    from pegasus.core.config import get_settings
+
+    get_settings()
+    from pegasus.validation import job_worker as _job_worker  # noqa: F401
+
+    _ = _job_worker
+
+
 def get_validation_pool(max_workers: int) -> ProcessPoolExecutor | None:
     """Return a shared pool sized to *max_workers*, or None if *max_workers* <= 0."""
     global _pool, _pool_workers
@@ -29,7 +42,11 @@ def get_validation_pool(max_workers: int) -> ProcessPoolExecutor | None:
         _pool.shutdown(wait=True, cancel_futures=False)
         _pool = None
     ctx = mp.get_context("spawn")
-    _pool = ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx)
+    _pool = ProcessPoolExecutor(
+        max_workers=max_workers,
+        mp_context=ctx,
+        initializer=_validation_pool_initializer,
+    )
     _pool_workers = max_workers
     logger.info("Started validation ProcessPoolExecutor max_workers=%d", max_workers)
     return _pool

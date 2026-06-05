@@ -56,6 +56,8 @@ def _run(source: Path, target: Path, *, force_spill: bool, drilldown: bool) -> d
         "rows": result.source_row_count,
         "path": result.extra_stats.get("path"),
         "timings": result.extra_stats.get("timings", {}),
+        "stages": result.extra_stats.get("stages", []),
+        "stage_report": result.extra_stats.get("stage_report", ""),
         "bytes": source.stat().st_size + target.stat().st_size,
     }
 
@@ -97,6 +99,9 @@ def main() -> int:
     args.output.write_text(stream.getvalue(), encoding="utf-8")
     args.json_output.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))
+    stage_report = summary.get("stage_report")
+    if stage_report:
+        print("\n" + stage_report)
     print(f"Wrote {args.output} and {prof_path}")
     return 0
 

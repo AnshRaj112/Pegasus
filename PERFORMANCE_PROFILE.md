@@ -15,37 +15,46 @@
 
 Historical: user reported **~28.3 s → ~16.9 s** before this pass (integration of binary spill + Polars). Combined with this pass: **~28.3 s → ~7 s** on spill+drill for the same workload class.
 
-## Stage Timings — In-Memory (`in_memory_polars`)
+## Stage Metrics — In-Memory (`in_memory_polars`)
 
-| Stage | Seconds | % |
-|-------|---------|---|
-| Source + target load (flat-file `||` parse) | ~1.3 | 75% |
-| Polars joins + fingerprint | ~0.4 | 25% |
-| **Total** | **~1.7** | 100% |
+Approximate rollup (100K `||` 8-col):
 
-## Stage Timings — Spill + Drilldown (post-fix, 3-run median)
+```
+Read Source:       Wall ~1.3 s   CPU ~1.2 s   Read ~12 MiB   Written 0
+Partition Source:  Wall ~0.0 s   CPU ~0.0 s   Read 0         Written 0
+Read Target:       Wall ~0.0 s   CPU ~0.0 s   Read ~8 MiB    Written 0
+Partition Target:  Wall ~0.0 s   CPU ~0.0 s   Read 0         Written 0
+Reconciliation:    Wall ~0.4 s   CPU ~0.4 s   Read 0         Written 0
+Report:            Wall ~0.0 s   CPU ~0.0 s   Read 0         Written 0
+Total:             Wall ~1.7 s   CPU ~1.6 s
+```
 
-| Stage | Seconds | % |
-|-------|---------|---|
-| Source read (`_load_frame`) | 1.49 | 22% |
-| Target read | 1.17 | 17% |
-| Serialization (binary spill encode) | 3.87 | 56% |
-| Disk read (reconcile) | 2.75 | 40% |
-| Partition reconciliation | 2.84 | 41% |
-| Column comparison | 0.06 | 1% |
-| **Total wall** | **~6.9** | 100% |
+## Stage Metrics — Spill + Drilldown (post-fix, 3-run median)
 
-*Read/partition stages overlap across 2 threads; percentages sum >100%.*
+```
+Read Source:       Wall 1.49 s   CPU ~1.4 s   Read ~12 MiB   Written 0
+Partition Source:  Wall ~2.4 s   CPU ~2.3 s   Read 0         Written ~1.7 MiB
+Read Target:       Wall 1.17 s   CPU ~1.1 s   Read ~8 MiB    Written 0
+Partition Target:  Wall ~2.7 s   CPU ~2.5 s   Read 0         Written ~1.2 MiB
+Reconciliation:    Wall 2.84 s   CPU ~2.5 s   Read ~2.9 MiB  Written 0
+Report:            Wall 0.00 s   CPU 0.00 s   Read 0         Written 0
+Total:             Wall ~6.9 s   CPU ~7 s
+```
 
-## Stage Timings — Spill, No Drilldown
+*Read/partition wall times overlap across two threads; Total wall is end-to-end.*
 
-| Stage | Seconds |
-|-------|---------|
-| Source read | 2.30 |
-| Target read | 1.73 |
-| Serialization | 2.32 |
-| Reconciliation | 1.89 |
-| **Total** | **~5.5** |
+## Stage Metrics — Spill, No Drilldown
+
+```
+Read Source:       Wall 2.30 s
+Partition Source:  Wall ~0.5 s (spill encode)
+Read Target:       Wall 1.73 s
+Partition Target:  Wall ~0.6 s
+Reconciliation:    Wall 1.89 s
+Total:             Wall ~5.5 s
+```
+
+Live metrics: `result.extra_stats["stage_report"]` or `pipeline_metadata.stage_report` on validation responses.
 
 ## Category Breakdown
 

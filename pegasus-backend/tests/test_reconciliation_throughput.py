@@ -73,7 +73,7 @@ def test_10k_local_throughput() -> None:
     total_bytes = src.stat().st_size + tgt.stat().st_size
     mbps = _mb_per_second(total_bytes, elapsed)
     assert rows == 10_000
-    assert path in ("in_memory_polars", "polars_direct", "spill_binary")
+    assert path in ("in_memory_polars", "polars_direct", "spill_binary", "spill_arrow_ipc")
     assert mbps >= 8.0 / _PERF_FACTOR, f"10k throughput {mbps:.2f} MB/s below floor (path={path})"
 
 
@@ -86,7 +86,7 @@ def test_100k_local_auto_path_under_ten_seconds() -> None:
 
     elapsed, path, rows = _run_pair(src, tgt, force_disk=False, drilldown=False)
     assert rows == 100_000
-    assert elapsed < 10.0 * _PERF_FACTOR, f"100k auto path took {elapsed:.2f}s (path={path})"
+    assert elapsed < 3.0 * _PERF_FACTOR, f"100k auto path took {elapsed:.2f}s (path={path})"
 
 
 @pytest.mark.performance
@@ -121,8 +121,9 @@ def test_100k_8col_spill_drilldown_under_eight_seconds() -> None:
         "spill_binary",
         "spill_columnar",
         "spill_binary_lazy_drilldown",
+        "spill_arrow_ipc",
     )
-    assert elapsed < 4.0 * _PERF_FACTOR, f"100k spill+drill took {elapsed:.2f}s"
+    assert elapsed < 3.5 * _PERF_FACTOR, f"100k spill+drill took {elapsed:.2f}s"
 
 
 @pytest.mark.performance
@@ -134,5 +135,10 @@ def test_100k_disk_spill_under_fifteen_seconds() -> None:
 
     elapsed, path, rows = _run_pair(src, tgt, force_disk=True, drilldown=False)
     assert rows == 100_000
-    assert path in ("spill_binary", "spill_columnar", "spill_binary_lazy_drilldown")
-    assert elapsed < 15.0 * _PERF_FACTOR, f"100k disk spill took {elapsed:.2f}s"
+    assert path in (
+        "spill_binary",
+        "spill_columnar",
+        "spill_binary_lazy_drilldown",
+        "spill_arrow_ipc",
+    )
+    assert elapsed < 8.0 * _PERF_FACTOR, f"100k disk spill took {elapsed:.2f}s"

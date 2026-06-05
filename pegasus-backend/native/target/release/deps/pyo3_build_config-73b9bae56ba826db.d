@@ -1,0 +1,14 @@
+/home/ansh.raj/Pegasus/pegasus-backend/native/target/release/deps/pyo3_build_config-73b9bae56ba826db.d: /home/ansh.raj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.23.5/src/lib.rs /home/ansh.raj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.23.5/src/errors.rs /home/ansh.raj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.23.5/src/impl_.rs /home/ansh.raj/Pegasus/pegasus-backend/native/target/release/build/pyo3-build-config-0ef9c6e3f49035ff/out/pyo3-build-config-file.txt /home/ansh.raj/Pegasus/pegasus-backend/native/target/release/build/pyo3-build-config-0ef9c6e3f49035ff/out/pyo3-build-config.txt
+
+/home/ansh.raj/Pegasus/pegasus-backend/native/target/release/deps/libpyo3_build_config-73b9bae56ba826db.rlib: /home/ansh.raj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.23.5/src/lib.rs /home/ansh.raj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.23.5/src/errors.rs /home/ansh.raj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.23.5/src/impl_.rs /home/ansh.raj/Pegasus/pegasus-backend/native/target/release/build/pyo3-build-config-0ef9c6e3f49035ff/out/pyo3-build-config-file.txt /home/ansh.raj/Pegasus/pegasus-backend/native/target/release/build/pyo3-build-config-0ef9c6e3f49035ff/out/pyo3-build-config.txt
+
+/home/ansh.raj/Pegasus/pegasus-backend/native/target/release/deps/libpyo3_build_config-73b9bae56ba826db.rmeta: /home/ansh.raj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.23.5/src/lib.rs /home/ansh.raj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.23.5/src/errors.rs /home/ansh.raj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.23.5/src/impl_.rs /home/ansh.raj/Pegasus/pegasus-backend/native/target/release/build/pyo3-build-config-0ef9c6e3f49035ff/out/pyo3-build-config-file.txt /home/ansh.raj/Pegasus/pegasus-backend/native/target/release/build/pyo3-build-config-0ef9c6e3f49035ff/out/pyo3-build-config.txt
+
+/home/ansh.raj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.23.5/src/lib.rs:
+/home/ansh.raj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.23.5/src/errors.rs:
+/home/ansh.raj/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.23.5/src/impl_.rs:
+/home/ansh.raj/Pegasus/pegasus-backend/native/target/release/build/pyo3-build-config-0ef9c6e3f49035ff/out/pyo3-build-config-file.txt:
+/home/ansh.raj/Pegasus/pegasus-backend/native/target/release/build/pyo3-build-config-0ef9c6e3f49035ff/out/pyo3-build-config.txt:
+
+# env-dep:CARGO_PKG_VERSION=0.23.5
+# env-dep:OUT_DIR=/home/ansh.raj/Pegasus/pegasus-backend/native/target/release/build/pyo3-build-config-0ef9c6e3f49035ff/out

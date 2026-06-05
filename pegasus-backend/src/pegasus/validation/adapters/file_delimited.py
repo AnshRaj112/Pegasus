@@ -42,6 +42,9 @@ class FileDelimitedAdapter:
     def get_size_bytes(self) -> int:
         return self.path.stat().st_size
 
+    def get_bytes_read(self) -> int:
+        return self.get_size_bytes()
+
     def _effective_delimiter(self, physical_line: str) -> str:
         delim = self._delimiter
         if delim == "xx" and "xx" not in physical_line and r"~\^|~" in physical_line:

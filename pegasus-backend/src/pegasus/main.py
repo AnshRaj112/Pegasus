@@ -36,9 +36,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     await log_database_connection_status()
 
+    settings = get_settings()
     # Start the concurrency-limited validation job queue drain loop
-    queue = get_validation_queue(get_settings())
+    queue = get_validation_queue(settings)
     queue.start_drain_loop()
+
+    pool_n = int(settings.validation_worker_pool_size or 0)
+    if pool_n > 0:
+        from pegasus.services.validation_worker_pool import get_validation_pool
+
+        get_validation_pool(pool_n)
+        logger.info("Validation worker pool warmed max_workers=%d", pool_n)
 
     yield
 

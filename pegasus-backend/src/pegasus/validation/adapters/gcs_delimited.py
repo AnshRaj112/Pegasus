@@ -3,7 +3,7 @@
 # Last edited: 2026-06-04T12:06:25+05:30
 # --- END GENERATED FILE METADATA ---
 
-"""Stream delimited objects from GCS without downloading the full file."""
+"""Stream delimited objects from GCS — no full-object download or local materialization."""
 
 from __future__ import annotations
 
@@ -18,62 +18,52 @@ from pegasus.validation.adapters.base import TabularColumn, TabularSchema
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
 from pegasus.validation.csv_header import synthetic_column_names
 from pegasus.validation.flat_file import split_line
-from pegasus.validation.gcs_object import (
-    GcsObjectRef,
-    gcs_blob_size,
-    open_gcs_binary,
-    read_gcs_object_bytes,
-    read_gcs_prefix,
-)
+from pegasus.validation.gcs_object import GcsObjectRef, gcs_blob_fingerprints
+from pegasus.validation.gcs_stream import GcsStreamSession, get_gcs_stream_session
 from pegasus.validation.readers.delimiter_detection import polars_supports_csv_delimiter
 from pegasus.validation.readers.pyarrow_io import batch_to_dicts, pyarrow_supports_delimiter
 
-_DEFAULT_MAX_CACHE_BYTES = 512 * 1024 * 1024
+_HEADER_PREFIX_BYTES = 256 * 1024
+_SAMPLE_PREFIX_BYTES = 512 * 1024
 
 
-def inherit_gcs_cache(
+def inherit_gcs_metadata(
     source: GcsDelimitedAdapter | None,
     target: GcsDelimitedAdapter,
 ) -> None:
-    """Copy downloaded bytes from *source* adapter onto *target* (e.g. after delimiter rebuild)."""
+    """Copy metadata and session stats when rebuilding an adapter (e.g. delimiter resolve)."""
     if source is None or source is target:
         return
-    if source._cached_full is not None:
-        target._cached_full = source._cached_full
-        target._cached_prefix = source._cached_prefix
-        target._digest_hex = source._digest_hex
-    elif source._cached_prefix is not None and (
-        target._cached_prefix is None or len(source._cached_prefix) > len(target._cached_prefix)
-    ):
-        target._cached_prefix = source._cached_prefix
     if source._size_bytes is not None:
         target._size_bytes = source._size_bytes
     target._crc32c = source._crc32c
     target._md5_hex = source._md5_hex
+    target._metadata_digest = source._metadata_digest
     target._network_transfer_seconds = max(
         target._network_transfer_seconds,
         source._network_transfer_seconds,
     )
+    if source._header_prefix is not None:
+        target._header_prefix = source._header_prefix
+    target._prefix_bytes_requested = max(
+        target._prefix_bytes_requested,
+        source._prefix_bytes_requested,
+    )
+    if source._column_names is not None:
+        target._column_names = list(source._column_names)
 
 
-def _digest_payload(payload: bytes) -> str:
-    try:
-        import xxhash
-
-        return xxhash.xxh64(payload).hexdigest()
-    except ImportError:
-        import hashlib
-
-        return hashlib.sha256(payload).hexdigest()
+# Backward-compatible alias
+inherit_gcs_cache = inherit_gcs_metadata
 
 
 def prefetch_gcs_delimited_pair(
     source: FileDelimitedAdapter | GcsDelimitedAdapter,
     target: FileDelimitedAdapter | GcsDelimitedAdapter,
     *,
-    max_cache_bytes: int = _DEFAULT_MAX_CACHE_BYTES,
+    max_cache_bytes: int = 0,  # noqa: ARG001 — kept for API compat; no full download
 ) -> None:
-    """Parallel one-shot download for GCS objects that fit in the cache budget."""
+    """Warm GCS metadata in parallel (no object body download)."""
     adapters: list[GcsDelimitedAdapter] = []
     for adapter in (source, target):
         if isinstance(adapter, GcsDelimitedAdapter):
@@ -83,7 +73,6 @@ def prefetch_gcs_delimited_pair(
 
     def _warm(adapter: GcsDelimitedAdapter) -> None:
         adapter.warm_metadata()
-        adapter.ensure_object_cached(max_cache_bytes=max_cache_bytes)
 
     if len(adapters) == 1:
         _warm(adapters[0])
@@ -94,7 +83,7 @@ def prefetch_gcs_delimited_pair(
 
 
 class GcsDelimitedAdapter:
-    """Streams a GCS object as delimited rows (chunked reads only)."""
+    """Streams a GCS object as delimited rows via PyArrow CSV or line iteration."""
 
     __slots__ = (
         "_ref",
@@ -104,12 +93,13 @@ class GcsDelimitedAdapter:
         "_encoding",
         "_column_names",
         "_size_bytes",
-        "_cached_prefix",
-        "_cached_full",
-        "_digest_hex",
+        "_header_prefix",
+        "_prefix_bytes_requested",
+        "_metadata_digest",
         "_crc32c",
         "_md5_hex",
         "_network_transfer_seconds",
+        "_session",
     )
 
     def __init__(
@@ -129,15 +119,28 @@ class GcsDelimitedAdapter:
         self._encoding = encoding
         self._column_names: list[str] | None = None
         self._size_bytes = size_bytes
-        self._cached_prefix: bytes | None = None
-        self._cached_full: bytes | None = None
-        self._digest_hex: str | None = None
+        self._header_prefix: bytes | None = None
+        self._prefix_bytes_requested: int = 0
+        self._metadata_digest: str | None = None
         self._crc32c: str | None = None
         self._md5_hex: str | None = None
         self._network_transfer_seconds: float = 0.0
+        self._session: GcsStreamSession | None = None
+
+    def _stream_session(self) -> GcsStreamSession:
+        if self._session is None:
+            self._session = get_gcs_stream_session(self._ref)
+        return self._session
+
+    def _sync_network_stats(self) -> None:
+        self._network_transfer_seconds = max(
+            self._network_transfer_seconds,
+            self._stream_session().network_transfer_seconds,
+        )
 
     @property
     def network_transfer_seconds(self) -> float:
+        self._sync_network_stats()
         return self._network_transfer_seconds
 
     @property
@@ -150,88 +153,70 @@ class GcsDelimitedAdapter:
 
     def get_size_bytes(self) -> int:
         if self._size_bytes is None:
-            self._size_bytes = gcs_blob_size(self._ref)
+            self._size_bytes = gcs_blob_fingerprints(self._ref)[0]
         return self._size_bytes
 
+    def get_bytes_read(self) -> int:
+        """Bytes consumed from GCS during streaming (falls back to object size)."""
+        self._sync_network_stats()
+        nbytes = self._stream_session().bytes_read
+        if nbytes > 0:
+            return nbytes
+        return self.get_size_bytes()
+
     def warm_metadata(self) -> None:
-        """Fetch GCS CRC32C/MD5 once when not already supplied by the caller."""
-        if self._crc32c is not None or self._md5_hex is not None:
-            return
-        if self._size_bytes is not None:
+        """Fetch size/CRC32C/MD5 from GCS metadata (no body read)."""
+        if self._crc32c is not None and self._md5_hex is not None and self._size_bytes is not None:
             return
         try:
-            from pegasus.validation.gcs_object import gcs_blob_fingerprints
-
             size, crc, md5 = gcs_blob_fingerprints(self._ref)
             if self._size_bytes is None:
                 self._size_bytes = size
             self._crc32c = crc
             self._md5_hex = md5
+            if md5:
+                self._metadata_digest = f"md5:{md5}"
+            elif crc:
+                self._metadata_digest = f"crc32c:{crc}"
         except Exception:
             pass
 
     def content_digest_hex(self) -> str | None:
-        return self._digest_hex
-
-    def ensure_object_cached(self, *, max_cache_bytes: int = _DEFAULT_MAX_CACHE_BYTES) -> bytes | None:
-        """Download the full object once when it fits *max_cache_bytes*."""
-        if self._cached_full is not None:
-            return self._cached_full
-        size = self.get_size_bytes()
-        if size <= 0 or size > max_cache_bytes:
-            return None
-        t0 = time.perf_counter()
-        payload = read_gcs_object_bytes(self._ref)
-        self._network_transfer_seconds += time.perf_counter() - t0
-        self._cached_full = payload
-        self._cached_prefix = payload
-        self._digest_hex = _digest_payload(payload)
-        return payload
-
-    def _load_prefix_bytes(self, *, max_bytes: int) -> bytes:
-        if self._cached_full is not None:
-            return self._cached_full[:max_bytes]
-        if self._cached_prefix is not None and len(self._cached_prefix) >= max_bytes:
-            return self._cached_prefix[:max_bytes]
-        size = self.get_size_bytes()
-        if size > 0 and size <= max_bytes:
-            full = self.ensure_object_cached(max_cache_bytes=size)
-            if full is not None:
-                return full
-        read_limit = min(max_bytes, size) if size > 0 else max_bytes
-        t0 = time.perf_counter()
-        payload = read_gcs_prefix(self._ref, max_bytes=read_limit)
-        self._network_transfer_seconds += time.perf_counter() - t0
-        if self._cached_prefix is None or len(payload) > len(self._cached_prefix):
-            self._cached_prefix = payload
-        return payload
+        """Metadata-based identity (GCS MD5/CRC32C), not a full-file hash."""
+        if self._metadata_digest is None:
+            self.warm_metadata()
+        return self._metadata_digest
 
     def cached_object_bytes(self) -> bytes | None:
-        """Return cached object bytes when the full blob is available locally."""
-        if self._cached_full is not None:
-            return self._cached_full
-        if self._cached_prefix is None:
-            return None
-        size = self.get_size_bytes()
-        if size > 0 and len(self._cached_prefix) >= size:
-            return self._cached_prefix
+        """Full-object cache is intentionally unavailable (streaming-only)."""
         return None
 
-    def sample_lines(self, *, max_lines: int = 500) -> list[str]:
+    def ensure_object_cached(self, *, max_cache_bytes: int = 0) -> None:
+        """No-op — retained for callers that previously prefetched full objects."""
+        self.warm_metadata()
+
+    def _ensure_prefix_bytes(self, limit: int) -> bytes:
+        """Single cached prefix fetch shared by header and delimiter sampling."""
         size = self.get_size_bytes()
-        if size > 0 and size <= _DEFAULT_MAX_CACHE_BYTES:
-            payload = self.ensure_object_cached(max_cache_bytes=_DEFAULT_MAX_CACHE_BYTES)
-            if payload is not None:
-                prefix = payload.decode(self._encoding, errors="replace")
-            else:
-                prefix = self._load_prefix_bytes(
-                    max_bytes=min(512 * 1024, size),
-                ).decode(self._encoding, errors="replace")
-        else:
-            max_bytes = min(512 * 1024, size) if size > 0 else 512 * 1024
-            prefix = self._load_prefix_bytes(max_bytes=max_bytes).decode(
-                self._encoding, errors="replace"
-            )
+        fetch = min(limit, size) if size > 0 else limit
+        if self._header_prefix is not None and self._prefix_bytes_requested >= fetch:
+            return self._header_prefix
+        t0 = time.perf_counter()
+        prefix = self._stream_session().read_prefix(max_bytes=fetch)
+        self._network_transfer_seconds += time.perf_counter() - t0
+        if self._header_prefix is None or len(prefix) > len(self._header_prefix):
+            self._header_prefix = prefix
+        self._prefix_bytes_requested = max(self._prefix_bytes_requested, fetch)
+        return self._header_prefix
+
+    def _load_header_prefix(self) -> bytes:
+        return self._ensure_prefix_bytes(_HEADER_PREFIX_BYTES)
+
+    def _load_sample_prefix(self) -> bytes:
+        return self._ensure_prefix_bytes(_SAMPLE_PREFIX_BYTES)
+
+    def sample_lines(self, *, max_lines: int = 500) -> list[str]:
+        prefix = self._load_sample_prefix().decode(self._encoding, errors="replace")
         out: list[str] = []
         for line in prefix.splitlines():
             stripped = line.strip()
@@ -260,21 +245,7 @@ class GcsDelimitedAdapter:
         return split_line(physical, delim)
 
     def _read_header_from_prefix(self) -> list[str]:
-        size = self.get_size_bytes()
-        if size > 0 and size <= _DEFAULT_MAX_CACHE_BYTES:
-            payload = self.ensure_object_cached(max_cache_bytes=_DEFAULT_MAX_CACHE_BYTES)
-            if payload is None:
-                max_bytes = min(256 * 1024, size)
-                prefix = self._load_prefix_bytes(max_bytes=max_bytes).decode(
-                    self._encoding, errors="replace"
-                )
-            else:
-                prefix = payload.decode(self._encoding, errors="replace")
-        else:
-            max_bytes = min(256 * 1024, size) if size > 0 else 256 * 1024
-            prefix = self._load_prefix_bytes(max_bytes=max_bytes).decode(
-                self._encoding, errors="replace"
-            )
+        prefix = self._load_header_prefix().decode(self._encoding, errors="replace")
         if self._has_header:
             if polars_supports_csv_delimiter(self._delimiter):
                 reader = csv.reader(
@@ -311,14 +282,7 @@ class GcsDelimitedAdapter:
         return self._column_names
 
     def _iter_data_rows(self) -> Iterator[list[str]]:
-        cached = self.cached_object_bytes()
-        if cached is not None:
-            text = io.BytesIO(cached)
-            wrapper = io.TextIOWrapper(text, encoding=self._encoding, errors="replace", newline="")
-            yield from self._iter_text_rows(wrapper)
-            return
-
-        with open_gcs_binary(self._ref) as handle:
+        with self._stream_session().open_binary() as handle:
             text = io.TextIOWrapper(handle, encoding=self._encoding, errors="replace", newline="")
             yield from self._iter_text_rows(text)
 
@@ -348,27 +312,9 @@ class GcsDelimitedAdapter:
             _csv_convert_options,
             _csv_parse_options,
             _csv_read_options,
-            read_csv_bytes,
         )
 
-        cached = self.cached_object_bytes()
-        if cached is not None:
-            table = read_csv_bytes(
-                cached,
-                delimiter=self._delimiter,
-                has_header=self._has_header,
-                skip_rows=self._skip_rows,
-            )
-            target = max(1, chunk_rows)
-            for batch in table.to_batches(max_chunksize=target):
-                if batch.num_rows == 0:
-                    continue
-                records = batch_to_dicts(batch)
-                if records:
-                    yield records
-            return
-
-        with open_gcs_binary(self._ref) as handle:
+        with self._stream_session().open_binary() as handle:
             reader = pacsv.open_csv(
                 handle,
                 read_options=_csv_read_options(has_header=self._has_header, skip_rows=self._skip_rows),
@@ -392,6 +338,7 @@ class GcsDelimitedAdapter:
                     if records:
                         yield records
                     offset += size
+        self._sync_network_stats()
 
     def get_schema(self) -> TabularSchema:
         names = self._read_header()

@@ -269,21 +269,80 @@ def build_validate_response(
     )
 
 
+def record_poll_lifecycle(
+    job_dir: Path,
+    *,
+    database_wall_seconds: float = 0.0,
+    response_build_wall_seconds: float = 0.0,
+) -> None:
+    """Stamp HTTP response epoch and API-side stages onto the worker lifecycle file."""
+    from pegasus.core.json_util import loads_str
+    from pegasus.validation.lifecycle_profiler import LifecycleProfiler
+
+    lifecycle_path = job_dir / "lifecycle_timings.json"
+    profiler = LifecycleProfiler(job_dir=job_dir)
+    if lifecycle_path.is_file():
+        try:
+            prior = loads_str(lifecycle_path.read_text(encoding="utf-8"))
+            raw_epochs = prior.get("epochs") if isinstance(prior, dict) else None
+            if isinstance(raw_epochs, dict):
+                for key in (
+                    "http_request_start_epoch_s",
+                    "job_enqueued_epoch_s",
+                    "worker_started_epoch_s",
+                    "validation_started_epoch_s",
+                    "worker_finished_epoch_s",
+                ):
+                    value = raw_epochs.get(key)
+                    if isinstance(value, (int, float)):
+                        setattr(profiler, key, float(value))
+            for raw_stage in list(prior.get("stages") or []) if isinstance(prior, dict) else []:
+                if not isinstance(raw_stage, dict):
+                    continue
+                name = str(raw_stage.get("name") or "")
+                if not name:
+                    continue
+                profiler.record(
+                    name,
+                    wall_seconds=float(raw_stage.get("wall_seconds") or 0),
+                    cpu_seconds=float(raw_stage.get("cpu_seconds") or 0),
+                    bytes_read=int(raw_stage.get("bytes_read") or 0),
+                    bytes_written=int(raw_stage.get("bytes_written") or 0),
+                    accumulate=False,
+                )
+        except (OSError, ValueError, TypeError):
+            pass
+    if database_wall_seconds > 0:
+        profiler.record("Database Updates", wall_seconds=database_wall_seconds, accumulate=False)
+    if response_build_wall_seconds > 0:
+        profiler.record(
+            "HTTP Response",
+            wall_seconds=response_build_wall_seconds,
+            accumulate=False,
+        )
+    profiler.mark_http_response()
+    profiler.write_artifacts()
+
+
 async def maybe_persist_completed_job(
     settings: Settings,
     *,
     run_id: uuid.UUID | None,
     run_result: ValidationRunResult,
     job_meta: dict[str, object] | None = None,
-) -> None:
+) -> float:
+    """Persist run results; return wall seconds spent in DB (0 when skipped)."""
     if not settings.enable_validation_persistence or run_id is None:
-        return
+        return 0.0
+    import time
+
+    t0 = time.perf_counter()
     mappings_raw = list((job_meta or {}).get("column_mappings") or [])
     column_mappings = [m for m in mappings_raw if isinstance(m, dict)]
     async with AsyncSessionLocal() as session:
         run = await ValidationRunRepository.get_run(session, run_id)
         if run is None or run.status != ValidationRunStatus.RUNNING:
-            return
+            return 0.0
         await ValidationRunRepository.complete_success(
             session,
             run_id,
@@ -291,3 +350,4 @@ async def maybe_persist_completed_job(
             column_mappings=column_mappings or None,
         )
         await session.commit()
+    return time.perf_counter() - t0

@@ -23,11 +23,15 @@
 
 ## Where Time Goes (100K mismatch, spill+drill)
 
+See `stage_report` from the pipeline (seconds and bytes, no percentages). Typical rollup:
+
 ```
-Read/parse     ████████████░░░░░░░░  39%
-Serialize spill ██████████████████░░  56%
-Reconcile      ████████████░░░░░░░░  41%  (overlaps read)
-Column diff    ░░░░░░░░░░░░░░░░░░░░   1%
+Read Source:       ~1.5 s wall
+Partition Source:  ~2.4 s wall (includes spill encode)
+Read Target:       ~1.2 s wall
+Partition Target:  ~2.7 s wall
+Reconciliation:    ~2.8 s wall
+Total:             ~6.9 s wall
 ```
 
 ## Expected Improvements (next changes)

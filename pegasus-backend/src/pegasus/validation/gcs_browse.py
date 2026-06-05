@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from pegasus.validation.file_pairing import extensions_for_format
 
@@ -195,6 +196,16 @@ def download_gcs_objects(
         safe_name = name.replace("/", "__")
         dest = dest_dir / safe_name
         blob = bucket_ref.blob(name)
-        blob.download_to_filename(str(dest))
+        _stream_blob_to_path(blob, dest)
         local_paths.append(dest.resolve())
+
+
+def _stream_blob_to_path(blob: Any, dest: Path, *, chunk_bytes: int = 256 * 1024) -> None:
+    """Write object to *dest* via chunked streaming (no download_to_filename)."""
+    with blob.open("rb") as src, open(dest, "wb") as out:
+        while True:
+            block = src.read(chunk_bytes)
+            if not block:
+                break
+            out.write(block)
     return local_paths

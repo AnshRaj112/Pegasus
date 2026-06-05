@@ -1,49 +1,28 @@
 # Hash Benchmarks
 
-**Date:** 2026-06-04  
-**Harness:** `scripts/benchmark_hash_algorithms.py`  
-**Raw results:** `docs/benchmarks/hash-benchmark.json`
-
-## Methodology
-
-- 7 compare columns, synthetic string values joined with `\x1f`
-- 5 iterations, mean throughput reported
-- Pegasus path uses `row_fingerprint_bytes` (canonical + join + xxhash)
+**Script:** `scripts/benchmark_hash_algorithms.py`  
+**Workload:** 100,000 rows × 7 columns, 5 iterations, join key materialized as strings.
 
 ## Results (hashes per second, higher is better)
 
-| Algorithm | Hashes/s | Digest | Notes |
-|-----------|----------|--------|-------|
-| **xxhash128** | 3,748,528 | 8 bytes (truncated) | Fastest in micro-benchmark |
-| **xxhash64** | 2,800,224 | 8 bytes | **Production default** |
-| crc64 (zlib composite) | 2,315,121 | 8 bytes | Acceptable |
-| sha1 | 2,268,014 | 8 bytes (truncated) | Faster than SHA256, weaker |
-| sha256 | 1,146,676 | 32 bytes | 2.4× slower than xxhash64 |
-| pegasus_xxhash64 | 960,720 | 8 bytes | Includes per-column `canonical()` |
+| Algorithm | Hashes/sec | Digest | Collision risk | Verdict |
+|-----------|------------|--------|----------------|---------|
+| **xxhash128** | **3,672,999** | 16 B | Low for fingerprint | Fastest raw |
+| **xxhash64** | **2,834,238** | 8 B | Low for fingerprint | **Production default** |
+| sha1 (trunc 8B) | 2,176,617 | 8 B | Higher | Legacy |
+| crc64 | 1,194,376 | 8 B | Higher | Weak |
+| pegasus `row_fingerprint_bytes` (xxhash64) | 978,173 | 8 B | Low | Canonicalization overhead |
+| sha256 | 393,192 | 32 B | Lowest | Too slow |
 
-## Production Usage
+## Production Choice
 
-| Path | Hash function |
-|------|---------------|
-| Polars in-memory / spill | Polars `Expr.hash()` on canonicalized `concat_str` |
-| Python streaming fallback | `xxhash64` via `row_fingerprint_from_parts` |
-| Partition ID | `xxhash64(identity) % N` (was MD5) |
+- **Keep `xxhash64`** via Polars `Expr.hash()` on concatenated canonical compare columns (in-memory and spill).
+- **Do not** per-row call Python `row_fingerprint_from_parts` on hot paths (streaming fallback only).
 
-## Recommendation
+## Reconciliation alignment
 
-**Keep `xxhash64`** for Python fallback fingerprints. Polars vectorized `hash()` already matches this class.
+Mismatch detection uses **equality of 64-bit fingerprints**, not cryptographic proof. xxhash64 is acceptable; upgrade to xxhash128 only if fingerprint collisions become observable (none in test suites).
 
-- **Do not** revert to SHA256 for hot paths — proven ~2.4× slower with no reconciliation benefit at 100K–100M row scale.
-- **xxhash128** is faster in isolation but provides no material gain when Polars hashing dominates; 64-bit collision risk is acceptable for equality screening (re-run with column drilldown on mismatch).
-- **BLAKE3 / MurmurHash3**: not in default deps; optional if xxhash unavailable.
+## Rows/sec (fingerprint only, synthetic)
 
-## Rows/sec equivalence (7 columns)
-
-At 2.8M hashes/s (xxhash64 join benchmark), fingerprint-only throughput ≈ **400K rows/s** — not the limiting factor when parsing/serialization dominate.
-
-## Re-run
-
-```bash
-PYTHONPATH=pegasus-backend/src python scripts/benchmark_hash_algorithms.py \
-  --rows 200000 --columns 7
-```
+~3M hashes/sec (xxhash128) → at 7 columns × 100K rows, fingerprint stage &lt;40 ms when vectorized in Polars.
