@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: github-actions[bot]
-# Last edited: 2026-06-04T06:59:09Z
+# Last edited: 2026-06-04T07:38:07Z
 # --- END GENERATED FILE METADATA ---
 
 """Add row_detail JSON column to mismatch_reports.
