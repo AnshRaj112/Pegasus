@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "pegasus-backend/**/*.py"
+      - "pegasus-backend/native/src/**/*.rs"
       - "scripts/sync_backend_file_metadata.py"
   workflow_dispatch:
 

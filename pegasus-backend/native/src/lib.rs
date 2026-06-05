@@ -1,5 +1,10 @@
 //! Fast multichar delimiter line splitting with inline canonicalize → hash → partition → spill.
 
+// --- BEGIN GENERATED FILE METADATA ---
+// Authors: Ansh Raj
+// Last edited: 2026-06-05T14:54:26+05:30
+// --- END GENERATED FILE METADATA ---
+
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Write};
