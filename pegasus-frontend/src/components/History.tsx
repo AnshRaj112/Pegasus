@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Button, Card, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd'
 import {
   basename,
   fetchValidationHistory,
@@ -60,50 +61,17 @@ function DeleteButton({ onClick, title }) {
 function ConfirmationModal({ isOpen, title, message, onConfirm, onCancel }) {
   if (!isOpen) return null
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0,0,0,0.3)',
-      backdropFilter: 'blur(3px)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 9999,
-      animation: 'fade-in 0.12s ease-out',
-    }}>
-      <div style={{
-        background: 'var(--surface-3)',
-        border: '1px solid var(--border-1)',
-        borderRadius: '12px',
-        padding: '20px',
-        maxWidth: '400px',
-        width: '90%',
-        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
-      }}>
-        <h4 style={{ margin: '0 0 8px', fontSize: '15px', color: 'var(--text-1)', fontWeight: 600 }}>{title}</h4>
-        <p style={{ margin: '0 0 20px', fontSize: '13px', color: 'var(--text-2)', lineHeight: '1.5' }}>{message}</p>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
-          <button type="button" className="btn" style={{ background: 'var(--danger)', color: '#fff', fontWeight: 600 }} onClick={onConfirm}>Delete</button>
-        </div>
-      </div>
-    </div>
+    <Modal open centered onCancel={onCancel} onOk={onConfirm} okText="Delete" okButtonProps={{ danger: true }} cancelText="Cancel" title={title}>
+      <Typography.Paragraph style={{ marginBottom: 0 }}>{message}</Typography.Paragraph>
+    </Modal>
   )
 }
 
 function TabButton({ active, onClick, children }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={active ? 'px-4 py-2 rounded-xl bg-slate-900 text-white' : 'px-4 py-2 rounded-xl bg-white border'}
-      style={{ border: '1px solid var(--border-1)', cursor: 'pointer' }}
-    >
+    <Button type={active ? 'primary' : 'default'} onClick={onClick} style={{ borderRadius: 12 }}>
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -149,15 +117,11 @@ function PaginationControls({
       </p>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button type="button" className="btn btn-secondary" onClick={onPrevious} disabled={page <= 1}>
-            Previous
-          </button>
-          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          <Button onClick={onPrevious} disabled={page <= 1}>Previous</Button>
+          <Typography.Text style={{ fontSize: 12, color: 'var(--text-3)' }}>
             Page {page} of {pageCount}
-          </span>
-          <button type="button" className="btn btn-secondary" onClick={onNext} disabled={page >= pageCount}>
-            Next
-          </button>
+          </Typography.Text>
+          <Button onClick={onNext} disabled={page >= pageCount}>Next</Button>
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-3)' }}>
           Go to
@@ -196,10 +160,10 @@ function PaginationControls({
 
 function FileDetailTile({ label, value }) {
   return (
-    <div className="rounded-2xl bg-white/70 p-3 ring-1 ring-black/5">
-      <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">{label}</p>
-      <p className="mt-2 break-words text-sm font-medium text-slate-900">{value || '—'}</p>
-    </div>
+    <Card size="small" style={{ borderRadius: 16, background: 'rgba(255,255,255,0.7)' }} styles={{ body: { padding: 12 } }}>
+      <Typography.Text style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#64748B' }}>{label}</Typography.Text>
+      <Typography.Paragraph style={{ marginBottom: 0, marginTop: 8, wordBreak: 'break-word', fontWeight: 500, color: '#0F172A' }}>{value || '—'}</Typography.Paragraph>
+    </Card>
   )
 }
 
@@ -390,23 +354,11 @@ function resolveMappingHistoryResume(detail, preview, previewError) {
 function StatusBadge({ isMatch, status }) {
   if (status && status !== 'completed') {
     return (
-      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: 'var(--surface-3)', color: 'var(--text-3)' }}>
-        {status}
-      </span>
+      <Tag>{status}</Tag>
     )
   }
   return (
-    <span
-      style={{
-        fontSize: 11,
-        padding: '2px 8px',
-        borderRadius: 999,
-        background: isMatch ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.12)',
-        color: isMatch ? 'var(--success)' : 'var(--danger)',
-      }}
-    >
-      {isMatch ? 'Match' : 'Mismatches'}
-    </span>
+    <Tag color={isMatch ? 'green' : 'red'}>{isMatch ? 'Match' : 'Mismatches'}</Tag>
   )
 }
 
@@ -455,7 +407,7 @@ function RunDetailPanel({ runId, onClose }) {
             {basename(detail.source_path || detail.source_filename)} → {basename(detail.target_path || detail.target_filename)}
           </p>
         </div>
-        <button type="button" className="btn btn-secondary" onClick={onClose}>Close</button>
+        <Button onClick={onClose}>Close</Button>
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 12, fontSize: 13 }}>
@@ -789,14 +741,7 @@ export default function History({ onLoadMapping }) {
               </p>
             </div>
             {mappingPairs.length ? (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)', background: 'var(--danger-muted)', height: 32, padding: '0 10px', fontSize: 12, fontWeight: 500 }}
-                onClick={() => handleClearAll('mapping')}
-              >
-                Clear all mappings
-              </button>
+              <Button danger onClick={() => handleClearAll('mapping')}>Clear all mappings</Button>
             ) : null}
           </div>
           {error ? <p style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</p> : null}
@@ -806,32 +751,19 @@ export default function History({ onLoadMapping }) {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {paginatedMappingPairs.map((row) => (
-                <div
+                <Card
                   key={row.run_id}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { handleMappingClick(row) } }}
-                  style={{
-                    padding: 12,
-                    cursor: loadingMappingId ? 'wait' : 'pointer',
-                    borderRadius: 8,
-                    border: '1px solid var(--border-1)',
-                    opacity: loadingMappingId === row.run_id ? 0.7 : 1,
-                    pointerEvents: loadingMappingId ? 'none' : 'auto',
-                    transition: 'all 0.15s ease'
-                  }}
+                  hoverable={!loadingMappingId}
                   onClick={() => handleMappingClick(row)}
+                  style={{ opacity: loadingMappingId === row.run_id ? 0.7 : 1, cursor: loadingMappingId ? 'wait' : 'pointer' }}
+                  styles={{ body: { padding: 16 } }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
                     <span style={{ fontSize: 13, color: 'var(--text-1)', fontWeight: 500 }}>
                       Mapping pair
                     </span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      {loadingMappingId === row.run_id ? (
-                        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Loading…</span>
-                      ) : (
-                        <StatusBadge isMatch={row.is_match} status={row.status} />
-                      )}
+                      {loadingMappingId === row.run_id ? <Typography.Text type="secondary">Loading…</Typography.Text> : <StatusBadge isMatch={row.is_match} status={row.status} />}
                       <DeleteButton title="Delete mapping history" onClick={() => handleDeleteMapping(row)} />
                     </div>
                   </div>
@@ -842,16 +774,16 @@ export default function History({ onLoadMapping }) {
                     <FileDetailTile label="Target file name" value={basename(row.target_path || row.target_filename)} />
                     <FileDetailTile label="Target file path" value={row.target_path || row.target_filename} />
                   </div>
-                  <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--text-3)' }}>
+                  <Typography.Paragraph style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--text-3)' }}>
                     {row.delimiter === 'fixed-width' || row.delimiter === 'fixed' ? (
-                      <span style={{ color: 'var(--blue, #3b82f6)', fontWeight: 500 }}>Fixed-Width Date validation</span>
+                      <Typography.Text style={{ color: 'var(--blue, #3b82f6)', fontWeight: 500 }}>Fixed-Width Date validation</Typography.Text>
                     ) : (
                       <>
                         {row.mapping_count} mapping(s) · UID <code>{row.uid_column}</code>
                       </>
                     )}
-                  </p>
-                </div>
+                  </Typography.Paragraph>
+                </Card>
               ))}
             </div>
           )}
@@ -877,41 +809,34 @@ export default function History({ onLoadMapping }) {
               </p>
             </div>
             {validationRows.length ? (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)', background: 'var(--danger-muted)', height: 32, padding: '0 10px', fontSize: 12, fontWeight: 500 }}
-                onClick={() => handleClearAll('validation')}
-              >
-                Clear all history
-              </button>
+              <Button danger onClick={() => handleClearAll('validation')}>Clear all history</Button>
             ) : null}
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, alignItems: 'flex-end' }}>
             <label style={{ fontSize: 12, color: 'var(--text-3)' }}>
               Source path
-              <input
+              <Input
                 type="text"
                 value={pairFilter.source}
                 onChange={(e) => setPairFilter((p) => ({ ...p, source: e.target.value }))}
                 placeholder="/path/to/source.csv"
-                style={{ display: 'block', marginTop: 4, minWidth: 220, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border-1)' }}
+                style={{ display: 'block', marginTop: 4, minWidth: 220 }}
               />
             </label>
             <label style={{ fontSize: 12, color: 'var(--text-3)' }}>
               Target path
-              <input
+              <Input
                 type="text"
                 value={pairFilter.target}
                 onChange={(e) => setPairFilter((p) => ({ ...p, target: e.target.value }))}
                 placeholder="/path/to/target.csv"
-                style={{ display: 'block', marginTop: 4, minWidth: 220, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border-1)' }}
+                style={{ display: 'block', marginTop: 4, minWidth: 220 }}
               />
             </label>
-            <button type="button" className="btn btn-secondary" onClick={handleApplyValidationFilter} disabled={validationLoading}>
+            <Button onClick={handleApplyValidationFilter} disabled={validationLoading}>
               {validationLoading ? 'Loading…' : 'Apply filter'}
-            </button>
+            </Button>
           </div>
 
           {error ? <p style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</p> : null}
@@ -922,87 +847,24 @@ export default function History({ onLoadMapping }) {
 
           {validationRows.length ? (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ textAlign: 'left', color: 'var(--text-3)', borderBottom: '1px solid var(--border-1)' }}>
-                    <th style={{ padding: '8px' }}>When</th>
-                    <th style={{ padding: '8px' }}>Source file</th>
-                    <th style={{ padding: '8px' }}>Target file</th>
-                    <th style={{ padding: '8px' }}>Mappings</th>
-                    <th style={{ padding: '8px' }}>Duration</th>
-                    <th style={{ padding: '8px' }}>Result</th>
-                    <th style={{ padding: '8px', textAlign: 'right' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {validationRows.map((row) => (
-                    <tr
-                      key={row.run_id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => handleOpenValidationReport(row)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            handleOpenValidationReport(row)
-                          }
-                        }}
-                        style={{ borderTop: '1px solid var(--border-1)', cursor: openingRunId === row.run_id ? 'wait' : 'pointer' }}
-                    >
-                      <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
-                        {row.completed_at ? new Date(row.completed_at).toLocaleString() : new Date(row.created_at).toLocaleString()}
-                      </td>
-                      <td style={{ padding: '8px' }}>
-                        <div style={{ minWidth: 220 }}>
-                          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-1)' }}>
-                            {basename(row.source_path || row.source_filename)}
-                          </div>
-                          <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-2)', wordBreak: 'break-word' }}>
-                            {row.source_path || row.source_filename}
-                          </div>
-                        </div>
-                      </td>
-                      <td style={{ padding: '8px' }}>
-                        <div style={{ minWidth: 220 }}>
-                          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-1)' }}>
-                            {basename(row.target_path || row.target_filename)}
-                          </div>
-                          <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-2)', wordBreak: 'break-word' }}>
-                            {row.target_path || row.target_filename}
-                          </div>
-                        </div>
-                        {(row.delimiter === 'fixed-width' || row.delimiter === 'fixed') && (
-                          <span style={{ display: 'block', fontSize: 10, color: 'var(--blue, #3b82f6)', fontWeight: 600, marginTop: 2 }}>
-                            Fixed-Width Format
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ padding: '8px' }}>
-                        {row.delimiter === 'fixed-width' || row.delimiter === 'fixed' ? 'Date slice' : row.mapping_count}
-                      </td>
-                      <td style={{ padding: '8px' }}>{formatDuration(row.durations?.validation_seconds ?? row.durations?.total_seconds)}</td>
-                      <td style={{ padding: '8px' }}><StatusBadge isMatch={row.is_match} status={row.status} /></td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleOpenValidationReport(row)
-                            }}
-                            disabled={openingRunId === row.run_id}
-                            style={{ height: 30, padding: '0 10px', fontSize: 12, fontWeight: 500 }}
-                          >
-                            View report
-                          </button>
-                          <DeleteButton title="Delete validation run" onClick={() => handleDeleteRun(row)} />
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <Table
+                rowKey="run_id"
+                pagination={false}
+                dataSource={validationRows}
+                columns={[
+                  { title: 'When', dataIndex: 'created_at', render: (_, row) => row.completed_at ? new Date(row.completed_at).toLocaleString() : new Date(row.created_at).toLocaleString() },
+                  { title: 'Source file', render: (_, row) => <div><div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-1)' }}>{basename(row.source_path || row.source_filename)}</div><div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-2)', wordBreak: 'break-word' }}>{row.source_path || row.source_filename}</div></div> },
+                  { title: 'Target file', render: (_, row) => <div><div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-1)' }}>{basename(row.target_path || row.target_filename)}</div><div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-2)', wordBreak: 'break-word' }}>{row.target_path || row.target_filename}</div>{(row.delimiter === 'fixed-width' || row.delimiter === 'fixed') && <div style={{ fontSize: 10, color: 'var(--blue, #3b82f6)', fontWeight: 600, marginTop: 2 }}>Fixed-Width Format</div>}</div> },
+                  { title: 'Mappings', render: (_, row) => row.delimiter === 'fixed-width' || row.delimiter === 'fixed' ? 'Date slice' : row.mapping_count },
+                  { title: 'Duration', render: (_, row) => formatDuration(row.durations?.validation_seconds ?? row.durations?.total_seconds) },
+                  { title: 'Result', render: (_, row) => <StatusBadge isMatch={row.is_match} status={row.status} /> },
+                  { title: 'Actions', align: 'right', render: (_, row) => <Space><Button onClick={(e) => { e.stopPropagation(); handleOpenValidationReport(row) }} disabled={openingRunId === row.run_id}>View report</Button><DeleteButton title="Delete validation run" onClick={() => handleDeleteRun(row)} /></Space> },
+                ]}
+                onRow={(row) => ({
+                  onClick: () => handleOpenValidationReport(row),
+                  style: { cursor: openingRunId === row.run_id ? 'wait' : 'pointer' },
+                })}
+              />
               <PaginationControls
                 page={safeValidationPage}
                 pageCount={validationPageCount}

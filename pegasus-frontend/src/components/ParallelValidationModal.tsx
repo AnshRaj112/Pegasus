@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { Button, Modal, Space, Typography } from 'antd'
 import ParallelValidationResourceForm from './ParallelValidationResourceForm'
 
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
@@ -23,8 +23,8 @@ function formatDetail(detail) {
   return JSON.stringify(detail)
 }
 
-export default function ParallelValidationModal({ open, onClose, onConfirm }) {
-  const [queueInfo, setQueueInfo] = useState(null)
+export default function ParallelValidationModal({ open, onClose, onConfirm }: any) {
+  const [queueInfo, setQueueInfo] = useState<any>(null)
   const [concurrencySlider, setConcurrencySlider] = useState(2)
   const [autoTuneEnabled, setAutoTuneEnabled] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -86,80 +86,18 @@ export default function ParallelValidationModal({ open, onClose, onConfirm }) {
 
   if (!open) return null
 
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="parallel-validation-title"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 200,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-      }}
+  return (
+    <Modal
+      open
+      onCancel={onClose}
+      centered
+      width={960}
+      footer={null}
+      title={<Typography.Title level={3} style={{ margin: 0 }}>Review resources before running</Typography.Title>}
+      styles={{ body: { maxHeight: '90vh', overflow: 'auto' } }}
     >
-      <button
-        type="button"
-        aria-label="Close backdrop"
-        onClick={onClose}
-        disabled={loading}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          border: 'none',
-          background: 'rgba(0, 0, 0, 0.72)',
-          cursor: loading ? 'not-allowed' : 'pointer',
-        }}
-      />
-      <div
-        style={{
-          position: 'relative',
-          width: 'min(960px, 100%)',
-          maxHeight: 'min(90vh, 900px)',
-          overflow: 'auto',
-          borderRadius: 16,
-          border: '1px solid var(--border-2)',
-          background: 'var(--surface-1)',
-          boxShadow: '0 24px 80px rgba(0, 0, 0, 0.55)',
-          padding: '28px 28px 24px',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={loading}
-          aria-label="Close dialog"
-          style={{
-            position: 'absolute',
-            top: 16,
-            right: 16,
-            width: 32,
-            height: 32,
-            border: 'none',
-            borderRadius: 8,
-            background: 'var(--surface-3)',
-            color: 'var(--text-2)',
-            fontSize: 20,
-            lineHeight: 1,
-            cursor: loading ? 'not-allowed' : 'pointer',
-          }}
-        >
-          ×
-        </button>
-
-        <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 6 }}>
-          Parallel validation
-        </p>
-        <h2 id="parallel-validation-title" style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.03em', marginBottom: 8 }}>
-          Review resources before running
-        </h2>
-        <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 20, maxWidth: 720 }}>
-          Set max parallel jobs and auto-tune before starting validation.
-        </p>
+      <Space direction="vertical" size={20} style={{ width: '100%' }}>
+        <Typography.Text type="secondary">Set max parallel jobs and auto-tune before starting validation.</Typography.Text>
 
         <ParallelValidationResourceForm
           queueInfo={queueInfo}
@@ -174,18 +112,17 @@ export default function ParallelValidationModal({ open, onClose, onConfirm }) {
           theme="light"
         />
 
-        {applyError ? <p style={{ fontSize: 12, color: 'var(--danger)', marginTop: 16 }}>{applyError}</p> : null}
+        {applyError ? <Typography.Text type="danger">{applyError}</Typography.Text> : null}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-1)' }}>
-          <button type="button" className="btn btn-primary btn-lg" disabled={loading || queueLoading} onClick={handleConfirm}>
-            {loading ? 'Starting…' : 'Run validation'}
-          </button>
-          <button type="button" className="btn btn-secondary" disabled={loading} onClick={onClose}>
+        <Space>
+          <Button type="primary" size="large" loading={loading} disabled={queueLoading} onClick={handleConfirm}>
+            Run validation
+          </Button>
+          <Button disabled={loading} onClick={onClose}>
             Cancel
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+          </Button>
+        </Space>
+      </Space>
+    </Modal>
   )
 }

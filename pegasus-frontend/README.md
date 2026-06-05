@@ -71,10 +71,10 @@ npm run lint
 pegasus-frontend/
 ├── src/
 │   ├── components/         # Reusable React components
-│   │   ├── ValidationPanel.jsx
-│   │   └── MismatchSampleRows.jsx
-│   ├── App.jsx            # Main application component
-│   ├── main.jsx           # Application entry point
+│   │   ├── ValidationPanel.tsx
+│   │   └── MismatchSampleRows.tsx
+│   ├── App.tsx            # Main application component
+│   ├── main.tsx           # Application entry point
 │   ├── App.css            # Application styles
 │   └── index.css          # Global styles
 ├── public/                # Static assets

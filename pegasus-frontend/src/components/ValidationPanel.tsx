@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Modal } from 'antd'
+import { Alert, Button, Card, Col, Divider, Input, Modal, Row, Select, Space, Statistic, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import LocalPathBrowser from './LocalPathBrowser'
 import ParallelValidationResourceForm from './ParallelValidationResourceForm'
@@ -79,11 +79,7 @@ function formatPercent(n) {
 }
 
 function jobRunningCopy(phase, jobId) {
-  const idLine = jobId ? (
-    <span className="mt-2 block text-sm text-slate-600">
-      Job id: <code>{jobId}</code>
-    </span>
-  ) : null
+  const idLine = jobId ? <Typography.Paragraph style={{ marginTop: 8, marginBottom: 0, color: '#475569' }}>Job id: <Typography.Text code>{jobId}</Typography.Text></Typography.Paragraph> : null
 
   switch (phase) {
     case 'upload':
@@ -305,27 +301,28 @@ export function ValidationPanel() {
   }
 
   return (
-    <div className="space-y-8">
-      <section className="rounded-2xl border border-[#F1F1F1] border-l-4 border-l-[#EB4C4C] bg-white p-6 shadow-[0_12px_40px_rgba(235,76,76,0.10)] sm:p-8">
-        <p className="mb-5 text-center text-sm font-medium text-slate-600 sm:text-base">
+    <Space direction="vertical" size={24} style={{ width: '100%' }}>
+      <Card style={{ borderRadius: 24, borderColor: '#F1F1F1', boxShadow: '0 12px 40px rgba(235,76,76,0.10)' }} styles={{ body: { padding: 24 } }}>
+        <Typography.Paragraph style={{ marginBottom: 20, textAlign: 'center', color: '#475569' }}>
           Select source and target files on the server to run comparison.
-        </p>
+        </Typography.Paragraph>
 
-        <form className="space-y-6" onSubmit={handleOpenParallelValidation}>
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-slate-700">File format</span>
-            <select
+        <Space direction="vertical" size={20} style={{ width: '100%' }}>
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Typography.Text strong>File format</Typography.Text>
+            <Select
               value={fileFormat}
               disabled={running}
-              onChange={(ev) => setFileFormat(ev.target.value)}
-              className="w-full max-w-xs rounded-lg border border-[#F1F1F1] bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <option value="csv">CSV / delimited</option>
-              <option value="json">JSON document</option>
-            </select>
-          </label>
+              onChange={(value) => setFileFormat(value)}
+              style={{ width: 240 }}
+              options={[
+                { value: 'csv', label: 'CSV / delimited' },
+                { value: 'json', label: 'JSON document' },
+              ]}
+            />
+          </Space>
 
-          <div className="space-y-4">
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <LocalPathBrowser
               label={fileFormat === 'json' ? 'Source JSON (expected)' : 'Source CSV (expected)'}
               value={sourcePath}
@@ -338,30 +335,31 @@ export function ValidationPanel() {
               onChange={setTargetPath}
               disabled={running}
             />
-          </div>
+          </Space>
 
           {fileFormat === 'json' ? (
-            <p className="text-xs text-slate-500">
+            <Typography.Text type="secondary">
               JSON files are compared as whole documents with sorted keys and sorted array elements (order-insensitive).
-            </p>
+            </Typography.Text>
           ) : (
-          <div className="grid gap-4 md:grid-cols-[1fr_240px]">
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-slate-700">UID column</span>
-              <input
+            <Row gutter={16}>
+              <Col xs={24} md={14}>
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Typography.Text strong>UID column</Typography.Text>
+                  <Input
                 type="text"
                 value={uidColumn}
                 disabled={running}
                 onChange={(ev) => setUidColumn(ev.target.value)}
                 autoComplete="off"
                 placeholder="e.g. id"
-                className="w-full rounded-lg border border-[#F1F1F1] bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
-              />
-            </label>
-
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-slate-700">Delimiter</span>
-              <input
+                  />
+                </Space>
+              </Col>
+              <Col xs={24} md={10}>
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Typography.Text strong>Delimiter</Typography.Text>
+                  <Input
                 type="text"
                 value={delimiter}
                 disabled={running}
@@ -369,118 +367,122 @@ export function ValidationPanel() {
                 title="Use auto, tab, \\t, single-char (, ; |), or multi-char (||, ::)"
                 aria-label="CSV delimiter or auto"
                 placeholder="auto"
-                className="w-full rounded-lg border border-[#F1F1F1] bg-white px-3 py-2.5 font-mono text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#EB4C4C] focus:ring-2 focus:ring-[#EB4C4C]/20 disabled:cursor-not-allowed disabled:opacity-60"
-              />
-              <span className="block text-xs text-slate-500">
-                Recommended: <code>auto</code>. You can also use <code>tab</code>, <code>\t</code>, <code>|</code>, <code>||</code>, <code>::</code>.
-              </span>
-            </label>
-          </div>
+                  />
+                  <Typography.Text type="secondary">
+                    Recommended: <Typography.Text code>auto</Typography.Text>. You can also use <Typography.Text code>tab</Typography.Text>, <Typography.Text code>\t</Typography.Text>, <Typography.Text code>|</Typography.Text>, <Typography.Text code>||</Typography.Text>, <Typography.Text code>::</Typography.Text>.
+                  </Typography.Text>
+                </Space>
+              </Col>
+            </Row>
           )}
 
-          <button
+          <Button
             type="submit"
+            type="primary"
             disabled={
               running
               || !sourcePath.trim()
               || !targetPath.trim()
               || (fileFormat !== 'json' && !uidColumn.trim())
             }
-            className="inline-flex w-full items-center justify-center gap-3 rounded-xl bg-[#EB4C4C] px-5 py-4 text-base font-semibold text-[#FFFDEF] shadow-[0_12px_30px_rgba(235,76,76,0.28)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60"
+            style={{ width: '100%', height: 52, borderRadius: 14, background: '#EB4C4C', boxShadow: '0 12px 30px rgba(235,76,76,0.28)' }}
           >
             {running ? (
-              <>
-                <span className="h-5 w-5 animate-spin rounded-full border-2 border-[#FFFDEF]/40 border-t-[#FFFDEF]" aria-hidden />
+              <Space>
+                <span style={{ width: 20, height: 20, borderRadius: '50%', border: '2px solid rgba(255,253,239,0.4)', borderTopColor: '#FFFDEF', animation: 'spin 1s linear infinite' }} aria-hidden />
                 Running...
-              </>
+              </Space>
             ) : (
               'Run validation'
             )}
-          </button>
-        </form>
-      </section>
+          </Button>
+        </Space>
+      </Card>
 
-      <div className="space-y-6" role="status" aria-live="polite">
+      <Space direction="vertical" size={16} style={{ width: '100%' }} role="status" aria-live="polite">
         {running && jobUi ? (
-          <section className="rounded-2xl border border-[#F1F1F1] border-l-4 border-l-[#EB4C4C] bg-white p-6 shadow-[0_12px_40px_rgba(235,76,76,0.10)]">
-            <p className="mb-2 inline-block rounded-md border border-sky-300 bg-sky-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-sky-700">
+          <Card style={{ borderRadius: 24, borderColor: '#F1F1F1', boxShadow: '0 12px 40px rgba(235,76,76,0.10)' }} styles={{ body: { padding: 24 } }}>
+            <Tag color="processing" style={{ marginBottom: 12 }}>
               Async job - 202 Accepted
-            </p>
-            <p className="mb-1 text-lg font-bold text-[#EB4C4C]">{jobUi.title}</p>
-            <p className="text-sm text-slate-600">{jobUi.body}</p>
-            {jobProgress.message ? <p className="mt-2 text-sm text-slate-600">{jobProgress.message}</p> : null}
-            {jobProgress.progress?.percent != null ? <p className="mt-2 text-sm text-slate-600">Progress: <strong>{formatPercent(jobProgress.progress.percent)}</strong></p> : null}
-            {jobProgress.progress?.total_mismatch_records != null ? <p className="mt-2 text-sm text-slate-600">Mismatches emitted so far: <strong>{Number(jobProgress.progress.total_mismatch_records)}</strong></p> : null}
+            </Tag>
+            <Typography.Title level={4} style={{ marginTop: 0, marginBottom: 8, color: '#EB4C4C' }}>{jobUi.title}</Typography.Title>
+            <Typography.Paragraph style={{ color: '#475569' }}>{jobUi.body}</Typography.Paragraph>
+            {jobProgress.message ? <Typography.Paragraph style={{ color: '#475569' }}>{jobProgress.message}</Typography.Paragraph> : null}
+            {jobProgress.progress?.percent != null ? <Typography.Paragraph style={{ color: '#475569' }}>Progress: <Typography.Text strong>{formatPercent(jobProgress.progress.percent)}</Typography.Text></Typography.Paragraph> : null}
+            {jobProgress.progress?.total_mismatch_records != null ? <Typography.Paragraph style={{ color: '#475569' }}>Mismatches emitted so far: <Typography.Text strong>{Number(jobProgress.progress.total_mismatch_records)}</Typography.Text></Typography.Paragraph> : null}
             {jobProgress.progress?.value_mismatch_done != null ? (
-              <p className="mt-2 text-sm text-slate-600">
-                Value mismatch rows emitted: <strong>{Number(jobProgress.progress.value_mismatch_done)}</strong>
-                {jobProgress.progress?.value_mismatch_total_estimate != null ? <> {' '} / est <strong>{Number(jobProgress.progress.value_mismatch_total_estimate)}</strong></> : null}
-              </p>
+              <Typography.Paragraph style={{ color: '#475569' }}>
+                Value mismatch rows emitted: <Typography.Text strong>{Number(jobProgress.progress.value_mismatch_done)}</Typography.Text>
+                {jobProgress.progress?.value_mismatch_total_estimate != null ? <> / est <Typography.Text strong>{Number(jobProgress.progress.value_mismatch_total_estimate)}</Typography.Text></> : null}
+              </Typography.Paragraph>
             ) : null}
             {jobProgress.phase === 'queued' && jobProgress.progress?.queue_position != null ? (
-              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-                <p className="text-sm font-semibold text-amber-800">
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginTop: 12 }}
+                message={
+                  <Typography.Text>
                   Queue position: {Number(jobProgress.progress.queue_position) + 1}
                   {jobProgress.progress?.max_concurrency ? (
-                    <span className="font-normal text-amber-600">
+                    <span style={{ color: '#B45309' }}>
                       {' '}· {jobProgress.progress.running_jobs ?? '?'}/{jobProgress.progress.max_concurrency} workers
                       {effectiveMax != null && effectiveMax !== queueInfo?.max_concurrency
                         ? ` (effective cap ${effectiveMax})`
                         : ''}
                     </span>
                   ) : null}
-                </p>
-                <p className="mt-1 text-xs text-amber-600">Your job will start when a running validation finishes.</p>
-              </div>
+                  </Typography.Text>
+                }
+                description="Your job will start when a running validation finishes."
+              />
             ) : null}
-            {jobUi.extra ? <p className="mt-2 text-sm text-slate-600">{jobUi.extra}</p> : null}
-            <p className="mt-3 text-sm font-medium text-slate-700"><strong>{(elapsedMs / 1000).toFixed(1)}s</strong> elapsed</p>
-          </section>
+            {jobUi.extra ? <Typography.Paragraph style={{ color: '#475569' }}>{jobUi.extra}</Typography.Paragraph> : null}
+            <Typography.Paragraph style={{ marginBottom: 0, color: '#334155', fontWeight: 500 }}><Typography.Text strong>{(elapsedMs / 1000).toFixed(1)}s</Typography.Text> elapsed</Typography.Paragraph>
+          </Card>
         ) : null}
 
         {phase === 'success' && result ? (
-          <section className="rounded-2xl border border-emerald-300 border-l-4 border-l-emerald-500 bg-emerald-50 p-6">
-            <p className="mb-4 text-lg font-bold text-emerald-900">Finished</p>
-            <p className="mb-2 pt-4 text-sm font-semibold uppercase tracking-wider text-slate-700">Summary of the search</p>
+          <Card style={{ borderRadius: 24, borderColor: '#86EFAC', background: '#F0FDF4' }} styles={{ body: { padding: 24 } }}>
+            <Typography.Title level={4} style={{ marginTop: 0, color: '#166534' }}>Finished</Typography.Title>
+            <Typography.Text style={{ display: 'block', marginBottom: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#334155' }}>Summary of the search</Typography.Text>
 
-            <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-xl bg-white p-4 shadow-sm"><span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Fully Match</span><span className="mt-1 block font-mono text-2xl font-black text-slate-900">{result.summary?.is_match ? 'Yes' : 'No'}</span></div>
-              <div className="rounded-xl bg-white p-4 shadow-sm"><span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Source rows</span><span className="mt-1 block font-mono text-2xl font-black text-slate-900">{result.summary?.source_row_count ?? '-'}</span></div>
-              <div className="rounded-xl bg-white p-4 shadow-sm"><span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Target rows</span><span className="mt-1 block font-mono text-2xl font-black text-slate-900">{result.summary?.target_row_count ?? '-'}</span></div>
-              <div className="rounded-xl bg-white p-4 shadow-sm"><span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Mismatch records</span><span className="mt-1 block font-mono text-2xl font-black text-slate-900">{result.summary?.total_mismatch_records ?? '-'}</span></div>
-            </div>
+            <Row gutter={16} style={{ marginBottom: 20 }}>
+              <Col xs={24} sm={12} xl={6}><Card size="small"><Typography.Text type="secondary">Fully Match</Typography.Text><Typography.Title level={2} style={{ marginBottom: 0 }}>{result.summary?.is_match ? 'Yes' : 'No'}</Typography.Title></Card></Col>
+              <Col xs={24} sm={12} xl={6}><Card size="small"><Typography.Text type="secondary">Source rows</Typography.Text><Typography.Title level={2} style={{ marginBottom: 0 }}>{result.summary?.source_row_count ?? '-'}</Typography.Title></Card></Col>
+              <Col xs={24} sm={12} xl={6}><Card size="small"><Typography.Text type="secondary">Target rows</Typography.Text><Typography.Title level={2} style={{ marginBottom: 0 }}>{result.summary?.target_row_count ?? '-'}</Typography.Title></Card></Col>
+              <Col xs={24} sm={12} xl={6}><Card size="small"><Typography.Text type="secondary">Mismatch records</Typography.Text><Typography.Title level={2} style={{ marginBottom: 0 }}>{result.summary?.total_mismatch_records ?? '-'}</Typography.Title></Card></Col>
+            </Row>
 
-            <p className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-700">Mismatch counts</p>
-            <ul className="grid gap-4 text-sm text-slate-700 sm:grid-cols-2 xl:grid-cols-3">
-              <li><div className="rounded-xl bg-white p-4 shadow-sm"><span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Missing in Target</span><span className="mt-1 block font-mono text-2xl font-black text-slate-900">{result.mismatch_counts?.missing_in_target ?? 0}</span></div></li>
-              <li><div className="rounded-xl bg-white p-4 shadow-sm"><span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Extra in Target</span><span className="mt-1 block font-mono text-2xl font-black text-slate-900">{result.mismatch_counts?.extra_in_target ?? 0}</span></div></li>
-              <li><div className="rounded-xl bg-white p-4 shadow-sm"><span className="block text-xs font-semibold uppercase tracking-widest text-slate-500">Value Mismatched</span><span className="mt-1 block font-mono text-2xl font-black text-slate-900">{result.mismatch_counts?.value_mismatch ?? 0}</span></div></li>
-            </ul>
+            <Typography.Text style={{ display: 'block', marginBottom: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#334155' }}>Mismatch counts</Typography.Text>
+            <Row gutter={16}>
+              <Col xs={24} sm={12} xl={8}><Card size="small"><Typography.Text type="secondary">Missing in Target</Typography.Text><Typography.Title level={3} style={{ marginBottom: 0 }}>{result.mismatch_counts?.missing_in_target ?? 0}</Typography.Title></Card></Col>
+              <Col xs={24} sm={12} xl={8}><Card size="small"><Typography.Text type="secondary">Extra in Target</Typography.Text><Typography.Title level={3} style={{ marginBottom: 0 }}>{result.mismatch_counts?.extra_in_target ?? 0}</Typography.Title></Card></Col>
+              <Col xs={24} sm={12} xl={8}><Card size="small"><Typography.Text type="secondary">Value Mismatched</Typography.Text><Typography.Title level={3} style={{ marginBottom: 0 }}>{result.mismatch_counts?.value_mismatch ?? 0}</Typography.Title></Card></Col>
+            </Row>
 
-            {result.run_id ? <p className="mt-4 text-sm text-slate-700">Run id: <code>{result.run_id}</code></p> : null}
+            {result.run_id ? <Typography.Paragraph style={{ marginTop: 16, marginBottom: 0, color: '#334155' }}>Run id: <Typography.Text code>{result.run_id}</Typography.Text></Typography.Paragraph> : null}
             {result.durations?.validation_seconds != null ? (
-              <p className="mt-2 text-sm text-slate-700">
+              <Typography.Paragraph style={{ color: '#334155' }}>
                 Validation time: <strong>{formatDuration(result.durations.validation_seconds)}</strong>
-              </p>
+              </Typography.Paragraph>
             ) : null}
 
-            <button
+            <Button
               type="button"
               onClick={() => navigate('/report', { state: { result } })}
-              className="mt-6 inline-flex w-full items-center justify-center gap-3 rounded-xl bg-[#EB4C4C] px-5 py-4 text-base font-semibold text-white shadow-[0_12px_30px_rgba(235,76,76,0.28)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-60"
+              type="primary"
+              style={{ marginTop: 20, width: '100%', height: 52, borderRadius: 14, background: '#EB4C4C' }}
             >
-              📊 View Detailed Report
-            </button>
-          </section>
+              View Detailed Report
+            </Button>
+          </Card>
         ) : null}
 
         {phase === 'error' ? (
-          <section className="rounded-2xl border border-rose-300 border-l-4 border-l-rose-500 bg-rose-50 p-6">
-            <p className="mb-2 text-lg font-bold text-rose-900">Something went wrong</p>
-            <p className="whitespace-pre-wrap break-words text-sm text-rose-800">{errorMessage}</p>
-          </section>
+          <Alert type="error" showIcon message="Something went wrong" description={errorMessage} />
         ) : null}
-      </div>
+      </Space>
 
       <Modal
         title={null}
@@ -490,17 +492,16 @@ export function ValidationPanel() {
         centered
         width={960}
         destroyOnClose
-        closeIcon={<span className="text-2xl text-slate-500 hover:text-slate-800">×</span>}
-        bodyStyle={{ padding: '2rem', maxHeight: 'min(90vh, 900px)', overflowY: 'auto' }}
+        closeIcon={<span style={{ fontSize: 22, color: '#64748B' }}>×</span>}
+        styles={{ body: { padding: '2rem', maxHeight: 'min(90vh, 900px)', overflowY: 'auto' } }}
       >
-        <div className="space-y-6">
+        <Space direction="vertical" size={20} style={{ width: '100%' }}>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#EB4C4C]">Parallel validation</p>
-            <h2 className="mt-1 text-2xl font-bold text-slate-900">Review resources before running</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Choose how many validations may run in parallel. Turn auto-tune on to let the server reduce load when
-              resources are tight.
-            </p>
+            <Typography.Text style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.25em', textTransform: 'uppercase', color: '#EB4C4C' }}>Parallel validation</Typography.Text>
+            <Typography.Title level={2} style={{ marginTop: 4, marginBottom: 0 }}>Review resources before running</Typography.Title>
+            <Typography.Paragraph style={{ marginTop: 8, color: '#475569' }}>
+              Choose how many validations may run in parallel. Turn auto-tune on to let the server reduce load when resources are tight.
+            </Typography.Paragraph>
           </div>
 
           <ParallelValidationResourceForm
@@ -516,30 +517,31 @@ export function ValidationPanel() {
             theme="light"
           />
 
-          <div className="flex flex-wrap items-center gap-3 border-t border-[#F1F1F1] pt-4">
-            <button
+          <Divider />
+          <Space wrap>
+            <Button
               type="button"
+              type="primary"
               disabled={concurrencyUpdating || queueModalLoading}
               onClick={executeValidation}
-              className="rounded-lg bg-[#EB4C4C] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#d83e3e] disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ borderRadius: 10, background: '#EB4C4C' }}
             >
               {concurrencyUpdating ? 'Starting…' : 'Run validation'}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              disabled={concurrencyUpdating}
               onClick={() => setShowParallelValidationModal(false)}
-              className="rounded-lg border border-[#F1F1F1] bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              disabled={concurrencyUpdating}
             >
               Cancel
-            </button>
+            </Button>
             {concurrencySlider === queueInfo?.max_concurrency ? (
-              <span className="text-xs font-medium text-emerald-600">✓ Matches saved queue setting</span>
+              <Typography.Text style={{ color: '#059669', fontWeight: 500 }}>Matches saved queue setting</Typography.Text>
             ) : null}
-            {concurrencyError ? <span className="text-xs text-rose-600">{concurrencyError}</span> : null}
-          </div>
-        </div>
+            {concurrencyError ? <Typography.Text type="danger">{concurrencyError}</Typography.Text> : null}
+          </Space>
+        </Space>
       </Modal>
-    </div>
+    </Space>
   )
 }
