@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: github-actions[bot]
-# Last edited: 2026-06-04T07:38:07Z
+# Last edited: 2026-06-05T09:31:09Z
 # --- END GENERATED FILE METADATA ---
 
 """Native Parquet writer for tests and simple export — pure Python."""

@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: github-actions[bot]
-# Last edited: 2026-06-04T07:38:07Z
+# Last edited: 2026-06-05T09:31:09Z
 # --- END GENERATED FILE METADATA ---
 
 """Cloud column preview streams headers from GCS without full download."""
