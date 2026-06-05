@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-04T12:59:04+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Lazy drilldown: columnar frames + batch lookup for mismatch keys only."""
 
 from __future__ import annotations
