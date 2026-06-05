@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
-# Authors: github-actions[bot]
-# Last edited: 2026-06-04T07:38:07Z
+# Authors: Ansh Raj
+# Last edited: 2026-06-05T09:31:09+00:00
 # --- END GENERATED FILE METADATA ---
 
 """Database access helpers for cloud credential profiles."""

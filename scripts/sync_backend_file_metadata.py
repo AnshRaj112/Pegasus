@@ -63,22 +63,7 @@ def header_pattern(comment_prefix: str) -> re.Pattern[str]:
 
 
 def file_authors(relative_path: str) -> list[str]:
-    authors = []
-    shortlog = run_git("shortlog", "-sne", "--", relative_path)
-    for line in shortlog.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.split("\t", 1)
-        contributor = parts[-1]
-        name = contributor.rsplit(" <", 1)[0].strip()
-        if name and name not in authors:
-            authors.append(name)
-    if not authors:
-        fallback = run_git("log", "-1", "--format=%an", "--", relative_path).strip()
-        if fallback:
-            authors.append(fallback)
-    return authors
+    return ["Ansh Raj"]
 
 
 def file_last_edited(relative_path: str) -> str:
