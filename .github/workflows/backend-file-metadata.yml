@@ -6,6 +6,7 @@ on:
       - "pegasus-backend/**/*.py"
       - "pegasus-backend/native/src/**/*.rs"
       - "scripts/sync_backend_file_metadata.py"
+      - "scripts/**/*.py"
   workflow_dispatch:
 
 permissions:
