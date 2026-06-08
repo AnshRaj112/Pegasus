@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-05T10:54:18Z
+# Last edited: 2026-06-08T07:03:36Z
 # --- END GENERATED FILE METADATA ---
 
 """Persistence helpers for validation runs and mismatch rows (async SQLAlchemy 2.0)."""
