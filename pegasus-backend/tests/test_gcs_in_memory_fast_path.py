@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-05T16:23:26+05:30
+# Last edited: 2026-06-05T10:54:18Z
 # --- END GENERATED FILE METADATA ---
 
 """GCS small-file validation streams into Polars (no full-object cache)."""
