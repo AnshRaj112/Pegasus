@@ -298,7 +298,13 @@ async def browse_cloud_prefix(
         prefix=result.prefix,
         parent_prefix=result.parent_prefix,
         entries=[
-            CloudBrowseEntry(name=e.name, path=e.path, is_dir=e.is_dir) for e in result.entries
+            CloudBrowseEntry(
+                name=e.name,
+                path=e.path,
+                is_dir=e.is_dir,
+                size_bytes=e.size_bytes,
+            )
+            for e in result.entries
         ],
         truncated=result.truncated,
     )

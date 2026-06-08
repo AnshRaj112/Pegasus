@@ -12,14 +12,11 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from pegasus.validation.file_format import extensions_for_format
+from pegasus.validation.file_format import extensions_for_format, object_name_matches_format
 
 
 def _file_matches_format(path: Path, allowed: frozenset[str]) -> bool:
-    suffix = path.suffix.lower()
-    if suffix and suffix in allowed:
-        return True
-    return not suffix
+    return object_name_matches_format(path.name, allowed)
 
 
 def list_files_in_directory(

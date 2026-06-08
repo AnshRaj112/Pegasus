@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { browseCloudPrefix } from '../../api/cloudBrowse'
 
+function formatObjectSize(sizeBytes) {
+  const n = Number(sizeBytes)
+  if (!Number.isFinite(n) || n < 0) return ''
+  if (n < 1024) return `${n} B`
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KiB`
+  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MiB`
+  return `${(n / 1024 ** 3).toFixed(2)} GiB`
+}
+
 export default function Step2_CloudPicker({
   panelLabel,
   cloudConfig,
@@ -21,6 +30,7 @@ export default function Step2_CloudPicker({
   const [selectedObject, setSelectedObject] = useState(null)
   const [selectedObjects, setSelectedObjects] = useState([])
   const [hasListed, setHasListed] = useState(false)
+  const [truncated, setTruncated] = useState(false)
 
   const canBrowse = Boolean(
     cloudConfig?.bucket?.trim()
@@ -43,6 +53,7 @@ export default function Step2_CloudPicker({
       setPrefix(data.prefix ?? '')
       setParentPrefix(data.parent_prefix ?? null)
       setEntries(Array.isArray(data.entries) ? data.entries : [])
+      setTruncated(Boolean(data.truncated))
       setHasListed(true)
     } catch (e) {
       setError(e.message || 'Cloud browse failed')
@@ -159,6 +170,12 @@ export default function Step2_CloudPicker({
 
           {error && <div style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</div>}
 
+          {truncated && (
+            <div style={{ fontSize: 12, color: 'var(--warning, #b45309)' }}>
+              Listing truncated — only the first 5000 entries are shown. Narrow the prefix to find a specific object.
+            </div>
+          )}
+
           {hasListed && (
             <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 8, height: 360, overflow: 'hidden' }}>
               <div style={{ minHeight: 0, border: '1px solid var(--border-1)', borderRadius: 8, overflowY: 'auto' }}>
@@ -202,7 +219,12 @@ export default function Step2_CloudPicker({
                           background: selected ? 'var(--accent-muted)' : 'var(--surface-2)',
                         }}
                       >
-                        {f.name}
+                        <span style={{ display: 'block', wordBreak: 'break-word' }}>{f.name}</span>
+                        {f.size_bytes != null && (
+                          <span style={{ display: 'block', marginTop: 4, fontSize: 10, color: 'var(--text-4)' }}>
+                            {formatObjectSize(f.size_bytes)}
+                          </span>
+                        )}
                       </button>
                     )
                   })}

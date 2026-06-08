@@ -533,7 +533,7 @@ class TabularReconciliationPipeline:
                 extra_stats=extra_stats,
             )
 
-        use_spill_payload = self._config.enable_column_drilldown and drilldown_cache is None
+        use_spill_payload = spill_payload
         if progress_callback:
             progress_callback(
                 {"phase": "reconciling", "message": "Reconciling partitions"}

@@ -767,6 +767,11 @@ class CloudBrowseEntry(BaseModel):
     name: str
     path: str = Field(description="Object name or prefix path within the bucket")
     is_dir: bool
+    size_bytes: int | None = Field(
+        default=None,
+        ge=0,
+        description="Object size from GCS metadata (files only; omitted for prefixes)",
+    )
 
 
 class CloudBrowseResponse(BaseModel):

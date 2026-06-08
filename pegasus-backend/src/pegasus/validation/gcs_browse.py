@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pegasus.validation.file_pairing import extensions_for_format
+from pegasus.validation.file_format import extensions_for_format, object_name_matches_format
 
 
 def parse_gcs_credentials_json(raw_json: str) -> dict[str, object]:
@@ -31,6 +31,7 @@ class GcsBrowseEntry:
     name: str
     path: str
     is_dir: bool
+    size_bytes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -59,11 +60,33 @@ def _parent_prefix(prefix: str) -> str | None:
     return "/".join(parts[:-1]) + "/"
 
 
+def coerce_gcs_object_size(raw: object) -> int | None:
+    """Normalize GCS object size metadata (API may return int or numeric string)."""
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def _blob_size_bytes(blob: object) -> int | None:
+    size = coerce_gcs_object_size(getattr(blob, "size", None))
+    if size is not None:
+        return size
+    reload = getattr(blob, "reload", None)
+    if not callable(reload):
+        return None
+    try:
+        reload()
+    except Exception:
+        return None
+    return coerce_gcs_object_size(getattr(blob, "size", None))
+
+
 def _file_allowed(name: str, allowed: frozenset[str]) -> bool:
-    suffix = Path(name).suffix.lower()
-    if suffix and suffix in allowed:
-        return True
-    return not suffix
+    return object_name_matches_format(name, allowed)
 
 
 def browse_gcs_prefix(
@@ -88,9 +111,14 @@ def browse_gcs_prefix(
 
     credentials = service_account.Credentials.from_service_account_info(credentials_info)
     client = gcs_storage.Client(credentials=credentials, project=project_id or credentials_info.get("project_id"))
-    iterator = client.list_blobs(bucket_name, prefix=norm_prefix or None, delimiter="/")
+    iterator = client.list_blobs(
+        bucket_name,
+        prefix=norm_prefix or None,
+        delimiter="/",
+        projection="full",
+    )
 
-    rows: list[tuple[bool, str, str, str]] = []
+    rows: list[tuple[bool, str, str, str, int | None]] = []
     truncated = False
 
     for page in iterator.pages:
@@ -98,7 +126,7 @@ def browse_gcs_prefix(
             name = folder_prefix[len(norm_prefix):].rstrip("/")
             if not name:
                 continue
-            rows.append((False, name.lower(), folder_prefix, name))
+            rows.append((False, name.lower(), folder_prefix, name, None))
         for blob in page:
             if blob.name.endswith("/"):
                 continue
@@ -107,7 +135,7 @@ def browse_gcs_prefix(
                 continue
             if not _file_allowed(blob.name, allowed):
                 continue
-            rows.append((True, rel_name.lower(), blob.name, rel_name))
+            rows.append((True, rel_name.lower(), blob.name, rel_name, _blob_size_bytes(blob)))
 
     rows.sort(key=lambda t: (t[0], t[1]))
     if len(rows) > max_entries:
@@ -115,8 +143,13 @@ def browse_gcs_prefix(
         rows = rows[:max_entries]
 
     entries = [
-        GcsBrowseEntry(name=display_name, path=path, is_dir=not is_file)
-        for is_file, _, path, display_name in rows
+        GcsBrowseEntry(
+            name=display_name,
+            path=path,
+            is_dir=not is_file,
+            size_bytes=size_bytes,
+        )
+        for is_file, _, path, display_name, size_bytes in rows
     ]
     return GcsBrowseResult(
         bucket=bucket_name,
@@ -208,4 +241,3 @@ def _stream_blob_to_path(blob: Any, dest: Path, *, chunk_bytes: int = 256 * 1024
             if not block:
                 break
             out.write(block)
-    return local_paths

@@ -230,22 +230,25 @@ def _iter_columnar_partition(
     fingerprints = [f.read(_FP_SIZE) for _ in range(row_count)]
 
     payloads: list[dict[str, Any] | None] = [None] * row_count
+    pos = f.tell()
     ncol_raw = f.read(_COL_COUNT.size)
-    if len(ncol_raw) == _COL_COUNT.size:
+    if len(ncol_raw) == _COL_COUNT.size and compare_columns:
         ncol = _COL_COUNT.unpack(ncol_raw)[0]
-        if ncol > 0 and compare_columns:
+        if 0 < ncol <= len(compare_columns):
             col_values: list[list[str]] = []
             for _ in range(ncol):
                 column: list[str] = []
                 for _ in range(row_count):
                     value_len = _COL_VALUE_LEN.unpack(f.read(_COL_VALUE_LEN.size))[0]
-                    column.append(f.read(value_len).decode("utf-8"))
+                    column.append(f.read(value_len).decode("utf-8", errors="replace"))
                 col_values.append(column)
             for i in range(row_count):
                 payloads[i] = {
                     compare_columns[j]: col_values[j][i]
-                    for j in range(min(ncol, len(compare_columns)))
+                    for j in range(ncol)
                 }
+        else:
+            f.seek(pos)
 
     for i in range(row_count):
         yield keys[i], fingerprints[i], payloads[i]

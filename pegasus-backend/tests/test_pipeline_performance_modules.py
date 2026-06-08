@@ -118,6 +118,19 @@ def test_stage_report_format() -> None:
     assert "%" not in report
 
 
+def test_columnar_spill_without_payload_skips_compare_columns() -> None:
+    """Fingerprint-only CBL2 blocks must not treat the next block header as column data."""
+    block1 = encode_columnar_partition(["k1"], [111])
+    block2 = encode_columnar_partition(["k2"], [222])
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "part_00001.bin"
+        path.write_bytes(block1 + block2)
+        rows = list(iter_partition(path, compare_columns=["c1", "c2"]))
+    assert len(rows) == 2
+    assert rows[0] == ("k1", (111).to_bytes(8, "big"), None)
+    assert rows[1] == ("k2", (222).to_bytes(8, "big"), None)
+
+
 def test_columnar_spill_roundtrip() -> None:
     payload = encode_columnar_partition(
         ["k1", "k2"],

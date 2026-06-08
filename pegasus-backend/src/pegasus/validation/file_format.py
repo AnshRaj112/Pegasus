@@ -62,6 +62,28 @@ def is_columnar_format(file_format: str | None) -> bool:
     return normalize_file_format(file_format) in _COLUMNAR_ALIASES
 
 
+_COMPRESSED_SUFFIXES: tuple[str, ...] = (".gz", ".bz2", ".zip", ".zst")
+
+
+def object_name_matches_format(name: str, allowed: frozenset[str]) -> bool:
+    """Return whether a leaf object name matches *allowed* tabular extensions.
+
+    Uses suffix matching so compressed exports like ``data.csv.gz`` match ``.csv``.
+    Extensionless names are allowed (common for large warehouse dumps).
+    """
+    leaf = name.rstrip("/").split("/")[-1]
+    lower = leaf.lower()
+    if "." not in lower:
+        return True
+    for ext in allowed:
+        if lower.endswith(ext):
+            return True
+        for comp in _COMPRESSED_SUFFIXES:
+            if lower.endswith(ext + comp):
+                return True
+    return False
+
+
 def extensions_for_format(file_format: str | None) -> frozenset[str]:
     fmt = normalize_file_format(file_format)
     if fmt == "json":
