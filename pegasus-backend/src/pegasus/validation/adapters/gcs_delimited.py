@@ -314,12 +314,13 @@ class GcsDelimitedAdapter:
             _csv_read_options,
         )
 
+        header_names = self._read_header()
         with self._stream_session().open_binary() as handle:
             reader = pacsv.open_csv(
                 handle,
                 read_options=_csv_read_options(has_header=self._has_header, skip_rows=self._skip_rows),
                 parse_options=_csv_parse_options(self._delimiter),
-                convert_options=_csv_convert_options(),
+                convert_options=_csv_convert_options(column_names=header_names),
             )
             target = max(1, chunk_rows)
             for batch in reader:

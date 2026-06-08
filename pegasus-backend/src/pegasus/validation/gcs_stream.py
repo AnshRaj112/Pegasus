@@ -17,7 +17,7 @@ from typing import IO, Any, Iterator
 
 from pegasus.validation.gcs_object import GcsObjectRef
 
-_DEFAULT_CHUNK_BYTES = 256 * 1024
+_DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024
 _DEFAULT_READAHEAD_CHUNKS = 2
 
 _CLIENT_LOCK = threading.Lock()

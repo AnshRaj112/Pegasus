@@ -24,6 +24,20 @@ def test_align_partitions_to_threads() -> None:
 def test_cap_partition_buckets() -> None:
     mx = rt.max_reconciliation_partition_buckets(ncpu=4, ram_bytes=16 * 1024**3)
     assert rt.cap_partition_buckets(4096, ncpu=4, ram_bytes=16 * 1024**3) == mx
+    large = rt.cap_partition_buckets(
+        512,
+        ncpu=4,
+        ram_bytes=16 * 1024**3,
+        combined_file_bytes=4 * 1024**3,
+    )
+    assert large >= 256
+    low_request = rt.cap_partition_buckets(
+        32,
+        ncpu=4,
+        ram_bytes=16 * 1024**3,
+        combined_file_bytes=4 * 1024**3,
+    )
+    assert low_request >= 256
 
 
 def test_effective_local_threads_never_exceeds_ncpu() -> None:

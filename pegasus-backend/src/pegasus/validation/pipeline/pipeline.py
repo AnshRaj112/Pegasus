@@ -100,7 +100,15 @@ def _adaptive_partition_count(
         column_count=compare_column_count + 1,
     )
     rows_per_partition = 10_000 if est_rows >= 5_000_000 else 2000
-    row_cap = max(4, min(requested, 512, (est_rows + rows_per_partition - 1) // rows_per_partition))
+    max_partitions = 512
+    if file_bytes >= 10 * 1024 * 1024 * 1024:
+        max_partitions = 2048
+    elif file_bytes >= 1024 * 1024 * 1024:
+        max_partitions = 1024
+    row_cap = max(
+        4,
+        min(requested, max_partitions, (est_rows + rows_per_partition - 1) // rows_per_partition),
+    )
     if file_bytes <= 4 * 1024 * 1024:
         return min(requested, 16, row_cap)
     if file_bytes <= 32 * 1024 * 1024:
@@ -539,7 +547,11 @@ class TabularReconciliationPipeline:
                 {"phase": "reconciling", "message": "Reconciling partitions"}
             )
         reconcile_workers = resolved_reconcile_workers(self._config.partition_reconcile_workers)
-        if should_parallel_reconcile(num_partitions=len(active_pids), workers=reconcile_workers):
+        if should_parallel_reconcile(
+            num_partitions=len(active_pids),
+            workers=reconcile_workers,
+            input_bytes=source_bytes + target_bytes,
+        ):
             missing, extra, changed, matching, mismatched_partitions = reconcile_partitions_parallel(
                 work,
                 active_pids,

@@ -188,6 +188,41 @@ def _swap_pressure() -> float | None:
 
 # ── Job workload estimation ───────────────────────────────────────
 
+def estimate_streaming_job_ram_bytes(
+    csv_bytes: int,
+    *,
+    min_ram_per_job_bytes: int,
+    chunk_rows: int = 500_000,
+    compare_column_count: int = 8,
+) -> int:
+    """Bounded RAM estimate for streaming spill (not O(file size))."""
+    row_bytes = max(64, min(2048, 32 * max(1, compare_column_count + 1)))
+    chunk_buffers = 2
+    chunk_ram = chunk_rows * row_bytes * chunk_buffers
+    overhead = 384 * 1024 * 1024
+    return max(min_ram_per_job_bytes, chunk_ram + overhead)
+
+
+def estimate_job_ram_bytes(
+    csv_bytes: int,
+    *,
+    ram_multiplier: float,
+    min_ram_per_job_bytes: int,
+    streaming: bool = False,
+    chunk_rows: int = 500_000,
+    compare_column_count: int = 8,
+) -> int:
+    """Per-job RAM estimate — streaming model for large GCS/local spill jobs."""
+    if streaming or csv_bytes >= 64 * 1024 * 1024:
+        return estimate_streaming_job_ram_bytes(
+            csv_bytes,
+            min_ram_per_job_bytes=min_ram_per_job_bytes,
+            chunk_rows=chunk_rows,
+            compare_column_count=compare_column_count,
+        )
+    return max(min_ram_per_job_bytes, int(csv_bytes * ram_multiplier))
+
+
 def _estimate_job_csv_bytes(job_dir: Path) -> int:
     """Estimate combined source + target CSV size for a job.
 
@@ -224,12 +259,20 @@ def _running_jobs_estimated_ram(
     *,
     ram_multiplier: float,
     min_ram_per_job_bytes: int,
+    streaming: bool = False,
+    chunk_rows: int = 500_000,
 ) -> int:
     """Estimate total RAM consumed by currently running jobs."""
     total = 0
     for job in running_jobs.values():
         csv_bytes = _estimate_job_csv_bytes(job.job_dir)
-        total += max(min_ram_per_job_bytes, int(csv_bytes * ram_multiplier))
+        total += estimate_job_ram_bytes(
+            csv_bytes,
+            ram_multiplier=ram_multiplier,
+            min_ram_per_job_bytes=min_ram_per_job_bytes,
+            streaming=streaming,
+            chunk_rows=chunk_rows,
+        )
     return total
 
 
@@ -310,6 +353,8 @@ def compute_resource_recommendation(
     min_disk_per_job_bytes: int | None = None,
     disk_reserve_bytes: int | None = None,
     threads_per_job: int | None = None,
+    streaming_jobs: bool | None = None,
+    chunk_rows: int | None = None,
 ) -> ResourceSnapshot:
     """Compute a resource-aware concurrency recommendation.
 
@@ -400,7 +445,25 @@ def compute_resource_recommendation(
         # Default estimate: 200 MiB combined CSV
         sample_csv_bytes = 200 * 1024**2
 
-    estimated_ram_per_job = max(min_ram_per_job_bytes, int(sample_csv_bytes * ram_multiplier))
+    use_streaming_ram = streaming_jobs
+    if use_streaming_ram is None and settings is not None:
+        use_streaming_ram = settings.validation_gcs_streaming_only
+    if use_streaming_ram is None:
+        use_streaming_ram = True
+
+    job_chunk_rows = chunk_rows
+    if job_chunk_rows is None and settings is not None:
+        job_chunk_rows = settings.validation_reconciliation_chunk_rows
+    if job_chunk_rows is None:
+        job_chunk_rows = 500_000
+
+    estimated_ram_per_job = estimate_job_ram_bytes(
+        sample_csv_bytes,
+        ram_multiplier=ram_multiplier,
+        min_ram_per_job_bytes=min_ram_per_job_bytes,
+        streaming=use_streaming_ram,
+        chunk_rows=job_chunk_rows,
+    )
     estimated_disk_per_job = max(min_disk_per_job_bytes, int(sample_csv_bytes * disk_headroom_multiplier))
 
     # ── What running jobs already consume ─────────────────────────
@@ -408,6 +471,8 @@ def compute_resource_recommendation(
         running_jobs,
         ram_multiplier=ram_multiplier,
         min_ram_per_job_bytes=min_ram_per_job_bytes,
+        streaming=use_streaming_ram,
+        chunk_rows=job_chunk_rows,
     )
 
     # ── Compute safe limits ───────────────────────────────────────

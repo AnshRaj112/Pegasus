@@ -17,10 +17,21 @@ from pegasus.validation.pipeline.fingerprint import (
     partition_id,
     row_fingerprint_from_parts,
 )
+from pegasus.validation.pipeline.native_spill import can_use_native_multichar_spill
 from pegasus.validation.readers.native_multichar import native_extension_available
 
 _REPO = Path("/home/ansh.raj/Pegasus")
 _FIXTURE = _REPO / "test-data/generated-10k-8cols/source.csv"
+
+
+def test_native_multichar_allowed_with_lazy_drilldown() -> None:
+    if not native_extension_available():
+        pytest.skip("pegasus_native not built")
+    assert can_use_native_multichar_spill(
+        store_payload=False,
+        lazy_drilldown=True,
+        use_arrow_ipc_spill=True,
+    )
 
 
 @pytest.mark.skipif(not native_extension_available(), reason="pegasus_native not built")

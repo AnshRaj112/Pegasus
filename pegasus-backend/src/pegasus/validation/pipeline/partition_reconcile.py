@@ -283,6 +283,18 @@ def resolved_reconcile_workers(requested: int) -> int:
     return max(1, requested)
 
 
-def should_parallel_reconcile(*, num_partitions: int, workers: int) -> bool:
-    # Process pool startup dominates when few partitions are active.
-    return workers > 1 and num_partitions >= max(16, workers * 8)
+def should_parallel_reconcile(
+    *,
+    num_partitions: int,
+    workers: int,
+    input_bytes: int = 0,
+) -> bool:
+    """Parallel reconcile when enough active partitions justify pool startup."""
+    if workers <= 1:
+        return False
+    # Large GCS/local spill runs use more partitions — lower the bar.
+    if input_bytes >= 512 * 1024 * 1024:
+        return num_partitions >= max(8, workers * 2)
+    if input_bytes >= 64 * 1024 * 1024:
+        return num_partitions >= max(12, workers * 4)
+    return num_partitions >= max(16, workers * 8)

@@ -270,11 +270,11 @@ class Settings(BaseSettings):
         description="RSS logging interval in validation worker subprocesses; 0 disables the memory monitor thread.",
     )
     validation_partition_reconcile_workers: int = Field(
-        default=1,
+        default=0,
         ge=0,
         le=32,
         description=(
-            "Process pool size for partition reconcile (0=auto only above 64 partitions, 1=sequential)."
+            "Process pool size for partition reconcile (0=auto up to cpu-1, 1=sequential)."
         ),
     )
     validation_skip_artifact_report: bool = Field(
@@ -291,8 +291,8 @@ class Settings(BaseSettings):
         ),
     )
     validation_enable_content_digest_precheck: bool = Field(
-        default=False,
-        description="Compare precomputed content digests before reconcile (GCS prefetch only).",
+        default=True,
+        description="Compare precomputed content digests before reconcile (GCS metadata MD5/CRC32C).",
     )
     validation_worker_pool_size: int = Field(
         default=2,
@@ -349,12 +349,11 @@ class Settings(BaseSettings):
             )
         return self
     validation_queue_ram_multiplier: float = Field(
-        default=4.0,
+        default=1.5,
         ge=1.0,
         le=32.0,
         description=(
-            "Estimated RAM per job = multiplier × (source_bytes + target_bytes) "
-            "for queue auto-tune and resource recommendations."
+            "RAM multiplier for small in-memory jobs; large streaming jobs use chunk-based estimates."
         ),
     )
     validation_queue_ram_reserve_bytes: int = Field(

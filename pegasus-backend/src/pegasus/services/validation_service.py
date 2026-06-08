@@ -65,6 +65,10 @@ class ValidationService:
             identity_column_count=identity_column_count,
             inline_native_spill=inline_native,
         )
+        largest_side = max(source_bytes, target_bytes)
+        if largest_side > 64 * 1024 * 1024:
+            # Wide multichar rows exceed the 32×cols heuristic — use bytes/1M floor.
+            row_width = max(row_width, largest_side // 1_500_000)
         source_row_estimate = max(1, source_bytes // row_width)
         target_row_estimate = max(1, target_bytes // row_width)
         budget = plan_workload_budget(
@@ -76,7 +80,8 @@ class ValidationService:
             target_duration_seconds=self._settings.validation_target_duration_seconds,
             requested_chunk_rows=self._settings.validation_reconciliation_chunk_rows,
             requested_partition_buckets=cap_partition_buckets(
-                self._settings.validation_reconciliation_partition_buckets
+                self._settings.validation_reconciliation_partition_buckets,
+                combined_file_bytes=source_bytes + target_bytes,
             ),
             requested_max_workers=policy.get("threads_per_job"),
             requested_sub_partition_buckets=self._settings.validation_reconciliation_sub_partition_buckets,

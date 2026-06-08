@@ -57,3 +57,22 @@ def test_plan_workload_budget_scales_chunk_with_row_estimate() -> None:
     assert small.chunk_rows <= 500_000
     assert large.chunk_rows >= small.chunk_rows
 
+
+def test_polars_path_never_chunks_above_cap() -> None:
+    budget = plan_workload_budget(
+        source_bytes=2 * 1024**3,
+        target_bytes=2 * 1024**3,
+        compare_column_count=11,
+        cpu_cores=4,
+        memory_budget_bytes=10 * 1024**3,
+        target_duration_seconds=300,
+        requested_chunk_rows=500_000,
+        requested_partition_buckets=512,
+        requested_max_workers=4,
+        requested_sub_partition_buckets=1,
+        source_row_estimate=10_000_000,
+        target_row_estimate=10_000_000,
+        inline_native_spill=False,
+    )
+    assert budget.chunk_rows <= 250_000
+

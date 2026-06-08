@@ -21,6 +21,7 @@ from pegasus.validation.pipeline.spill import PartitionWriter, encode_columnar_p
 from pegasus.validation.pipeline.timing import PipelineTimings, StageTimer
 from pegasus.validation.readers.pyarrow_io import (
     iter_csv_batches,
+    iter_csv_batches_stream,
     pyarrow_supports_delimiter,
     read_csv_binary,
     read_csv_table,
@@ -137,27 +138,42 @@ def _spill_partition_groups(
     subset = frame.select(select_cols)
 
     with StageTimer(timings, "serialization_seconds"):
+        if use_arrow_ipc_spill and not payload_cols:
+            for part in subset.partition_by("_pid", as_dict=False):
+                pid_int = int(part["_pid"][0])
+                id_series = part["_identity"]
+                hash_series = part["_fp_hash"]
+                if merkle is not None:
+                    merkle.add_group(pid_int, id_series, hash_series)
+                writer.write_bytes(
+                    pid_int,
+                    encode_arrow_partition_series(id_series, hash_series),
+                )
+            return frame.height
+
         grouped = subset.group_by("_pid", maintain_order=True).agg(
             pl.col("_identity"),
             pl.col("_fp_hash"),
             *([pl.col(col) for col in payload_cols]),
         )
-        for row in grouped.iter_rows(named=True):
-            pid = int(row["_pid"])
-            identities = row["_identity"]
-            hashes = row["_fp_hash"]
+        pid_list = grouped["_pid"].to_list()
+        identity_lists = grouped["_identity"].to_list()
+        hash_lists = grouped["_fp_hash"].to_list()
+        payload_lists = (
+            {col: grouped[col].to_list() for col in payload_cols} if payload_cols else None
+        )
+        for idx, pid in enumerate(pid_list):
+            pid_int = int(pid)
+            identities = identity_lists[idx]
+            hashes = hash_lists[idx]
             if merkle is not None:
-                merkle.add_group(pid, pl.Series(identities), pl.Series(hashes))
-            if use_arrow_ipc_spill and not payload_cols:
-                writer.write_bytes(
-                    pid,
-                    encode_arrow_partition_series(pl.Series(identities), pl.Series(hashes)),
-                )
-                continue
-            col_lists = [row[col] for col in payload_cols] if payload_cols else None
+                merkle.add_group(pid_int, pl.Series(identities), pl.Series(hashes))
+            col_lists = (
+                [payload_lists[col][idx] for col in payload_cols] if payload_lists else None
+            )
             if use_columnar_spill:
                 writer.write_bytes(
-                    pid,
+                    pid_int,
                     encode_columnar_partition(
                         list(identities),
                         list(hashes),
@@ -169,8 +185,45 @@ def _spill_partition_groups(
     return frame.height
 
 
+def _iter_csv_batches_for_adapter(
+    adapter: TabularSourceAdapter,
+    *,
+    chunk_rows: int,
+    include_columns: list[str] | None,
+) -> Iterator[object]:
+    """Yield PyArrow RecordBatches from a local file or GCS stream."""
+    from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+    from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
+
+    schema_names = adapter.get_schema().column_names
+    if isinstance(adapter, FileDelimitedAdapter):
+        yield from iter_csv_batches(
+            adapter.path,
+            delimiter=adapter._delimiter,
+            chunk_rows=chunk_rows,
+            has_header=adapter._has_header,
+            skip_rows=adapter._skip_rows,
+            include_columns=include_columns,
+            column_names=schema_names,
+        )
+        return
+    if isinstance(adapter, GcsDelimitedAdapter):
+        with adapter._stream_session().open_binary(read_ahead=True) as handle:
+            yield from iter_csv_batches_stream(
+                handle,
+                delimiter=adapter._delimiter,
+                chunk_rows=chunk_rows,
+                has_header=adapter._has_header,
+                skip_rows=adapter._skip_rows,
+                include_columns=include_columns,
+                column_names=schema_names,
+            )
+        return
+    raise TypeError(f"unsupported adapter for PyArrow CSV batches: {type(adapter).__name__}")
+
+
 def partition_side_streaming_batches(
-    adapter: FileDelimitedAdapter,
+    adapter: TabularSourceAdapter,
     writer: PartitionWriter,
     *,
     identity_columns: list[str],
@@ -186,7 +239,7 @@ def partition_side_streaming_batches(
     use_arrow_ipc_spill: bool = True,
     merkle: PartitionMerkleAccumulator | None = None,
 ) -> int:
-    """PyArrow RecordBatch streaming — bounded RAM for large local files."""
+    """PyArrow RecordBatch streaming — bounded RAM for local files and GCS."""
     import pyarrow as pa
 
     read_field = "source_read_seconds" if is_source else "target_read_seconds"
@@ -199,12 +252,9 @@ def partition_side_streaming_batches(
 
     with StageTimer(timings, part_field):
         with StageTimer(timings, read_field):
-            batches = iter_csv_batches(
-                adapter.path,
-                delimiter=adapter._delimiter,
+            batches = _iter_csv_batches_for_adapter(
+                adapter,
                 chunk_rows=chunk_rows,
-                has_header=adapter._has_header,
-                skip_rows=adapter._skip_rows,
                 include_columns=project_cols,
             )
         for batch in batches:
@@ -625,7 +675,24 @@ def try_partition_side_polars(
             )
             if cached is not None:
                 return cached
-            if not pyarrow_supports_delimiter(adapter._delimiter) and can_use_fast_multichar_load_bytes(
+            if pyarrow_supports_delimiter(adapter._delimiter):
+                return partition_side_streaming_batches(
+                    adapter,
+                    writer,
+                    identity_columns=identity_columns,
+                    compare_columns=compare_columns,
+                    num_partitions=num_partitions,
+                    store_payload=store_payload,
+                    timings=timings,
+                    chunk_rows=chunk_rows,
+                    is_source=is_source,
+                    drilldown_cache=drilldown_cache,
+                    lazy_drilldown=lazy_drilldown,
+                    use_columnar_spill=use_columnar_spill,
+                    use_arrow_ipc_spill=use_arrow_ipc_spill,
+                    merkle=merkle,
+                )
+            if can_use_fast_multichar_load_bytes(
                 adapter._load_header_prefix(),
                 adapter._delimiter,
             ):
@@ -715,9 +782,7 @@ def try_partition_side_polars(
                     use_arrow_ipc_spill=use_arrow_ipc_spill,
                     merkle=merkle,
                 )
-            if isinstance(adapter, FileDelimitedAdapter) and pyarrow_supports_delimiter(
-                adapter._delimiter
-            ):
+            if pyarrow_supports_delimiter(getattr(adapter, "_delimiter", "")):
                 return partition_side_streaming_batches(
                     adapter,
                     writer,

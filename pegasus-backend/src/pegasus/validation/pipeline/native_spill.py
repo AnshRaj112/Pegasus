@@ -21,13 +21,13 @@ if TYPE_CHECKING:
 def can_use_native_multichar_spill(
     *,
     store_payload: bool,
-    lazy_drilldown: bool,
+    lazy_drilldown: bool,  # noqa: ARG001 — fingerprint-only spill does not need drilldown frames
     use_arrow_ipc_spill: bool,
 ) -> bool:
     return (
         native_multichar.native_extension_available()
         and not store_payload
-        and not lazy_drilldown
+        and use_arrow_ipc_spill
     )
 
 

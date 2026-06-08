@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Polars multichar spill materializes a full chunk frame — keep chunks bounded.
+_POLARS_CHUNK_CAP = 250_000
+
 
 @dataclass(frozen=True)
 class WorkloadBudget:
@@ -74,14 +77,18 @@ def plan_workload_budget(
     estimated_total_rows = max(1, int(source_row_estimate or 0) + int(target_row_estimate or 0))
 
     row_scaled_chunk = requested_chunk_rows
-    if estimated_total_rows <= 200_000:
-        row_scaled_chunk = max(requested_chunk_rows, estimated_total_rows)
-    elif estimated_total_rows >= 200_000_000:
-        row_scaled_chunk = requested_chunk_rows * 3
-    elif estimated_total_rows >= 5_000_000:
-        row_scaled_chunk = min(requested_chunk_rows * 2, max_rows_per_chunk)
-    elif estimated_total_rows >= 50_000_000:
-        row_scaled_chunk = requested_chunk_rows * 2
+    if inline_native_spill:
+        if estimated_total_rows <= 200_000:
+            row_scaled_chunk = max(requested_chunk_rows, estimated_total_rows)
+        elif estimated_total_rows >= 200_000_000:
+            row_scaled_chunk = requested_chunk_rows * 3
+        elif estimated_total_rows >= 5_000_000:
+            row_scaled_chunk = min(requested_chunk_rows * 2, max_rows_per_chunk)
+        elif estimated_total_rows >= 50_000_000:
+            row_scaled_chunk = requested_chunk_rows * 2
+    else:
+        # Polars / PyArrow frames: never scale chunk size up with row estimates.
+        row_scaled_chunk = min(requested_chunk_rows, _POLARS_CHUNK_CAP)
 
     chunk_rows = min(row_scaled_chunk, max_rows_per_chunk)
     chunk_rows = max(4096, chunk_rows)
@@ -95,6 +102,8 @@ def plan_workload_budget(
             chunk_rows = min(max(chunk_rows, 250_000), inline_cap)
         else:
             chunk_rows = min(chunk_rows, inline_cap)
+    else:
+        chunk_rows = min(chunk_rows, _POLARS_CHUNK_CAP)
 
     throughput_goal_bps = file_bytes / max(1, target_duration_seconds)
     if throughput_goal_bps > 50 * 1024 * 1024 and not inline_native_spill:
@@ -110,7 +119,15 @@ def plan_workload_budget(
         max(source_bytes, target_bytes) // estimated_row_bytes,
     )
     rows_per_partition = 10_000 if est_rows >= 5_000_000 else 2000
-    partition_target = max(8, min(512, (int(est_rows) + rows_per_partition - 1) // rows_per_partition))
+    max_partitions = 512
+    if file_bytes >= 10 * 1024 * 1024 * 1024:
+        max_partitions = 2048
+    elif file_bytes >= 1024 * 1024 * 1024:
+        max_partitions = 1024
+    partition_target = max(
+        8,
+        min(max_partitions, (int(est_rows) + rows_per_partition - 1) // rows_per_partition),
+    )
     if columns >= 64:
         partition_target = min(512, int(partition_target * 1.25))
     if columns >= 500:

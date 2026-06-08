@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import mmap
 import struct
 from pathlib import Path
 from typing import Iterator
@@ -58,7 +59,7 @@ def encode_arrow_partition(identities: list[str], hashes: list[int]) -> bytes:
     return _BLOCK_LEN.pack(len(body)) + body
 
 
-def _iter_blocks(data: bytes) -> Iterator[bytes]:
+def _iter_blocks(data: bytes | memoryview) -> Iterator[bytes]:
     offset = 0
     total = len(data)
     while offset + _BLOCK_LEN.size <= total:
@@ -67,7 +68,7 @@ def _iter_blocks(data: bytes) -> Iterator[bytes]:
         end = offset + block_len
         if end > total:
             break
-        block = data[offset:end]
+        block = bytes(data[offset:end])
         offset = end
         if block[:4] == _ARROW_MAGIC:
             yield block[4:]
@@ -76,15 +77,31 @@ def _iter_blocks(data: bytes) -> Iterator[bytes]:
 def iter_arrow_frames(path: Path) -> Iterator[pl.DataFrame]:
     if not path.is_file():
         return
-    data = path.read_bytes()
-    for ipc in _iter_blocks(data):
+    with open(path, "rb") as handle:
+        mm = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ)
         try:
-            table = pa_ipc.open_stream(ipc).read_all()
-        except Exception:
-            continue
-        if table.num_rows == 0:
-            continue
-        yield pl.from_arrow(table)
+            offset = 0
+            total = len(mm)
+            while offset + _BLOCK_LEN.size <= total:
+                block_len = _BLOCK_LEN.unpack_from(mm, offset)[0]
+                offset += _BLOCK_LEN.size
+                end = offset + block_len
+                if end > total:
+                    break
+                block = mm[offset:end]
+                offset = end
+                if block[:4] != _ARROW_MAGIC:
+                    continue
+                ipc = bytes(block[4:])
+                try:
+                    table = pa_ipc.open_stream(ipc).read_all()
+                except Exception:
+                    continue
+                if table.num_rows == 0:
+                    continue
+                yield pl.from_arrow(table)
+        finally:
+            mm.close()
 
 
 def read_arrow_partition(path: Path) -> pl.DataFrame | None:

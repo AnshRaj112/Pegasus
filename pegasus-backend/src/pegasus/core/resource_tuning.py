@@ -118,9 +118,19 @@ def cap_partition_buckets(
     *,
     ncpu: int | None = None,
     ram_bytes: int | None = None,
+    combined_file_bytes: int = 0,
 ) -> int:
+    """Cap partition count by host RAM, but raise the floor for large fingerprint-only spill jobs."""
     mx = max_reconciliation_partition_buckets(ncpu=ncpu, ram_bytes=ram_bytes)
-    return max(1, min(int(requested), mx))
+    file_floor = 16
+    if combined_file_bytes >= 512 * 1024**2:
+        file_floor = 128
+    if combined_file_bytes >= 2 * 1024**3:
+        file_floor = 256
+    if combined_file_bytes >= 8 * 1024**3:
+        file_floor = 512
+    effective_cap = max(mx, file_floor)
+    return max(1, max(file_floor, min(int(requested), effective_cap)))
 
 
 def effective_local_thread_cap(requested_threads: int, *, ncpu: int | None = None) -> int:
