@@ -245,7 +245,7 @@ class GcsDelimitedAdapter:
         return split_line(physical, delim)
 
     def _read_header_from_prefix(self) -> list[str]:
-        prefix = self._load_header_prefix().decode(self._encoding, errors="replace")
+        prefix = self._load_header_prefix().decode("utf-8-sig", errors="replace")
         if self._has_header:
             if polars_supports_csv_delimiter(self._delimiter):
                 reader = csv.reader(
@@ -318,7 +318,11 @@ class GcsDelimitedAdapter:
         with self._stream_session().open_binary() as handle:
             reader = pacsv.open_csv(
                 handle,
-                read_options=_csv_read_options(has_header=self._has_header, skip_rows=self._skip_rows),
+                read_options=_csv_read_options(
+                    has_header=self._has_header,
+                    skip_rows=self._skip_rows,
+                    column_names=header_names,
+                ),
                 parse_options=_csv_parse_options(self._delimiter),
                 convert_options=_csv_convert_options(column_names=header_names),
             )

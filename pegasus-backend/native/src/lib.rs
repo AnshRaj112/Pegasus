@@ -373,7 +373,6 @@ fn encode_cbl2_partition(identities: &[String], hashes: &[u64]) -> PyResult<Vec<
 struct NativeSpillWriter {
     base: PathBuf,
     buffers: HashMap<u32, Vec<u8>>,
-    files: HashMap<u32, File>,
     merkle_xor: HashMap<u32, u64>,
     row_count: usize,
     track_merkle: bool,
@@ -385,7 +384,6 @@ impl NativeSpillWriter {
         Ok(Self {
             base,
             buffers: HashMap::new(),
-            files: HashMap::new(),
             merkle_xor: HashMap::new(),
             row_count: 0,
             track_merkle,
@@ -424,24 +422,20 @@ impl NativeSpillWriter {
             return Ok(());
         }
         let path = self.base.join(format!("part_{pid:05}.bin"));
-        let file = self.files.entry(pid).or_insert_with(|| {
-            fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-                .expect("open spill partition")
-        });
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| io::Error::new(e.kind(), format!("open spill partition {path:?}: {e}")))?;
         file.write_all(buf)?;
         buf.clear();
+        file.flush()?;
         Ok(())
     }
 
     fn close(mut self) -> PyResult<(usize, HashMap<u32, u64>)> {
         for pid in self.buffers.keys().copied().collect::<Vec<_>>() {
             self.flush(pid).map_err(|e| PyValueError::new_err(e.to_string()))?;
-        }
-        for file in self.files.values_mut() {
-            file.flush().map_err(|e| PyValueError::new_err(e.to_string()))?;
         }
         Ok((self.row_count, self.merkle_xor))
     }

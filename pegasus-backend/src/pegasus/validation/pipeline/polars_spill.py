@@ -19,6 +19,9 @@ from pegasus.validation.pipeline.partition_merkle import PartitionMerkleAccumula
 from pegasus.validation.pipeline.arrow_spill import encode_arrow_partition, encode_arrow_partition_series
 from pegasus.validation.pipeline.spill import PartitionWriter, encode_columnar_partition
 from pegasus.validation.pipeline.timing import PipelineTimings, StageTimer
+
+if TYPE_CHECKING:
+    from pegasus.validation.pipeline.live_progress import LiveProgressTracker
 from pegasus.validation.readers.pyarrow_io import (
     iter_csv_batches,
     iter_csv_batches_stream,
@@ -238,17 +241,20 @@ def partition_side_streaming_batches(
     use_columnar_spill: bool = True,
     use_arrow_ipc_spill: bool = True,
     merkle: PartitionMerkleAccumulator | None = None,
+    live_progress: LiveProgressTracker | None = None,
 ) -> int:
     """PyArrow RecordBatch streaming — bounded RAM for local files and GCS."""
     import pyarrow as pa
 
     read_field = "source_read_seconds" if is_source else "target_read_seconds"
     part_field = "source_partition_seconds" if is_source else "target_partition_seconds"
+    side = "source" if is_source else "target"
     project_cols = list(dict.fromkeys([*identity_columns, *compare_columns]))
     canon_cols = compare_columns if (store_payload or lazy_drilldown) else []
     cache_side = "source" if is_source else "target"
     drilldown_parts: list[pl.DataFrame] = []
     total = 0
+    chunk_index = 0
 
     with StageTimer(timings, part_field):
         with StageTimer(timings, read_field):
@@ -260,6 +266,12 @@ def partition_side_streaming_batches(
         for batch in batches:
             if batch.num_rows == 0:
                 continue
+            if live_progress is not None:
+                live_progress.on_chunk(
+                    side,
+                    chunk_index=chunk_index,
+                    rows_in_chunk=batch.num_rows,
+                )
             frame = table_to_polars(pa.Table.from_batches([batch]))
             frame = frame.with_columns([
                 _identity_expr(identity_columns),
@@ -279,6 +291,7 @@ def partition_side_streaming_batches(
                 use_arrow_ipc_spill=use_arrow_ipc_spill,
                 merkle=merkle,
             )
+            chunk_index += 1
 
     if lazy_drilldown and drilldown_cache is not None and drilldown_parts:
         drilldown_cache.register_side(cache_side, pl.concat(drilldown_parts, how="vertical"))
@@ -333,6 +346,7 @@ def partition_side_multichar_batches(
     use_columnar_spill: bool = True,
     use_arrow_ipc_spill: bool = True,
     merkle: PartitionMerkleAccumulator | None = None,
+    live_progress: LiveProgressTracker | None = None,
 ) -> int:
     """Batched multichar line reader → native inline spill or Polars fallback."""
     from pegasus.validation.pipeline.native_spill import (
@@ -359,8 +373,10 @@ def partition_side_multichar_batches(
 
     read_field = "source_read_seconds" if is_source else "target_read_seconds"
     part_field = "source_partition_seconds" if is_source else "target_partition_seconds"
+    side = "source" if is_source else "target"
     canon_cols = compare_columns if (store_payload or lazy_drilldown) else []
     total = 0
+    chunk_index = 0
 
     with StageTimer(timings, part_field):
         with StageTimer(timings, read_field):
@@ -368,6 +384,12 @@ def partition_side_multichar_batches(
         for frame in batches:
             if frame.is_empty():
                 continue
+            if live_progress is not None:
+                live_progress.on_chunk(
+                    side,
+                    chunk_index=chunk_index,
+                    rows_in_chunk=frame.height,
+                )
             _validate_frame_columns(
                 frame,
                 identity_columns=identity_columns,
@@ -390,6 +412,7 @@ def partition_side_multichar_batches(
                 use_arrow_ipc_spill=use_arrow_ipc_spill,
                 merkle=merkle,
             )
+            chunk_index += 1
     return total
 
 
@@ -583,14 +606,17 @@ def partition_side_adapter_stream(
     use_columnar_spill: bool = True,
     use_arrow_ipc_spill: bool = True,
     merkle: PartitionMerkleAccumulator | None = None,
+    live_progress: LiveProgressTracker | None = None,
 ) -> int:
     """Chunked stream_records → Polars spill (multi-char delimiters and GCS)."""
     read_field = "source_read_seconds" if is_source else "target_read_seconds"
     part_field = "source_partition_seconds" if is_source else "target_partition_seconds"
+    side = "source" if is_source else "target"
     canon_cols = compare_columns if (store_payload or lazy_drilldown) else []
     cache_side = "source" if is_source else "target"
     drilldown_parts: list[pl.DataFrame] = []
     total = 0
+    chunk_index = 0
 
     with StageTimer(timings, part_field):
         with StageTimer(timings, read_field):
@@ -598,6 +624,12 @@ def partition_side_adapter_stream(
         for chunk in chunks:
             if not chunk:
                 continue
+            if live_progress is not None:
+                live_progress.on_chunk(
+                    side,
+                    chunk_index=chunk_index,
+                    rows_in_chunk=len(chunk),
+                )
             frame = pl.DataFrame(chunk)
             _validate_frame_columns(
                 frame,
@@ -623,6 +655,7 @@ def partition_side_adapter_stream(
                 use_arrow_ipc_spill=use_arrow_ipc_spill,
                 merkle=merkle,
             )
+            chunk_index += 1
 
     if lazy_drilldown and drilldown_cache is not None and drilldown_parts:
         drilldown_cache.register_side(cache_side, pl.concat(drilldown_parts, how="vertical"))
@@ -647,6 +680,7 @@ def try_partition_side_polars(
     streaming_spill_min_bytes: int = 64 * 1024 * 1024,
     chunk_rows: int = 50_000,
     merkle: PartitionMerkleAccumulator | None = None,
+    live_progress: LiveProgressTracker | None = None,
 ) -> int | None:
     """Spill via streaming batches or a single in-memory frame (PyArrow-friendly delimiters)."""
     from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
@@ -691,6 +725,7 @@ def try_partition_side_polars(
                     use_columnar_spill=use_columnar_spill,
                     use_arrow_ipc_spill=use_arrow_ipc_spill,
                     merkle=merkle,
+                    live_progress=live_progress,
                 )
             if can_use_fast_multichar_load_bytes(
                 adapter._load_header_prefix(),
@@ -711,6 +746,7 @@ def try_partition_side_polars(
                     use_columnar_spill=use_columnar_spill,
                     use_arrow_ipc_spill=use_arrow_ipc_spill,
                     merkle=merkle,
+                    live_progress=live_progress,
                 )
             return partition_side_adapter_stream(
                 adapter,
@@ -727,6 +763,7 @@ def try_partition_side_polars(
                 use_columnar_spill=use_columnar_spill,
                 use_arrow_ipc_spill=use_arrow_ipc_spill,
                 merkle=merkle,
+                live_progress=live_progress,
             )
         except Exception:
             return None
@@ -781,6 +818,7 @@ def try_partition_side_polars(
                     use_columnar_spill=use_columnar_spill,
                     use_arrow_ipc_spill=use_arrow_ipc_spill,
                     merkle=merkle,
+                    live_progress=live_progress,
                 )
             if pyarrow_supports_delimiter(getattr(adapter, "_delimiter", "")):
                 return partition_side_streaming_batches(
@@ -798,6 +836,7 @@ def try_partition_side_polars(
                     use_columnar_spill=use_columnar_spill,
                     use_arrow_ipc_spill=use_arrow_ipc_spill,
                     merkle=merkle,
+                    live_progress=live_progress,
                 )
             return partition_side_adapter_stream(
                 adapter,
@@ -814,6 +853,7 @@ def try_partition_side_polars(
                 use_columnar_spill=use_columnar_spill,
                 use_arrow_ipc_spill=use_arrow_ipc_spill,
                 merkle=merkle,
+                live_progress=live_progress,
             )
         except Exception:
             pass

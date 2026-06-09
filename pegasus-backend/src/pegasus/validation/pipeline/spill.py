@@ -203,10 +203,15 @@ class PartitionWriter:
         if not buf:
             return
         path = self.base / f"part_{partition_id:05d}.bin"
-        if partition_id not in self._handles:
-            self._handles[partition_id] = open(path, "ab")  # noqa: SIM115
-        self._handles[partition_id].write(buf)
+        handle = self._handles.get(partition_id)
+        if handle is None:
+            handle = open(path, "ab")  # noqa: SIM115
+            self._handles[partition_id] = handle
+        handle.write(buf)
         buf.clear()
+        handle.flush()
+        handle.close()
+        del self._handles[partition_id]
 
     def close(self) -> None:
         for pid in list(self._buffers):

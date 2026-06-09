@@ -101,12 +101,14 @@ class FileDelimitedAdapter:
                     yield fields
 
     def _stream_records_pyarrow(self, chunk_rows: int) -> Iterator[list[dict[str, Any]]]:
+        header_names = self._read_header()
         for batch in iter_csv_batches(
             self.path,
             delimiter=self._delimiter,
             chunk_rows=chunk_rows,
             has_header=self._has_header,
             skip_rows=self._skip_rows,
+            column_names=header_names,
         ):
             records = batch_to_dicts(batch)
             if records:

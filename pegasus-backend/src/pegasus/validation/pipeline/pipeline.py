@@ -36,6 +36,7 @@ from pegasus.validation.pipeline.precheck import (
     try_identical_precheck,
 )
 from pegasus.validation.pipeline.drilldown_cache import DrilldownCache
+from pegasus.validation.pipeline.live_progress import LiveProgressTracker
 from pegasus.validation.pipeline.polars_spill import (
     try_partition_side_polars,
 )
@@ -332,6 +333,7 @@ class TabularReconciliationPipeline:
                 lazy_drilldown=lazy_drilldown,
                 drilldown_cache=drilldown_cache,
                 progress_callback=progress_callback,
+                est_rows=est_rows,
             )
         finally:
             if owned_workspace:
@@ -356,6 +358,7 @@ class TabularReconciliationPipeline:
         lazy_drilldown: bool,
         drilldown_cache: DrilldownCache | None,
         progress_callback: Callable[[dict[str, Any]], None] | None,
+        est_rows: int,
     ) -> PipelineResult:
         from pegasus.validation.pipeline.partition_merkle import PartitionMerkleAccumulator
 
@@ -379,6 +382,18 @@ class TabularReconciliationPipeline:
             compare_columns=compare_columns,
         )
 
+        live_progress: LiveProgressTracker | None = None
+        if progress_callback is not None:
+            live_progress = LiveProgressTracker(
+                progress_callback,
+                chunk_rows=chunk_rows,
+                column_count=len(compare_columns) + len(self._identity_columns),
+                partition_buckets=num_partitions,
+                partition_workers=2,
+                est_rows=est_rows,
+            )
+            live_progress.begin_partition()
+
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = {
                 pool.submit(
@@ -395,6 +410,7 @@ class TabularReconciliationPipeline:
                     lazy_drilldown,
                     is_source=True,
                     merkle=src_merkle,
+                    live_progress=live_progress,
                 ): "source",
                 pool.submit(
                     self._partition_side,
@@ -410,6 +426,7 @@ class TabularReconciliationPipeline:
                     lazy_drilldown,
                     is_source=False,
                     merkle=tgt_merkle,
+                    live_progress=live_progress,
                 ): "target",
             }
             counts: dict[str, int] = {}
@@ -542,11 +559,16 @@ class TabularReconciliationPipeline:
             )
 
         use_spill_payload = spill_payload
-        if progress_callback:
+        reconcile_workers = resolved_reconcile_workers(self._config.partition_reconcile_workers)
+        if live_progress is not None:
+            live_progress.begin_reconcile(
+                partitions_total=len(active_pids),
+                reconcile_workers=reconcile_workers,
+            )
+        elif progress_callback:
             progress_callback(
                 {"phase": "reconciling", "message": "Reconciling partitions"}
             )
-        reconcile_workers = resolved_reconcile_workers(self._config.partition_reconcile_workers)
         if should_parallel_reconcile(
             num_partitions=len(active_pids),
             workers=reconcile_workers,
@@ -563,8 +585,10 @@ class TabularReconciliationPipeline:
                 timings=timings,
                 use_spill_payload=use_spill_payload,
                 max_workers=reconcile_workers,
+                live_progress=live_progress,
             )
         else:
+            done = 0
             for pid in sorted(active_pids):
                 src_path = work / "source" / f"part_{pid:05d}.bin"
                 tgt_path = work / "target" / f"part_{pid:05d}.bin"
@@ -585,6 +609,9 @@ class TabularReconciliationPipeline:
                 matching += part_matching
                 if part_missing or part_extra or part_changed:
                     mismatched_partitions += 1
+                done += 1
+                if live_progress is not None:
+                    live_progress.on_reconcile_done(partitions_done=done)
 
         timings.total_seconds = time.perf_counter() - t0
         timings.total_cpu_seconds = time.process_time() - process_cpu_start
@@ -663,7 +690,11 @@ class TabularReconciliationPipeline:
         *,
         is_source: bool,
         merkle: object | None = None,
+        live_progress: LiveProgressTracker | None = None,
     ) -> int:
+        side = "source" if is_source else "target"
+        if live_progress is not None:
+            live_progress.side_started(side)
         spill_flags = {
             "drilldown_cache": drilldown_cache,
             "lazy_drilldown": lazy_drilldown,
@@ -682,12 +713,15 @@ class TabularReconciliationPipeline:
             is_source=is_source,
             streaming_spill_min_bytes=self._config.streaming_spill_min_bytes,
             chunk_rows=self._config.chunk_rows,
+            live_progress=live_progress,
             **spill_flags,
         )
         if polars_rows is not None:
+            if live_progress is not None:
+                live_progress.side_finished(side, total_rows=polars_rows)
             return polars_rows
 
-        return self._partition_side_streaming(
+        rows = self._partition_side_streaming(
             adapter,
             writer,
             chunk_rows,
@@ -697,7 +731,11 @@ class TabularReconciliationPipeline:
             timings,
             compare_columns,
             is_source=is_source,
+            live_progress=live_progress,
         )
+        if live_progress is not None:
+            live_progress.side_finished(side, total_rows=rows)
+        return rows
 
     def _partition_side_streaming(
         self,
@@ -711,10 +749,13 @@ class TabularReconciliationPipeline:
         compare_columns: list[str],
         *,
         is_source: bool,
+        live_progress: LiveProgressTracker | None = None,
     ) -> int:
+        side = "source" if is_source else "target"
         part_field = "source_partition_seconds" if is_source else "target_partition_seconds"
         read_field = "source_read_seconds" if is_source else "target_read_seconds"
         total = 0
+        chunk_index = 0
 
         with StageTimer(timings, part_field):
             with StageTimer(timings, read_field):
@@ -722,6 +763,12 @@ class TabularReconciliationPipeline:
             id_cols = self._identity_columns
             cmp_cols = compare_columns
             for chunk in chunks:
+                if live_progress is not None:
+                    live_progress.on_chunk(
+                        side,
+                        chunk_index=chunk_index,
+                        rows_in_chunk=len(chunk),
+                    )
                 for record in chunk:
                     with StageTimer(timings, "canonicalization_seconds"):
                         id_parts = _canonical_parts(record, id_cols)
@@ -737,6 +784,7 @@ class TabularReconciliationPipeline:
                     with StageTimer(timings, "disk_write_seconds"):
                         pass
                     total += 1
+                chunk_index += 1
         return total
 
 

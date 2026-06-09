@@ -65,6 +65,43 @@ def test_pyarrow_keeps_mixed_numeric_and_alpha_as_strings(tmp_path: Path) -> Non
     assert frame["col_c"][-1] == "K"
 
 
+def test_pyarrow_keeps_column_18_k_as_string(tmp_path: Path) -> None:
+    path = tmp_path / "wide.csv"
+    header = ",".join(f"col_{index}" for index in range(1, 19))
+    lines = [header]
+    for row_index in range(200):
+        values = ["1"] * 17 + (["100"] if row_index < 199 else ["K"])
+        lines.append(",".join(values))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    table = read_csv_table(path, delimiter=",")
+    frame = table_to_polars(table)
+    assert frame.height == 200
+    assert frame["col_18"][-1] == "K"
+
+
+def test_pyarrow_duplicate_headers_keep_alpha_values_as_strings(tmp_path: Path) -> None:
+    path = tmp_path / "dup.csv"
+    header = ",".join(["amount"] * 18)
+    row = ",".join(["1"] * 17 + ["K"])
+    path.write_text(f"{header}\n{row}\n", encoding="utf-8")
+    table = read_csv_table(path, delimiter=",")
+    frame = table_to_polars(table)
+    assert frame.height == 1
+    assert frame["amount"][-1] == "K"
+
+
+def test_pyarrow_streaming_wide_csv_with_k(tmp_path: Path) -> None:
+    path = tmp_path / "wide_stream.csv"
+    header = ",".join(f"c{index}" for index in range(1, 19))
+    lines = [header]
+    for row_index in range(250):
+        values = ["1"] * 17 + (["100"] if row_index < 249 else ["K"])
+        lines.append(",".join(values))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    total = sum(batch.num_rows for batch in iter_csv_batches(path, delimiter=",", chunk_rows=50))
+    assert total == 250
+
+
 def test_delimited_adapter_uses_pyarrow_for_comma(tmp_path: Path) -> None:
     path = tmp_path / "data.csv"
     path.write_text("uid,amount\n10,5\n20,6\n", encoding="utf-8")

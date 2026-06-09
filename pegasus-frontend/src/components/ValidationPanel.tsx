@@ -3,6 +3,7 @@ import { Alert, Button, Card, Col, Divider, Input, Modal, Row, Select, Space, St
 import { useNavigate } from 'react-router-dom'
 import LocalPathBrowser from './LocalPathBrowser'
 import ParallelValidationResourceForm from './ParallelValidationResourceForm'
+import ValidationJobProgress from './ValidationJobProgress'
 import { formatJobError } from '../api/formatError.js'
 import { formatDuration } from '../api/validationHistory.js'
 
@@ -73,60 +74,6 @@ async function pollValidationJob(pollPath, { timeoutMs = 0, intervalMs = 400, on
   throw new Error('Timed out waiting for validation job to finish')
 }
 
-function formatPercent(n) {
-  if (!Number.isFinite(n)) return null
-  return `${Math.max(0, Math.min(100, Number(n))).toFixed(1)}%`
-}
-
-function jobRunningCopy(phase, jobId) {
-  const idLine = jobId ? <Typography.Paragraph style={{ marginTop: 8, marginBottom: 0, color: '#475569' }}>Job id: <Typography.Text code>{jobId}</Typography.Text></Typography.Paragraph> : null
-
-  switch (phase) {
-    case 'upload':
-    case 'uploading':
-      return {
-        title: 'Uploading files…',
-        body: <>Sending CSVs to the API. The next step returns HTTP 202 and starts a background worker.</>,
-        extra: null,
-      }
-    case 'accepted':
-      return {
-        title: 'Job accepted',
-        body: (
-          <>
-            The server responded with <strong>202 Accepted</strong> — validation does not run inside this request.
-            {idLine ? <> {idLine}</> : null}
-          </>
-        ),
-        extra: 'Polling for status until the worker finishes…',
-      }
-    case 'queued':
-      return {
-        title: 'Job queued',
-        body: (
-          <>
-            Your job is in the queue and will start shortly.
-            {idLine ? <> {idLine}</> : null}
-          </>
-        ),
-        extra: 'Large files can take several minutes — you can keep this tab open.',
-      }
-    case 'running':
-      return {
-        title: 'Validation running',
-        body: (
-          <>
-            A background worker is comparing the two files on the server (streaming / external memory).
-            {idLine ? <> {idLine}</> : null}
-          </>
-        ),
-        extra: 'Still working…',
-      }
-    default:
-      return { title: 'Working…', body: <>Please wait.</>, extra: null }
-  }
-}
-
 export function ValidationPanel() {
   const navigate = useNavigate()
   const [sourcePath, setSourcePath] = useState('')
@@ -149,7 +96,6 @@ export function ValidationPanel() {
   const [queueModalError, setQueueModalError] = useState('')
   const running = phase === 'running'
   const effectiveMax = queueInfo?.effective_max_concurrency ?? null
-  const jobUi = running ? jobRunningCopy(jobProgress.phase, jobProgress.jobId) : null
 
   async function refreshQueueInfo() {
     setQueueModalLoading(true)
@@ -400,46 +346,36 @@ export function ValidationPanel() {
       </Card>
 
       <Space direction="vertical" size={16} style={{ width: '100%' }} role="status" aria-live="polite">
-        {running && jobUi ? (
-          <Card style={{ borderRadius: 24, borderColor: '#F1F1F1', boxShadow: '0 12px 40px rgba(235,76,76,0.10)' }} styles={{ body: { padding: 24 } }}>
-            <Tag color="processing" style={{ marginBottom: 12 }}>
-              Async job - 202 Accepted
-            </Tag>
-            <Typography.Title level={4} style={{ marginTop: 0, marginBottom: 8, color: '#EB4C4C' }}>{jobUi.title}</Typography.Title>
-            <Typography.Paragraph style={{ color: '#475569' }}>{jobUi.body}</Typography.Paragraph>
-            {jobProgress.message ? <Typography.Paragraph style={{ color: '#475569' }}>{jobProgress.message}</Typography.Paragraph> : null}
-            {jobProgress.progress?.percent != null ? <Typography.Paragraph style={{ color: '#475569' }}>Progress: <Typography.Text strong>{formatPercent(jobProgress.progress.percent)}</Typography.Text></Typography.Paragraph> : null}
-            {jobProgress.progress?.total_mismatch_records != null ? <Typography.Paragraph style={{ color: '#475569' }}>Mismatches emitted so far: <Typography.Text strong>{Number(jobProgress.progress.total_mismatch_records)}</Typography.Text></Typography.Paragraph> : null}
-            {jobProgress.progress?.value_mismatch_done != null ? (
-              <Typography.Paragraph style={{ color: '#475569' }}>
-                Value mismatch rows emitted: <Typography.Text strong>{Number(jobProgress.progress.value_mismatch_done)}</Typography.Text>
-                {jobProgress.progress?.value_mismatch_total_estimate != null ? <> / est <Typography.Text strong>{Number(jobProgress.progress.value_mismatch_total_estimate)}</Typography.Text></> : null}
-              </Typography.Paragraph>
-            ) : null}
-            {jobProgress.phase === 'queued' && jobProgress.progress?.queue_position != null ? (
-              <Alert
-                type="warning"
-                showIcon
-                style={{ marginTop: 12 }}
-                message={
-                  <Typography.Text>
-                  Queue position: {Number(jobProgress.progress.queue_position) + 1}
-                  {jobProgress.progress?.max_concurrency ? (
-                    <span style={{ color: '#B45309' }}>
-                      {' '}· {jobProgress.progress.running_jobs ?? '?'}/{jobProgress.progress.max_concurrency} workers
-                      {effectiveMax != null && effectiveMax !== queueInfo?.max_concurrency
-                        ? ` (effective cap ${effectiveMax})`
-                        : ''}
-                    </span>
-                  ) : null}
-                  </Typography.Text>
-                }
-                description="Your job will start when a running validation finishes."
-              />
-            ) : null}
-            {jobUi.extra ? <Typography.Paragraph style={{ color: '#475569' }}>{jobUi.extra}</Typography.Paragraph> : null}
-            <Typography.Paragraph style={{ marginBottom: 0, color: '#334155', fontWeight: 500 }}><Typography.Text strong>{(elapsedMs / 1000).toFixed(1)}s</Typography.Text> elapsed</Typography.Paragraph>
-          </Card>
+        {running ? (
+          <ValidationJobProgress
+            phase={jobProgress.phase}
+            jobId={jobProgress.jobId}
+            message={jobProgress.message}
+            progress={jobProgress.progress}
+            elapsedLabel={`${(elapsedMs / 1000).toFixed(1)}s elapsed`}
+          />
+        ) : null}
+
+        {running && jobProgress.phase === 'queued' && jobProgress.progress?.queue_position != null ? (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginTop: -8, marginBottom: 16 }}
+            message={
+              <Typography.Text>
+                Queue position: {Number(jobProgress.progress.queue_position) + 1}
+                {jobProgress.progress?.max_concurrency ? (
+                  <span style={{ color: '#B45309' }}>
+                    {' '}· {jobProgress.progress.running_jobs ?? '?'}/{jobProgress.progress.max_concurrency} workers
+                    {effectiveMax != null && effectiveMax !== queueInfo?.max_concurrency
+                      ? ` (effective cap ${effectiveMax})`
+                      : ''}
+                  </span>
+                ) : null}
+              </Typography.Text>
+            }
+            description="Your job will start when a running validation finishes."
+          />
         ) : null}
 
         {phase === 'success' && result ? (

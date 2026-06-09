@@ -41,15 +41,21 @@ def pyarrow_supports_delimiter(delimiter: str) -> bool:
     return polars_supports_csv_delimiter(delimiter)
 
 
+def _string_column_types(names: list[str]) -> pa.Schema:
+    """Force every named CSV column to UTF-8 strings (including duplicate names)."""
+    return pa.schema([(name, pa.string()) for name in names])
+
+
 def _csv_read_options(
     *,
     has_header: bool,
     skip_rows: int,
     column_names: list[str] | None = None,
 ) -> pacsv.ReadOptions:
-    if not has_header and column_names:
+    if column_names:
+        # Names are already parsed elsewhere; skip the on-disk header row when present.
         return pacsv.ReadOptions(
-            skip_rows=skip_rows,
+            skip_rows=skip_rows + (1 if has_header else 0),
             column_names=column_names,
             autogenerate_column_names=False,
             encoding="UTF8",
@@ -79,7 +85,7 @@ def _csv_convert_options(
         kwargs["include_columns"] = list(include_columns)
     typed_columns = list(include_columns) if include_columns else list(column_names or [])
     if typed_columns:
-        kwargs["column_types"] = dict.fromkeys(typed_columns, pa.string())
+        kwargs["column_types"] = _string_column_types(typed_columns)
     return pacsv.ConvertOptions(**kwargs)
 
 
@@ -95,7 +101,7 @@ def _read_header_column_names(
         return []
     import csv
 
-    with path.open(newline="", encoding="utf-8") as handle:
+    with path.open(newline="", encoding="utf-8-sig") as handle:
         for _ in range(skip_rows):
             next(handle, None)
         reader = csv.reader(handle, delimiter=delimiter)
@@ -119,15 +125,16 @@ def read_csv_binary(
     if not pyarrow_supports_delimiter(delimiter):
         raise ValueError(f"PyArrow CSV does not support delimiter {delimiter!r}")
 
+    header_names = column_names
     read_options = _csv_read_options(
         has_header=has_header,
         skip_rows=skip_rows,
-        column_names=column_names,
+        column_names=header_names,
     )
     parse_options = _csv_parse_options(delimiter)
     convert_options = _csv_convert_options(
         include_columns=include_columns,
-        column_names=column_names,
+        column_names=header_names,
     )
 
     if max_rows is None:
@@ -199,7 +206,7 @@ def read_csv_table(
         read_options=_csv_read_options(
             has_header=has_header,
             skip_rows=skip_rows,
-            column_names=column_names,
+            column_names=header_names,
         ),
         parse_options=_csv_parse_options(delimiter),
         convert_options=_csv_convert_options(
@@ -277,7 +284,11 @@ def _open_csv_batch_reader(
         )
     return pacsv.open_csv(
         source,
-        read_options=_csv_read_options(has_header=has_header, skip_rows=skip_rows),
+        read_options=_csv_read_options(
+            has_header=has_header,
+            skip_rows=skip_rows,
+            column_names=header_names,
+        ),
         parse_options=_csv_parse_options(delimiter),
         convert_options=_csv_convert_options(
             include_columns=include_columns,

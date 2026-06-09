@@ -289,6 +289,11 @@ def _run_job_body(
                 else str(stage_payload) if stage_payload is not None else None
             )
             is_total_stage = stage_name == "Total"
+            is_live = event.get("live") is True or str(event.get("phase") or "") in {
+                "partitioning",
+                "reconciling",
+            }
+            live_interval = min(progress_interval, 1.0)
             if is_stage:
                 if (
                     not is_total_stage
@@ -297,8 +302,10 @@ def _run_job_body(
                 ):
                     return
                 last_stage_emit = now
-            elif not is_terminal and now - last_emit < progress_interval:
-                return
+            elif not is_terminal:
+                interval = live_interval if is_live else progress_interval
+                if now - last_emit < interval:
+                    return
             last_emit = now
             progress_seq += 1
             progress: dict[str, Any] = {

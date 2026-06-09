@@ -21,6 +21,9 @@ from pegasus.validation.pipeline.spill import iter_partition
 from pegasus.validation.pipeline.timing import PipelineTimings, StageTimer
 
 if TYPE_CHECKING:
+    from pegasus.validation.pipeline.live_progress import LiveProgressTracker
+
+if TYPE_CHECKING:
     from pegasus.validation.pipeline.drilldown_cache import DrilldownCache
 
 
@@ -219,6 +222,7 @@ def reconcile_partitions_parallel(
     timings: PipelineTimings,
     use_spill_payload: bool,
     max_workers: int,
+    live_progress: LiveProgressTracker | None = None,
 ) -> tuple[int, int, int, int, int]:
     """Reconcile partitions in a process pool; drilldown runs in the parent."""
     tasks = [
@@ -233,11 +237,15 @@ def reconcile_partitions_parallel(
     mismatched_partitions = 0
 
     with StageTimer(timings, "partition_reconciliation_seconds"):
+        done = 0
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {pool.submit(_worker_reconcile, t): i for i, t in enumerate(tasks)}
             ordered: list[PartitionReconcileResult | None] = [None] * len(tasks)
             for fut in as_completed(futures):
                 ordered[futures[fut]] = fut.result()
+                done += 1
+                if live_progress is not None:
+                    live_progress.on_reconcile_done(partitions_done=done)
 
     for i, pid in enumerate(sorted(active_pids)):
         core = ordered[i]
