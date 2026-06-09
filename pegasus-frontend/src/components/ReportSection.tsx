@@ -202,18 +202,45 @@ function Pagination({ page, totalPages, totalItems, pageSize, onPageChange, onPa
   )
 }
 
-export function ReportSection({ type, samples = [] }) {
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(PAGE_SIZE)
+export function ReportSection({
+  type,
+  samples = [],
+  totalCount,
+  page: controlledPage,
+  pageSize: controlledPageSize,
+  loading = false,
+  serverPaginated = false,
+  onPageChange,
+  onPageSizeChange,
+}) {
+  const [localPage, setLocalPage] = useState(1)
+  const [localPageSize, setLocalPageSize] = useState(PAGE_SIZE)
+  const page = controlledPage ?? localPage
+  const pageSize = controlledPageSize ?? localPageSize
   const firstRowRef = useRef(null)
   const style = variantStyles[type] ?? variantStyles.mismatched
-  const totalPages = Math.max(1, Math.ceil(samples.length / pageSize))
+  const totalItems = totalCount ?? samples.length
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
   const safePage = Math.min(page, totalPages)
 
   const visibleSamples = useMemo(() => {
+    if (serverPaginated) return samples
     const start = (safePage - 1) * pageSize
     return samples.slice(start, start + pageSize)
-  }, [samples, safePage, pageSize])
+  }, [samples, safePage, pageSize, serverPaginated])
+
+  function handlePageChange(nextPage) {
+    if (typeof onPageChange === 'function') onPageChange(nextPage)
+    else setLocalPage(nextPage)
+  }
+
+  function handlePageSizeChange(nextSize) {
+    if (typeof onPageSizeChange === 'function') onPageSizeChange(nextSize)
+    else {
+      setLocalPageSize(nextSize)
+      setLocalPage(1)
+    }
+  }
 
   useEffect(() => {
     if (!visibleSamples.length) return
@@ -237,12 +264,16 @@ export function ReportSection({ type, samples = [] }) {
           </Space>
 
           <Card size="small" style={{ borderRadius: 16, background: '#F8FAFC', borderColor: '#E2E8F0' }} styles={{ body: { padding: 16 } }}>
-            <Statistic value={samples.length} suffix="total rows" />
+            <Statistic value={totalItems} suffix="total rows" />
             <Typography.Text type="secondary">Showing up to {pageSize} rows per page</Typography.Text>
           </Card>
         </Space>
 
-        {samples.length ? (
+        {loading && !visibleSamples.length ? (
+          <Typography.Text type="secondary">Loading rows…</Typography.Text>
+        ) : null}
+
+        {totalItems ? (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Row gutter={[12, 12]}>
               <Col xs={24} md={8}>
@@ -274,13 +305,10 @@ export function ReportSection({ type, samples = [] }) {
             <Pagination
               page={safePage}
               totalPages={totalPages}
-              totalItems={samples.length}
+              totalItems={totalItems}
               pageSize={pageSize}
-              onPageChange={setPage}
-              onPageSizeChange={(nextPageSize) => {
-                setPageSize(nextPageSize)
-                setPage(1)
-              }}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
             />
           </Space>
         ) : (

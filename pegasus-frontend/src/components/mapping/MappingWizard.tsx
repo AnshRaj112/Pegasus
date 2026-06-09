@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { formatJobError } from '../../api/formatError.js'
+import { normalizeValidateResult } from '../../api/validationPoll.js'
 import StepIndicator    from './StepIndicator'
 import Step1_DataSource from './Step1_DataSource'
 import Step2_FilePicker from './Step2_FilePicker'
@@ -50,23 +51,6 @@ function formatDetail(detail) {
   if (typeof detail === 'string') return detail
   if (Array.isArray(detail)) return detail.map(e => (typeof e === 'object' && e != null ? e.msg ?? e.message : null) ?? JSON.stringify(e)).join('; ')
   return JSON.stringify(detail)
-}
-
-function flattenMismatchSampleGroups(groups) {
-  if (!groups) return []
-  return [
-    ...(groups.missing_in_target ?? []),
-    ...(groups.extra_in_target ?? []),
-    ...(groups.value_mismatch ?? []),
-  ]
-}
-
-function normalizeResult(data) {
-  if (!data) return data
-  if ((data.mismatch_samples?.length ?? 0) > 0) return data
-  const flattened = flattenMismatchSampleGroups(data.mismatch_sample_groups)
-  if (flattened.length === 0) return data
-  return { ...data, mismatch_samples: flattened }
 }
 
 const DEFAULT_CLOUD_CONFIG = {
@@ -201,7 +185,7 @@ async function pollJobDetail(pollPath, { timeoutMs = 0, intervalMs = 400, onPoll
     if (typeof onPoll === 'function') onPoll(payload)
     if (payload.status === 'completed') {
       if (payload.batch_result) return payload
-      if (payload.result) return { ...payload, result: normalizeResult(payload.result) }
+      if (payload.result) return { ...payload, result: normalizeValidateResult(payload.result) }
       return payload
     }
     if (payload.status === 'failed') {
@@ -222,7 +206,7 @@ async function pollJob(pollPath, { timeoutMs = 0, intervalMs = 400, onPoll } = {
     if (raw) { try { payload = JSON.parse(raw) } catch { throw new Error(raw.trim().slice(0, 400)) } }
     if (!res.ok) throw new Error(formatDetail(payload.detail) || `${res.status} ${res.statusText}`)
     if (typeof onPoll === 'function') onPoll(payload)
-    if (payload.status === 'completed' && payload.result) return normalizeResult(payload.result)
+    if (payload.status === 'completed' && payload.result) return normalizeValidateResult(payload.result)
     if (payload.status === 'failed') {
       throw new Error(formatJobError(payload.message || payload.error))
     }
@@ -1989,7 +1973,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           },
         })
       } else if (data.summary) {
-        final = normalizeResult(data)
+        final = normalizeValidateResult(data)
       } else {
         throw new Error('Unexpected API response')
       }

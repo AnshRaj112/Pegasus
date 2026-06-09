@@ -41,15 +41,22 @@ def _load_json(path: Path) -> dict[str, object]:
 
 def _normalize_summary(summary: dict[str, int]) -> dict[str, int]:
     """Map pipeline summary keys to API mismatch type keys."""
-    if MismatchType.MISSING_IN_TARGET.value in summary:
-        return dict(summary)
-    return {
-        MismatchType.MISSING_IN_TARGET.value: int(summary.get("missing", summary.get("missing_in_target", 0))),
-        MismatchType.EXTRA_IN_TARGET.value: int(summary.get("extra", summary.get("extra_in_target", 0))),
-        MismatchType.VALUE_MISMATCH.value: int(
-            summary.get("changed", summary.get("value_mismatch", 0))
-        ),
+    from pegasus.api.v1.mismatch_sample import normalize_mismatch_summary
+
+    return normalize_mismatch_summary(summary)
+
+
+def _merge_summary_counts(*summaries: dict[str, int]) -> dict[str, int]:
+    merged = {
+        MismatchType.MISSING_IN_TARGET.value: 0,
+        MismatchType.EXTRA_IN_TARGET.value: 0,
+        MismatchType.VALUE_MISMATCH.value: 0,
     }
+    for summary in summaries:
+        normalized = _normalize_summary(dict(summary))
+        for key in merged:
+            merged[key] = max(merged[key], int(normalized.get(key, 0)))
+    return merged
 
 
 def _resolve_job_mismatch_artifact(
@@ -69,10 +76,6 @@ def _resolve_job_mismatch_artifact(
 
     mismatches = result.report.mismatches
     if mismatches.is_empty():
-        return None
-
-    sample_cap = int(get_settings().validation_mismatch_sample_limit or 0)
-    if sample_cap <= 0:
         return None
 
     export_path.parent.mkdir(parents=True, exist_ok=True)
@@ -396,7 +399,43 @@ def _run_job_body(
             profiler.mark_worker_finished()
         with lifecycle_span("Mismatch Export"):
             artifact = result.mismatch_artifact_path or result.report.mismatch_artifact_path
-            artifact = _resolve_job_mismatch_artifact(job_dir, result, artifact)
+            workspace = job_dir / "reconcile_workspace"
+            export_path = job_dir / "mismatches.ndjson"
+            if workspace.is_dir() and result.compared_columns:
+                try:
+                    from pegasus.validation.pipeline.mismatch_export import export_workspace_mismatches_ndjson
+
+                    export_stats = export_workspace_mismatches_ndjson(
+                        workspace,
+                        export_path,
+                        compare_columns=list(result.compared_columns),
+                    )
+                    if export_stats.total > 0 and export_path.is_file():
+                        artifact = export_path
+                        result.report.summary = _merge_summary_counts(
+                            dict(result.report.summary),
+                            export_stats.to_summary(),
+                        )
+                        logger.info(
+                            "Exported %d mismatch rows from spill workspace to %s "
+                            "(missing=%d extra=%d value=%d)",
+                            export_stats.total,
+                            export_path,
+                            export_stats.missing_in_target,
+                            export_stats.extra_in_target,
+                            export_stats.value_mismatch,
+                        )
+                except Exception:
+                    logger.exception("Failed to export mismatches from reconcile workspace")
+            if artifact is None or not artifact.is_file():
+                artifact = _resolve_job_mismatch_artifact(job_dir, result, artifact)
+            if artifact is not None and artifact.is_file():
+                from pegasus.api.v1.mismatch_sample import reconcile_summary_with_artifact
+
+                result.report.summary = reconcile_summary_with_artifact(
+                    dict(result.report.summary),
+                    artifact,
+                )
         artifact_rel = None
         artifact_abs = None
         if artifact is not None and artifact.is_file():

@@ -36,8 +36,11 @@ from pegasus.validation.comparators.models import MismatchReport, MismatchType, 
 
 from .mismatch_sample import (
     build_grouped_mismatch_samples,
+    count_mismatch_types_ndjson,
     load_mismatch_polars_for_api,
     load_value_mismatch_sample_from_ndjson,
+    normalize_mismatch_summary,
+    reconcile_summary_with_artifact,
     stream_all_value_mismatch_rows_from_ndjson,
     stream_presence_mismatch_rows_from_ndjson,
     value_mismatch_counts_by_column,
@@ -97,12 +100,6 @@ def run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.UU
     res = loads_str((job_dir / "result.json").read_text(encoding="utf-8"))
     rid = meta.get("run_id")
     run_uuid = uuid.UUID(str(rid)) if rid else None
-    summary_raw = res.get("summary") or {}
-    summary = {
-        MismatchType.MISSING_IN_TARGET.value: int(summary_raw.get(MismatchType.MISSING_IN_TARGET.value, 0)),
-        MismatchType.EXTRA_IN_TARGET.value: int(summary_raw.get(MismatchType.EXTRA_IN_TARGET.value, 0)),
-        MismatchType.VALUE_MISMATCH.value: int(summary_raw.get(MismatchType.VALUE_MISMATCH.value, 0)),
-    }
     apath = None
     artifact_raw = res.get("mismatch_artifact_path")
     if isinstance(artifact_raw, str) and artifact_raw.strip():
@@ -117,6 +114,7 @@ def run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.UU
             cand = job_dir / rel.strip()
             if cand.is_file():
                 apath = cand
+    summary = reconcile_summary_with_artifact(res.get("summary"), apath)
     report = MismatchReport(mismatches=empty_mismatch_frame(), summary=summary, mismatch_artifact_path=apath)
     format_checks_raw = res.get("mapping_format_checks")
     footer_raw = res.get("footer_validation")
@@ -143,13 +141,13 @@ def build_validate_response(
     run_id: uuid.UUID | None,
 ) -> ValidateResponse:
     """Turn a :class:`ValidationRunResult` into API JSON."""
-    summary_dict = run_result.report.summary
+    artifact = run_result.mismatch_artifact_path or run_result.report.mismatch_artifact_path
+    summary_dict = reconcile_summary_with_artifact(run_result.report.summary, artifact)
     counts_model = build_mismatch_counts(summary_dict)
     total_records = (
         counts_model.missing_in_target + counts_model.extra_in_target + counts_model.value_mismatch
     )
 
-    artifact = run_result.mismatch_artifact_path or run_result.report.mismatch_artifact_path
     presence_cap = settings.validation_presence_mismatch_response_max_rows
     raw_sample_limit = settings.validation_mismatch_sample_limit
     sample_limit = raw_sample_limit if raw_sample_limit > 0 else 0
@@ -168,9 +166,12 @@ def build_validate_response(
             presence_max_rows=presence_cap,
         )
         if sample_limit <= 0:
+            val_n = counts_model.value_mismatch
+            if val_n <= 0:
+                val_n = count_mismatch_types_ndjson(artifact).get(MismatchType.VALUE_MISMATCH.value, 0)
             val_rows = stream_all_value_mismatch_rows_from_ndjson(
                 artifact,
-                n_val=counts_model.value_mismatch,
+                n_val=val_n,
             )
         else:
             val_df = load_value_mismatch_sample_from_ndjson(

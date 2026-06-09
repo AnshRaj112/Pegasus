@@ -24,11 +24,33 @@ from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter, creat
 from pegasus.validation.comparators.models import MismatchReport, empty_mismatch_frame
 from pegasus.validation.delimiter_resolve import resolve_delimiter_for_adapters, resolve_delimiter_for_paths
 from pegasus.validation.pipeline.config import TabularPipelineConfig
+from pegasus.validation.pipeline.fingerprint import filter_compare_columns
 from pegasus.validation.pipeline.pipeline import TabularReconciliationPipeline
 from pegasus.validation.pipeline.reporting import write_validation_results
 from pegasus.validation.services.validation_run import pipeline_result_to_run_result
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_compare_columns(
+    schema_names: list[str],
+    uid_column: str,
+    column_mappings: list[ColumnMapping] | None,
+) -> list[str]:
+    """Columns used for value comparison (never the UID / identity column)."""
+    uid = uid_column.strip()
+    default = [c for c in schema_names if c != uid]
+    if not column_mappings:
+        return filter_compare_columns(default, schema_names)
+    mapped = list(
+        dict.fromkeys(
+            m.source_column.strip()
+            for m in column_mappings
+            if m.source_column and m.source_column.strip() and m.source_column.strip() != uid
+        )
+    )
+    mapped = filter_compare_columns(mapped, schema_names)
+    return mapped if mapped else filter_compare_columns(default, schema_names)
 
 __all__ = ("ValidationRunDurations", "ValidationRunResult", "ValidationService")
 
@@ -213,9 +235,7 @@ class ValidationService:
 
         with lifecycle_span("Schema And Planning"):
             schema = source.get_schema()
-        compare_columns = [c for c in schema.column_names if c != uid_column]
-        if column_mappings:
-            compare_columns = list(dict.fromkeys(m.source_column for m in column_mappings))
+        compare_columns = _resolve_compare_columns(schema.column_names, uid_column, column_mappings)
 
         cfg = self._pipeline_config(
             source_bytes=source.get_size_bytes(),

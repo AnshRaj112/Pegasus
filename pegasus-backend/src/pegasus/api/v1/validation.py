@@ -20,12 +20,14 @@ logger = logging.getLogger(__name__)
 from pegasus.api.deps import AppSettings, DbSession, ValidationServiceDep
 from pegasus.core.json_util import dumps_bytes, loads_str
 from pegasus.core.local_paths import (
+    compute_file_pair_key_for_settings,
     default_browse_path,
     default_browse_path_for_ui,
     local_path_remap,
     resolve_local_path_on_disk,
     to_display_path,
 )
+from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.schemas.validation import (
     CloudBrowseEntry,
     CloudBrowseRequest,
@@ -523,6 +525,36 @@ async def validate_csv_local_paths(
     job_dir = validation_jobs_root(settings) / str(job_id)
     job_dir.mkdir(parents=True, exist_ok=False)
 
+    src_display = None
+    tgt_display = None
+    pair_key = None
+    if source_cloud is None and target_cloud is None:
+        src_display = to_display_path(resolved_source, settings)
+        tgt_display = to_display_path(resolved_target, settings)
+        pair_key = compute_file_pair_key_for_settings(
+            str(resolved_source),
+            str(resolved_target),
+            settings,
+        )
+
+    run_id: uuid.UUID | None = None
+    if settings.enable_validation_persistence:
+        run = await ValidationRunRepository.create_running(
+            session,
+            source_filename=source_input.display_name if source_input else resolved_source.name,
+            target_filename=target_input.display_name if target_input else resolved_target.name,
+            uid_column=body.uid_column.strip(),
+            delimiter=body.delimiter,
+            source_path=src_display,
+            target_path=tgt_display,
+            file_pair_key=pair_key,
+            column_mappings=[m.model_dump() for m in body.column_mappings],
+            validate_header_formats=body.validate_header_formats,
+            validate_footers=body.validate_footers,
+        )
+        await session.commit()
+        run_id = run.id
+
     meta = {
         "uid_column": body.uid_column.strip(),
         "delimiter": body.delimiter,
@@ -532,7 +564,7 @@ async def validate_csv_local_paths(
         "footer_trailing_rows": body.footer_trailing_rows,
         "has_header": body.has_header,
         "header_leading_rows": body.header_leading_rows,
-        "run_id": None,
+        "run_id": str(run_id) if run_id else None,
         "source_filename": source_input.display_name if source_input else resolved_source.name,
         "target_filename": target_input.display_name if target_input else resolved_target.name,
         "file_format": file_format,

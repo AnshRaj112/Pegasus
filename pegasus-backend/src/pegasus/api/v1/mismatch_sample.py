@@ -20,6 +20,71 @@ from pegasus.validation.comparators.models import (
 )
 
 
+def normalize_mismatch_summary(summary: dict[str, Any] | None) -> dict[str, int]:
+    """Map pipeline / manifest summary keys to API mismatch type keys."""
+    raw = dict(summary or {})
+    return {
+        MismatchType.MISSING_IN_TARGET.value: int(
+            raw.get(
+                MismatchType.MISSING_IN_TARGET.value,
+                raw.get("missing", raw.get("missing_in_target", 0)),
+            )
+        ),
+        MismatchType.EXTRA_IN_TARGET.value: int(
+            raw.get(
+                MismatchType.EXTRA_IN_TARGET.value,
+                raw.get("extra", raw.get("extra_in_target", 0)),
+            )
+        ),
+        MismatchType.VALUE_MISMATCH.value: int(
+            raw.get(
+                MismatchType.VALUE_MISMATCH.value,
+                raw.get(
+                    "changed",
+                    raw.get("value_mismatch", raw.get("value_mismatch_records", 0)),
+                ),
+            )
+        ),
+    }
+
+
+def count_mismatch_types_ndjson(path: Path) -> dict[str, int]:
+    """Count mismatch rows per category in an NDJSON artifact."""
+    counts = {
+        MismatchType.MISSING_IN_TARGET.value: 0,
+        MismatchType.EXTRA_IN_TARGET.value: 0,
+        MismatchType.VALUE_MISMATCH.value: 0,
+    }
+    with path.open(encoding="utf-8") as fp:
+        for line in fp:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            mtype = str(obj.get("mismatch_type") or "")
+            if mtype in counts:
+                counts[mtype] += 1
+    return counts
+
+
+def reconcile_summary_with_artifact(
+    summary: dict[str, Any] | None,
+    artifact: Path | None,
+) -> dict[str, int]:
+    """Prefer the highest per-category count from summary and artifact."""
+    merged = normalize_mismatch_summary(summary)
+    if artifact is None or not artifact.is_file():
+        return merged
+    from_file = count_mismatch_types_ndjson(artifact)
+    return {
+        key: max(int(merged.get(key, 0)), int(from_file.get(key, 0)))
+        for key in merged
+    }
+
+
 def load_mismatch_polars_for_api(
     *,
     mismatches: pl.DataFrame,
@@ -193,9 +258,11 @@ def stream_all_value_mismatch_rows_from_ndjson(
     *,
     n_val: int,
 ) -> list[dict[str, Any]]:
-    """Read every value_mismatch row from the artifact (deduped by uid + column)."""
-    if n_val <= 0:
-        return []
+    """Read every value_mismatch row from the artifact (deduped by uid + column).
+
+    When *n_val* is 0, return every deduped value_mismatch row in the file.
+    """
+    unlimited = n_val <= 0
     val_lit = MismatchType.VALUE_MISMATCH.value
     seen: set[tuple[str, str]] = set()
     out: list[dict[str, Any]] = []
@@ -217,7 +284,7 @@ def stream_all_value_mismatch_rows_from_ndjson(
                 continue
             seen.add(dedupe_key)
             out.append(obj)
-            if len(out) >= n_val:
+            if not unlimited and len(out) >= n_val:
                 break
     return out
 

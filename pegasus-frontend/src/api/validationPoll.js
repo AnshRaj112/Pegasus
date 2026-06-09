@@ -2,6 +2,7 @@
 
 import { absoluteApiUrl, fetchJson, messageFromHttpFailure } from './http.js'
 import { formatJobError } from './formatError.js'
+import { normalizeMismatchRow } from './validationHistory.js'
 
 function flattenMismatchSampleGroups(groups) {
   if (!groups) return []
@@ -12,12 +13,83 @@ function flattenMismatchSampleGroups(groups) {
   ]
 }
 
+function deriveMismatchCounts(data) {
+  const counts = data?.mismatch_counts ?? {}
+  const resolved = {
+    missing_in_target: Number(counts.missing_in_target ?? 0),
+    extra_in_target: Number(counts.extra_in_target ?? 0),
+    value_mismatch: Number(
+      counts.value_mismatch
+      ?? data?.summary?.value_mismatch_records
+      ?? data?.value_mismatch_records
+      ?? 0,
+    ),
+  }
+  if (
+    resolved.missing_in_target > 0
+    || resolved.extra_in_target > 0
+    || resolved.value_mismatch > 0
+  ) {
+    return resolved
+  }
+  const groups = data?.mismatch_sample_groups
+  if (groups) {
+    const derived = {
+      missing_in_target: groups.missing_in_target?.length ?? 0,
+      extra_in_target: groups.extra_in_target?.length ?? 0,
+      value_mismatch: groups.value_mismatch?.length ?? 0,
+    }
+    if (derived.missing_in_target + derived.extra_in_target + derived.value_mismatch > 0) {
+      return derived
+    }
+  }
+  const samples = data?.mismatch_samples ?? []
+  if (samples.length > 0) {
+    return {
+      missing_in_target: samples.filter((row) => row.mismatch_type === 'missing_in_target').length,
+      extra_in_target: samples.filter((row) => row.mismatch_type === 'extra_in_target').length,
+      value_mismatch: samples.filter((row) => row.mismatch_type === 'value_mismatch').length,
+    }
+  }
+  return counts ?? { missing_in_target: 0, extra_in_target: 0, value_mismatch: 0 }
+}
+
+function normalizeMismatchSampleGroups(groups) {
+  if (!groups) return groups
+  return {
+    missing_in_target: (groups.missing_in_target ?? []).map(normalizeMismatchRow),
+    extra_in_target: (groups.extra_in_target ?? []).map(normalizeMismatchRow),
+    value_mismatch: (groups.value_mismatch ?? []).map(normalizeMismatchRow),
+  }
+}
+
 export function normalizeValidateResult(data) {
   if (!data) return data
-  if ((data.mismatch_samples?.length ?? 0) > 0) return data
-  const flattened = flattenMismatchSampleGroups(data.mismatch_sample_groups)
-  if (flattened.length === 0) return data
-  return { ...data, mismatch_samples: flattened }
+  const groups = normalizeMismatchSampleGroups(data.mismatch_sample_groups)
+  const flattened = (data.mismatch_samples?.length ?? 0) > 0
+    ? data.mismatch_samples.map(normalizeMismatchRow)
+    : flattenMismatchSampleGroups(groups)
+  const mismatch_counts = deriveMismatchCounts({
+    ...data,
+    mismatch_samples: flattened,
+  })
+  const totalFromCounts =
+    Number(mismatch_counts.missing_in_target ?? 0)
+    + Number(mismatch_counts.extra_in_target ?? 0)
+    + Number(mismatch_counts.value_mismatch ?? 0)
+  const summary = {
+    ...(data.summary ?? {}),
+    total_mismatch_records: Number(
+      data.summary?.total_mismatch_records ?? totalFromCounts,
+    ),
+  }
+  return {
+    ...data,
+    summary,
+    mismatch_counts,
+    mismatch_sample_groups: groups,
+    ...(flattened.length > 0 ? { mismatch_samples: flattened } : {}),
+  }
 }
 
 function formatElapsed(seconds) {

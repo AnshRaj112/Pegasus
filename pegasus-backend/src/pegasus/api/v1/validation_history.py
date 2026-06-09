@@ -298,6 +298,10 @@ async def list_validation_history_mismatches(
     run_id: uuid.UUID,
     limit: Annotated[int, Query(ge=1, le=5000)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
+    mismatch_type: Annotated[
+        str | None,
+        Query(description="Filter by missing_in_target | extra_in_target | value_mismatch"),
+    ] = None,
 ) -> ValidationHistoryMismatchesResponse:
     _require_persistence(settings)
     try:
@@ -310,6 +314,7 @@ async def list_validation_history_mismatches(
                 run_id,
                 limit=limit,
                 offset=offset,
+                mismatch_type=mismatch_type,
             )
     except HTTPException:
         raise

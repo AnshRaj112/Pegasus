@@ -82,8 +82,30 @@ export async function fetchValidationHistoryDetail(runId) {
   return data
 }
 
-export async function fetchValidationHistoryMismatches(runId, { limit = 100, offset = 0 } = {}) {
+export function parseMismatchRowDetail(rowDetail) {
+  if (!rowDetail) return null
+  if (typeof rowDetail === 'object') return rowDetail
+  if (typeof rowDetail !== 'string') return null
+  const trimmed = rowDetail.trim()
+  if (!trimmed || trimmed === '{}') return null
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+}
+
+export function normalizeMismatchRow(row) {
+  if (!row) return row
+  return {
+    ...row,
+    row_detail: parseMismatchRowDetail(row.row_detail),
+  }
+}
+
+export async function fetchValidationHistoryMismatches(runId, { limit = 100, offset = 0, mismatchType } = {}) {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (mismatchType) params.set('mismatch_type', mismatchType)
   const res = await fetch(absoluteApiUrl(`/api/v1/validate/history/${runId}/mismatches?${params}`))
   const data = await parseJson(res)
   if (!res.ok) throw new Error(formatDetail(data.detail) || `Mismatches failed (${res.status})`)

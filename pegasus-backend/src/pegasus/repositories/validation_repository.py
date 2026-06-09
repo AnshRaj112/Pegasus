@@ -345,17 +345,17 @@ class ValidationRunRepository:
         *,
         limit: int = 100,
         offset: int = 0,
+        mismatch_type: str | None = None,
     ) -> tuple[list[MismatchReport], int]:
         """Return mismatch rows for a run and total count."""
-        count_stmt = (
-            select(func.count())
-            .select_from(MismatchReport)
-            .where(MismatchReport.validation_run_id == run_id)
-        )
+        filters = [MismatchReport.validation_run_id == run_id]
+        if mismatch_type:
+            filters.append(MismatchReport.mismatch_type == mismatch_type)
+        count_stmt = select(func.count()).select_from(MismatchReport).where(*filters)
         total = int(await session.scalar(count_stmt) or 0)
         stmt = (
             select(MismatchReport)
-            .where(MismatchReport.validation_run_id == run_id)
+            .where(*filters)
             .order_by(MismatchReport.created_at.asc())
             .offset(offset)
             .limit(limit)
