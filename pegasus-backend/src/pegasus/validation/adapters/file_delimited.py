@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-08T07:03:36Z
+# Last edited: 2026-06-09T10:15:23+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Delimited file adapter (CSV, TSV, PSV) with chunked streaming."""
