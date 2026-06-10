@@ -25,7 +25,7 @@ function formatDetail(detail) {
 
 export default function ParallelValidationModal({ open, onClose, onConfirm }: any) {
   const [queueInfo, setQueueInfo] = useState<any>(null)
-  const [concurrencySlider, setConcurrencySlider] = useState(2)
+  const [concurrencySlider, setConcurrencySlider] = useState(0)
   const [autoTuneEnabled, setAutoTuneEnabled] = useState(true)
   const [loading, setLoading] = useState(false)
   const [queueLoading, setQueueLoading] = useState(false)
@@ -43,7 +43,7 @@ export default function ParallelValidationModal({ open, onClose, onConfirm }: an
       }
       const data = await res.json()
       setQueueInfo(data)
-      setConcurrencySlider(data.max_concurrency ?? 2)
+      setConcurrencySlider(data.max_concurrency ?? 0)
       setAutoTuneEnabled(data.auto_tune_enabled ?? true)
     } catch (e) {
       setQueueError(e instanceof Error ? e.message : String(e))
@@ -75,8 +75,8 @@ export default function ParallelValidationModal({ open, onClose, onConfirm }: an
         throw new Error(formatDetail(err.detail) || `Failed to apply settings (${res.status})`)
       }
       setQueueInfo(await res.json())
-      const ok = await onConfirm()
-      if (ok !== false) onClose()
+      onClose()
+      await onConfirm()
     } catch (e) {
       setApplyError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -97,7 +97,9 @@ export default function ParallelValidationModal({ open, onClose, onConfirm }: an
       styles={{ body: { maxHeight: '90vh', overflow: 'auto' } }}
     >
       <Space direction="vertical" size={20} style={{ width: '100%' }}>
-        <Typography.Text type="secondary">Set max parallel jobs and auto-tune before starting validation.</Typography.Text>
+        <Typography.Text type="secondary">
+          Jobs run in parallel when resources allow; overflow is scheduled automatically.
+        </Typography.Text>
 
         <ParallelValidationResourceForm
           queueInfo={queueInfo}

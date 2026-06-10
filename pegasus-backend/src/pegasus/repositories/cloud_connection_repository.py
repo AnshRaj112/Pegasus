@@ -34,3 +34,19 @@ class CloudConnectionRepository:
         row = await session.execute(stmt)
         return row.scalar_one_or_none()
 
+    @staticmethod
+    async def get_active_connection_by_bucket(
+        session: AsyncSession,
+        bucket: str,
+    ) -> CloudConnection | None:
+        """Return the most recently updated active connection for *bucket*."""
+        target = (bucket or "").strip()
+        if not target:
+            return None
+        for row in await CloudConnectionRepository.list_connections(session):
+            if not row.active:
+                continue
+            if str(row.bucket).strip() == target:
+                return row
+        return None
+

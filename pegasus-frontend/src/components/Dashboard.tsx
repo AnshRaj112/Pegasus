@@ -30,6 +30,7 @@ function formatToIST(iso, { short = false, compact = false } = {}) {
   return `${months[MM]} ${DD}, ${YYYY} ${hour12}:${mm} ${suffix} IST`
 }
 import { CheckCircle, XCircle, Activity } from 'lucide-react'
+import ActiveValidationsPanel from './ActiveValidationsPanel'
 import {
   createEntityDefinition,
   fetchEntityInsights,
@@ -387,7 +388,7 @@ export default function Dashboard() {
             Validation Dashboard
           </h1>
           <p style={{ color: 'var(--text-2)', margin: '4px 0 0 0' }}>
-            Monitor your file validation success rates and overall activity.
+            Monitor live validations, resource footprint, and historical success rates.
           </p>
         </div>
         
@@ -415,6 +416,8 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      <ActiveValidationsPanel showResourceDetails />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 24, alignItems: 'start' }}>
         {/* Main Chart Area */}

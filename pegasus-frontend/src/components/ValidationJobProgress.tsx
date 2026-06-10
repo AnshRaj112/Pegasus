@@ -79,14 +79,21 @@ export default function ValidationJobProgress({
         border: '1px solid var(--border-1)',
       }
 
+  const stageName = progress.stage && typeof progress.stage === 'object'
+    ? String((progress.stage as { name?: string }).name || '')
+    : ''
   const title =
-    phase === 'queued' ? 'Queued — waiting for a worker slot'
-      : phase === 'accepted' ? 'Job accepted — starting worker'
-        : phase === 'uploading' || phase === 'upload' ? 'Uploading files'
-          : phase === 'partitioning' ? 'Partitioning files into spill buckets'
-            : phase === 'reconciling' ? 'Reconciling partitions'
-              : phase === 'running' || phase === 'validating' ? 'Validation in progress'
-                : 'Working…'
+    phase === 'stage' && message
+      ? message
+      : phase === 'stage' && stageName
+        ? `${stageName} complete`
+        : phase === 'queued' ? 'Queued — waiting for a worker slot'
+          : phase === 'accepted' ? 'Job accepted — starting worker'
+            : phase === 'uploading' || phase === 'upload' ? 'Uploading files'
+              : phase === 'partitioning' ? 'Partitioning files into spill buckets'
+                : phase === 'reconciling' ? 'Reconciling partitions'
+                  : phase === 'running' || phase === 'validating' ? 'Validation in progress'
+                    : 'Working…'
 
   const pipelinePhase = live && typeof live.pipeline_phase === 'string' ? live.pipeline_phase : null
 

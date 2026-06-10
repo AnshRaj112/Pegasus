@@ -19,6 +19,25 @@ _DEFAULT_PREFIX_BYTES = 512 * 1024
 _DEFAULT_PREFIX_LINES = 500
 
 
+def parse_gs_uri(raw: str) -> tuple[str, str] | None:
+    """Parse ``gs://bucket/object/key`` into ``(bucket, object_name)``."""
+    text = (raw or "").strip()
+    if not text.lower().startswith("gs://"):
+        return None
+    remainder = text[5:]
+    if not remainder:
+        return None
+    slash = remainder.find("/")
+    if slash < 0:
+        bucket = remainder.strip()
+        return (bucket, "") if bucket else None
+    bucket = remainder[:slash].strip()
+    object_name = remainder[slash + 1 :].strip().lstrip("/")
+    if not bucket:
+        return None
+    return bucket, object_name
+
+
 @dataclass(frozen=True, slots=True)
 class GcsObjectRef:
     bucket: str

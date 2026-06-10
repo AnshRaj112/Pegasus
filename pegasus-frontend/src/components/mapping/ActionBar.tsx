@@ -1,4 +1,4 @@
-export default function ActionBar({ onValidate, onSaveAsDraft, isValid, isRunning }) {
+export default function ActionBar({ onValidate, onSaveAsDraft, isValid, isSubmitting, activeRunCount = 0 }) {
   return (
     <div style={{
       marginTop: 24,
@@ -16,7 +16,9 @@ export default function ActionBar({ onValidate, onSaveAsDraft, isValid, isRunnin
           Ready to run?
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
-          Validate instantly, or save as a draft to resume from History.
+          {activeRunCount > 0
+            ? `${activeRunCount} validation${activeRunCount === 1 ? '' : 's'} running — you can start another without waiting.`
+            : 'Validate instantly, or save as a draft to resume from History.'}
         </div>
       </div>
 
@@ -24,7 +26,7 @@ export default function ActionBar({ onValidate, onSaveAsDraft, isValid, isRunnin
         <button
           type="button"
           onClick={onSaveAsDraft}
-          disabled={isRunning}
+          disabled={isSubmitting}
           className="btn btn-secondary"
         >
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
@@ -36,11 +38,11 @@ export default function ActionBar({ onValidate, onSaveAsDraft, isValid, isRunnin
         <button
           type="button"
           onClick={onValidate}
-          disabled={!isValid || isRunning}
+          disabled={!isValid || isSubmitting}
           className="btn btn-primary btn-lg"
           style={{ minWidth: 130 }}
         >
-          {isRunning ? (
+          {isSubmitting ? (
             <>
               <span style={{
                 display: 'inline-block',

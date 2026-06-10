@@ -11,6 +11,7 @@ import StepFilePairing from './StepFilePairing'
 import StepBatchMappingMode from './StepBatchMappingMode'
 import ActionBar        from './ActionBar'
 import ParallelValidationModal from '../ParallelValidationModal'
+import { useValidationRuns } from '../../context/ValidationRunsContext'
 import { buildMappingRows, mappingRowFromApi, toColumnMappingPayload } from './columnMapping'
 import { buildAnalyzePayload, formatCheckBySource } from './mappingAnalyze'
 import MappingColumnPreview from './MappingColumnPreview'
@@ -93,6 +94,31 @@ function describeStorageInput(storageType, path, cloudConfig) {
   return path || '—'
 }
 
+function parseGsUri(uri) {
+  const text = String(uri || '').trim()
+  if (!text.startsWith('gs://')) return null
+  const without = text.slice(5)
+  const slash = without.indexOf('/')
+  if (slash < 0) return { bucket: without.trim(), objectName: '' }
+  return {
+    bucket: without.slice(0, slash).trim(),
+    objectName: without.slice(slash + 1).replace(/^\/+/, ''),
+  }
+}
+
+function cloudConfigFromGsUri(uri, savedConnections = []) {
+  const parsed = parseGsUri(uri)
+  if (!parsed?.bucket || !parsed.objectName) return null
+  const match = savedConnections.find(row => String(row.bucket || '').trim() === parsed.bucket)
+  return {
+    ...DEFAULT_CLOUD_CONFIG,
+    bucket: parsed.bucket,
+    objectName: parsed.objectName,
+    connectionId: match ? String(match.id) : '',
+    projectId: match ? String(match.project_id || '') : '',
+  }
+}
+
 function normalizeGcsObjectName(bucket, raw) {
   let name = String(raw || '').trim()
   if (!name) return ''
@@ -132,8 +158,18 @@ function resolveCloudConfig(cloudConfig, savedConnections = []) {
 }
 
 function buildStoragePayload(prefix, storageType, path, cloudConfig, savedConnections = []) {
-  if (storageType === 'cloud') {
-    const resolved = resolveCloudConfig(cloudConfig, savedConnections)
+  const gsParsed = parseGsUri(path)
+  const useCloud = storageType === 'cloud' || Boolean(gsParsed?.bucket && gsParsed?.objectName)
+  if (useCloud) {
+    const mergedConfig = gsParsed
+      ? {
+          ...cloudConfig,
+          bucket: gsParsed.bucket,
+          objectName: gsParsed.objectName,
+          ...(cloudConfigFromGsUri(path, savedConnections) || {}),
+        }
+      : cloudConfig
+    const resolved = resolveCloudConfig(mergedConfig, savedConnections)
     return {
       [`${prefix}_cloud`]: {
         provider: resolved.provider,
@@ -149,8 +185,17 @@ function buildStoragePayload(prefix, storageType, path, cloudConfig, savedConnec
 }
 
 function isStorageSelectionComplete(storageType, path, cloudConfig, savedConnections = []) {
-  if (storageType === 'cloud') {
-    const resolved = resolveCloudConfig(cloudConfig, savedConnections)
+  const gsParsed = parseGsUri(path)
+  if (storageType === 'cloud' || (gsParsed?.bucket && gsParsed?.objectName)) {
+    const merged = gsParsed
+      ? {
+          ...cloudConfig,
+          bucket: gsParsed.bucket,
+          objectName: gsParsed.objectName,
+          ...(cloudConfigFromGsUri(path, savedConnections) || {}),
+        }
+      : cloudConfig
+    const resolved = resolveCloudConfig(merged, savedConnections)
     return Boolean(
       resolved.bucket
       && resolved.objectName
@@ -651,8 +696,10 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     loadSavedCloudConnections()
   }, [])
 
+  const validationRuns = useValidationRuns()
   const [parallelModalOpen, setParallelModalOpen] = useState(false)
-  const [isRunning, setIsRunning]   = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [localRunIds, setLocalRunIds] = useState([])
   const [result, setResult]         = useState(null)
   const [errorMsg, setErrorMsg]     = useState('')
   const [phase, setPhase]           = useState('idle')
@@ -725,13 +772,16 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     preserveFixedWidthDatesRef.current = targetStep === 4
       && (detail.delimiter === 'fixed-width' || detail.delimiter === 'fixed')
 
-    // Initialize configuration states from detail
-    setSourceStorageType('local')
-    setTargetStorageType('local')
-    setSourceCloudConfig(DEFAULT_CLOUD_CONFIG)
-    setTargetCloudConfig(DEFAULT_CLOUD_CONFIG)
-    setSourcePath(detail.source_path || detail.source_filename || '')
-    setTargetPath(detail.target_path || detail.target_filename || '')
+    const rawSource = detail.source_path || detail.source_filename || ''
+    const rawTarget = detail.target_path || detail.target_filename || ''
+    const sourceGs = cloudConfigFromGsUri(rawSource, savedCloudConnections)
+    const targetGs = cloudConfigFromGsUri(rawTarget, savedCloudConnections)
+    setSourceStorageType(sourceGs ? 'cloud' : 'local')
+    setTargetStorageType(targetGs ? 'cloud' : 'local')
+    setSourceCloudConfig(sourceGs || DEFAULT_CLOUD_CONFIG)
+    setTargetCloudConfig(targetGs || DEFAULT_CLOUD_CONFIG)
+    setSourcePath(sourceGs ? '' : rawSource)
+    setTargetPath(targetGs ? '' : rawTarget)
     setValidateHeaderFormats(detail.validate_header_formats || false)
     setValidateFooters(detail.validate_footers || false)
     setHeaderLeadingRows(detail.header_leading_rows || 0)
@@ -818,7 +868,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     }
 
     queueMicrotask(() => onResetInitialData())
-  }, [initialMappingData, onResetInitialData])
+  }, [initialMappingData, onResetInitialData, savedCloudConnections])
 
 
 
@@ -1816,8 +1866,50 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
     fileFormat,
   ])
 
+  useEffect(() => {
+    const run = validationRuns.focusedRun
+    if (!run || !localRunIds.includes(run.id)) return
+    setJobProgress({ phase: run.phase || run.status, jobId: run.jobId })
+    if (run.status === 'completed') {
+      if (run.batchResult) {
+        setBatchResult(run.batchResult)
+        setResult(null)
+        if (run.batchResult.summary?.is_match) {
+          setPhase('success')
+          setErrorMsg('')
+        } else {
+          setPhase('mismatch')
+          setErrorMsg(`${run.batchResult.summary.failed_units} unit(s) failed, ${run.batchResult.summary.total_units - run.batchResult.summary.passed_units} with mismatches`)
+        }
+      } else if (run.result) {
+        setResult(run.result)
+        setBatchResult(null)
+        if (run.isMatch) {
+          setPhase('success')
+          setErrorMsg('')
+        } else {
+          setPhase('mismatch')
+          const count = run.result.summary?.total_mismatch_records ?? 0
+          setErrorMsg(`${count} mismatch record(s) found — validation ran successfully.`)
+        }
+      } else {
+        setPhase('submitted')
+      }
+      return
+    }
+    if (run.status === 'failed') {
+      setPhase('error')
+      setErrorMsg(run.error || 'Validation job failed')
+      return
+    }
+    setPhase('submitted')
+    setResult(null)
+    setBatchResult(null)
+    setErrorMsg('')
+  }, [validationRuns.focusedRun, localRunIds])
+
   async function handleValidate() {
-    setIsRunning(true); setPhase('running'); setResult(null); setBatchResult(null); setErrorMsg('')
+    setIsSubmitting(true); setPhase('submitted'); setResult(null); setBatchResult(null); setErrorMsg('')
     try {
       const apiFileFormat = backendFileFormat(fileFormat)
       if (isBatchMode) {
@@ -1887,24 +1979,19 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         if (!res.ok) throw new Error(formatDetail(data.detail) || `${res.status} ${res.statusText}`)
         if (res.status === 202 && data.poll_url) {
           const jid = data.job_id != null ? String(data.job_id) : null
-          setJobProgress({ phase: 'accepted', jobId: jid })
-          const pollPayload = await pollJobDetail(data.poll_url, {
-            timeoutMs: pollTimeoutMs,
-            onPoll: payload => {
-              const st = payload?.status
-              setJobProgress(prev => ({ ...prev, phase: payload?.phase || (st === 'running' ? 'running' : st) || 'running' }))
-            },
+          const sourceLabel = validationUnits.map(u => u.sourcePaths?.join(' + ') || u.sourcePath || 'source').join(', ')
+          const targetLabel = validationUnits.map(u => u.targetPaths?.join(' + ') || u.targetPath || 'target').join(', ')
+          const runId = validationRuns.startRun({
+            jobId: jid,
+            pollUrl: data.poll_url,
+            sourceLabel,
+            targetLabel,
+            initialStatus: data.status === 'running' ? 'running' : 'queued',
           })
-          const batch = normalizeBatchPollResult(pollPayload)
-          if (batch) {
-            setBatchResult(batch)
-            setPhase(batch.summary?.is_match ? 'success' : 'error')
-            if (!batch.summary?.is_match) {
-              setErrorMsg(`${batch.summary.failed_units} failed, ${batch.summary.total_units - batch.summary.passed_units} with mismatches`)
-            }
-          } else {
-            throw new Error('Batch job completed without batch_result payload')
-          }
+          setLocalRunIds(prev => [...prev, runId])
+          setJobProgress({ phase: data.status === 'running' ? 'running' : 'queued', jobId: jid })
+          setPhase('submitted')
+          setParallelModalOpen(false)
         } else {
           throw new Error('Unexpected batch API response')
         }
@@ -1961,27 +2048,29 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       let data = {}
       if (raw) { try { data = JSON.parse(raw) } catch { data = { detail: raw.trim().slice(0, 800) } } }
       if (!res.ok) throw new Error(formatDetail(data.detail) || `${res.status} ${res.statusText}`)
-      let final = data
       if (res.status === 202 && data.poll_url) {
         const jid = data.job_id != null ? String(data.job_id) : null
-        setJobProgress({ phase: 'accepted', jobId: jid })
-        final = await pollJob(data.poll_url, {
-          timeoutMs: pollTimeoutMs,
-          onPoll: payload => {
-            const st = payload?.status
-            setJobProgress(prev => ({ ...prev, phase: payload?.phase || (st === 'running' ? 'running' : st) || 'running' }))
-          },
+        const runId = validationRuns.startRun({
+          jobId: jid,
+          pollUrl: data.poll_url,
+          sourceLabel: describeStorageInput(sourceStorageType, sourcePath, sourceCloudConfig),
+          targetLabel: describeStorageInput(targetStorageType, targetPath, targetCloudConfig),
+          initialStatus: data.status === 'running' ? 'running' : 'queued',
         })
+        setLocalRunIds(prev => [...prev, runId])
+        setJobProgress({ phase: data.status === 'running' ? 'running' : 'queued', jobId: jid })
+        setPhase('submitted')
+        setParallelModalOpen(false)
       } else if (data.summary) {
-        final = normalizeValidateResult(data)
+        setResult(normalizeValidateResult(data))
+        setPhase('success')
       } else {
         throw new Error('Unexpected API response')
       }
-      setResult(final); setPhase('success')
     } catch (err) {
       setPhase('error')
       setErrorMsg(formatJobError(err instanceof Error ? err.message : String(err)))
-    } finally { setIsRunning(false) }
+    } finally { setIsSubmitting(false) }
   }
 
   async function handleSaveAsDraft() {
@@ -2183,6 +2272,17 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
       }}>
         <StepIndicator currentStep={step} inputLayout={inputLayout} />
       </div>
+
+      {validationRuns.activeCount > 0 && step < 4 ? (
+        <div style={{
+          marginTop: 12, padding: '10px 14px', borderRadius: 9,
+          background: 'var(--accent-muted)', border: '1px solid var(--accent-border)',
+          fontSize: 12, color: 'var(--accent)',
+        }}>
+          {validationRuns.activeCount} validation{validationRuns.activeCount === 1 ? '' : 's'} in progress —
+          open the <strong>Dashboard</strong> for live status and resource footprint (before / during / after).
+        </div>
+      ) : null}
 
       {/* Step content */}
       <div style={{
@@ -3728,8 +3828,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               </div>
             )}
 
-            {/* Running state */}
-            {phase === 'running' && (
+            {/* Submitted / running state */}
+            {(phase === 'submitted' || phase === 'running') && (
               <div style={{
                 marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10,
                 padding: '11px 14px', borderRadius: 9,
@@ -3741,8 +3841,19 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                   animation: 'spin 0.7s linear infinite', display: 'inline-block', flexShrink: 0,
                 }} />
                 <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--accent)' }}>
-                  Validating… ({jobProgress.phase})
+                  Validation queued — start another run here, or open the Dashboard for live progress ({jobProgress.phase})
                 </span>
+              </div>
+            )}
+
+            {phase === 'submitted' && (
+              <div style={{
+                marginBottom: 12, padding: '11px 14px', borderRadius: 9,
+                background: 'var(--surface-2)', border: '1px solid var(--border-1)',
+                fontSize: 12, color: 'var(--text-2)',
+              }}>
+                Resource footprint (RAM, disk, CPU) is reported on the <strong>Dashboard</strong> and in backend logs
+                (<code>resource_profile_report.md</code> per job).
               </div>
             )}
 
@@ -3769,6 +3880,36 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               </div>
             )}
 
+            {phase === 'mismatch' && result && (
+              <div style={{
+                marginBottom: 12, padding: '14px 16px', borderRadius: 9,
+                background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.35)',
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--warning, #d97706)', marginBottom: 10 }}>
+                  Validation complete — mismatches found
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--text-2)', margin: '0 0 10px' }}>{errorMsg}</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+                  <StatCard label="Match" value="No" accent="var(--warning, #d97706)" />
+                  <StatCard label={fileFormat === 'fixed-width' ? 'Lines compared' : fileFormat === 'json' ? 'Documents' : 'Source rows'} value={result.summary?.source_row_count ?? '—'} />
+                  <StatCard label={fileFormat === 'fixed-width' ? 'Target lines' : fileFormat === 'json' ? 'Compared' : 'Target rows'} value={result.summary?.target_row_count ?? '—'} />
+                  <StatCard label="Mismatches" value={result.summary?.total_mismatch_records ?? '—'} accent="var(--danger)" />
+                  <StatCard label="Validation time" value={formatDuration(result.durations?.validation_seconds)} />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate('/report', { state: { result } })}
+                  style={{
+                    marginTop: 12, width: '100%', height: 38, borderRadius: 8,
+                    border: '1px solid var(--border-1)', background: 'var(--surface-1)',
+                    color: 'var(--text-1)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  View Detailed Report
+                </button>
+              </div>
+            )}
+
             {phase === 'success' && result && (
               <div style={{
                 marginBottom: 12, padding: '14px 16px', borderRadius: 9,
@@ -3778,7 +3919,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
                   <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
                     <path d="M2 6.5l3 3 6-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
-                  Validation complete
+                  Validation complete — all rows matched
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
                   <StatCard label="Match" value={result.summary?.is_match ? 'Yes' : 'No'} accent={result.summary?.is_match ? 'var(--success)' : 'var(--danger)'} />
@@ -3889,13 +4030,13 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               </div>
             )}
 
-            {/* Error */}
+            {/* Error — worker / API failure only */}
             {phase === 'error' && (
               <div style={{
                 marginBottom: 12, padding: '11px 14px', borderRadius: 9,
                 background: 'var(--danger-muted)', border: '1px solid var(--danger-border)',
               }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--danger)', marginBottom: 4 }}>Validation failed</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--danger)', marginBottom: 4 }}>Validation job failed</div>
                 <p style={{ fontSize: 12, color: 'var(--text-2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{errorMsg}</p>
               </div>
             )}
@@ -3917,7 +4058,8 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
               onValidate={() => setParallelModalOpen(true)}
               onSaveAsDraft={handleSaveAsDraft}
               isValid={isValidForRun}
-              isRunning={isRunning}
+              isSubmitting={isSubmitting}
+              activeRunCount={validationRuns.activeCount}
             />
           </div>
         )}

@@ -18,8 +18,17 @@ from pegasus.repositories.cloud_connection_repository import CloudConnectionRepo
 
 
 def resolve_cloud_credentials(raw_json: str) -> dict[str, object]:
+    text = (raw_json or "").strip()
+    if not text:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Cloud credentials are missing. Provide credentials_json, a saved connection_id, "
+                "or configure an admin cloud connection for this bucket."
+            ),
+        )
     try:
-        parsed = json.loads(raw_json)
+        parsed = json.loads(text)
     except json.JSONDecodeError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,

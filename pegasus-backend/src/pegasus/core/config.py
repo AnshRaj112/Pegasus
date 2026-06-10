@@ -304,20 +304,20 @@ class Settings(BaseSettings):
         ),
     )
     validation_max_concurrency: int = Field(
-        default=2,
-        ge=1,
+        default=0,
+        ge=0,
         description=(
-            "Startup default for maximum parallel validation jobs (FIFO queue). "
-            "Users can override at runtime via PATCH /api/v1/validate/queue. "
-            "Set to 1 to serialize all validations."
+            "Upper cap on parallel validation jobs (FIFO queue). "
+            "0 = no fixed cap — auto-tune runs as many jobs in parallel as RAM, disk, and CPU allow; "
+            "additional jobs are scheduled until resources free up. "
+            "Set to 1 to serialize, or N>0 to hard-cap parallel workers."
         ),
     )
     validation_auto_tune_enabled: bool = Field(
         default=True,
         description=(
-            "When true, the job queue caps effective concurrency below "
-            "max_concurrency using live RAM, disk, and swap probes. "
-            "Disable to honor only the user-set max_concurrency."
+            "When true, the queue starts every job that fits current RAM/disk/CPU headroom "
+            "and schedules the rest. When false, only max_concurrency is used (0 falls back to CPU cores)."
         ),
     )
     validation_auto_detect_format: bool = Field(

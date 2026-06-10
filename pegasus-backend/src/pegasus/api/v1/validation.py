@@ -54,7 +54,9 @@ from pegasus.services.validation_job_queue import get_validation_queue
 from pegasus.validation.cloud_credentials import resolve_gcs_auth
 from pegasus.validation.cloud_input import (
     ResolvedDelimitedInput,
+    coerce_cloud_storage_reference,
     delimited_input_from_meta,
+    ensure_resolved_cloud_config,
     resolve_cloud_config_with_saved_connection,
     resolve_delimited_input,
 )
@@ -220,20 +222,32 @@ async def preview_local_csv_columns_body(
     session: DbSession,
     body: Annotated[LocalPathValidateRequest, Body()],
 ) -> LocalColumnPreviewResponse:
-    source_cloud = (
-        await resolve_cloud_config_with_saved_connection(body.source_cloud, session=session)
-        if body.source_cloud is not None
-        else None
+    source_cloud, source_path = await coerce_cloud_storage_reference(
+        session,
+        label="source",
+        path=body.source_path,
+        cloud=(
+            await resolve_cloud_config_with_saved_connection(body.source_cloud, session=session)
+            if body.source_cloud is not None
+            else None
+        ),
     )
-    target_cloud = (
-        await resolve_cloud_config_with_saved_connection(body.target_cloud, session=session)
-        if body.target_cloud is not None
-        else None
+    target_cloud, target_path = await coerce_cloud_storage_reference(
+        session,
+        label="target",
+        path=body.target_path,
+        cloud=(
+            await resolve_cloud_config_with_saved_connection(body.target_cloud, session=session)
+            if body.target_cloud is not None
+            else None
+        ),
     )
+    source_cloud = await ensure_resolved_cloud_config(session, source_cloud)
+    target_cloud = await ensure_resolved_cloud_config(session, target_cloud)
     source_input = resolve_delimited_input(
         settings=settings,
         label="source",
-        path=body.source_path,
+        path=source_path,
         cloud=source_cloud,
         delimiter=body.delimiter,
         has_header=body.has_header,
@@ -242,7 +256,7 @@ async def preview_local_csv_columns_body(
     target_input = resolve_delimited_input(
         settings=settings,
         label="target",
-        path=body.target_path,
+        path=target_path,
         cloud=target_cloud,
         delimiter=body.delimiter,
         has_header=body.has_header,
@@ -438,20 +452,32 @@ async def validate_csv_local_paths(
     session: DbSession,
     body: Annotated[LocalPathValidateRequest, Body()],
 ) -> ValidationJobAcceptedResponse:
-    source_cloud = (
-        await resolve_cloud_config_with_saved_connection(body.source_cloud, session=session)
-        if body.source_cloud is not None
-        else None
+    source_cloud, source_path = await coerce_cloud_storage_reference(
+        session,
+        label="source",
+        path=body.source_path,
+        cloud=(
+            await resolve_cloud_config_with_saved_connection(body.source_cloud, session=session)
+            if body.source_cloud is not None
+            else None
+        ),
     )
-    target_cloud = (
-        await resolve_cloud_config_with_saved_connection(body.target_cloud, session=session)
-        if body.target_cloud is not None
-        else None
+    target_cloud, target_path = await coerce_cloud_storage_reference(
+        session,
+        label="target",
+        path=body.target_path,
+        cloud=(
+            await resolve_cloud_config_with_saved_connection(body.target_cloud, session=session)
+            if body.target_cloud is not None
+            else None
+        ),
     )
+    source_cloud = await ensure_resolved_cloud_config(session, source_cloud)
+    target_cloud = await ensure_resolved_cloud_config(session, target_cloud)
 
-    if body.source_path is None and source_cloud is None:
+    if source_path is None and source_cloud is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="source_path or source_cloud is required")
-    if body.target_path is None and target_cloud is None:
+    if target_path is None and target_cloud is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="target_path or target_cloud is required")
 
     source_input: ResolvedDelimitedInput | None = None
@@ -468,7 +494,7 @@ async def validate_csv_local_paths(
         source_input = resolve_delimited_input(
             settings=settings,
             label="source",
-            path=body.source_path,
+            path=source_path,
             cloud=source_cloud,
             delimiter=body.delimiter,
             has_header=body.has_header,
@@ -477,7 +503,7 @@ async def validate_csv_local_paths(
         target_input = resolve_delimited_input(
             settings=settings,
             label="target",
-            path=body.target_path,
+            path=target_path,
             cloud=target_cloud,
             delimiter=body.delimiter,
             has_header=body.has_header,
@@ -488,8 +514,8 @@ async def validate_csv_local_paths(
         file_format = "csv"
     else:
         require_local_path_access(settings)
-        resolved_source = resolve_local_path_on_disk(body.source_path, settings, must_be_file=True)
-        resolved_target = resolve_local_path_on_disk(body.target_path, settings, must_be_file=True)
+        resolved_source = resolve_local_path_on_disk(source_path, settings, must_be_file=True)
+        resolved_target = resolve_local_path_on_disk(target_path, settings, must_be_file=True)
         try:
             file_format, detection_warnings = coerce_local_validate_fields_with_detection(
                 resolved_source,
@@ -536,6 +562,11 @@ async def validate_csv_local_paths(
             str(resolved_target),
             settings,
         )
+    else:
+        if source_input is not None:
+            src_display = source_input.display_name
+        if target_input is not None:
+            tgt_display = target_input.display_name
 
     run_id: uuid.UUID | None = None
     if settings.enable_validation_persistence:
@@ -581,21 +612,47 @@ async def validate_csv_local_paths(
     (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
 
     from pegasus.validation.lifecycle_profiler import LifecycleProfiler
+    from pegasus.validation.resource_profiler import capture_resource_snapshot
 
     enqueue_profiler = LifecycleProfiler(job_dir=job_dir)
     enqueue_profiler.mark_http_request_start()
     enqueue_profiler.mark_job_enqueued()
     enqueue_profiler.write_artifacts()
 
+    before_snapshot = capture_resource_snapshot(job_dir=job_dir, label="before_enqueue")
+    before_public = {k: v for k, v in before_snapshot.items() if not str(k).startswith("_")}
+    (job_dir / "status.json").write_bytes(
+        dumps_bytes(
+            {
+                "status": "queued",
+                "phase": "queued",
+                "message": "Job accepted, waiting for worker slot",
+                "progress": {"enqueued_at_epoch_s": time.time()},
+                "resource_profile": {
+                    "before": before_public,
+                    "latest": before_public,
+                    "during_samples": 0,
+                    "peak": {},
+                },
+            },
+            indent=True,
+        )
+    )
+
     queue = get_validation_queue(settings)
     queued_job = queue.enqueue(job_id, job_dir)
     poll = f"{settings.api_v1_prefix.rstrip('/')}/validate/jobs/{job_id}"
     queue_stats = queue.stats
+    from pegasus.services.validation_job_queue import JobState
+
+    accepted_status = (
+        "running" if queued_job.state == JobState.RUNNING else "queued"
+    )
     return ValidationJobAcceptedResponse(
         job_id=job_id,
-        status="queued",
+        status=accepted_status,
         poll_url=poll,
-        queue_position=queued_job.position,
+        queue_position=queued_job.position if accepted_status == "queued" else None,
         queue_pending=queue_stats["pending"],
         queue_running=queue_stats["running"],
         max_concurrency=queue_stats["max_concurrency"],
@@ -621,6 +678,7 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
     phase = st.get("phase")
     message = st.get("message")
     progress = st.get("progress") if isinstance(st.get("progress"), dict) else {}
+    resource_profile = st.get("resource_profile") if isinstance(st.get("resource_profile"), dict) else None
 
     if status_val in {"queued", "running"}:
         if status_val == "queued":
@@ -644,6 +702,7 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
             phase=phase,
             message=message,
             progress=progress,
+            resource_profile=resource_profile,
         )
 
     if status_val == "failed":
@@ -653,6 +712,7 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
             message=message,
             progress=progress,
             error=str(st.get("error") or "failed"),
+            resource_profile=resource_profile,
         )
 
     if status_val != "completed":
@@ -662,6 +722,7 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
             message=message,
             progress=progress,
             error=str(st.get("error") or ""),
+            resource_profile=resource_profile,
         )
 
     result_path = job_dir / "result.json"
@@ -698,6 +759,7 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
         message=message,
         progress=progress,
         result=payload,
+        resource_profile=resource_profile,
     )
     completed_job_cache_put(job_id, detail)
     return detail

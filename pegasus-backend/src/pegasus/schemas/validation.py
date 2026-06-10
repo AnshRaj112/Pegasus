@@ -659,10 +659,13 @@ class ValidateResponse(BaseModel):
 
 
 class ValidationJobAcceptedResponse(BaseModel):
-    """Returned immediately when a validation job is queued (processing runs in a subprocess)."""
+    """Returned immediately when a validation job is accepted (queued or already running)."""
 
     job_id: UUID
-    status: str = Field(default="queued", description="queued until the worker picks up the job directory")
+    status: str = Field(
+        default="queued",
+        description="queued when waiting for a worker slot; running when started immediately",
+    )
     poll_url: str = Field(description="Relative URL to poll for status and the final ValidateResponse payload")
     queue_position: int | None = Field(
         default=None,
@@ -866,6 +869,13 @@ class ValidationJobDetailResponse(BaseModel):
         default=None,
         description="Present when the job was queued via POST /validate/local/batch",
     )
+    resource_profile: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Memory, disk, and CPU footprint snapshots captured before, during, and after validation. "
+            "Includes peak RSS, job workspace disk usage, and CPU utilization samples."
+        ),
+    )
 
 
 def build_mismatch_counts(summary_dict: dict[str, int]) -> MismatchCounts:
@@ -882,19 +892,19 @@ class UpdateQueueSettingsRequest(BaseModel):
 
     max_concurrency: int | None = Field(
         default=None,
-        ge=1,
+        ge=0,
         description=(
-            "Maximum number of validation jobs to run in parallel (user upper cap). "
-            "Use GET /validate/queue resource_advisor for RAM/disk/CPU-based guidance. "
+            "Maximum parallel validation jobs (user upper cap). "
+            "0 = no fixed cap — auto-tune runs as many jobs as RAM, disk, and CPU allow. "
             "Running jobs are never killed; the new limit affects when queued jobs start."
         ),
     )
     auto_tune_enabled: bool | None = Field(
         default=None,
         description=(
-            "When true, the system dynamically caps effective concurrency below "
-            "max_concurrency if RAM, disk, or swap pressure is too high. "
-            "When false, only the user-set max_concurrency is used."
+            "When true, every job that fits current resources starts immediately; "
+            "the rest wait in the FIFO queue. When false, only max_concurrency is used "
+            "(0 falls back to CPU core count)."
         ),
     )
     threads_per_job: int | None = Field(
@@ -919,11 +929,13 @@ class UpdateQueueSettingsRequest(BaseModel):
 class QueueStatusResponse(BaseModel):
     """Response for GET /validate/queue."""
 
-    max_concurrency: int = Field(description="User-set maximum parallel validation workers")
+    max_concurrency: int = Field(
+        description="User-set parallel cap (0 = no fixed cap; resource advisor decides)"
+    )
     effective_max_concurrency: int = Field(
         description=(
-            "Effective parallel cap used by the drain loop "
-            "(min of max_concurrency and resource advisor when auto-tune is on)"
+            "Parallel slots the drain loop uses right now "
+            "(resource recommendation when auto-tune is on and max_concurrency is 0)"
         ),
     )
     cpu_cores_available: int = Field(description="Logical CPU cores detected on the server")

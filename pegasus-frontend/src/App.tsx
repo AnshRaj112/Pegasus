@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Avatar, Button, Layout, Menu, Spin, Typography } from 'antd'
+import { Avatar, Badge, Button, Layout, Menu, Spin, Typography } from 'antd'
 import type { MenuProps } from 'antd'
 import MappingWizard from './components/mapping/MappingWizard'
 import History from './components/History'
 import Dashboard from './components/Dashboard'
 import AdminCloudConnections from './components/AdminCloudConnections'
 import AdminAuthPage from './components/AdminAuthPage'
+import { ValidationRunsProvider, useValidationRuns } from './context/ValidationRunsContext'
 import { adminLogout, fetchAdminMe } from './api/adminAuth'
 import { Compass, History as HistoryIcon, LayoutDashboard, Settings, ShieldCheck } from 'lucide-react'
 
@@ -13,7 +14,8 @@ const { Sider, Content } = Layout
 
 type SectionKey = 'dashboard' | 'mapping' | 'history' | 'admin'
 
-function App() {
+function AppShell() {
+  const { activeCount } = useValidationRuns()
   const [activeSection, setActiveSection] = useState<SectionKey>('dashboard')
   const [initialMappingData, setInitialMappingData] = useState<any>(null)
   const [authChecked, setAuthChecked] = useState(false)
@@ -47,11 +49,20 @@ function App() {
   }
 
   const menuItems: MenuProps['items'] = useMemo(() => [
-    { key: 'dashboard', icon: <LayoutDashboard size={16} />, label: 'Dashboard' },
+    {
+      key: 'dashboard',
+      icon: <LayoutDashboard size={16} />,
+      label: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          Dashboard
+          {activeCount > 0 ? <Badge count={activeCount} size="small" /> : null}
+        </span>
+      ),
+    },
     { key: 'mapping', icon: <Compass size={16} />, label: 'Mapping' },
     { key: 'history', icon: <HistoryIcon size={16} />, label: 'History' },
     { key: 'admin', icon: <Settings size={16} />, label: 'Admin' },
-  ], [])
+  ], [activeCount])
 
   if (!authChecked) {
     return (
@@ -108,6 +119,14 @@ function App() {
         </Content>
       </Layout>
     </Layout>
+  )
+}
+
+function App() {
+  return (
+    <ValidationRunsProvider>
+      <AppShell />
+    </ValidationRunsProvider>
   )
 }
 

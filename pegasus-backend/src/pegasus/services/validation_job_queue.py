@@ -84,7 +84,8 @@ class ValidationJobQueue:
         max_concurrency: int | None = None,
     ) -> None:
         mc = max_concurrency if max_concurrency is not None else settings.validation_max_concurrency
-        self._max_concurrency: int = max(1, mc)
+        # 0 = no user cap; resource advisor (when auto-tune is on) decides parallelism.
+        self._max_concurrency: int = max(0, int(mc))
         self._settings = settings
         self._runner = BackgroundValidationRunner(settings)
         self._auto_tune_enabled: bool = settings.validation_auto_tune_enabled
@@ -138,17 +139,15 @@ class ValidationJobQueue:
     def set_max_concurrency(self, value: int) -> int:
         """Update the concurrency cap at runtime.  Returns the clamped value actually set.
 
-        The new limit takes effect on the next drain-loop tick.  If *value* is
-        greater than the current number of running jobs, pending jobs will be
-        promoted immediately.  If it is smaller, no running jobs are killed —
-        the queue simply waits for slots to free up naturally.
+        ``0`` removes the user cap (resource auto-tune decides how many jobs run in parallel).
+        The new limit takes effect immediately.  Running jobs are never killed.
         """
-        clamped = max(1, value)
+        clamped = max(0, int(value))
         with self._lock:
             old = self._max_concurrency
             self._max_concurrency = clamped
         logger.info("max_concurrency changed %d → %d", old, clamped)
-        # Wake the drain loop so it can start more pending jobs if slots opened
+        self._try_start_pending()
         self._drain_event.set()
         return clamped
 
@@ -218,15 +217,21 @@ class ValidationJobQueue:
         return snapshot
 
     def effective_max_concurrency(self, *, snapshot: ResourceSnapshot | None = None) -> int:
-        """User cap after optional auto-tune (what the drain loop uses)."""
-        effective = self._max_concurrency
+        """Parallel slot cap used by the drain loop (resource-aware when auto-tune is on)."""
+        user_cap = self._max_concurrency
+        fallback_cap = max(1, self.cpu_cores_available())
         if self._auto_tune_enabled:
             try:
                 snap = snapshot or self.resource_recommendation()
-                effective = min(self._max_concurrency, snap.recommended_max_concurrency)
+                recommended = max(1, snap.recommended_max_concurrency)
+                if user_cap <= 0:
+                    return recommended
+                return max(1, min(user_cap, recommended))
             except Exception:
                 logger.warning("Resource advisor failed, using user-set max_concurrency", exc_info=True)
-        return max(1, effective)
+        if user_cap <= 0:
+            return fallback_cap
+        return max(1, user_cap)
 
     @property
     def stats(self) -> dict[str, Any]:
@@ -260,20 +265,23 @@ class ValidationJobQueue:
             self._pending.append(job)
             self._all_jobs[job_id] = job
             self._update_queue_positions()
-            self._refresh_pending_statuses_locked(effective_max=max(1, self._max_concurrency))
+            effective = self.effective_max_concurrency()
+            self._refresh_pending_statuses_locked(effective_max=effective)
             logger.info(
-                "Job %s enqueued position=%d pending=%d running=%d/%d",
+                "Job %s enqueued position=%d pending=%d running=%d effective_cap=%d user_cap=%d",
                 job_id,
                 job.position,
                 len(self._pending),
                 len(self._running),
+                effective,
                 self._max_concurrency,
             )
 
-        # Write queue position to status.json so the poll endpoint can show it
-        self._write_queued_status(job)
-
-        # Signal the drain loop
+        # Start immediately when capacity allows (do not wait for the drain-loop tick).
+        self._try_start_pending()
+        with self._lock:
+            if job.state == JobState.QUEUED:
+                self._write_queued_status(job)
         self._drain_event.set()
         return job
 
@@ -295,7 +303,7 @@ class ValidationJobQueue:
         with self._lock:
             jobs = sorted(self._all_jobs.values(), key=lambda j: j.enqueued_at, reverse=True)
             running_jobs = len(self._running)
-            max_concurrency = self._max_concurrency
+        effective_max = self.effective_max_concurrency()
         return [
             {
                 "job_id": str(j.job_id),
@@ -307,7 +315,7 @@ class ValidationJobQueue:
                 "estimated_wait_seconds": (
                     self._estimate_wait_seconds_for_position(
                         queue_position=j.position,
-                        effective_max=max_concurrency,
+                        effective_max=effective_max,
                         running_jobs=running_jobs,
                     )
                     if j.state == JobState.QUEUED
@@ -317,7 +325,7 @@ class ValidationJobQueue:
                     time.time()
                     + self._estimate_wait_seconds_for_position(
                         queue_position=j.position,
-                        effective_max=max_concurrency,
+                        effective_max=effective_max,
                         running_jobs=running_jobs,
                     )
                     if j.state == JobState.QUEUED
@@ -351,30 +359,26 @@ class ValidationJobQueue:
                 pass
 
     def _try_start_pending(self) -> None:
-        """Start as many pending jobs as concurrency slots allow.
-
-        When ``auto_tune_enabled`` is True, the effective concurrency cap
-        is the **minimum** of the user-set ``max_concurrency`` and the
-        resource advisor's recommendation.  This prevents starting more
-        jobs than the system can safely handle.
-        """
-        effective_max = self.effective_max_concurrency()
-        if self._auto_tune_enabled and effective_max < self._max_concurrency:
-            snapshot = self._last_resource_snapshot
-            if snapshot is not None:
-                logger.info(
-                    "Auto-tune: capping concurrency from %d to %d "
-                    "(ram_safe=%d disk_safe=%d cpu_safe=%d)",
-                    self._max_concurrency,
-                    effective_max,
-                    snapshot.max_safe_by_ram,
-                    snapshot.max_safe_by_disk,
-                    snapshot.max_safe_by_cpu,
-                )
-
-        with self._lock:
-            while self._pending and len(self._running) < effective_max:
+        """Start pending jobs while RAM/disk/CPU headroom allows (re-checked per job)."""
+        while True:
+            with self._lock:
+                if not self._pending:
+                    return
+                if len(self._running) >= self.effective_max_concurrency():
+                    snapshot = self._last_resource_snapshot
+                    if snapshot is not None and self._auto_tune_enabled:
+                        logger.debug(
+                            "Scheduling %d job(s): at resource cap effective=%d "
+                            "(ram_safe=%d disk_safe=%d cpu_safe=%d)",
+                            len(self._pending),
+                            self.effective_max_concurrency(snapshot=snapshot),
+                            snapshot.max_safe_by_ram,
+                            snapshot.max_safe_by_disk,
+                            snapshot.max_safe_by_cpu,
+                        )
+                    return
                 job = self._pending.popleft()
+                effective_max = self.effective_max_concurrency()
                 self._update_queue_positions()
                 self._refresh_pending_statuses_locked(effective_max=effective_max)
                 try:
@@ -434,10 +438,15 @@ class ValidationJobQueue:
                 job = self._running.pop(jid)
                 self._finished[jid] = job
 
-            # Notify pending are now eligible to start
             if done_ids and self._pending:
-                # Will be picked up on next loop iteration
-                self._refresh_pending_statuses_locked(effective_max=max(1, self._max_concurrency))
+                self._refresh_pending_statuses_locked(
+                    effective_max=self.effective_max_concurrency(),
+                )
+            had_done = bool(done_ids)
+
+        if had_done:
+            self._try_start_pending()
+            self._drain_event.set()
 
         # Prune old finished entries (keep last 500 max)
         with self._lock:
@@ -510,9 +519,12 @@ class ValidationJobQueue:
             running_jobs=running,
         )
         try:
+            resource_profile = None
             if status_path.is_file():
                 existing = loads_str(status_path.read_text(encoding="utf-8"))
                 prog = existing.get("progress") if isinstance(existing, dict) else None
+                if isinstance(existing, dict) and isinstance(existing.get("resource_profile"), dict):
+                    resource_profile = existing.get("resource_profile")
                 if (
                     isinstance(existing, dict)
                     and existing.get("status") == "queued"
@@ -523,27 +535,27 @@ class ValidationJobQueue:
                     and prog.get("effective_max_concurrency") == eff
                 ):
                     return
-            _atomic_write_json(
-                status_path,
-                {
-                    "status": "queued",
-                    "phase": "queued",
-                    "message": (
-                        f"Waiting in queue (position {job.position + 1} of {pend}, "
-                        f"estimated wait {int(wait_s)}s)"
-                    ),
-                    "progress": {
-                        "queue_position": job.position,
-                        "pending_ahead": job.position,
-                        "running_jobs": running,
-                        "max_concurrency": self._max_concurrency,
-                        "effective_max_concurrency": eff,
-                        "estimated_wait_seconds": wait_s,
-                        "estimated_start_epoch_s": time.time() + wait_s,
-                        "enqueued_at_epoch_s": job.enqueued_at,
-                    },
+            payload: dict[str, Any] = {
+                "status": "queued",
+                "phase": "queued",
+                "message": (
+                    f"Waiting in queue (position {job.position + 1} of {pend}, "
+                    f"estimated wait {int(wait_s)}s)"
+                ),
+                "progress": {
+                    "queue_position": job.position,
+                    "pending_ahead": job.position,
+                    "running_jobs": running,
+                    "max_concurrency": self._max_concurrency,
+                    "effective_max_concurrency": eff,
+                    "estimated_wait_seconds": wait_s,
+                    "estimated_start_epoch_s": time.time() + wait_s,
+                    "enqueued_at_epoch_s": job.enqueued_at,
                 },
-            )
+            }
+            if resource_profile is not None:
+                payload["resource_profile"] = resource_profile
+            _atomic_write_json(status_path, payload)
         except OSError:
             pass
 

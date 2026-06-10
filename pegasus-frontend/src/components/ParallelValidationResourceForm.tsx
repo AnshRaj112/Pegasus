@@ -13,10 +13,11 @@ export function buildResourceProjection(queueInfo, concurrencySlider, autoTuneEn
   const availRam = ra?.system?.available_ram_bytes ?? 0
   const availDisk = ra?.system?.available_disk_bytes ?? 0
 
-  let jobs = Math.max(1, Math.floor(concurrencySlider) || 1)
+  const userCap = Math.max(0, Math.floor(concurrencySlider) || 0)
   const effectiveMax = queueInfo?.effective_max_concurrency
+  let jobs = userCap > 0 ? userCap : Math.max(1, effectiveMax ?? 1)
   if (autoTuneEnabled && effectiveMax != null) {
-    jobs = Math.min(jobs, Math.max(1, effectiveMax))
+    jobs = userCap > 0 ? Math.min(jobs, Math.max(1, effectiveMax)) : Math.max(1, effectiveMax)
   }
 
   return {
@@ -57,12 +58,13 @@ export default function ParallelValidationResourceForm({
   )
   const sliderMax = Math.max(
     1,
-    concurrencySlider,
-    queueInfo?.max_concurrency ?? 1,
+    concurrencySlider || 0,
+    queueInfo?.max_concurrency ?? 0,
     cpuCores ?? 1,
     recommended ?? 1,
     practicalSliderMax,
   )
+  const isAutoCap = concurrencySlider <= 0
   const isDark = theme === 'dark'
   const hintColor = isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.6)'
   const labelColor = isDark ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.88)'
@@ -105,8 +107,10 @@ export default function ParallelValidationResourceForm({
               <Tag color={isDark ? 'default' : 'processing'}>
                 Queue: {queueInfo.pending ?? 0} pending · {queueInfo.running ?? 0} running
               </Tag>
-              {effectiveMax != null && autoTuneEnabled && effectiveMax < concurrencySlider ? (
-                <Tag color="gold">Effective cap: {effectiveMax} (auto-tune)</Tag>
+              {effectiveMax != null && autoTuneEnabled && (isAutoCap || effectiveMax < concurrencySlider) ? (
+                <Tag color="gold">
+                  {isAutoCap ? `Auto: up to ${effectiveMax} parallel` : `Effective cap: ${effectiveMax} (auto-tune)`}
+                </Tag>
               ) : null}
             </Space>
           ) : null}
@@ -126,7 +130,8 @@ export default function ParallelValidationResourceForm({
               Max parallel jobs
             </Typography.Title>
             <Typography.Text style={{ color: hintColor }}>
-              How many validations may run at the same time. Each job uses its own worker process.
+              How many validations may run at once. Choose Auto to run every job in parallel until RAM, disk, or CPU
+              limits are reached — extra jobs are scheduled in the queue.
             </Typography.Text>
 
             <Space wrap align="center" style={{ width: '100%', marginTop: 16, justifyContent: 'space-between' }}>
@@ -154,12 +159,12 @@ export default function ParallelValidationResourceForm({
                   </button>
                 ) : null}
                 <InputNumber
-                  min={1}
+                  min={0}
                   value={concurrencySlider}
                   disabled={disabled}
                   onChange={(value) => {
                     const n = Number(value)
-                    if (Number.isFinite(n) && n >= 1) onConcurrencyChange(Math.floor(n))
+                    if (Number.isFinite(n) && n >= 0) onConcurrencyChange(Math.floor(n))
                   }}
                   style={{ width: 96, textAlign: 'center' }}
                   aria-label="Max parallel jobs"
@@ -171,16 +176,16 @@ export default function ParallelValidationResourceForm({
             <div style={{ marginTop: 8 }}>
               <Slider
                 id="pegasus-parallel-jobs-range"
-                min={1}
+                min={0}
                 max={sliderMax}
                 step={1}
-                value={Math.min(concurrencySlider, sliderMax)}
+                value={Math.min(Math.max(0, concurrencySlider), sliderMax)}
                 disabled={disabled}
                 onChange={(value) => onConcurrencyChange(Number(value))}
               />
             </div>
             <Typography.Text style={{ display: 'flex', justifyContent: 'space-between', color: hintColor }}>
-              <span>1 (one at a time)</span>
+              <span>Auto (resource-based)</span>
               <span>up to {sliderMax}</span>
             </Typography.Text>
           </div>
@@ -193,8 +198,8 @@ export default function ParallelValidationResourceForm({
           >
             <span style={{ display: 'block', color: labelColor, fontWeight: 600 }}>Auto-tune</span>
             <Typography.Paragraph style={{ marginBottom: 0, marginTop: 4, color: hintColor }}>
-              When on, the server may run fewer jobs than you set if RAM, disk, or swap are tight. When off, only your
-              parallel job count is used.
+              When on, jobs start immediately while resources allow; only overflow goes to the schedule queue. When off,
+              only your parallel cap is used (Auto uses CPU core count).
             </Typography.Paragraph>
           </Checkbox>
 

@@ -88,7 +88,7 @@ export function ValidationPanel() {
   const [showParallelValidationModal, setShowParallelValidationModal] = useState(false)
   const [jobProgress, setJobProgress] = useState({ phase: 'queued', jobId: null, message: '', progress: {} })
   const [queueInfo, setQueueInfo] = useState(null)
-  const [concurrencySlider, setConcurrencySlider] = useState(2)
+  const [concurrencySlider, setConcurrencySlider] = useState(0)
   const [autoTuneLocal, setAutoTuneLocal] = useState(true)
   const [concurrencyUpdating, setConcurrencyUpdating] = useState(false)
   const [concurrencyError, setConcurrencyError] = useState('')
@@ -108,7 +108,7 @@ export function ValidationPanel() {
       }
       const data = await res.json()
       setQueueInfo(data)
-      setConcurrencySlider(data.max_concurrency ?? 2)
+      setConcurrencySlider(data.max_concurrency ?? 0)
       setAutoTuneLocal(data.auto_tune_enabled ?? true)
     } catch (e) {
       setQueueModalError(e instanceof Error ? e.message : String(e))
