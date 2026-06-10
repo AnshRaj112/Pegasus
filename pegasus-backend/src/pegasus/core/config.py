@@ -398,7 +398,7 @@ class Settings(BaseSettings):
         description="Hard RAM cap per validation job (default 10 GiB).",
     )
     validation_target_duration_seconds: int = Field(
-        default=15 * 60,
+        default=10 * 60,
         ge=60,
         le=24 * 60 * 60,
         description="Target completion time used to tune reconciliation runtime settings.",

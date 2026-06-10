@@ -100,9 +100,11 @@ def _adaptive_partition_count(
         max(source_bytes, target_bytes),
         column_count=compare_column_count + 1,
     )
-    rows_per_partition = 10_000 if est_rows >= 5_000_000 else 2000
+    rows_per_partition = 5_000 if est_rows >= 50_000_000 else (10_000 if est_rows >= 5_000_000 else 2000)
     max_partitions = 512
-    if file_bytes >= 10 * 1024 * 1024 * 1024:
+    if file_bytes >= 20 * 1024 * 1024 * 1024:
+        max_partitions = 4096
+    elif file_bytes >= 10 * 1024 * 1024 * 1024:
         max_partitions = 2048
     elif file_bytes >= 1024 * 1024 * 1024:
         max_partitions = 1024
@@ -164,17 +166,19 @@ def _should_attempt_in_memory(
         # GCS always uses chunked streaming spill — never download full objects first.
         return False
     if not _delimiter_supports_fast_load(source) or not _delimiter_supports_fast_load(target):
-        return config.enable_in_memory_reconcile or should_try_in_memory_reconcile(
-            enable_in_memory_reconcile=False,
+        return should_try_in_memory_reconcile(
+            enable_in_memory_reconcile=config.enable_in_memory_reconcile,
             auto_in_memory_max_bytes=config.auto_in_memory_max_bytes,
             source_bytes=source_bytes,
             target_bytes=target_bytes,
+            memory_budget_bytes=config.memory_budget_bytes,
         )
     return should_try_in_memory_reconcile(
         enable_in_memory_reconcile=config.enable_in_memory_reconcile,
         auto_in_memory_max_bytes=config.auto_in_memory_max_bytes,
         source_bytes=source_bytes,
         target_bytes=target_bytes,
+        memory_budget_bytes=config.memory_budget_bytes,
     )
 
 
@@ -645,6 +649,8 @@ class TabularReconciliationPipeline:
             columnar_spill=self._config.use_columnar_spill,
             arrow_ipc_spill=self._config.use_arrow_ipc_spill,
             fingerprint_only_spill=self._config.fingerprint_only_spill,
+            chunk_rows=chunk_rows,
+            reconcile_workers=reconcile_workers,
         )
         assert_reasonable_row_counts(
             self._source,
@@ -800,16 +806,23 @@ def _build_extra_stats(
     columnar_spill: bool,
     arrow_ipc_spill: bool,
     fingerprint_only_spill: bool,
+    chunk_rows: int | None = None,
+    reconcile_workers: int | None = None,
 ) -> dict[str, Any]:
     extra: dict[str, Any] = {
         "path": path,
         "fingerprint_algorithm": fingerprint_algorithm,
         "num_partitions": num_partitions,
+        "partition_buckets": num_partitions,
         "active_partitions": active_partitions,
         "lazy_column_drilldown": lazy_column_drilldown,
         "columnar_spill": columnar_spill,
         "arrow_ipc_spill": arrow_ipc_spill,
         "fingerprint_only_spill": fingerprint_only_spill,
     }
+    if chunk_rows is not None:
+        extra["chunk_rows"] = chunk_rows
+    if reconcile_workers is not None:
+        extra["reconcile_workers"] = reconcile_workers
     attach_stage_report(extra, timings, io)
     return extra

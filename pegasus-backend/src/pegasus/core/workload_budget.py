@@ -81,11 +81,11 @@ def plan_workload_budget(
         if estimated_total_rows <= 200_000:
             row_scaled_chunk = max(requested_chunk_rows, estimated_total_rows)
         elif estimated_total_rows >= 200_000_000:
-            row_scaled_chunk = requested_chunk_rows * 3
+            row_scaled_chunk = min(requested_chunk_rows * 4, max_rows_per_chunk)
+        elif estimated_total_rows >= 50_000_000:
+            row_scaled_chunk = min(requested_chunk_rows * 3, max_rows_per_chunk)
         elif estimated_total_rows >= 5_000_000:
             row_scaled_chunk = min(requested_chunk_rows * 2, max_rows_per_chunk)
-        elif estimated_total_rows >= 50_000_000:
-            row_scaled_chunk = requested_chunk_rows * 2
     else:
         # Polars / PyArrow frames: never scale chunk size up with row estimates.
         row_scaled_chunk = min(requested_chunk_rows, _POLARS_CHUNK_CAP)
@@ -111,16 +111,19 @@ def plan_workload_budget(
 
     workers_cap_by_memory = max(1, usable_budget // (max(1, chunk_rows * estimated_row_bytes * chunk_buffers)))
     workers = requested_max_workers if requested_max_workers is not None else cores
-    workers = min(max(1, workers), cores, workers_cap_by_memory)
+    worker_ceiling = min(cores, 16 if file_bytes >= 8 * 1024**3 else 8)
+    workers = min(max(1, workers), worker_ceiling, workers_cap_by_memory)
 
     est_rows = max(
         int(source_row_estimate or 0),
         int(target_row_estimate or 0),
         max(source_bytes, target_bytes) // estimated_row_bytes,
     )
-    rows_per_partition = 10_000 if est_rows >= 5_000_000 else 2000
+    rows_per_partition = 5_000 if est_rows >= 50_000_000 else (10_000 if est_rows >= 5_000_000 else 2000)
     max_partitions = 512
-    if file_bytes >= 10 * 1024 * 1024 * 1024:
+    if file_bytes >= 20 * 1024 * 1024 * 1024:
+        max_partitions = 4096
+    elif file_bytes >= 10 * 1024 * 1024 * 1024:
         max_partitions = 2048
     elif file_bytes >= 1024 * 1024 * 1024:
         max_partitions = 1024

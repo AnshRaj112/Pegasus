@@ -113,5 +113,8 @@ def pipeline_result_to_run_result(result: PipelineResult) -> ValidationRunResult
             "io": (result.extra_stats or {}).get("io"),
             "lazy_column_drilldown": (result.extra_stats or {}).get("lazy_column_drilldown"),
             "columnar_spill": (result.extra_stats or {}).get("columnar_spill"),
+            "chunk_rows": (result.extra_stats or {}).get("chunk_rows"),
+            "partition_buckets": (result.extra_stats or {}).get("partition_buckets"),
+            "reconcile_workers": (result.extra_stats or {}).get("reconcile_workers"),
         },
     )

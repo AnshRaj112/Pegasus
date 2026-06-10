@@ -129,6 +129,8 @@ def cap_partition_buckets(
         file_floor = 256
     if combined_file_bytes >= 8 * 1024**3:
         file_floor = 512
+    if combined_file_bytes >= 20 * 1024**3:
+        file_floor = 1024
     effective_cap = max(mx, file_floor)
     return max(1, max(file_floor, min(int(requested), effective_cap)))
 

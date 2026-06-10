@@ -87,12 +87,11 @@ class ValidationService:
             identity_column_count=identity_column_count,
             inline_native_spill=inline_native,
         )
-        largest_side = max(source_bytes, target_bytes)
-        if largest_side > 64 * 1024 * 1024:
-            # Wide multichar rows exceed the 32×cols heuristic — use bytes/1M floor.
-            row_width = max(row_width, largest_side // 1_500_000)
-        source_row_estimate = max(1, source_bytes // row_width)
-        target_row_estimate = max(1, target_bytes // row_width)
+        min_row_bytes = max(48, 8 * (compare_column_count + identity_column_count) + 32)
+        dense_source_rows = max(1, source_bytes // min_row_bytes)
+        dense_target_rows = max(1, target_bytes // min_row_bytes)
+        source_row_estimate = max(1, source_bytes // row_width, dense_source_rows)
+        target_row_estimate = max(1, target_bytes // row_width, dense_target_rows)
         budget = plan_workload_budget(
             source_bytes=source_bytes,
             target_bytes=target_bytes,
@@ -113,6 +112,9 @@ class ValidationService:
             inline_native_spill=inline_native,
         )
         preset = self._settings.validation_tabular_partition_preset
+        reconcile_workers = self._settings.validation_partition_reconcile_workers
+        if reconcile_workers <= 0:
+            reconcile_workers = budget.max_parallel_workers
         return TabularPipelineConfig(
             chunk_rows=budget.chunk_rows,
             partition_count=budget.partition_buckets,
@@ -130,7 +132,7 @@ class ValidationService:
             lazy_column_drilldown=True,
             fingerprint_only_spill=True,
             use_arrow_ipc_spill=True,
-            partition_reconcile_workers=self._settings.validation_partition_reconcile_workers,
+            partition_reconcile_workers=reconcile_workers,
             gcs_streaming_only=self._settings.validation_gcs_streaming_only,
         )
 
@@ -244,16 +246,18 @@ class ValidationService:
             identity_column_count=1,
             resource_policy=resource_policy,
         )
+        combined_bytes = source.get_size_bytes() + target.get_size_bytes()
         logger.info(
-            "reconciliation delimiter=%r source_bytes=%s target_bytes=%s in_memory=%s",
+            "reconciliation delimiter=%r source_bytes=%s target_bytes=%s in_memory=%s "
+            "chunk_rows=%s partitions=%s reconcile_workers=%s",
             sep,
             source.get_size_bytes(),
             target.get_size_bytes(),
             cfg.enable_in_memory_reconcile
-            or (
-                source.get_size_bytes() + target.get_size_bytes()
-                <= cfg.auto_in_memory_max_bytes
-            ),
+            and combined_bytes <= cfg.auto_in_memory_max_bytes,
+            cfg.chunk_rows,
+            cfg.resolved_partition_count(),
+            cfg.partition_reconcile_workers,
         )
 
         workspace = None

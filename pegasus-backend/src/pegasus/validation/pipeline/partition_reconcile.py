@@ -287,7 +287,7 @@ def resolved_reconcile_workers(requested: int) -> int:
         return 1
     if requested <= 0:
         cpus = os.cpu_count() or 1
-        return max(2, min(8, cpus - 1))
+        return max(2, min(16, cpus))
     return max(1, requested)
 
 

@@ -93,11 +93,16 @@ def should_try_in_memory_reconcile(
     auto_in_memory_max_bytes: int,
     source_bytes: int,
     target_bytes: int,
+    memory_budget_bytes: int | None = None,
 ) -> bool:
-    """Return whether to attempt the Polars in-memory fast path."""
-    if enable_in_memory_reconcile:
-        return True
-    return source_bytes + target_bytes <= auto_in_memory_max_bytes
+    """Return whether combined inputs are small enough for the Polars in-memory fast path."""
+    if not enable_in_memory_reconcile:
+        return source_bytes + target_bytes <= auto_in_memory_max_bytes
+    combined = source_bytes + target_bytes
+    cap = max(auto_in_memory_max_bytes, _DEFAULT_AUTO_IN_MEMORY_MAX_BYTES)
+    if memory_budget_bytes is not None and memory_budget_bytes > 0:
+        cap = min(cap, int(memory_budget_bytes * 0.40))
+    return combined <= cap
 
 
 def _headerless_column_names(adapter: TabularSourceAdapter) -> list[str] | None:
