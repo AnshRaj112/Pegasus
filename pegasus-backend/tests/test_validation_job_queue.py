@@ -63,6 +63,35 @@ def test_effective_max_honors_user_cap_when_auto_tune_on(monkeypatch) -> None:
     assert queue.effective_max_concurrency() == 3
 
 
+def test_enqueue_does_not_deadlock_under_lock(monkeypatch, tmp_path: Path) -> None:
+    """Regression: resource probes must not run while self._lock is held."""
+    import concurrent.futures
+
+    settings = Settings(validation_max_concurrency=0, validation_auto_tune_enabled=True)
+    queue = ValidationJobQueue(settings, max_concurrency=0)
+    queue._runner = _StubRunner()  # noqa: SLF001
+    monkeypatch.setattr(queue, "_stamp_resource_policy", lambda *a, **k: None)
+    monkeypatch.setattr(queue, "_write_queued_status", lambda *a, **k: None)
+
+    real_recommendation = queue.resource_recommendation
+
+    def tracked_recommendation():
+        assert not queue._lock.locked(), "resource_recommendation must not run under queue lock"
+        return real_recommendation()
+
+    monkeypatch.setattr(queue, "resource_recommendation", tracked_recommendation)
+
+    job_id = uuid.uuid4()
+    job_dir = tmp_path / str(job_id)
+    job_dir.mkdir()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        enqueue_future = pool.submit(queue.enqueue, job_id, job_dir)
+        stats_future = pool.submit(lambda: queue.stats)
+        enqueue_future.result(timeout=5)
+        stats_future.result(timeout=5)
+
+
 def test_enqueue_starts_multiple_jobs_up_to_resource_cap(monkeypatch, tmp_path: Path) -> None:
     settings = Settings(validation_max_concurrency=0, validation_auto_tune_enabled=True)
     queue = ValidationJobQueue(settings, max_concurrency=0)

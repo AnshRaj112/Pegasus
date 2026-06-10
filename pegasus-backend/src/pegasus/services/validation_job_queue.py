@@ -260,12 +260,13 @@ class ValidationJobQueue:
     def enqueue(self, job_id: uuid.UUID, job_dir: Path) -> QueuedJob:
         """Add a job to the queue.  Returns the :class:`QueuedJob` immediately."""
         job = QueuedJob(job_id=job_id, job_dir=job_dir.resolve())
+        snapshot = self.resource_recommendation()
+        effective = self.effective_max_concurrency(snapshot=snapshot)
         with self._lock:
             job.position = len(self._pending)
             self._pending.append(job)
             self._all_jobs[job_id] = job
             self._update_queue_positions()
-            effective = self.effective_max_concurrency()
             self._refresh_pending_statuses_locked(effective_max=effective)
             logger.info(
                 "Job %s enqueued position=%d pending=%d running=%d effective_cap=%d user_cap=%d",
@@ -361,24 +362,26 @@ class ValidationJobQueue:
     def _try_start_pending(self) -> None:
         """Start pending jobs while RAM/disk/CPU headroom allows (re-checked per job)."""
         while True:
+            # Never call resource_recommendation / effective_max_concurrency under self._lock
+            # (resource_recommendation acquires the same lock → deadlock).
+            snapshot = self.resource_recommendation()
+            effective_max = self.effective_max_concurrency(snapshot=snapshot)
             with self._lock:
                 if not self._pending:
                     return
-                if len(self._running) >= self.effective_max_concurrency():
-                    snapshot = self._last_resource_snapshot
-                    if snapshot is not None and self._auto_tune_enabled:
+                if len(self._running) >= effective_max:
+                    if self._auto_tune_enabled:
                         logger.debug(
                             "Scheduling %d job(s): at resource cap effective=%d "
                             "(ram_safe=%d disk_safe=%d cpu_safe=%d)",
                             len(self._pending),
-                            self.effective_max_concurrency(snapshot=snapshot),
+                            effective_max,
                             snapshot.max_safe_by_ram,
                             snapshot.max_safe_by_disk,
                             snapshot.max_safe_by_cpu,
                         )
                     return
                 job = self._pending.popleft()
-                effective_max = self.effective_max_concurrency()
                 self._update_queue_positions()
                 self._refresh_pending_statuses_locked(effective_max=effective_max)
                 try:
@@ -415,6 +418,8 @@ class ValidationJobQueue:
 
     def _reap_finished(self) -> None:
         """Move completed/failed running jobs to the finished set."""
+        snapshot = self.resource_recommendation()
+        effective_max = self.effective_max_concurrency(snapshot=snapshot)
         with self._lock:
             done_ids = []
             for jid, job in self._running.items():
@@ -439,9 +444,7 @@ class ValidationJobQueue:
                 self._finished[jid] = job
 
             if done_ids and self._pending:
-                self._refresh_pending_statuses_locked(
-                    effective_max=self.effective_max_concurrency(),
-                )
+                self._refresh_pending_statuses_locked(effective_max=effective_max)
             had_done = bool(done_ids)
 
         if had_done:
