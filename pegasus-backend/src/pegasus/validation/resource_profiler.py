@@ -287,6 +287,35 @@ def _snapshot_report_lines(snap: dict[str, Any] | None, *, heading: str) -> list
     return lines
 
 
+def log_resource_snapshot_summary(
+    snap: dict[str, Any] | None,
+    *,
+    phase: str,
+    job_id: str | None = None,
+) -> None:
+    """Emit a one-line memory / disk / CPU summary to worker logs."""
+    if not snap:
+        return
+    mem = snap.get("memory") if isinstance(snap.get("memory"), dict) else {}
+    disk = snap.get("disk") if isinstance(snap.get("disk"), dict) else {}
+    cpu = snap.get("cpu") if isinstance(snap.get("cpu"), dict) else {}
+    prefix = f"job={job_id} " if job_id else ""
+    logger.info(
+        "%sresource [%s]: mem avail=%s GiB used=%s GiB rss=%s MiB | "
+        "disk free=%s GiB job_ws=%s MiB | cpu proc=%s%% sys=%s%% cores=%s",
+        prefix,
+        phase,
+        mem.get("available_gib"),
+        mem.get("used_gib"),
+        mem.get("process_rss_mib"),
+        disk.get("available_gib"),
+        disk.get("job_workspace_mib"),
+        cpu.get("process_percent") if cpu.get("process_percent") is not None else "n/a",
+        cpu.get("system_percent") if cpu.get("system_percent") is not None else "n/a",
+        cpu.get("cores"),
+    )
+
+
 def format_resource_profile_report(profile: dict[str, Any]) -> str:
     """Human-readable before / during / after resource footprint report."""
     during = profile.get("during") if isinstance(profile.get("during"), list) else []

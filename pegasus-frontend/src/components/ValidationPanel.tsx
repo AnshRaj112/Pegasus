@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Col, Divider, Input, Modal, Row, Select, Space, Statistic, Typography } from 'antd'
+import { Alert, Button, Card, Col, Input, Row, Select, Space, Statistic, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import LocalPathBrowser from './LocalPathBrowser'
-import ParallelValidationResourceForm from './ParallelValidationResourceForm'
 import ValidationJobProgress from './ValidationJobProgress'
 import { formatJobError } from '../api/formatError.js'
 import { formatDuration } from '../api/validationHistory.js'
@@ -85,46 +84,8 @@ export function ValidationPanel() {
   const [elapsedMs, setElapsedMs] = useState(0)
   const [result, setResult] = useState(null)
   const [errorMessage, setErrorMessage] = useState('')
-  const [showParallelValidationModal, setShowParallelValidationModal] = useState(false)
   const [jobProgress, setJobProgress] = useState({ phase: 'queued', jobId: null, message: '', progress: {} })
-  const [queueInfo, setQueueInfo] = useState(null)
-  const [concurrencySlider, setConcurrencySlider] = useState(0)
-  const [autoTuneLocal, setAutoTuneLocal] = useState(true)
-  const [concurrencyUpdating, setConcurrencyUpdating] = useState(false)
-  const [concurrencyError, setConcurrencyError] = useState('')
-  const [queueModalLoading, setQueueModalLoading] = useState(false)
-  const [queueModalError, setQueueModalError] = useState('')
   const running = phase === 'running'
-  const effectiveMax = queueInfo?.effective_max_concurrency ?? null
-
-  async function refreshQueueInfo() {
-    setQueueModalLoading(true)
-    setQueueModalError('')
-    try {
-      const res = await fetch(absoluteApiUrl('/api/v1/validate/queue'))
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(formatDetail(err.detail) || `Queue status failed (${res.status})`)
-      }
-      const data = await res.json()
-      setQueueInfo(data)
-      setConcurrencySlider(data.max_concurrency ?? 0)
-      setAutoTuneLocal(data.auto_tune_enabled ?? true)
-    } catch (e) {
-      setQueueModalError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setQueueModalLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    refreshQueueInfo()
-  }, [])
-
-  useEffect(() => {
-    if (!showParallelValidationModal) return
-    refreshQueueInfo()
-  }, [showParallelValidationModal])
 
   useEffect(() => {
     if (!running) return
@@ -133,38 +94,7 @@ export function ValidationPanel() {
     return () => clearInterval(id)
   }, [running])
 
-  function handleOpenParallelValidation(e) {
-    e.preventDefault()
-    if (!sourcePath.trim() || !targetPath.trim()) return
-    setShowParallelValidationModal(true)
-  }
-
   async function executeValidation() {
-    setConcurrencyUpdating(true)
-    setConcurrencyError('')
-    try {
-      const res = await fetch(absoluteApiUrl('/api/v1/validate/queue'), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          max_concurrency: concurrencySlider,
-          auto_tune_enabled: autoTuneLocal,
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        setConcurrencyError(formatDetail(err.detail) || `Failed to apply settings (${res.status})`)
-        return
-      }
-      setQueueInfo(await res.json())
-    } catch (e) {
-      setConcurrencyError(e instanceof Error ? e.message : String(e))
-      return
-    } finally {
-      setConcurrencyUpdating(false)
-    }
-
-    setShowParallelValidationModal(false)
     setPhase('running')
     setElapsedMs(0)
     setResult(null)
@@ -234,12 +164,6 @@ export function ValidationPanel() {
 
       setResult(final)
       setPhase('success')
-      try {
-        const qres = await fetch(absoluteApiUrl('/api/v1/validate/queue'))
-        if (qres.ok) setQueueInfo(await qres.json())
-      } catch {
-        // silent
-      }
     } catch (err) {
       setPhase('error')
       setErrorMessage(formatJobError(err instanceof Error ? err.message : String(err)))
@@ -323,7 +247,7 @@ export function ValidationPanel() {
           )}
 
           <Button
-            type="submit"
+            type="button"
             type="primary"
             disabled={
               running
@@ -331,6 +255,7 @@ export function ValidationPanel() {
               || !targetPath.trim()
               || (fileFormat !== 'json' && !uidColumn.trim())
             }
+            onClick={() => { void executeValidation() }}
             style={{ width: '100%', height: 52, borderRadius: 14, background: '#EB4C4C', boxShadow: '0 12px 30px rgba(235,76,76,0.28)' }}
           >
             {running ? (
@@ -353,28 +278,6 @@ export function ValidationPanel() {
             message={jobProgress.message}
             progress={jobProgress.progress}
             elapsedLabel={`${(elapsedMs / 1000).toFixed(1)}s elapsed`}
-          />
-        ) : null}
-
-        {running && jobProgress.phase === 'queued' && jobProgress.progress?.queue_position != null ? (
-          <Alert
-            type="warning"
-            showIcon
-            style={{ marginTop: -8, marginBottom: 16 }}
-            message={
-              <Typography.Text>
-                Queue position: {Number(jobProgress.progress.queue_position) + 1}
-                {jobProgress.progress?.max_concurrency ? (
-                  <span style={{ color: '#B45309' }}>
-                    {' '}· {jobProgress.progress.running_jobs ?? '?'}/{jobProgress.progress.max_concurrency} workers
-                    {effectiveMax != null && effectiveMax !== queueInfo?.max_concurrency
-                      ? ` (effective cap ${effectiveMax})`
-                      : ''}
-                  </span>
-                ) : null}
-              </Typography.Text>
-            }
-            description="Your job will start when a running validation finishes."
           />
         ) : null}
 
@@ -420,64 +323,6 @@ export function ValidationPanel() {
         ) : null}
       </Space>
 
-      <Modal
-        title={null}
-        open={showParallelValidationModal}
-        onCancel={() => setShowParallelValidationModal(false)}
-        footer={null}
-        centered
-        width={960}
-        destroyOnClose
-        closeIcon={<span style={{ fontSize: 22, color: '#64748B' }}>×</span>}
-        styles={{ body: { padding: '2rem', maxHeight: 'min(90vh, 900px)', overflowY: 'auto' } }}
-      >
-        <Space direction="vertical" size={20} style={{ width: '100%' }}>
-          <div>
-            <Typography.Text style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.25em', textTransform: 'uppercase', color: '#EB4C4C' }}>Parallel validation</Typography.Text>
-            <Typography.Title level={2} style={{ marginTop: 4, marginBottom: 0 }}>Review resources before running</Typography.Title>
-            <Typography.Paragraph style={{ marginTop: 8, color: '#475569' }}>
-              Choose how many validations may run in parallel. Turn auto-tune on to let the server reduce load when resources are tight.
-            </Typography.Paragraph>
-          </div>
-
-          <ParallelValidationResourceForm
-            queueInfo={queueInfo}
-            queueLoading={queueModalLoading}
-            queueError={queueModalError}
-            concurrencySlider={concurrencySlider}
-            onConcurrencyChange={setConcurrencySlider}
-            autoTuneEnabled={autoTuneLocal}
-            onAutoTuneChange={setAutoTuneLocal}
-            onRefresh={refreshQueueInfo}
-            disabled={concurrencyUpdating}
-            theme="light"
-          />
-
-          <Divider />
-          <Space wrap>
-            <Button
-              type="button"
-              type="primary"
-              disabled={concurrencyUpdating || queueModalLoading}
-              onClick={executeValidation}
-              style={{ borderRadius: 10, background: '#EB4C4C' }}
-            >
-              {concurrencyUpdating ? 'Starting…' : 'Run validation'}
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setShowParallelValidationModal(false)}
-              disabled={concurrencyUpdating}
-            >
-              Cancel
-            </Button>
-            {concurrencySlider === queueInfo?.max_concurrency ? (
-              <Typography.Text style={{ color: '#059669', fontWeight: 500 }}>Matches saved queue setting</Typography.Text>
-            ) : null}
-            {concurrencyError ? <Typography.Text type="danger">{concurrencyError}</Typography.Text> : null}
-          </Space>
-        </Space>
-      </Modal>
     </Space>
   )
 }

@@ -2,7 +2,6 @@ import { Button, Progress, Tag } from 'antd'
 import { Activity, Bell, CheckCircle2, XCircle } from 'lucide-react'
 import { useValidationRuns } from '../context/ValidationRunsContext'
 import ValidationJobProgress from './ValidationJobProgress'
-import ResourceProfileView from './ResourceProfileView'
 
 function basename(path: string) {
   const normalized = String(path || '').replace(/\\/g, '/')
@@ -25,10 +24,8 @@ function runDisplay(run: { status: string; outcome?: string | null }) {
 }
 
 export default function ActiveValidationsPanel({
-  showResourceDetails = true,
   limit,
 }: {
-  showResourceDetails?: boolean
   limit?: number
 }) {
   const {
@@ -140,15 +137,6 @@ export default function ActiveValidationsPanel({
               />
             ) : null}
 
-            {run.resourceProfile && showResourceDetails ? (
-              <div style={{ marginTop: 12 }}>
-                <ResourceProfileView profile={run.resourceProfile} />
-              </div>
-            ) : run.resourceProfile ? (
-              <div style={{ marginTop: 12 }}>
-                <ResourceProfileView profile={run.resourceProfile} compact />
-              </div>
-            ) : null}
           </div>
         )
       })}

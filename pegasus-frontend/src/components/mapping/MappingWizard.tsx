@@ -10,7 +10,6 @@ import StepInputLayout from './StepInputLayout'
 import StepFilePairing from './StepFilePairing'
 import StepBatchMappingMode from './StepBatchMappingMode'
 import ActionBar        from './ActionBar'
-import ParallelValidationModal from '../ParallelValidationModal'
 import { useValidationRuns } from '../../context/ValidationRunsContext'
 import { buildMappingRows, mappingRowFromApi, toColumnMappingPayload } from './columnMapping'
 import { buildAnalyzePayload, formatCheckBySource } from './mappingAnalyze'
@@ -697,7 +696,6 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
   }, [])
 
   const validationRuns = useValidationRuns()
-  const [parallelModalOpen, setParallelModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [localRunIds, setLocalRunIds] = useState([])
   const [result, setResult]         = useState(null)
@@ -1991,7 +1989,6 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           setLocalRunIds(prev => [...prev, runId])
           setJobProgress({ phase: data.status === 'running' ? 'running' : 'queued', jobId: jid })
           setPhase('submitted')
-          setParallelModalOpen(false)
         } else {
           throw new Error('Unexpected batch API response')
         }
@@ -2060,7 +2057,6 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
         setLocalRunIds(prev => [...prev, runId])
         setJobProgress({ phase: data.status === 'running' ? 'running' : 'queued', jobId: jid })
         setPhase('submitted')
-        setParallelModalOpen(false)
       } else if (data.summary) {
         setResult(normalizeValidateResult(data))
         setPhase('success')
@@ -4055,7 +4051,7 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
             </button>
 
             <ActionBar
-              onValidate={() => setParallelModalOpen(true)}
+              onValidate={() => { void handleValidate() }}
               onSaveAsDraft={handleSaveAsDraft}
               isValid={isValidForRun}
               isSubmitting={isSubmitting}
@@ -4064,15 +4060,6 @@ export default function MappingWizard({ initialMappingData, onResetInitialData }
           </div>
         )}
       </div>
-
-      <ParallelValidationModal
-        open={parallelModalOpen}
-        onClose={() => setParallelModalOpen(false)}
-        onConfirm={async () => {
-          await handleValidate()
-          return true
-        }}
-      />
 
       {/* Redesign Overlay Modals */}
       {isBrowserOpen && (

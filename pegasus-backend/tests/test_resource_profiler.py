@@ -13,6 +13,7 @@ from pegasus.validation.resource_profiler import (
     JobResourceProfiler,
     capture_resource_snapshot,
     format_resource_profile_report,
+    log_resource_snapshot_summary,
     merge_resource_profile,
     write_resource_profile_artifacts,
 )
@@ -92,6 +93,18 @@ def test_write_resource_profile_artifacts(tmp_path: Path) -> None:
         },
     )
     assert (job_dir / "resource_profile_report.md").is_file()
+
+
+def test_log_resource_snapshot_summary_does_not_raise() -> None:
+    log_resource_snapshot_summary(
+        {
+            "memory": {"available_gib": 4.0, "used_gib": 11.5, "process_rss_mib": 180.3},
+            "disk": {"available_gib": 187.8, "job_workspace_mib": 2.9},
+            "cpu": {"process_percent": 12.5, "system_percent": 40.0, "cores": 8},
+        },
+        phase="before",
+        job_id="test-job",
+    )
 
 
 def test_merge_resource_profile_appends_during_samples() -> None:

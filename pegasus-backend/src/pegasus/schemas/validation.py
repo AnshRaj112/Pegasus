@@ -892,10 +892,9 @@ class UpdateQueueSettingsRequest(BaseModel):
 
     max_concurrency: int | None = Field(
         default=None,
-        ge=0,
+        ge=1,
         description=(
-            "Maximum parallel validation jobs (user upper cap). "
-            "0 = no fixed cap — auto-tune runs as many jobs as RAM, disk, and CPU allow. "
+            "Maximum parallel validation jobs. "
             "Running jobs are never killed; the new limit affects when queued jobs start."
         ),
     )

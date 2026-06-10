@@ -25,7 +25,7 @@ from pegasus.validation.comparators.models import MismatchType
 from pegasus.validation.lifecycle_profiler import get_active_profiler, lifecycle_job, lifecycle_span
 from pegasus.validation.resource_profiler import (
     JobResourceProfiler,
-    merge_resource_profile,
+    log_resource_snapshot_summary,
     write_resource_profile_artifacts,
 )
 
@@ -231,27 +231,24 @@ def run_job_directory(job_dir: Path) -> int:
     except Exception as exc:
         err_msg = format_validation_job_error(exc)
         logger.exception("validation job failed: %s", err_msg)
-        failed_profile: dict[str, object] | None = None
-        if status_path.is_file():
-            try:
-                prior = _load_json(status_path)
-                raw_profile = prior.get("resource_profile")
-                if isinstance(raw_profile, dict):
-                    failed_profile = raw_profile
-                    write_resource_profile_artifacts(job_dir, raw_profile)
-            except (OSError, ValueError, TypeError):
-                failed_profile = None
-        failed_payload: dict[str, object] = {
-            "status": "failed",
-            "phase": "failed",
-            "message": err_msg,
-            "error": err_msg,
-            "traceback": traceback.format_exc(),
-            "progress": {"failed_at_epoch_s": time.time()},
-        }
-        if failed_profile is not None:
-            failed_payload["resource_profile"] = failed_profile
-        _write_json(status_path, failed_payload)
+        report_path = job_dir / "resource_profile_report.md"
+        if report_path.is_file():
+            logger.info(
+                "Resource footprint report for failed job %s written to %s",
+                job_dir.name,
+                report_path,
+            )
+        _write_json(
+            status_path,
+            {
+                "status": "failed",
+                "phase": "failed",
+                "message": err_msg,
+                "error": err_msg,
+                "traceback": traceback.format_exc(),
+                "progress": {"failed_at_epoch_s": time.time()},
+            },
+        )
         _cleanup_partial(job_dir)
         return 1
 
@@ -276,29 +273,13 @@ def _run_job_body(
     tgt: object,
     lifecycle: object,
 ) -> int:
+    job_id = job_dir.name
+    resource_profiler = JobResourceProfiler(job_dir=job_dir)
+    before = resource_profiler.capture_before()
+    log_resource_snapshot_summary(before, phase="before", job_id=job_id)
+
     try:
         start = time.time()
-        existing_profile: dict[str, Any] | None = None
-        if status_path.is_file():
-            try:
-                existing_status = _load_json(status_path)
-                raw_profile = existing_status.get("resource_profile")
-                if isinstance(raw_profile, dict):
-                    existing_profile = raw_profile
-            except (OSError, ValueError, TypeError):
-                existing_profile = None
-
-        resource_profiler = JobResourceProfiler(job_dir=job_dir)
-        worker_before = resource_profiler.capture_before()
-        if existing_profile and isinstance(existing_profile.get("before"), dict):
-            resource_profiler.before = existing_profile["before"]
-        else:
-            existing_profile = merge_resource_profile(existing_profile, {"before": worker_before})
-
-        existing_profile = merge_resource_profile(
-            existing_profile,
-            resource_profiler.to_dict(),
-        )
         _write_json(
             status_path,
             {
@@ -306,7 +287,6 @@ def _run_job_body(
                 "phase": "initializing",
                 "message": "Worker started, loading settings",
                 "progress": {"started_at_epoch_s": start},
-                "resource_profile": existing_profile,
             },
         )
         with lifecycle_span("Worker Init (pre-validation)"):
@@ -318,7 +298,7 @@ def _run_job_body(
         progress_seq = 0
 
         def _progress_cb(event: dict[str, Any]) -> None:
-            nonlocal last_emit, last_stage_emit, progress_seq, existing_profile
+            nonlocal last_emit, last_stage_emit, progress_seq
             now = time.time()
             is_stage = event.get("phase") == "stage"
             is_terminal = event.get("percent") in {100, 99}
@@ -357,18 +337,17 @@ def _run_job_body(
             if stage_payload is not None:
                 progress["stage"] = stage_payload
             during_sample = resource_profiler.maybe_capture_during()
-            status_payload: dict[str, Any] = {
-                "status": "running",
-                "phase": str(event.get("phase") or "validating"),
-                "message": str(event.get("message") or "Running reconciliation"),
-                "progress": progress,
-            }
-            profile_update = resource_profiler.to_dict()
             if during_sample is not None:
-                profile_update["during"] = [during_sample]
-            existing_profile = merge_resource_profile(existing_profile, profile_update)
-            status_payload["resource_profile"] = existing_profile
-            _write_json(status_path, status_payload)
+                log_resource_snapshot_summary(during_sample, phase="during", job_id=job_id)
+            _write_json(
+                status_path,
+                {
+                    "status": "running",
+                    "phase": str(event.get("phase") or "validating"),
+                    "message": str(event.get("message") or "Running reconciliation"),
+                    "progress": progress,
+                },
+            )
 
         try:
             src_bytes = src.stat().st_size if isinstance(src, Path) else None
@@ -520,9 +499,8 @@ def _run_job_body(
             lifecycle_summary = profiler.summarize()
             out["lifecycle"] = lifecycle_summary
         resource_profiler.capture_after()
-        final_profile = merge_resource_profile(existing_profile, resource_profiler.to_dict())
-        write_resource_profile_artifacts(job_dir, final_profile)
-        out["resource_profile"] = final_profile
+        log_resource_snapshot_summary(resource_profiler.after, phase="after", job_id=job_id)
+        write_resource_profile_artifacts(job_dir, resource_profiler.to_dict())
         with lifecycle_span("Result Serialization"):
             _write_json(job_dir / "result.json", out, indent=True)
         _write_json(
@@ -539,11 +517,20 @@ def _run_job_body(
                     "total_mismatch_records": int(sum(_normalize_summary(dict(result.report.summary)).values())),
                     "validation_seconds": validation_duration,
                 },
-                "resource_profile": final_profile,
             },
         )
         return 0
     except Exception as exc:
+        if resource_profiler.after is None:
+            try:
+                resource_profiler.capture_after()
+                log_resource_snapshot_summary(resource_profiler.after, phase="after", job_id=job_id)
+            except Exception:
+                logger.debug("Could not capture after-resource snapshot on failure", exc_info=True)
+        try:
+            write_resource_profile_artifacts(job_dir, resource_profiler.to_dict())
+        except Exception:
+            logger.debug("Could not write resource profile artifacts on failure", exc_info=True)
         raise exc
     finally:
         if uses_cloud:

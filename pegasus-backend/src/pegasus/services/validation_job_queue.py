@@ -84,8 +84,7 @@ class ValidationJobQueue:
         max_concurrency: int | None = None,
     ) -> None:
         mc = max_concurrency if max_concurrency is not None else settings.validation_max_concurrency
-        # 0 = no user cap; resource advisor (when auto-tune is on) decides parallelism.
-        self._max_concurrency: int = max(0, int(mc))
+        self._max_concurrency: int = max(1, int(mc))
         self._settings = settings
         self._runner = BackgroundValidationRunner(settings)
         self._auto_tune_enabled: bool = settings.validation_auto_tune_enabled
@@ -139,10 +138,9 @@ class ValidationJobQueue:
     def set_max_concurrency(self, value: int) -> int:
         """Update the concurrency cap at runtime.  Returns the clamped value actually set.
 
-        ``0`` removes the user cap (resource auto-tune decides how many jobs run in parallel).
         The new limit takes effect immediately.  Running jobs are never killed.
         """
-        clamped = max(0, int(value))
+        clamped = max(1, int(value))
         with self._lock:
             old = self._max_concurrency
             self._max_concurrency = clamped
@@ -217,21 +215,22 @@ class ValidationJobQueue:
         return snapshot
 
     def effective_max_concurrency(self, *, snapshot: ResourceSnapshot | None = None) -> int:
-        """Parallel slot cap used by the drain loop (resource-aware when auto-tune is on)."""
-        user_cap = self._max_concurrency
-        fallback_cap = max(1, self.cpu_cores_available())
+        """Parallel slot cap used by the drain loop (resource-aware only when auto-tune is on)."""
         if self._auto_tune_enabled:
             try:
                 snap = snapshot or self.resource_recommendation()
                 recommended = max(1, snap.recommended_max_concurrency)
-                if user_cap <= 0:
-                    return recommended
-                return max(1, min(user_cap, recommended))
+                return max(1, min(self._max_concurrency, recommended))
             except Exception:
                 logger.warning("Resource advisor failed, using user-set max_concurrency", exc_info=True)
-        if user_cap <= 0:
-            return fallback_cap
-        return max(1, user_cap)
+        return max(1, self._max_concurrency)
+
+    def _drain_slot_cap(self) -> tuple[int, ResourceSnapshot | None]:
+        """Effective parallel slots for enqueue/drain (skips resource probes when auto-tune is off)."""
+        if self._auto_tune_enabled:
+            snapshot = self.resource_recommendation()
+            return self.effective_max_concurrency(snapshot=snapshot), snapshot
+        return max(1, self._max_concurrency), None
 
     @property
     def stats(self) -> dict[str, Any]:
@@ -252,16 +251,19 @@ class ValidationJobQueue:
                 "finished": len(self._finished),
                 "total_tracked": len(self._all_jobs),
             }
-        snapshot = self.resource_recommendation()
-        result["effective_max_concurrency"] = self.effective_max_concurrency(snapshot=snapshot)
-        result["resource_advisor"] = snapshot.to_dict()
+        if self._auto_tune_enabled:
+            snapshot = self.resource_recommendation()
+            result["effective_max_concurrency"] = self.effective_max_concurrency(snapshot=snapshot)
+            result["resource_advisor"] = snapshot.to_dict()
+        else:
+            result["effective_max_concurrency"] = max(1, self._max_concurrency)
+            result["resource_advisor"] = {}
         return result
 
     def enqueue(self, job_id: uuid.UUID, job_dir: Path) -> QueuedJob:
         """Add a job to the queue.  Returns the :class:`QueuedJob` immediately."""
         job = QueuedJob(job_id=job_id, job_dir=job_dir.resolve())
-        snapshot = self.resource_recommendation()
-        effective = self.effective_max_concurrency(snapshot=snapshot)
+        effective, _snapshot = self._drain_slot_cap()
         with self._lock:
             job.position = len(self._pending)
             self._pending.append(job)
@@ -362,15 +364,12 @@ class ValidationJobQueue:
     def _try_start_pending(self) -> None:
         """Start pending jobs while RAM/disk/CPU headroom allows (re-checked per job)."""
         while True:
-            # Never call resource_recommendation / effective_max_concurrency under self._lock
-            # (resource_recommendation acquires the same lock → deadlock).
-            snapshot = self.resource_recommendation()
-            effective_max = self.effective_max_concurrency(snapshot=snapshot)
+            effective_max, snapshot = self._drain_slot_cap()
             with self._lock:
                 if not self._pending:
                     return
                 if len(self._running) >= effective_max:
-                    if self._auto_tune_enabled:
+                    if self._auto_tune_enabled and snapshot is not None:
                         logger.debug(
                             "Scheduling %d job(s): at resource cap effective=%d "
                             "(ram_safe=%d disk_safe=%d cpu_safe=%d)",
@@ -418,8 +417,7 @@ class ValidationJobQueue:
 
     def _reap_finished(self) -> None:
         """Move completed/failed running jobs to the finished set."""
-        snapshot = self.resource_recommendation()
-        effective_max = self.effective_max_concurrency(snapshot=snapshot)
+        effective_max, _snapshot = self._drain_slot_cap()
         with self._lock:
             done_ids = []
             for jid, job in self._running.items():

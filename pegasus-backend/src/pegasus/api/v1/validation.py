@@ -611,16 +611,6 @@ async def validate_csv_local_paths(
         meta["target_path"] = str(resolved_target)
     (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
 
-    from pegasus.validation.lifecycle_profiler import LifecycleProfiler
-    from pegasus.validation.resource_profiler import capture_resource_snapshot
-
-    enqueue_profiler = LifecycleProfiler(job_dir=job_dir)
-    enqueue_profiler.mark_http_request_start()
-    enqueue_profiler.mark_job_enqueued()
-    enqueue_profiler.write_artifacts()
-
-    before_snapshot = capture_resource_snapshot(job_dir=job_dir, label="before_enqueue")
-    before_public = {k: v for k, v in before_snapshot.items() if not str(k).startswith("_")}
     (job_dir / "status.json").write_bytes(
         dumps_bytes(
             {
@@ -628,12 +618,6 @@ async def validate_csv_local_paths(
                 "phase": "queued",
                 "message": "Job accepted, waiting for worker slot",
                 "progress": {"enqueued_at_epoch_s": time.time()},
-                "resource_profile": {
-                    "before": before_public,
-                    "latest": before_public,
-                    "during_samples": 0,
-                    "peak": {},
-                },
             },
             indent=True,
         )

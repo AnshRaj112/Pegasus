@@ -232,11 +232,6 @@ export function ValidationRunsProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  useEffect(() => {
-    void refreshQueue()
-    const timer = window.setInterval(() => { void refreshQueue() }, 5000)
-    return () => window.clearInterval(timer)
-  }, [refreshQueue])
 
   const activeCount = useMemo(
     () => runs.filter((run) => run.status === 'queued' || run.status === 'running').length,

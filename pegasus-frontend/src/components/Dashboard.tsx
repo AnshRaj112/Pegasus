@@ -417,7 +417,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <ActiveValidationsPanel showResourceDetails />
+      <ActiveValidationsPanel />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 24, alignItems: 'start' }}>
         {/* Main Chart Area */}
