@@ -340,7 +340,7 @@ async def profile_cloud_file(
     session: DbSession,
     body: Annotated[CloudFileProfileRequest, Body()],
 ) -> CloudFileProfileResponse:
-    """Run file-type detection and stream-count a single GCS delimited object."""
+    """Run file-type detection and profile shape stats from GCS metadata + prefix sample."""
     cloud = await resolve_cloud_config_with_saved_connection(body.cloud, session=session)
     cloud = await ensure_resolved_cloud_config(session, cloud)
     resolved = resolve_delimited_input(

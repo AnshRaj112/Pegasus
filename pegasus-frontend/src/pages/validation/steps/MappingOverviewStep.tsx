@@ -134,7 +134,7 @@ export const MappingOverviewStep: React.FC = () => {
       return {
         status: 'warning' as const,
         title: 'Analyzing files',
-        message: 'Detecting format and counting rows/columns…',
+        message: 'Detecting format and estimating file shape…',
         mismatches: { size: false, columns: false, rows: false },
       };
     }
@@ -146,10 +146,12 @@ export const MappingOverviewStep: React.FC = () => {
       sourceStats.columnCount != null &&
       targetStats.columnCount != null &&
       sourceStats.columnCount !== targetStats.columnCount;
-    const rowMismatch =
-      sourceStats.rowCount != null &&
-      targetStats.rowCount != null &&
-      sourceStats.rowCount !== targetStats.rowCount;
+    const rowDiff =
+      sourceStats.rowCount != null && targetStats.rowCount != null
+        ? Math.abs(sourceStats.rowCount - targetStats.rowCount) /
+          Math.max(sourceStats.rowCount, targetStats.rowCount)
+        : 0;
+    const rowMismatch = rowDiff > 0.05;
     const mismatches = {
       size: sizeDiff > 0.2,
       columns: columnMismatch,

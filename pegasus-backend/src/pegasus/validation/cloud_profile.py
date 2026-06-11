@@ -49,10 +49,10 @@ def detect_format_from_adapter(
 
 
 def count_adapter_rows(adapter: FileDelimitedAdapter | GcsDelimitedAdapter) -> int:
-    """Count data rows via newline scan (accurate for multi-char delimiters)."""
-    from pegasus.validation.row_count import count_delimited_data_rows
+    """Estimate data rows from a prefix sample (GCS) or exact count for small local files."""
+    from pegasus.validation.row_count import profile_delimited_data_rows
 
-    return count_delimited_data_rows(adapter)
+    return profile_delimited_data_rows(adapter)
 
 
 def build_delimited_profile(
@@ -64,6 +64,8 @@ def build_delimited_profile(
     has_header: bool = True,
 ) -> CloudFileProfileResponse:
     """Build a cloud file profile from a warmed delimited adapter."""
+    if isinstance(adapter, GcsDelimitedAdapter):
+        adapter.warm_metadata()
     report = detect_format_from_adapter(adapter)
     schema = adapter.get_schema()
     column_count = len(schema.columns)
