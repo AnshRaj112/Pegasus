@@ -1,0 +1,115 @@
+.authWrapper {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--surface-bright, #fcf9f8);
+  color: var(--on-surface, #1b1b1c);
+  font-family: 'Inter', sans-serif;
+}
+
+.glassBackground {
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(0, 87, 194, 0.03) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(39, 82, 202, 0.03) 0px, transparent 50%);
+}
+
+.authMain {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.authCard {
+  width: 100%;
+  max-width: 420px;
+  background-color: var(--surface-container-lowest, #ffffff);
+  border: 1px solid var(--outline-variant, #c1c6d7);
+  border-radius: 12px;
+  padding: 32px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.signupCard {
+  max-width: 480px;
+}
+
+.inputWrapper {
+  position: relative;
+  margin-top: 4px;
+}
+
+.inputIcon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--outline, #727786);
+}
+
+.actionIcon {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--outline, #727786);
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.authInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 16px 10px 36px;
+  background-color: var(--surface-container-lowest, #ffffff);
+  border: 1px solid var(--outline-variant, #c1c6d7);
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s;
+
+  &:focus {
+    border-color: var(--primary, #0057c2);
+    box-shadow: 0 0 0 2px rgba(0, 87, 194, 0.1);
+  }
+}
+
+.submitBtn {
+  width: 100%;
+  background-color: var(--primary, #0057c2);
+  color: var(--on-primary, #ffffff);
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+
+  &:hover {
+    background-color: var(--secondary, #2752ca);
+  }
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+.strengthBarContainer {
+  height: 4px;
+  width: 100%;
+  background-color: var(--surface-container-high, #eae7e7);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.strengthBarFill {
+  height: 100%;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
