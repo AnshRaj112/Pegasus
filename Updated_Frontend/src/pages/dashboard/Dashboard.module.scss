@@ -1,0 +1,359 @@
+/* ==========================================================================
+   DASHBOARD VIEW COMPONENTS & SYSTEM LAYOUTS
+   ========================================================================== */
+.dashboardContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lg);
+}
+
+.row1Grid {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: var(--lg);
+}
+
+.leftMetricsCol {
+  grid-column: span 24 / span 24;
+}
+
+.rightChartCol {
+  grid-column: span 24 / span 24;
+  background: var(--surface);
+  border: 1px solid var(--surface-variant);
+  padding: var(--lg);
+  border-radius: var(--lg);
+}
+
+@media (min-width: 768px) {
+  .leftMetricsCol {
+    grid-column: span 8 / span 8;
+  }
+  .rightChartCol {
+    grid-column: span 16 / span 16;
+  }
+}
+
+.metricsSubGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--md);
+  height: 100%;
+}
+
+.chartHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--lg);
+}
+
+.chartLegend {
+  display: flex;
+  gap: var(--sm);
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+  font-size: var(--body-sm);
+}
+
+.chartWrapper {
+  height: 200px;
+  width: 100%;
+  position: relative;
+}
+
+.chartDaysLabel {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--sm);
+  font-size: var(--body-sm);
+  color: var(--on-surface-variant);
+}
+
+.row2Grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--lg);
+}
+
+.panelCard {
+  background: var(--surface);
+  border: 1px solid var(--surface-variant);
+  border-radius: var(--lg);
+  display: flex;
+  flex-direction: column;
+  height: 500px;
+}
+
+.panelHeader {
+  padding: var(--md);
+  border-bottom: 1px solid var(--surface-variant);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.panelTableContainer {
+  overflow-y: auto;
+  flex-grow: 1;
+}
+
+.taskTable {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+}
+
+.tableHeaderSticky {
+  background: var(--surface-container-low);
+  position: sticky;
+  top: 0;
+}
+
+.workspaceStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--md);
+  height: 500px;
+}
+
+.dashedAddCard {
+  background: var(--surface-container-low);
+  border: 1px dashed var(--outline-variant);
+  padding: var(--md);
+  border-radius: var(--lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sm);
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.dashedAddCard:hover {
+  background: var(--surface-container);
+}
+
+.defaultWorkspaceCard {
+  background: var(--surface);
+  border: 1px solid var(--surface-variant);
+  padding: var(--md);
+  border-radius: var(--lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--md);
+}
+
+.badgeSystem {
+  font-size: 10px;
+  font-weight: bold;
+  padding: var(--xs) var(--sm);
+  background: var(--primary-fixed);
+  color: var(--on-primary-fixed);
+  border-radius: 4px;
+}
+
+.customizerCard {
+  background: var(--surface);
+  border: 1px solid var(--surface-variant);
+  padding: var(--lg);
+  border-radius: var(--lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--lg);
+  height: 500px;
+}
+
+.inputIconWrapper {
+  position: relative;
+}
+
+.searchIcon {
+  position: absolute;
+  left: var(--sm);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--on-surface-variant);
+  font-size: 20px;
+}
+
+.textInput {
+  width: 100%;
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--outline-variant);
+  border-radius: 8px;
+  padding: var(--xs) var(--md) var(--xs) var(--xl);
+  font-size: var(--body-md);
+  outline: none;
+}
+
+.selectInput {
+  width: 100%;
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--outline-variant);
+  border-radius: 8px;
+  padding: var(--xs) var(--md);
+  font-size: var(--body-md);
+  appearance: none;
+  outline: none;
+}
+
+.selectDropdownIcon {
+  position: absolute;
+  right: var(--sm);
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.toggleRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--md);
+  background: var(--surface-container-low);
+  border-radius: 8px;
+}
+
+.toggleContainer {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.toggleTrack {
+  width: 44px;
+  height: 24px;
+  background-color: var(--surface-dim);
+  border-radius: 9999px;
+  position: relative;
+  transition: background-color 0.2s;
+}
+
+.toggleTrackActive {
+  background-color: var(--primary);
+}
+
+.toggleThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background-color: #ffffff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+
+.toggleThumbActive {
+  transform: translateX(20px);
+}
+
+.submitActionBtn {
+  width: 100%;
+  padding: var(--md);
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+  font-weight: 500;
+  border-radius: 8px;
+  border: 1px solid var(--outline-variant);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--xs);
+}
+.customizerCard * {
+  box-sizing: border-box;
+}
+
+.textInput, .selectInput {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+.workspaceScrollContainer {
+  overflow-y: auto;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--md);
+  padding: var(--md);
+}
+.avatar-stack {
+  display: flex;
+  align-items: center;
+}
+
+.avatar-item {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  object-fit: cover;
+  display: block;
+}
+.badge-system-highlight {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--sm);
+  border-radius: var(--DEFAULT);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: #D9E2FF;
+  color: var(--on-primary-fixed-variant);
+  border: 1px solid var(--outline-variant);
+  text-transform: uppercase;
+}
+.customizerCardFlex {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lg);
+}
+
+.customizerFooterSpacer {
+  margin-top: auto;
+  padding-bottom: var(--base); /* Provides a clean padding offset from the container edge */
+}
+.panelCard, .customizerCard {
+  background: var(--surface);
+  border: 1px solid var(--surface-variant);
+  border-radius: var(--lg);
+  display: flex;
+  flex-direction: column;
+  height: 500px !important;       /* Forces all 3 boxes to share an identical 500px height profile */
+  max-height: 500px !important;   /* Prevents the customizer from ballooning past adjacent boxes */
+  overflow: hidden;               /* Locks the outer boundary box template tightly in place */
+  box-sizing: border-box;
+}
+
+.customizerCard {
+  padding: var(--lg);             /* Standardises internal container box alignment padding */
+  gap: var(--md);
+}
+
+.customizerFooterSpacer {
+  margin-top: auto;               /* Grounds the action button layout to the absolute bottom matrix */
+  padding-bottom: var(--xs);      /* Adds clean cushioning buffer from the card border edge */
+}
+.secondaryBtn {
+  background-color: var(--surface-variant);
+  color: var(--primary);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: var(--body-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background-color: var(--primary);
+    color: var(--on-primary);
+  }
+}
