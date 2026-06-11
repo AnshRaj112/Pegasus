@@ -1,0 +1,1236 @@
+
+
+/* ==========================================================================
+   VALIDATION WIZARD COORD SYSTEM LAYOUTS
+   ========================================================================== */
+.wizardHeaderShell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-1);
+  padding: var(--md) var(--lg);
+  background: var(--surface-container-lowest);
+  border-top-left-radius: var(--lg);
+  border-top-right-radius: var(--lg);
+}
+
+.wizardHeaderLogoGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--md);
+  color: var(--on-surface);
+}
+
+.wizardStepTabBanner {
+  background: var(--surface-container-lowest);
+  padding: var(--md) var(--lg) var(--xs);
+  border-left: 1px solid var(--outline-variant);
+  border-right: 1px solid var(--outline-variant);
+  border-bottom: 1px solid var(--outline-variant);
+}
+
+.wizardStepRow {
+  display: flex;
+  align-items: center;
+  gap: var(--xl);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.stepTabItem {
+  display: flex;
+  align-items: center;
+  gap: var(--md);
+  padding-bottom: var(--md);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.stepTabActive {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.stepTabInactive {
+  color: var(--outline);
+}
+
+.stepNumberBadge {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: var(--body-sm);
+  font-weight: 700;
+}
+
+.stepNumberActive {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.stepNumberInactive {
+  background: var(--surface-container-high);
+  color: var(--on-surface-variant);
+}
+
+.wizardWorkspaceArea {
+  flex: 1;
+  background: var(--surface-container-lowest);
+  padding: var(--lg) var(--lg);
+  overflow-y: auto;
+  border-left: 1px solid var(--outline-variant);
+  border-right: 1px solid var(--outline-variant);
+}
+
+.wizardModeControl {
+  margin-bottom: var(--xl);
+}
+
+.wizardGridWorkspace {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--lg);
+  height: 500px;
+}
+
+.bucketSelectionCol {
+  grid-column: span 12 / span 12;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-container-low);
+  border-radius: var(--lg);
+  border: 1px solid var(--outline-variant);
+  overflow: hidden;
+}
+
+@media (min-width: 768px) {
+  .bucketSelectionCol {
+    grid-column: span 4 / span 4;
+  }
+}
+
+.bucketItemRow {
+  display: flex;
+  align-items: center;
+  gap: var(--md);
+  padding: var(--md);
+  border-radius: var(--lg);
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: var(--surface-container-lowest);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  transition: all 0.2s;
+  margin-bottom: var(--xs);
+}
+
+.bucketItemRowActive {
+  background: #E6F4FE;
+  border-color: #91caff;
+}
+
+.fileExplorerCol {
+  grid-column: span 12 / span 12;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-container-lowest);
+  border-radius: var(--lg);
+  border: 1px solid var(--outline-variant);
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+@media (min-width: 768px) {
+  .fileExplorerCol {
+    grid-column: span 8 / span 8;
+  }
+}
+
+.explorerTableHeader {
+  padding: var(--md);
+  border-bottom: 1px solid var(--outline-variant);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface-container-lowest);
+}
+
+.explorerBreadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+  font-family: var(--font-mono);
+  font-size: var(--body-sm);
+  color: var(--on-surface-variant);
+}
+
+.explorerSearchWrapper {
+  position: relative;
+}
+
+.explorerSearchInput {
+  padding: var(--xs) var(--md) var(--xs) var(--xl);
+  border-radius: 8px;
+  border: 1px solid var(--outline-variant);
+  background: var(--surface-container-low);
+  font-size: var(--body-sm);
+  width: 256px;
+  outline: none;
+}
+
+.explorerTableFrame {
+  flex: 1;
+  overflow: auto;
+}
+
+.explorerTableData {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.explorerTableData th {
+  padding: var(--md);
+  color: var(--on-surface-variant);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  border-bottom: 1px solid var(--outline-variant);
+}
+
+.explorerTableData tr {
+  transition: background-color 0.2s;
+  cursor: pointer;
+}
+
+.rowSelected {
+  background-color: rgba(22, 119, 255, 0.08) !important;
+}
+
+.badgeReady {
+  padding: 2px var(--sm);
+  border-radius: var(--DEFAULT);
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid #bbf7d0;
+}
+
+.badgeScanning {
+  padding: 2px var(--sm);
+  border-radius: var(--DEFAULT);
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid #fef3c7;
+}
+
+.wizardActionFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--md);
+  padding: var(--lg);
+  background: var(--surface-container-low);
+  border-left: 1px solid var(--outline-variant);
+  border-right: 1px solid var(--outline-variant);
+  border-bottom: 1px solid var(--outline-variant);
+  border-bottom-left-radius: var(--lg);
+  border-bottom-right-radius: var(--lg);
+}
+/* ==========================================================================
+   VALIDATION WIZARD - STEP 2 (MAPPING OVERVIEW) STYLES ADD-ON
+   ========================================================================== */
+.step2ContentWrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.flowVisualizationRow {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lg);
+  margin-top: var(--lg);
+}
+
+@media (min-width: 768px) {
+  .flowVisualizationRow {
+    flex-direction: row;
+    gap: var(--xl);
+  }
+}
+
+.techCard {
+  width: 100%;
+  max-width: 384px;
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  padding: var(--lg);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+  transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.techCard:hover {
+  border-color: var(--primary) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.cardHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--md);
+}
+
+.cardHeaderLabelGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+}
+
+.statusBadgeConnected {
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  color: #389e0d;
+  padding: 2px var(--sm);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.statusBadgeReady {
+  background: #e6f4ff;
+  border: 1px solid #91caff;
+  color: #0958d9;
+  padding: 2px var(--sm);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.cardEntityUrl {
+  font-family: var(--font-mono);
+  font-size: var(--body-sm);
+  color: var(--on-surface-variant);
+  margin: 0 0 var(--lg) 0;
+  overflow: hidden;
+  text-ellipsis: ellipsis;
+  white-space: nowrap;
+}
+
+.metadataTableGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.metadataTableRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--base) 0;
+  border-bottom: 1px solid var(--outline-variant);
+}
+
+.metadataTableRowLast {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--base) 0;
+}
+
+.visualFlowConnector {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+}
+
+@media (min-width: 768px) {
+  .visualFlowConnector {
+    display: flex;
+  }
+}
+
+.dataFlowLine {
+  width: 100%;
+  height: 2px;
+  background-image: linear-gradient(90deg, var(--primary) 50%, transparent 50%);
+  background-size: 15px 1px;
+  background-repeat: repeat-x;
+}
+
+.pulseIconWrapper {
+  margin-top: var(--base);
+  color: var(--primary);
+}
+
+.recommendationBanner {
+  margin-top: var(--xl);
+  width: 100%;
+  max-width: 896px;
+  padding: var(--md);
+  background: var(--surface-container);
+  border-radius: 8px;
+  border: 1px solid var(--outline-variant);
+  display: flex;
+  align-items: center;
+  gap: var(--lg);
+}
+/* ==========================================================================
+   VALIDATION WIZARD - STEP 3 (CONFIGURE MAPPING) STYLES ADD-ON
+   ========================================================================== */
+.step3ContentWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lg);
+  width: 100%;
+}
+
+.breadcrumbRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--xs);
+}
+
+.breadcrumbTrail {
+  display: flex;
+  align-items: center;
+  font-size: var(--body-sm);
+  color: var(--on-surface-variant);
+  gap: var(--xs);
+}
+
+.matrixControlBar {
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--outline-variant);
+  border-radius: 8px;
+  padding: var(--md);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--md);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+}
+
+.controlItemBlock {
+  display: flex;
+  align-items: center;
+  gap: var(--md);
+}
+
+.autoDetectedLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--sm);
+  background: var(--surface-container-low);
+  padding: var(--sm) var(--md);
+  border-radius: 8px;
+  border: 1px solid var(--outline-variant);
+  font-size: var(--label-md);
+}
+
+.matrixMainCard {
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--outline-variant);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+}
+
+.matrixToolbar {
+  padding: var(--md);
+  border-bottom: 1px solid var(--outline-variant);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface-container-lowest);
+}
+
+.matrixSearchWrapper {
+  position: relative;
+  width: 384px;
+}
+
+.matrixSearchInput {
+  width: 100%;
+  padding: var(--base) var(--md) var(--base) 40px;
+  border: 1px solid var(--outline-variant);
+  border-radius: 8px;
+  font-size: var(--body-md);
+  outline: none;
+}
+
+.matrixTableScrollFrame {
+  overflow-y: auto;
+  max-height: 550px;
+}
+
+.matrixTableLayout {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.matrixStickyHeader {
+  position: sticky;
+  top: 0;
+  background: var(--surface-container-low);
+  z-index: 10;
+  box-shadow: 0 2px 0 0 #f0f0f0;
+}
+
+.matrixTableLayout th {
+  padding: var(--md);
+  font-size: var(--label-md);
+  font-weight: 500;
+  color: var(--on-surface-variant);
+  border-bottom: 1px solid var(--outline-variant);
+}
+
+.mappingRow {
+  transition: background-color 0.2s;
+}
+
+.mappingRow:hover {
+  background-color: #fafafa !important;
+}
+
+.dataTypeBadgeString {
+  background: #e6f4ff;
+  color: #0958d9;
+  border: 1px solid #91caff;
+  padding: 2px var(--sm);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.dataTypeBadgeFloat {
+  background: #f6ffed;
+  color: #389e0d;
+  border: 1px solid #b7eb8f;
+  padding: 2px var(--sm);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.dataTypeBadgeInt {
+  background: #fff7e6;
+  color: #d46b08;
+  border: 1px solid #ffd591;
+  padding: 2px var(--sm);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.dataTypeBadgeBool {
+  background: #f0f5ff;
+  color: #2f54eb;
+  border: 1px solid #adc6ff;
+  padding: 2px var(--sm);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tagSelectContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  min-height: 38px;
+  border: 1px solid var(--outline-variant);
+  border-radius: 8px;
+  background: var(--surface-container-lowest);
+}
+
+.tagSelectContainer:focus-within {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.1);
+}
+
+.mappingPillChip {
+  background: var(--surface-container);
+  padding: 2px var(--sm);
+  border-radius: 4px;
+  font-size: var(--body-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+  border: 1px solid var(--outline-variant);
+  transition: opacity 0.15s;
+}
+
+.mappingPillInput {
+  border: none;
+  outline: none;
+  font-size: var(--body-sm);
+  padding: 4px;
+  width: 96px;
+  background: transparent;
+}
+
+.matrixTableFooter {
+  padding: var(--md);
+  background: var(--surface-container-low);
+  border-top: 1px solid var(--outline-variant);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+/* ==========================================================================
+   4. LOG EXECUTION HISTORY VIEWS ADD-ON RULES
+   ========================================================================== */
+.historyLayoutContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lg);
+  width: 100%;
+}
+
+.historyTopHeader {
+  margin-bottom: var(--lg);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--md);
+}
+
+@media (min-width: 768px) {
+  .historyTopHeader {
+    flex-direction: row;
+    align-items: flex-end;
+  }
+}
+
+.historyControlBlock {
+  display: flex;
+  gap: var(--sm);
+}
+
+.historySearchInput {
+  padding: var(--base) var(--md) var(--base) 40px;
+  background: var(--surface);
+  border: 1px solid var(--outline-variant);
+  border-radius: 8px;
+  font-size: var(--body-md);
+  width: 256px;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.historySearchInput:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(0, 87, 194, 0.1);
+}
+
+.historyMasterCard {
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--outline-variant);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.historyTabsBanner {
+  display: flex;
+  border-bottom: 1px solid var(--outline-variant);
+  background: var(--surface-container-lowest);
+}
+
+.historyTabButton {
+  padding: var(--md) var(--xl);
+  font-family: var(--font-label-md);
+  font-size: var(--label-md);
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--sm);
+  border-bottom: 2px solid transparent;
+  color: var(--on-surface-variant);
+  transition: all 0.2s;
+}
+
+.historyTabButtonActive {
+  color: var(--primary) !important;
+  border-bottom-color: var(--primary) !important;
+  font-weight: 600;
+}
+
+.historyTableScrollFrame {
+  overflow-x: auto;
+}
+
+.antTableLayout {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+  min-width: 1000px;
+}
+
+.antTableLayout th {
+  padding: var(--md) var(--gutter);
+  font-family: var(--font-label-md);
+  font-size: var(--label-md);
+  font-weight: 500;
+  color: var(--on-surface-variant);
+  border-bottom: 1px solid var(--outline-variant);
+  background: var(--surface-container-low);
+}
+
+.antTableRow {
+  transition: all 0.2s;
+}
+
+.antTableRow:hover {
+  background-color: #fafafa;
+}
+
+.rowDetailsGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.rowTruncateCode {
+  font-family: var(--font-code-sm);
+  font-size: var(--body-sm);
+  color: var(--on-surface-variant);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyBadgeSuccess {
+  inline-flex: true;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--sm);
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.historyBadgeFail {
+  inline-flex: true;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--sm);
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--error-container);
+  color: #93000a;
+  border: 1px solid var(--error);
+}
+
+.historyBadgeMapped {
+  inline-flex: true;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--sm);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #e6f4ff;
+  color: #0958d9;
+  border: 1px solid #91caff;
+}
+
+.historyBadgePartial {
+  inline-flex: true;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--sm);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #fff7e6;
+  color: #d46b08;
+  border: 1px solid #ffd591;
+}
+
+.popoverBubbleContainer {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 8px;
+  width: 192px;
+  background: #ffffff;
+  border: 1px solid var(--outline-variant);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  border-radius: 8px;
+  padding: var(--md);
+  z-index: 50;
+  text-align: left;
+}
+
+.historyPaginationRow {
+  margin-top: var(--lg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--body-sm);
+}
+
+.paginationNavBox {
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+}
+
+.paginationNumBtn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--outline-variant);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.paginationNumBtn:hover {
+  background: var(--surface-container-low);
+}
+
+.paginationNumBtnActive {
+  background: var(--primary) !important;
+  color: #ffffff !important;
+  border-color: var(--primary) !important;
+  font-weight: 500;
+}
+/* ==========================================================================
+   5. ADMIN CENTER - SIDEBAR & CONFIGURE STORE STYLES ADD-ON
+   ========================================================================== */
+.adminLayoutContainer {
+  display: flex;
+  gap: var(--xl);
+  min-height: 600px;
+  width: 100%;
+}
+
+.adminSidebar {
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--base);
+  border-right: 1px solid var(--outline-variant);
+  padding-right: var(--md);
+}
+
+.adminNavButton {
+  display: flex;
+  align-items: center;
+  gap: var(--md);
+  width: 100%;
+  border: none;
+  padding: var(--md);
+  border-radius: 8px;
+  text-align: left;
+  font-family: var(--font-label-md);
+  font-size: var(--label-md);
+  font-weight: 500;
+  color: var(--on-surface-variant);
+  background: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.adminNavButton:hover {
+  background: var(--surface-container-low);
+  color: var(--primary);
+}
+
+.adminNavButtonActive {
+  background: #466CE5 !important;
+  color: #FFFFFF !important;
+  font-weight: 600;
+}
+
+.adminMainPanelWorkspace {
+  flex: 1;
+}
+
+.adminMainPanelWorkspace h1 {
+  font-family: var(--font-h1);
+  fontSize: var(--h1);
+  color: var(--on-surface);
+  margin: 0 0 var(--xs) 0;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.storeCardsGrid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: var(--gutter);
+  margin-top: var(--lg);
+}
+
+@media (min-width: 768px) {
+  .storeCardsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1200px) {
+  .storeCardsGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.antCard {
+  background: var(--surface-container-lowest);
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: var(--md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--md);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+  transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.antCard:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  border-color: #1677ff;
+}
+
+.providerCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.providerLogoGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--sm);
+}
+
+.providerIconContainer {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.badgeStatusSuccess {
+  padding: var(--xs) var(--sm);
+  border-radius: 4px;
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  color: #52c41a;
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+}
+
+.badgeStatusSyncing {
+  padding: var(--xs) var(--sm);
+  border-radius: 4px;
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+  color: #faad14;
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+}
+
+.cardActionDivider {
+  display: flex;
+  gap: var(--sm);
+  margin-top: var(--xs);
+  padding-top: var(--md);
+  border-top: 1px solid #f0f0f0;
+}
+
+.providerDashedAddCard {
+  border: 2px dashed #d9d9d9;
+  border-radius: 8px;
+  padding: var(--md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sm);
+  cursor: pointer;
+  background: none;
+  transition: all 0.2s;
+}
+
+.providerDashedAddCard:hover {
+  border-color: var(--primary);
+  background: rgba(22, 119, 255, 0.03);
+}
+
+.bentoMetricsLayout {
+  margin-top: var(--xl);
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: var(--gutter);
+}
+
+@media (min-width: 768px) {
+  .bentoMetricsLayout {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.bentoHealthOverviewCard {
+  grid-column: span 1 / span 1;
+  background: var(--surface-container-low);
+  padding: var(--lg);
+  border-radius: 12px;
+  border: 1px solid rgba(114, 119, 134, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: var(--md);
+}
+
+@media (min-width: 768px) {
+  .bentoHealthOverviewCard {
+    grid-column: span 2 / span 2;
+  }
+}
+
+.bentoScannedDataCard {
+  background: #006EF2;
+  color: #FFFFFF;
+  padding: var(--lg);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+}
+/* ==========================================================================
+   6. ADMIN CENTER - WORKSPACE MANAGEMENT SUBVIEW LAYOUTS
+   ========================================================================== */
+.workspaceMgmtContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lg);
+  width: 100%;
+}
+
+.workspaceHeaderRow {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--md);
+  margin-bottom: var(--xl);
+}
+
+@media (min-width: 576px) {
+  .workspaceHeaderRow {
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
+.bentoLiteMetricsGrid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: var(--lg);
+  margin-bottom: var(--xl);
+}
+
+@media (min-width: 768px) {
+  .bentoLiteMetricsGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.bentoLiteMetricCard {
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--outline-variant);
+  padding: var(--md);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: var(--md);
+}
+
+.metricCardIconBox {
+  height: 48px;
+  width: 48px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspaceMainTableCard {
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--outline-variant);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.workspaceTableFrame {
+  overflow-x: auto;
+}
+
+.workspaceTableLayout {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+}
+
+.workspaceTableLayout th {
+  background: #fafafa;
+  border-bottom: 1px solid var(--outline-variant);
+  padding: var(--md) var(--lg);
+  font-family: var(--font-label-md);
+  font-size: var(--label-md);
+  color: var(--on-surface-variant);
+  font-weight: 500;
+}
+
+.workspaceDataTableRow {
+  transition: background-color 0.2s;
+  cursor: pointer;
+}
+
+.workspaceDataTableRow:hover {
+  background-color: #fafafa;
+}
+
+.systemGlobalBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--sm);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: rgba(0, 87, 194, 0.1);
+  color: var(--primary);
+  border: 1px solid rgba(0, 87, 194, 0.2);
+}
+
+.badgeActiveGreen {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--xs);
+  padding: 2px var(--sm);
+  border-radius: 9999px;
+  font-size: var(--body-sm);
+  font-weight: 600;
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.badgeRestrictedAmber {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--xs);
+  padding: 2px var(--sm);
+  border-radius: 9999px;
+  font-size: var(--body-sm);
+  font-weight: 600;
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fef3c7;
+}
+
+.badgeArchivedGray {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--xs);
+  padding: 2px var(--sm);
+  border-radius: 9999px;
+  font-size: var(--body-sm);
+  font-weight: 600;
+  background: var(--surface-container-low);
+  color: var(--on-surface-variant);
+  border: 1px solid var(--outline-variant);
+}
+
+.adminTipCardRow {
+  margin-top: var(--xl);
+  padding: var(--lg);
+  background: rgba(0, 87, 194, 0.02);
+  border: 1px solid rgba(0, 87, 194, 0.08);
+  border-radius: 12px;
+  display: flex;
+  gap: var(--lg);
+  align-items: start;
+}
+/* ==========================================================================
+   7. LUCIDE VECTOR ICON HOVER & ANIMATION SYSTEM
+   ========================================================================== */
+.icon-spin-loop {
+  animation: spin 4s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.action-icon-btn {
+  background: none;
+  border: none;
+  padding: 6px;
+  border-radius: 6px;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease-in-out;
+}
+
+.action-icon-btn:hover {
+  background: var(--surface-container-low);
+  color: var(--primary);
+}
+
+.action-icon-btn-danger:hover {
+  background: var(--error-container);
+  color: var(--error);
+}
