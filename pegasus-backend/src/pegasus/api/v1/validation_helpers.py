@@ -50,7 +50,7 @@ from .mismatch_sample import (
 _completed_job_cache: OrderedDict[uuid.UUID, tuple[float, ValidationJobDetailResponse]] = OrderedDict()
 _completed_job_lock = threading.Lock()
 _COMPLETED_JOB_CACHE_MAX = 256
-_COMPLETED_JOB_TTL_SEC = 120.0
+_COMPLETED_JOB_TTL_SEC = 3600.0
 
 
 def validation_jobs_root(settings: Settings) -> Path:

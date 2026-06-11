@@ -4,7 +4,13 @@
  */
 import { type AxiosResponse } from 'axios';
 
+import { isTransientPollError } from './apiError';
 import { httpClient } from './httpClient';
+
+/** Completion polls may build a large JSON payload; allow up to 10 minutes per request. */
+const JOB_POLL_TIMEOUT_MS = 600_000;
+const POLL_INTERVAL_MS = 2_000;
+const MAX_POLL_BACKOFF_MS = 30_000;
 
 // ─── Request / response types ───────────────────────────────────────────────
 
@@ -287,15 +293,23 @@ export const Api = {
 
   /** GET /validate/jobs/{job_id} — poll job status/result */
   getValidationJob: (jobId: string): Promise<AxiosResponse<ValidationJobDetailResponse>> =>
-    httpClient.get(E.validateJob(jobId)),
+    httpClient.get(E.validateJob(jobId), { timeout: JOB_POLL_TIMEOUT_MS }),
 
-  /** Poll until completed or failed */
+  /** Poll until completed or failed; retries transient network/gateway errors. */
   pollValidationUntilComplete: async (jobId: string): Promise<ValidateResult> => {
+    let backoffMs = POLL_INTERVAL_MS;
     for (;;) {
-      const { data } = await Api.getValidationJob(jobId);
-      if (data.status === 'completed' && data.result) return data.result;
-      if (data.status === 'failed') throw new Error(data.error || 'Validation failed');
-      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const { data } = await Api.getValidationJob(jobId);
+        backoffMs = POLL_INTERVAL_MS;
+        if (data.status === 'completed' && data.result) return data.result;
+        if (data.status === 'failed') throw new Error(data.error || 'Validation failed');
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      } catch (error) {
+        if (!isTransientPollError(error)) throw error;
+        await new Promise((r) => setTimeout(r, backoffMs));
+        backoffMs = Math.min(Math.round(backoffMs * 1.5), MAX_POLL_BACKOFF_MS);
+      }
     }
   },
 
