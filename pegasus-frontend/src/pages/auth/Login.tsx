@@ -37,7 +37,7 @@ export const Login: React.FC = () => {
   return (
     <div className={`${styles.authWrapper} ${styles.glassBackground}`}>
       <header style={{ width: '100%', height: '64px', borderBottom: '1px solid var(--outline-variant)', backgroundColor: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' }}>
-        <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--primary)' }}>DataAudit Pro</div>
+        <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--primary)' }}>Pegasus</div>
         <QuestionCircleOutlined style={{ fontSize: '20px', color: 'var(--on-surface-variant)', cursor: 'pointer' }} />
       </header>
 

@@ -4,7 +4,7 @@ import { BaseLayout } from '../layouts/BaseLayout';
 import { Dashboard } from '../pages/dashboard/Dashboard';
 import { ValidationWizardView } from '../pages/validation/ValidationWizardView';
 import { HistoryView } from '../views/history/HistoryView';
-import { AdminView } from '../views/admin/AdminView';
+import { AdminView } from '../pages/admin/AdminView';
 import { ValidationReport } from '../pages/validation/components/ValidationReport';
 import { Login } from '../pages/auth/Login';
 import { ProtectedRoute } from './ProtectedRoute';
