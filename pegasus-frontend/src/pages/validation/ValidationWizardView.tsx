@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { ArrowRightOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
@@ -15,12 +15,29 @@ export const ValidationWizardView: React.FC = () => {
   const isStep1Valid = useAppSelector((state) => state.validation.isStep1Valid);
   const { isFetching, data } = useAppSelector((state) => state.validation.validationDataState);
   const validationForm = useAppSelector((state) => state.validation.validationForm);
+  const wasFetchingRef = useRef(false);
 
+  // Opening the wizard tab after a finished run should start fresh, not reopen the report.
   useEffect(() => {
-    if (data?.status === 'Complete' && data.jobId) {
+    if (data?.status === 'Complete' || data?.status === 'Failed') {
+      dispatch(validationActions.clearValidationRun());
+    }
+    // Only when the wizard view is mounted (user navigated to /validations).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Redirect to the report once, immediately after a run finishes on this page.
+  useEffect(() => {
+    if (
+      wasFetchingRef.current
+      && !isFetching
+      && data?.status === 'Complete'
+      && data.jobId
+    ) {
       navigate(`/validation/report/${data.jobId}`);
     }
-  }, [data, navigate]);
+    wasFetchingRef.current = isFetching;
+  }, [isFetching, data, navigate]);
 
   const isNextButtonDisabled = isFetching || (currentStep === 1 && !isStep1Valid);
 

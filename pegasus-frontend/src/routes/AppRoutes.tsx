@@ -4,26 +4,29 @@ import { BaseLayout } from '../layouts/BaseLayout';
 import { Dashboard } from '../pages/dashboard/Dashboard';
 import { ValidationWizardView } from '../pages/validation/ValidationWizardView';
 import { HistoryView } from '../views/history/HistoryView';
-import { AdminView } from '../views/admin/AdminView'; // Imported here!
+import { AdminView } from '../views/admin/AdminView';
 import { ValidationReport } from '../pages/validation/components/ValidationReport';
+import { Login } from '../pages/auth/Login';
+import { ProtectedRoute } from './ProtectedRoute';
 
 export const AppRoutes: React.FC = () => {
   return (
-    <BaseLayout>
-      <Routes>
-        {/* Persistent Path Mappings */}
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/validations" element={<ValidationWizardView />} />
-        <Route path="/history" element={<HistoryView />} />
-        <Route path="/validation/report/run/:runId" element={<ValidationReport />} />
-        <Route path="/validation/report/:jobId" element={<ValidationReport />} />
-        
-        {/* Full Modular Administrative Workspace Center */}
-        <Route path="/admin" element={<AdminView />} />
-        
-        {/* Catch-all Layout Boundary Fallback */}
-        <Route path="*" element={<div style={{ color: 'var(--on-surface)', padding: 'var(--lg)' }}>404 Error: Section View Not Found</div>} />
-      </Routes>
-    </BaseLayout>
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route element={<ProtectedRoute />}>
+        <Route path="/*" element={
+          <BaseLayout>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/validations" element={<ValidationWizardView />} />
+              <Route path="/history" element={<HistoryView />} />
+              <Route path="/validation/report/:jobId" element={<ValidationReport onBack={() => window.history.back()} />} />
+              <Route path="/admin" element={<AdminView />} />              
+              <Route path="*" element={<div style={{ color: 'var(--on-surface)', padding: 'var(--lg)' }}>404 Error: Section View Not Found</div>} />
+            </Routes>
+          </BaseLayout>
+        } />
+      </Route>
+    </Routes>
   );
 };

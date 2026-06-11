@@ -70,6 +70,11 @@ const validationSlice = createSlice({
       overviewProfileCache: action.payload,
     }),
     resetWizard: () => initialState,
+    clearValidationRun: (state) => ({
+      ...state,
+      currentStep: 1,
+      validationDataState: initializeNullState,
+    }),
 
     submitValidationRequest: (state) => ({
       ...state,
