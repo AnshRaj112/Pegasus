@@ -12,13 +12,13 @@ function* submitValidationSaga() {
     const { validationForm }: ValidationReducerState = yield select(
       (state: { validation: ValidationReducerState }) => state.validation,
     );
-    if (!validationForm.sourcePath || !validationForm.targetPath) {
-      throw new Error('Select source and target files before running validation');
+    if (!validationForm.sourceCloud || !validationForm.targetCloud) {
+      throw new Error('Select source and target GCS objects before running validation');
     }
 
     const accepted: AxiosResponse<ValidationJobAcceptedResponse> = yield call(Api.submitValidation, {
-      source_path: validationForm.sourcePath,
-      target_path: validationForm.targetPath,
+      source_cloud: validationForm.sourceCloud,
+      target_cloud: validationForm.targetCloud,
       uid_column: validationForm.uidColumn,
       delimiter: validationForm.delimiter || 'auto',
       column_mappings: validationForm.columnMappings,

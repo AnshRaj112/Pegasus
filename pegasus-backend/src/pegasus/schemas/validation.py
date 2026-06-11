@@ -787,6 +787,32 @@ class CloudBrowseResponse(BaseModel):
     truncated: bool = False
 
 
+class CloudFileProfileRequest(BaseModel):
+    """JSON body for POST /validate/cloud/profile."""
+
+    cloud: GoogleCloudStorageConfig
+    delimiter: str = Field(default="auto", description="Field separator or auto")
+    has_header: bool = Field(
+        default=True,
+        description="Whether the first row contains column names",
+    )
+
+
+class CloudFileProfileResponse(BaseModel):
+    """Detected format and shape stats for one GCS object."""
+
+    object_name: str
+    gcs_uri: str
+    file_size_bytes: int = Field(ge=0)
+    file_format: str = Field(description="Detected format label (csv, fixed-width, parquet, …)")
+    suggested_file_format: str | None = None
+    dataset_model: str | None = None
+    column_count: int = Field(ge=0)
+    row_count: int = Field(ge=0)
+    delimiter: str | None = None
+    has_header: bool = True
+
+
 class CloudMatchFilePairsRequest(BaseModel):
     """JSON body for POST /validate/cloud/match-pairs."""
 

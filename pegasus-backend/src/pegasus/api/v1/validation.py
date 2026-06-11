@@ -32,6 +32,8 @@ from pegasus.schemas.validation import (
     CloudBrowseEntry,
     CloudBrowseRequest,
     CloudBrowseResponse,
+    CloudFileProfileRequest,
+    CloudFileProfileResponse,
     CloudMatchFilePairsRequest,
     FileDetectionResponse,
     FilePairMatch,
@@ -50,6 +52,7 @@ from pegasus.validation.file_detection import detect_file
 from pegasus.validation.file_detection.coerce import coerce_local_validate_fields_with_detection
 from pegasus.validation.file_format import infer_file_format_from_path, normalize_file_format
 from pegasus.validation.file_pairing import auto_match_files_by_name, list_files_in_directory
+from pegasus.services.exceptions import ValidationBadRequestError
 from pegasus.services.validation_job_queue import get_validation_queue
 from pegasus.validation.cloud_credentials import resolve_gcs_auth
 from pegasus.validation.cloud_input import (
@@ -324,6 +327,41 @@ async def browse_cloud_prefix(
         ],
         truncated=result.truncated,
     )
+
+
+@router.post(
+    "/validate/cloud/profile",
+    response_model=CloudFileProfileResponse,
+    summary="Detect format and count rows/columns for a GCS object",
+)
+async def profile_cloud_file(
+    service: ValidationServiceDep,
+    settings: AppSettings,
+    session: DbSession,
+    body: Annotated[CloudFileProfileRequest, Body()],
+) -> CloudFileProfileResponse:
+    """Run file-type detection and stream-count a single GCS delimited object."""
+    cloud = await resolve_cloud_config_with_saved_connection(body.cloud, session=session)
+    cloud = await ensure_resolved_cloud_config(session, cloud)
+    resolved = resolve_delimited_input(
+        settings=settings,
+        label="source",
+        path=None,
+        cloud=cloud,
+        delimiter=",",
+        has_header=body.has_header,
+        skip_rows=0,
+    )
+    try:
+        return service.profile_delimited_adapter(
+            resolved.adapter,
+            object_name=cloud.object_name,
+            gcs_uri=resolved.display_name,
+            delimiter=body.delimiter,
+            has_header=body.has_header,
+        )
+    except ValidationBadRequestError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post(

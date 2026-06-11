@@ -2,7 +2,6 @@ import React, { useEffect } from 'react';
 import { ArrowRightOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
-import { Api } from '../../shared/api/Api';
 import { validationActions } from './Validation.reducer';
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
@@ -40,16 +39,9 @@ export const ValidationWizardView: React.FC = () => {
     }
   };
 
-  const handleSaveDraft = async () => {
-    if (!validationForm.sourcePath || !validationForm.targetPath) return;
-    await Api.saveValidationDraft({
-      source_path: validationForm.sourcePath,
-      target_path: validationForm.targetPath,
-      uid_column: validationForm.uidColumn,
-      delimiter: validationForm.delimiter,
-      column_mappings: validationForm.columnMappings,
-    });
-  };
+  const canSaveDraft = Boolean(
+    validationForm.sourceCloud?.object_name && validationForm.targetCloud?.object_name,
+  );
 
   const renderStepContent = () => {
     switch (currentStep) {
@@ -113,9 +105,9 @@ export const ValidationWizardView: React.FC = () => {
         <div style={{ display: 'flex', gap: 'var(--md)' }}>
           <button
             type="button"
-            onClick={() => void handleSaveDraft()}
-            disabled={!validationForm.sourcePath || !validationForm.targetPath}
-            style={{ padding: '0 var(--lg)', height: '40px', borderRadius: '8px', border: '1px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', color: 'var(--on-surface-variant)', fontSize: 'var(--body-md)', fontWeight: 600, cursor: 'pointer' }}
+            disabled={!canSaveDraft}
+            title="Draft save requires local paths; use GCS selection and Run Validation"
+            style={{ padding: '0 var(--lg)', height: '40px', borderRadius: '8px', border: '1px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', color: 'var(--on-surface-variant)', fontSize: 'var(--body-md)', fontWeight: 600, cursor: 'not-allowed', opacity: 0.6 }}
           >
             Save Draft
           </button>

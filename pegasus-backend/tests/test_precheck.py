@@ -13,6 +13,7 @@ from pathlib import Path
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
 from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
 from pegasus.validation.gcs_object import GcsObjectRef
+from pegasus.validation.gcs_stream import get_gcs_stream_session
 from pegasus.validation.pipeline.precheck import try_identical_precheck
 
 
@@ -33,6 +34,7 @@ def test_metadata_digest_precheck_gcs() -> None:
     target._metadata_digest = digest
     source._md5_hex = "deadbeef"
     target._md5_hex = "deadbeef"
+    get_gcs_stream_session(ref).store_cached_object_body(src_path.read_bytes())
 
     result = try_identical_precheck(
         source,
@@ -44,6 +46,7 @@ def test_metadata_digest_precheck_gcs() -> None:
     assert result is not None
     assert result.extra_stats.get("precheck_method") == "content_digest"
     assert result.changed_count == 0
+    assert result.source_row_count > 0
 
 
 def test_metadata_precheck_different_size_skips() -> None:

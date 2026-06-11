@@ -92,9 +92,24 @@ def _estimate_row_count(adapter: TabularSourceAdapter) -> int:
     getter = getattr(adapter, "get_row_count", None)
     if callable(getter):
         count = getter()
-        if isinstance(count, int) and count >= 0:
+        if isinstance(count, int) and count > 0:
             return count
-    return 0
+    from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+    from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
+    from pegasus.validation.row_count import count_delimited_data_rows
+
+    if isinstance(adapter, (FileDelimitedAdapter, GcsDelimitedAdapter)):
+        return count_delimited_data_rows(adapter)
+    size = _adapter_size_bytes(adapter)
+    if size is None or size <= 0:
+        return 0
+    try:
+        column_count = len(adapter.get_schema().column_names)
+    except Exception:
+        column_count = 8
+    from pegasus.validation.pipeline.pipeline import _estimate_row_count_from_bytes
+
+    return _estimate_row_count_from_bytes(size, column_count=column_count)
 
 
 def try_identical_precheck(

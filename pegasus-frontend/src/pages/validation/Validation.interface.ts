@@ -1,9 +1,10 @@
 export type {
   ColumnMapping,
-  ValidateLocalRequest,
-  LocalBrowseEntry,
-  LocalBrowseResponse,
-  FileDetectionResponse,
+  ValidateRequest,
+  GoogleCloudStorageConfig,
+  CloudBrowseEntry,
+  CloudBrowseResponse,
+  CloudConnection,
   LocalColumnPreviewResponse,
   MismatchCounts,
   MismatchSampleRow,
@@ -20,19 +21,35 @@ export interface ValidationDataResponse {
 }
 
 export interface ValidationFormState {
-  sourcePath: string | null;
-  targetPath: string | null;
+  connectionId: string | null;
+  bucket: string | null;
+  browsePrefix: string;
+  sourceCloud: import('../../shared/api/Api').GoogleCloudStorageConfig | null;
+  targetCloud: import('../../shared/api/Api').GoogleCloudStorageConfig | null;
   sourceFileName: string | null;
   targetFileName: string | null;
+  sourceFileSize: number | null;
+  targetFileSize: number | null;
   uidColumn: string;
   delimiter: string;
   columnMappings: import('../../shared/api/Api').ColumnMapping[];
+}
+
+/** Cached GCS file profiles for step 2; cleared when source/target objects change. */
+export interface OverviewProfileCache {
+  sourceKey: string;
+  targetKey: string;
+  source: import('../../shared/api/Api').CloudFileProfileResponse | null;
+  target: import('../../shared/api/Api').CloudFileProfileResponse | null;
+  sourceError: boolean;
+  targetError: boolean;
 }
 
 export interface ValidationReducerState {
   currentStep: number;
   isStep1Valid: boolean;
   validationForm: ValidationFormState;
+  overviewProfileCache: OverviewProfileCache | null;
   validationDataState: {
     data: ValidationDataResponse | null;
     isFetching: boolean;

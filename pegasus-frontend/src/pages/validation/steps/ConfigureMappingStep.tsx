@@ -29,10 +29,11 @@ export const ConfigureMappingStep: React.FC = () => {
   const validationForm = useAppSelector((s) => s.validation.validationForm);
   const { data: validationResult, isFetching, error } = useAppSelector((s) => s.validation.validationDataState);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sourceColumns, setSourceColumns] = useState<string[]>([]);
   const [columnsMatrix, setColumnsMatrix] = useState<MappingItem[]>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const loadingPreview = Boolean(
-    validationForm.sourcePath && validationForm.targetPath && columnsMatrix.length === 0 && !previewError,
+    validationForm.sourceCloud && validationForm.targetCloud && columnsMatrix.length === 0 && !previewError,
   );
   const [viewDetailedReport, setViewDetailedReport] = useState(false);
 
@@ -40,27 +41,29 @@ export const ConfigureMappingStep: React.FC = () => {
   const overrideDelimiter = validationForm.delimiter;
 
   useEffect(() => {
-    if (!validationForm.sourcePath || !validationForm.targetPath) return;
+    if (!validationForm.sourceCloud || !validationForm.targetCloud) return;
     let cancelled = false;
-    Api.previewLocalColumns({
-      source_path: validationForm.sourcePath,
-      target_path: validationForm.targetPath,
+    Api.previewValidationColumns({
+      source_cloud: validationForm.sourceCloud,
+      target_cloud: validationForm.targetCloud,
       uid_column: validationForm.uidColumn,
       delimiter: validationForm.delimiter,
     })
       .then((res) => {
         if (cancelled) return;
         const preview = res.data;
-        const mappings: MappingItem[] = preview.compare_columns.map((col) => {
-          const auto = preview.auto_mappings.find((m) => m.source_column === col);
-          const targets = auto ? [auto.target_column] : [];
-          const sample = preview.source_samples[col]?.[0] ?? '';
-          return { id: col, sourceColumn: col, targetMappings: targets, previewValue: sample };
-        });
-        setColumnsMatrix(mappings);
         const uid = preview.source_columns.includes(validationForm.uidColumn)
           ? validationForm.uidColumn
           : preview.source_columns[0] ?? 'id';
+        const mappings: MappingItem[] = preview.source_columns.map((col) => {
+          const auto = preview.auto_mappings.find((m) => m.source_column === col);
+          const uidTarget = col === uid && preview.target_columns.includes(col) ? col : null;
+          const targets = auto ? [auto.target_column] : uidTarget ? [uidTarget] : [];
+          const sample = preview.source_samples[col]?.[0] ?? '';
+          return { id: col, sourceColumn: col, targetMappings: targets, previewValue: sample };
+        });
+        setSourceColumns(preview.source_columns);
+        setColumnsMatrix(mappings);
         dispatch(validationActions.setValidationForm({
           uidColumn: uid,
           delimiter: preview.delimiter,
@@ -74,7 +77,7 @@ export const ConfigureMappingStep: React.FC = () => {
         if (!cancelled) setPreviewError('Could not load column preview from server');
       });
     return () => { cancelled = true; };
-  }, [validationForm.sourcePath, validationForm.targetPath, validationForm.uidColumn, validationForm.delimiter, dispatch]);
+  }, [validationForm.sourceCloud, validationForm.targetCloud, validationForm.uidColumn, validationForm.delimiter, dispatch]);
 
   const handleUidChange = (uid: string) => {
     dispatch(validationActions.setValidationForm({ uidColumn: uid }));
@@ -121,14 +124,14 @@ export const ConfigureMappingStep: React.FC = () => {
               onChange={(e) => handleUidChange(e.target.value)}
               style={{ height: '32px', padding: '0 8px', borderRadius: '6px', border: '1px solid #d9d9d9' }}
             >
-              {columnsMatrix.map((col) => (
-                <option key={col.id} value={col.sourceColumn}>{col.sourceColumn}</option>
+              {sourceColumns.map((col) => (
+                <option key={col} value={col}>{col}</option>
               ))}
             </select>
           </label>
         </div>
         <span style={{ fontSize: '13px', color: '#727786' }}>
-          {loadingPreview ? 'Loading columns…' : `${columnsMatrix.length} columns`}
+          {loadingPreview ? 'Loading columns…' : `${sourceColumns.length || columnsMatrix.length} columns`}
         </span>
       </div>
 

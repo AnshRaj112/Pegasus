@@ -15,6 +15,7 @@ export const AppRoutes: React.FC = () => {
         <Route path="/" element={<Dashboard />} />
         <Route path="/validations" element={<ValidationWizardView />} />
         <Route path="/history" element={<HistoryView />} />
+        <Route path="/validation/report/run/:runId" element={<ValidationReport />} />
         <Route path="/validation/report/:jobId" element={<ValidationReport />} />
         
         {/* Full Modular Administrative Workspace Center */}

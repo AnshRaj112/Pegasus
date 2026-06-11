@@ -21,7 +21,15 @@ from pegasus.validation.readers.pyarrow_io import batch_to_dicts, iter_csv_batch
 class FileDelimitedAdapter:
     """Streams delimited text files without loading the full dataset."""
 
-    __slots__ = ("path", "_delimiter", "_has_header", "_skip_rows", "_encoding", "_column_names")
+    __slots__ = (
+        "path",
+        "_delimiter",
+        "_has_header",
+        "_skip_rows",
+        "_encoding",
+        "_column_names",
+        "_data_row_count",
+    )
 
     def __init__(
         self,
@@ -38,6 +46,7 @@ class FileDelimitedAdapter:
         self._skip_rows = skip_rows
         self._encoding = encoding
         self._column_names: list[str] | None = None
+        self._data_row_count: int | None = None
 
     def get_size_bytes(self) -> int:
         return self.path.stat().st_size
@@ -121,7 +130,12 @@ class FileDelimitedAdapter:
         )
 
     def get_row_count(self) -> int | None:
-        return None
+        if self._data_row_count is not None:
+            return self._data_row_count
+        from pegasus.validation.row_count import count_delimited_data_rows
+
+        self._data_row_count = count_delimited_data_rows(self)
+        return self._data_row_count
 
     def stream_records(self, chunk_rows: int) -> Iterator[list[dict[str, Any]]]:
         if pyarrow_supports_delimiter(self._delimiter):

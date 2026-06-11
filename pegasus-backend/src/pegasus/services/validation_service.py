@@ -15,7 +15,13 @@ from typing import Any, Callable
 from pegasus.core.config import Settings
 from pegasus.core.resource_tuning import cap_partition_buckets
 from pegasus.core.workload_budget import plan_workload_budget
-from pegasus.schemas.validation import ColumnMapping, LitmusComparison, LitmusFileStats, ValidationTestMode
+from pegasus.schemas.validation import (
+    CloudFileProfileResponse,
+    ColumnMapping,
+    LitmusComparison,
+    LitmusFileStats,
+    ValidationTestMode,
+)
 from pegasus.services.exceptions import ValidationBadRequestError, ValidationUnprocessableError
 from pegasus.services.validation_results import ValidationRunDurations, ValidationRunResult
 from pegasus.validation.adapters.file_columnar import FileColumnarAdapter
@@ -415,6 +421,30 @@ class ValidationService:
             resolved_delimiter=sep,
             has_header=has_header,
             file_format=file_format or "csv",
+        )
+
+    def profile_delimited_adapter(
+        self,
+        adapter: FileDelimitedAdapter | GcsDelimitedAdapter,
+        *,
+        object_name: str,
+        gcs_uri: str,
+        delimiter: str = "auto",
+        has_header: bool = True,
+        skip_rows: int = 0,
+    ) -> CloudFileProfileResponse:
+        from pegasus.validation.cloud_profile import build_delimited_profile
+
+        sep = self._resolve_delimiter_for_inputs(delimiter, adapter, adapter)
+        adapter = self._rebuild_delimited_adapter(
+            adapter, delimiter=sep, has_header=has_header, skip_rows=skip_rows
+        )
+        return build_delimited_profile(
+            adapter,
+            object_name=object_name,
+            gcs_uri=gcs_uri,
+            resolved_delimiter=sep,
+            has_header=has_header,
         )
 
     def validate_columnar_pair_sync(

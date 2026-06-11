@@ -1,23 +1,47 @@
 import { type PayloadAction, createSlice } from '@reduxjs/toolkit';
 import { initializeNullState } from '../../shared/constants/common.constant';
 import {
+  type OverviewProfileCache,
   type ValidationFormState,
   type ValidationReducerState,
   type ValidationDataResponse,
 } from './Validation.interface';
+import type { GoogleCloudStorageConfig } from '../../shared/api/Api';
+
+const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string =>
+  cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';
+
+const shouldClearOverviewCache = (
+  prev: ValidationFormState,
+  patch: Partial<ValidationFormState>,
+): boolean => {
+  if (patch.sourceCloud !== undefined && cloudObjectKey(patch.sourceCloud ?? null) !== cloudObjectKey(prev.sourceCloud)) {
+    return true;
+  }
+  if (patch.targetCloud !== undefined && cloudObjectKey(patch.targetCloud ?? null) !== cloudObjectKey(prev.targetCloud)) {
+    return true;
+  }
+  return false;
+};
 
 export const initialState: ValidationReducerState = {
   currentStep: 1,
   isStep1Valid: false,
   validationForm: {
-    sourcePath: null,
-    targetPath: null,
+    connectionId: null,
+    bucket: null,
+    browsePrefix: '',
+    sourceCloud: null,
+    targetCloud: null,
     sourceFileName: null,
     targetFileName: null,
+    sourceFileSize: null,
+    targetFileSize: null,
     uidColumn: 'id',
     delimiter: 'auto',
     columnMappings: [],
   },
+  overviewProfileCache: null,
   validationDataState: initializeNullState,
 };
 
@@ -37,6 +61,13 @@ const validationSlice = createSlice({
     setValidationForm: (state, action: PayloadAction<Partial<ValidationFormState>>) => ({
       ...state,
       validationForm: { ...state.validationForm, ...action.payload },
+      overviewProfileCache: shouldClearOverviewCache(state.validationForm, action.payload)
+        ? null
+        : state.overviewProfileCache,
+    }),
+    setOverviewProfileCache: (state, action: PayloadAction<OverviewProfileCache>) => ({
+      ...state,
+      overviewProfileCache: action.payload,
     }),
     resetWizard: () => initialState,
 

@@ -2,7 +2,8 @@ import { Api } from '../../shared/api/Api';
 
 /** @deprecated Import from `shared/api/Api` directly */
 export const ValidationServiceApi = {
-  browseLocal: Api.browseLocal,
+  browseCloud: Api.browseCloud,
+  listCloudConnections: Api.listCloudConnections,
   submitValidation: Api.submitValidation,
   pollJob: Api.getValidationJob,
   fetchMismatches: Api.getValidationMismatches,
@@ -15,7 +16,5 @@ export const ValidationServiceApi = {
       results: result,
     };
   },
-  detectLocalFile: Api.detectLocalFile,
-  previewLocalColumns: Api.previewLocalColumns,
-  saveDraft: Api.saveValidationDraft,
+  previewValidationColumns: Api.previewValidationColumns,
 };

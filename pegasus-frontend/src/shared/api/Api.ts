@@ -14,9 +14,20 @@ export interface ColumnMapping {
   target_columns?: string[];
 }
 
-export interface ValidateLocalRequest {
-  source_path: string;
-  target_path: string;
+export interface GoogleCloudStorageConfig {
+  provider?: 'google-cloud-storage';
+  bucket?: string | null;
+  object_name: string;
+  connection_id?: string | null;
+  credentials_json?: string | null;
+  project_id?: string | null;
+}
+
+export interface ValidateRequest {
+  source_path?: string | null;
+  target_path?: string | null;
+  source_cloud?: GoogleCloudStorageConfig | null;
+  target_cloud?: GoogleCloudStorageConfig | null;
   uid_column?: string;
   delimiter?: string;
   column_mappings?: ColumnMapping[];
@@ -24,32 +35,56 @@ export interface ValidateLocalRequest {
   file_format?: string;
 }
 
-export interface LocalBrowseEntry {
+export interface CloudBrowseRequest {
+  bucket?: string | null;
+  prefix?: string;
+  connection_id?: string | null;
+  credentials_json?: string | null;
+  project_id?: string | null;
+  file_format?: string;
+}
+
+export interface CloudBrowseEntry {
   name: string;
   path: string;
   is_dir: boolean;
+  size_bytes?: number | null;
 }
 
-export interface LocalBrowseResponse {
-  path: string;
-  parent_path: string | null;
-  entries: LocalBrowseEntry[];
+export interface CloudBrowseResponse {
+  bucket: string;
+  prefix: string;
+  parent_prefix: string | null;
+  entries: CloudBrowseEntry[];
   truncated?: boolean;
 }
 
-export interface LocalBrowseConfigResponse {
-  default_browse_path: string;
-  path_remap_enabled: boolean;
-  host_path_prefix: string | null;
-  container_path_prefix: string | null;
+export interface CloudFileProfileRequest {
+  cloud: GoogleCloudStorageConfig;
+  delimiter?: string;
+  has_header?: boolean;
 }
 
-export interface FileDetectionResponse {
-  path: string;
+export interface CloudFileProfileResponse {
+  object_name: string;
+  gcs_uri: string;
   file_size_bytes: number;
-  suggested_file_format: string | null;
-  dataset_model: string;
-  schema?: { metadata?: Record<string, unknown> };
+  file_format: string;
+  suggested_file_format?: string | null;
+  dataset_model?: string | null;
+  column_count: number;
+  row_count: number;
+  delimiter?: string | null;
+  has_header?: boolean;
+}
+
+export interface CloudConnection {
+  id: string;
+  name: string;
+  provider: string;
+  bucket: string;
+  project_id: string | null;
+  active: boolean;
 }
 
 export interface LocalColumnPreviewResponse {
@@ -89,6 +124,7 @@ export interface ValidateResult {
   summary: {
     source_row_count: number;
     target_row_count: number;
+    compared_column_count?: number;
     total_mismatch_records: number;
     is_match: boolean;
   };
@@ -99,6 +135,7 @@ export interface ValidateResult {
     value_mismatch: MismatchSampleRow[];
   };
   run_id: string | null;
+  compared_columns?: string[];
   durations?: { validation_seconds?: number; total_seconds?: number };
 }
 
@@ -114,6 +151,24 @@ export interface ValidationMismatchesResponse {
   total: number;
   offset: number;
   limit: number;
+}
+
+export interface ValidationHistoryDetail {
+  run_id: string;
+  status: string;
+  source_path: string | null;
+  target_path: string | null;
+  source_filename: string | null;
+  target_filename: string | null;
+  uid_column: string;
+  delimiter: string;
+  is_match: boolean | null;
+  mismatch_counts: MismatchCounts;
+  source_row_count: number | null;
+  target_row_count: number | null;
+  compared_column_count: number | null;
+  compared_columns: string[];
+  durations?: { validation_seconds?: number; total_seconds?: number };
 }
 
 export interface QueueJobSnapshot {
@@ -175,15 +230,16 @@ const E = {
   health: '/health',
   validateQueue: '/validate/queue',
   validateLocal: '/validate/local',
-  validateLocalBrowse: '/validate/local/browse',
-  validateLocalBrowseConfig: '/validate/local/browse/config',
-  validateLocalDetect: '/validate/local/detect',
   validateLocalColumns: '/validate/local/columns',
+  validateCloudBrowse: '/validate/cloud/browse',
+  validateCloudProfile: '/validate/cloud/profile',
+  cloudConnections: '/admin/cloud-connections',
   validateJob: (jobId: string) => `/validate/jobs/${jobId}`,
   validateDailyStats: '/validate/history/daily-stats',
   validateEntityInsights: '/validate/history/entities/insights',
   validateCreateEntity: '/validate/history/entities',
   validateHistoryDraft: '/validate/history/draft',
+  validateHistoryRun: (runId: string) => `/validate/history/${runId}`,
   validateHistoryMismatches: (runId: string) => `/validate/history/${runId}/mismatches`,
 } as const;
 
@@ -209,29 +265,24 @@ export const Api = {
   createEntity: (body: CreateEntityRequest): Promise<AxiosResponse<unknown>> =>
     httpClient.post(E.validateCreateEntity, body),
 
-  /** GET /validate/local/browse/config — default browse directory */
-  getLocalBrowseConfig: (): Promise<AxiosResponse<LocalBrowseConfigResponse>> =>
-    httpClient.get(E.validateLocalBrowseConfig),
+  /** GET /admin/cloud-connections — saved GCS connection profiles (admin session cookie) */
+  listCloudConnections: (): Promise<AxiosResponse<CloudConnection[]>> =>
+    httpClient.get(E.cloudConnections),
 
-  /** GET /validate/local/browse?path= — list server files/folders */
-  browseLocal: (path?: string): Promise<AxiosResponse<LocalBrowseResponse>> =>
-    httpClient.get(E.validateLocalBrowse, { params: path ? { path } : undefined }),
+  /** POST /validate/cloud/browse — list GCS prefixes/objects under a bucket prefix */
+  browseCloud: (body: CloudBrowseRequest): Promise<AxiosResponse<CloudBrowseResponse>> =>
+    httpClient.post(E.validateCloudBrowse, body),
 
-  /** GET /validate/local/detect?path= — file format/size overview (step 2) */
-  detectLocalFile: (path: string): Promise<AxiosResponse<FileDetectionResponse>> =>
-    httpClient.get(E.validateLocalDetect, { params: { path } }),
+  /** POST /validate/cloud/profile — detect format and row/column counts for one GCS object */
+  profileCloudFile: (body: CloudFileProfileRequest): Promise<AxiosResponse<CloudFileProfileResponse>> =>
+    httpClient.post(E.validateCloudProfile, body),
 
-  /** GET /validate/local/columns — header preview + auto-mappings (step 3) */
-  previewLocalColumns: (params: {
-    source_path: string;
-    target_path: string;
-    uid_column?: string;
-    delimiter?: string;
-  }): Promise<AxiosResponse<LocalColumnPreviewResponse>> =>
-    httpClient.get(E.validateLocalColumns, { params }),
+  /** POST /validate/local/columns — header preview (supports source_cloud / target_cloud) */
+  previewValidationColumns: (body: ValidateRequest): Promise<AxiosResponse<LocalColumnPreviewResponse>> =>
+    httpClient.post(E.validateLocalColumns, body),
 
-  /** POST /validate/local — queue validation job (202) */
-  submitValidation: (body: ValidateLocalRequest): Promise<AxiosResponse<ValidationJobAcceptedResponse>> =>
+  /** POST /validate/local — queue validation job (202); use source_cloud + target_cloud for GCS */
+  submitValidation: (body: ValidateRequest): Promise<AxiosResponse<ValidationJobAcceptedResponse>> =>
     httpClient.post(E.validateLocal, body),
 
   /** GET /validate/jobs/{job_id} — poll job status/result */
@@ -247,6 +298,10 @@ export const Api = {
       await new Promise((r) => setTimeout(r, 2000));
     }
   },
+
+  /** GET /validate/history/{run_id} — persisted run summary (fallback when job poll expires) */
+  getValidationHistoryRun: (runId: string): Promise<AxiosResponse<ValidationHistoryDetail>> =>
+    httpClient.get(E.validateHistoryRun(runId)),
 
   /** GET /validate/history/{run_id}/mismatches — paginated report rows */
   getValidationMismatches: (

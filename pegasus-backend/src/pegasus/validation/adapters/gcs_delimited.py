@@ -51,6 +51,8 @@ def inherit_gcs_metadata(
     )
     if source._column_names is not None:
         target._column_names = list(source._column_names)
+    if source._data_row_count is not None:
+        target._data_row_count = source._data_row_count
 
 
 # Backward-compatible alias
@@ -100,6 +102,7 @@ class GcsDelimitedAdapter:
         "_md5_hex",
         "_network_transfer_seconds",
         "_session",
+        "_data_row_count",
     )
 
     def __init__(
@@ -126,6 +129,7 @@ class GcsDelimitedAdapter:
         self._md5_hex: str | None = None
         self._network_transfer_seconds: float = 0.0
         self._session: GcsStreamSession | None = None
+        self._data_row_count: int | None = None
 
     def _stream_session(self) -> GcsStreamSession:
         if self._session is None:
@@ -350,7 +354,12 @@ class GcsDelimitedAdapter:
         return TabularSchema(columns=[TabularColumn(name=n, data_type="string") for n in names])
 
     def get_row_count(self) -> int | None:
-        return None
+        if self._data_row_count is not None:
+            return self._data_row_count
+        from pegasus.validation.row_count import count_delimited_data_rows
+
+        self._data_row_count = count_delimited_data_rows(self)
+        return self._data_row_count
 
     def stream_records(self, chunk_rows: int) -> Iterator[list[dict[str, Any]]]:
         if pyarrow_supports_delimiter(self._delimiter):
