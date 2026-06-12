@@ -15,6 +15,7 @@ from pegasus.validation.flat_file import split_line
 from pegasus.validation.readers.delimiter_detection import polars_supports_csv_delimiter
 
 _HEADER_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_RECORD_ID = re.compile(r"^(?:id|rec|record|r)[-_]?\d+$", re.IGNORECASE)
 _KNOWN_HEADER_TOKENS = frozenset(
     {
         "id",
@@ -64,15 +65,13 @@ def read_first_row_fields(path: Path, delimiter: str) -> list[str]:
     return [cell.strip() for cell in split_line(physical, delim)]
 
 
-def infer_csv_has_header(path: Path, delimiter: str) -> bool:
-    """Guess whether the first row is a header (not data).
-
-    Repo ``test-data/validation_*.csv`` fixtures are headerless: row 1 is
-    ``1xxSKU-00001xx101xxEMEA``. Matching uses UID join, not row order.
-    """
-    fields = read_first_row_fields(path, delimiter)
+def infer_has_header_from_fields(fields: list[str]) -> bool:
+    """Guess whether *fields* is a header row (not data)."""
     if not fields:
         return True
+    first = fields[0].strip()
+    if first.isdigit() or _RECORD_ID.match(first):
+        return False
 
     lowered = [field.casefold() for field in fields]
     if all(_HEADER_NAME.match(field) for field in fields):
@@ -89,6 +88,30 @@ def infer_csv_has_header(path: Path, delimiter: str) -> bool:
         return False
 
     return True
+
+
+def infer_csv_has_header(path: Path, delimiter: str) -> bool:
+    """Guess whether the first physical row is a header (not data)."""
+    return infer_has_header_from_fields(read_first_row_fields(path, delimiter))
+
+
+def infer_has_header_from_text_prefix(prefix: str, delimiter: str) -> bool | None:
+    """Infer header presence from the first non-empty physical line in *prefix*."""
+    lines = [line for line in prefix.splitlines() if line.strip()]
+    if not lines:
+        return None
+    physical = lines[0].rstrip("\r\n")
+    if polars_supports_csv_delimiter(delimiter):
+        try:
+            fields = next(csv.reader([physical], delimiter=delimiter, doublequote=True))
+        except csv.Error:
+            fields = split_line(physical, delimiter)
+    else:
+        delim = delimiter
+        if delimiter == "xx" and "xx" not in physical and r"~\^|~" in physical:
+            delim = r"~\^|~"
+        fields = split_line(physical, delim)
+    return infer_has_header_from_fields([cell.strip() for cell in fields])
 
 
 def count_fields_first_row(path: Path, delimiter: str) -> int:

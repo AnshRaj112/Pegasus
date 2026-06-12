@@ -32,6 +32,8 @@ export interface ValidationFormState {
   targetFileSize: number | null;
   uidColumn: string;
   delimiter: string;
+  hasHeader: boolean;
+  structuredOrderSensitive: boolean;
   columnMappings: import('../../shared/api/Api').ColumnMapping[];
 }
 

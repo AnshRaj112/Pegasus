@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import polars as pl
@@ -68,6 +69,40 @@ class DrilldownCache:
 
     def target_values(self, record_key: str) -> dict[str, str]:
         return self.values_for_keys("target", [record_key]).get(record_key, {})
+
+    def persist(self, workspace: Path) -> None:
+        """Write source/target drilldown frames for later mismatch NDJSON export."""
+        root = Path(workspace)
+        root.mkdir(parents=True, exist_ok=True)
+        if self._source is not None and not self._source.is_empty():
+            self._source.write_parquet(root / "drilldown_source.parquet")
+        if self._target is not None and not self._target.is_empty():
+            self._target.write_parquet(root / "drilldown_target.parquet")
+
+
+def load_drilldown_lookup(
+    workspace: Path,
+    side: str,
+    compare_columns: list[str],
+) -> dict[str, dict[str, str]]:
+    """Load uid -> column values written by :meth:`DrilldownCache.persist`."""
+    path = Path(workspace) / f"drilldown_{side}.parquet"
+    if not path.is_file():
+        return {}
+    frame = pl.read_parquet(path)
+    if frame.is_empty() or "_identity" not in frame.columns:
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for row in frame.iter_rows(named=True):
+        uid = str(row.get("_identity") or "")
+        if not uid:
+            continue
+        out[uid] = {
+            col: _as_str(row[col])
+            for col in compare_columns
+            if col in row
+        }
+    return out
 
 
 def _as_str(value: Any) -> str:

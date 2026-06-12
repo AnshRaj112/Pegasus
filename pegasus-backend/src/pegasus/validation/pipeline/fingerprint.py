@@ -18,6 +18,8 @@ except ImportError:
     _HAS_XXHASH = False
     _xxhash = None  # type: ignore[assignment]
 
+from pegasus.validation.comparators.policy import ComparePolicy, active_compare_policy
+
 # Separator between canonicalized column values (matches in-memory Polars path).
 _FIELD_SEP = "\x1f"
 
@@ -26,8 +28,16 @@ _FIELD_SEP = "\x1f"
 DEFAULT_ALGORITHM = "xxhash64"
 
 
-def canonical(value: Any) -> str:
+def canonical(
+    value: Any,
+    *,
+    column: str | None = None,
+    policy: ComparePolicy | None = None,
+) -> str:
     """Normalize a cell value for deterministic comparison."""
+    pol = policy if policy is not None else active_compare_policy()
+    if pol is not None and column is not None:
+        return pol.canonical(column, value)
     if value is None:
         return "__NULL__"
     text = str(value).strip()
@@ -36,16 +46,30 @@ def canonical(value: Any) -> str:
     return text
 
 
+def _identity_parts(record: dict[str, Any], columns: list[str]) -> list[str]:
+    """Plain text identity parts — never apply compare-policy canonicalization."""
+    return [canonical(record.get(c)) for c in columns]
+
+
 def identity_key(record: dict[str, Any], columns: list[str]) -> str:
-    return identity_key_from_parts(_canonical_parts(record, columns))
+    return identity_key_from_parts(_identity_parts(record, columns))
 
 
 def identity_key_from_parts(parts: list[str]) -> str:
     return "|".join(parts)
 
 
-def _canonical_parts(record: dict[str, Any], columns: list[str]) -> list[str]:
-    return [canonical(record.get(c)) for c in columns]
+def _canonical_parts(
+    record: dict[str, Any],
+    columns: list[str],
+    *,
+    policy: ComparePolicy | None = None,
+    side: str = "source",
+) -> list[str]:
+    pol = policy if policy is not None else active_compare_policy()
+    if pol is not None and pol.fields:
+        return pol.canonical_parts_for_record(record, side=side)  # type: ignore[arg-type]
+    return [canonical(record.get(c), column=c, policy=pol) for c in columns]
 
 
 def filter_compare_columns(compare_columns: list[str], available: list[str]) -> list[str]:
@@ -98,11 +122,16 @@ def row_fingerprint_bytes(
     columns: list[str],
     *,
     algorithm: str = DEFAULT_ALGORITHM,
+    policy: ComparePolicy | None = None,
+    side: str = "source",
 ) -> bytes:
     """Return an 8-byte (or 32-byte for sha256) fingerprint digest."""
     if not columns:
         return b""
-    return row_fingerprint_from_parts(_canonical_parts(record, columns), algorithm=algorithm)
+    return row_fingerprint_from_parts(
+        _canonical_parts(record, columns, policy=policy, side=side),
+        algorithm=algorithm,
+    )
 
 
 def row_fingerprint_from_parts(
@@ -120,8 +149,9 @@ def row_fingerprint_hex(
     columns: list[str],
     *,
     algorithm: str = DEFAULT_ALGORITHM,
+    policy: ComparePolicy | None = None,
 ) -> str:
-    return row_fingerprint_bytes(record, columns, algorithm=algorithm).hex()
+    return row_fingerprint_bytes(record, columns, algorithm=algorithm, policy=policy).hex()
 
 
 def partition_id(key: str, num_partitions: int) -> int:
@@ -134,6 +164,15 @@ def partition_id(key: str, num_partitions: int) -> int:
 def compare_columns_payload(
     record: dict[str, Any],
     columns: list[str],
+    *,
+    policy: ComparePolicy | None = None,
+    side: str = "source",
 ) -> dict[str, str]:
-    """Extract only compare columns (canonicalized) for drilldown storage."""
-    return {col: canonical(record.get(col)) for col in columns}
+    """Extract logical compare columns (canonicalized) for drilldown storage."""
+    pol = policy if policy is not None else active_compare_policy()
+    if pol is not None and pol.fields:
+        return {
+            key: pol.canonical_side_part(record, key, side=side)  # type: ignore[arg-type]
+            for key in columns
+        }
+    return {col: canonical(record.get(col), column=col, policy=pol) for col in columns}

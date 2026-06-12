@@ -52,28 +52,89 @@ const TAB_TO_TYPE: Record<ActiveSectionTab, string> = {
   extra: 'extra_in_target',
 };
 
-const mapRow = (row: MismatchSampleRow, index: number): ReportRow => {
-  const detail = typeof row.row_detail === 'string' ? null : row.row_detail;
+type RowDetail = {
+  source_record?: Record<string, unknown> | null;
+  target_record?: Record<string, unknown> | null;
+};
+
+const parseRowDetail = (raw: MismatchSampleRow['row_detail']): RowDetail | null => {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as RowDetail;
+    } catch {
+      return null;
+    }
+  }
+  return raw as RowDetail;
+};
+
+const formatCell = (value: unknown): string => {
+  if (value === null || value === undefined || value === '') return '—';
+  const text = String(value);
+  if (text === '__NULL__') return '—';
+  return text;
+};
+
+const formatRecord = (
+  record: Record<string, unknown> | null | undefined,
+  column?: string | null,
+): string => {
+  if (!record) return '—';
+  if (column && column !== '—' && record[column] !== undefined && record[column] !== null) {
+    return formatCell(record[column]);
+  }
+  const keys = Object.keys(record).filter((k) => k !== 'uid');
+  if (keys.length === 0) return '—';
+  return keys.map((k) => `${k}: ${formatCell(record[k])}`).join(' · ');
+};
+
+const mapRow = (row: MismatchSampleRow, index: number, tab: ActiveSectionTab): ReportRow => {
+  const detail = parseRowDetail(row.row_detail);
+  const column = row.column_name?.trim() || null;
+
+  let expected = formatCell(row.source_value);
+  let actual = formatCell(row.target_value);
+
+  if (expected === '—' && detail?.source_record) {
+    expected = formatRecord(detail.source_record, column);
+  }
+  if (actual === '—' && detail?.target_record) {
+    actual = formatRecord(detail.target_record, column);
+  }
+
+  if (tab === 'missing') {
+    expected = formatRecord(detail?.source_record) !== '—'
+      ? formatRecord(detail?.source_record)
+      : expected;
+    actual = '— (not in target)';
+  } else if (tab === 'extra') {
+    expected = '— (not in source)';
+    actual = formatRecord(detail?.target_record) !== '—'
+      ? formatRecord(detail?.target_record)
+      : actual;
+  }
+
   const srcCount = detail?.source_record && typeof detail.source_record === 'object'
-    ? Object.keys(detail.source_record).length
+    ? Object.keys(detail.source_record).filter((k) => k !== 'uid').length
     : 0;
   const tgtCount = detail?.target_record && typeof detail.target_record === 'object'
-    ? Object.keys(detail.target_record).length
+    ? Object.keys(detail.target_record).filter((k) => k !== 'uid').length
     : 0;
 
   return {
-    id: `${row.uid}-${row.column_name ?? 'row'}-${index}`,
+    id: `${row.uid}-${column ?? 'row'}-${index}`,
     uid: row.uid,
-    column: row.column_name ?? '[ALL_COLUMNS]',
-    expected: row.source_value ?? '[Not found in source]',
-    actual: row.target_value ?? '[Null / Record missing from source pool]',
+    column: column ?? (tab === 'mismatches' ? '—' : 'Full record'),
+    expected,
+    actual,
     srcFields: srcCount ? `${srcCount} fields` : '0 fields',
     tgtFields: tgtCount ? `${tgtCount} fields` : '0 fields',
   };
 };
 
-const rowsFromSamples = (samples: MismatchSampleRow[]): ReportRow[] =>
-  samples.map((row, index) => mapRow(row, index));
+const rowsFromSamples = (samples: MismatchSampleRow[], tab: ActiveSectionTab): ReportRow[] =>
+  samples.map((row, index) => mapRow(row, index, tab));
 
 const historyToResult = (history: ValidationHistoryDetail): ValidateResult => ({
   summary: {
@@ -159,6 +220,11 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
 
     let cancelled = false;
 
+    const embeddedSamplesEmpty = (result: ValidateResult) =>
+      result.mismatch_sample_groups.missing_in_target.length === 0
+      && result.mismatch_sample_groups.extra_in_target.length === 0
+      && result.mismatch_sample_groups.value_mismatch.length === 0;
+
     const applyResult = (
       result: ValidateResult,
       meta: ReportMeta,
@@ -182,9 +248,9 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
       setResolvedRunId(runId);
       setUseHistoryPagination(preferHistoryPagination);
       setRowsByTab({
-        mismatches: rowsFromSamples(result.mismatch_sample_groups.value_mismatch),
-        missing: rowsFromSamples(result.mismatch_sample_groups.missing_in_target),
-        extra: rowsFromSamples(result.mismatch_sample_groups.extra_in_target),
+        mismatches: rowsFromSamples(result.mismatch_sample_groups.value_mismatch, 'mismatches'),
+        missing: rowsFromSamples(result.mismatch_sample_groups.missing_in_target, 'missing'),
+        extra: rowsFromSamples(result.mismatch_sample_groups.extra_in_target, 'extra'),
       });
     };
 
@@ -252,7 +318,7 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
           return;
         }
 
-        applyResult(result, meta, runId, Boolean(runId));
+        applyResult(result, meta, runId, Boolean(runId) && embeddedSamplesEmpty(result));
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load validation report');
@@ -279,9 +345,12 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
           mismatch_type: TAB_TO_TYPE[activeTab],
         });
         if (cancelled) return;
+        if (page.items.length === 0 && page.total === 0) {
+          return;
+        }
         setRowsByTab((prev) => ({
           ...prev,
-          [activeTab]: page.items.map(mapRow),
+          [activeTab]: page.items.map((row, index) => mapRow(row, index, activeTab)),
         }));
         setTabTotals((prev) => ({
           ...prev,

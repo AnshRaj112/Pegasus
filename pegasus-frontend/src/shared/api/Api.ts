@@ -17,7 +17,10 @@ const MAX_POLL_BACKOFF_MS = 30_000;
 export interface ColumnMapping {
   source_column: string;
   target_column: string;
+  source_columns?: string[];
   target_columns?: string[];
+  compare_mode?: string;
+  structured_order_sensitive?: boolean;
 }
 
 export interface GoogleCloudStorageConfig {
@@ -101,8 +104,12 @@ export interface LocalColumnPreviewResponse {
   unmatched_source_columns: string[];
   unmatched_target_columns: string[];
   delimiter: string;
+  has_header?: boolean;
+  inferred_has_header?: boolean | null;
   source_samples: Record<string, string[]>;
   target_samples: Record<string, string[]>;
+  complex_columns?: string[];
+  needs_order_preference?: boolean;
 }
 
 export interface ValidationJobAcceptedResponse {

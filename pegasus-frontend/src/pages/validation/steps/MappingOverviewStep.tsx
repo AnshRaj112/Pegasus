@@ -76,8 +76,8 @@ export const MappingOverviewStep: React.FC = () => {
     };
 
     Promise.all([
-      Api.profileCloudFile({ cloud: form.sourceCloud, delimiter: form.delimiter || 'auto' }),
-      Api.profileCloudFile({ cloud: form.targetCloud, delimiter: form.delimiter || 'auto' }),
+      Api.profileCloudFile({ cloud: form.sourceCloud, delimiter: form.delimiter || 'auto', has_header: form.hasHeader }),
+      Api.profileCloudFile({ cloud: form.targetCloud, delimiter: form.delimiter || 'auto', has_header: form.hasHeader }),
     ])
       .then(([sourceRes, targetRes]) => {
         nextCache.source = sourceRes.data;
@@ -91,7 +91,7 @@ export const MappingOverviewStep: React.FC = () => {
       });
 
     return () => { cancelled = true; };
-  }, [form.sourceCloud, form.targetCloud, sourceKey, targetKey, cacheHit, dispatch, form.delimiter]);
+  }, [form.sourceCloud, form.targetCloud, sourceKey, targetKey, cacheHit, dispatch, form.delimiter, form.hasHeader]);
 
   const sourceStats = {
     name: form.sourceFileName ?? '—',
@@ -100,11 +100,11 @@ export const MappingOverviewStep: React.FC = () => {
       ? '…'
       : sourceProfile.error
         ? '—'
-        : sourceProfile.profile?.file_format ?? '—',
+        : (form.sourceFileSize === 0 ? 'empty file' : sourceProfile.profile?.file_format ?? '—'),
     sizeBytes: sourceProfile.profile?.file_size_bytes ?? form.sourceFileSize,
-    columnCount: sourceProfile.profile?.column_count ?? null,
-    rowCount: sourceProfile.profile?.row_count ?? null,
-    loading: sourceProfile.loading,
+    columnCount: form.sourceFileSize === 0 ? 0 : sourceProfile.profile?.column_count ?? null,
+    rowCount: form.sourceFileSize === 0 ? 0 : sourceProfile.profile?.row_count ?? null,
+    loading: sourceProfile.loading && form.sourceFileSize !== 0,
   };
 
   const targetStats = {
@@ -193,6 +193,14 @@ export const MappingOverviewStep: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', alignSelf: 'flex-start' }}>
+        <input
+          type="checkbox"
+          checked={form.hasHeader}
+          onChange={(e) => dispatch(validationActions.setValidationForm({ hasHeader: e.target.checked }))}
+        />
+        First row contains column names (uncheck for headerless files)
+      </label>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px' }}>
         <FileCard label="Source" color="#1677ff" stats={sourceStats} warn={alert.mismatches} />
         <ArrowRightOutlined style={{ fontSize: '20px', color: '#727786' }} />

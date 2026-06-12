@@ -16,7 +16,10 @@ import polars as pl
 from pegasus.validation.adapters.file_columnar import FileColumnarAdapter
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
 from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
-from pegasus.validation.csv_header import infer_csv_has_header
+from pegasus.validation.comparators.core import _lit
+from pegasus.validation.csv_header import infer_csv_has_header, infer_has_header_from_text_prefix
+
+_COMPLEX_TYPES = (list, dict, tuple)
 from pegasus.validation.delimited_sample import read_delimited_sample_frame
 from pegasus.validation.delimiter_resolve import resolve_delimiter_for_paths
 from pegasus.validation.file_format import infer_file_format_from_path, is_columnar_format, normalize_file_format
@@ -60,6 +63,15 @@ def _read_columnar_sample(path: Path, file_format: str, sample_rows: int) -> pl.
     return pl.read_parquet(path).head(sample_rows)
 
 
+def _align_frame_columns(frame: pl.DataFrame, columns: list[str]) -> pl.DataFrame:
+    """Rename PyArrow f0/f1/... columns to schema names (headerless preview)."""
+    if frame.is_empty() or not columns or frame.width != len(columns):
+        return frame
+    if list(frame.columns) == columns:
+        return frame
+    return frame.rename(dict(zip(frame.columns, columns, strict=False)))
+
+
 def _sample_column_values(frame: pl.DataFrame, columns: list[str]) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for col in columns:
@@ -68,6 +80,49 @@ def _sample_column_values(frame: pl.DataFrame, columns: list[str]) -> dict[str, 
             continue
         out[col] = [v if v is not None else "" for v in frame[col].cast(pl.String).to_list()]
     return out
+
+
+def _infer_has_header_pair(
+    source: FileDelimitedAdapter | GcsDelimitedAdapter,
+    target: FileDelimitedAdapter | GcsDelimitedAdapter,
+    delimiter: str,
+) -> bool | None:
+    src_infer = _infer_has_header_adapter(source, delimiter)
+    tgt_infer = _infer_has_header_adapter(target, delimiter)
+    if src_infer is None or tgt_infer is None:
+        return src_infer if tgt_infer is None else tgt_infer
+    return src_infer and tgt_infer
+
+
+def _infer_has_header_adapter(
+    adapter: FileDelimitedAdapter | GcsDelimitedAdapter,
+    delimiter: str,
+) -> bool | None:
+    if isinstance(adapter.path, Path) and adapter.path.exists():
+        return infer_csv_has_header(adapter.path, delimiter)
+    if isinstance(adapter, GcsDelimitedAdapter):
+        prefix = adapter._load_header_prefix().decode("utf-8-sig", errors="replace")
+        return infer_has_header_from_text_prefix(prefix, delimiter)
+    return None
+
+
+def _detect_complex_columns(
+    source_samples: dict[str, list[str]],
+    target_samples: dict[str, list[str]],
+    columns: list[str],
+) -> list[str]:
+    found: list[str] = []
+    for col in columns:
+        for bucket in (source_samples.get(col, []), target_samples.get(col, [])):
+            for value in bucket:
+                if isinstance(_lit(value), _COMPLEX_TYPES):
+                    if col not in found:
+                        found.append(col)
+                    break
+            else:
+                continue
+            break
+    return found
 
 
 def _sample_delimited_frame(
@@ -97,11 +152,7 @@ def build_column_preview_from_adapters(
     sample_rows = _MAPPING_PREVIEW_SAMPLE_ROWS
     source_columns = source.get_schema().column_names
     target_columns = target.get_schema().column_names
-    inferred_has_header = None
-    if isinstance(source.path, Path) and source.path.exists() and isinstance(target.path, Path) and target.path.exists():
-        inferred_has_header = infer_csv_has_header(source.path, resolved_delimiter) and infer_csv_has_header(
-            target.path, resolved_delimiter
-        )
+    inferred_has_header = _infer_has_header_pair(source, target, resolved_delimiter)
     source_frame = _sample_delimited_frame(source, sample_rows=sample_rows)
     target_frame = _sample_delimited_frame(target, sample_rows=sample_rows)
 
@@ -111,6 +162,11 @@ def build_column_preview_from_adapters(
     matched_sources = {m["source_column"] for m in auto_mappings}
     matched_targets = {m["target_column"] for m in auto_mappings}
 
+    source_frame = _align_frame_columns(source_frame, source_columns)
+    target_frame = _align_frame_columns(target_frame, target_columns)
+    source_samples = _sample_column_values(source_frame, source_columns)
+    target_samples = _sample_column_values(target_frame, target_columns)
+    complex_columns = _detect_complex_columns(source_samples, target_samples, compare_columns)
     return {
         "source_columns": source_columns,
         "target_columns": target_columns,
@@ -121,8 +177,10 @@ def build_column_preview_from_adapters(
         "delimiter": resolved_delimiter,
         "has_header": has_header,
         "inferred_has_header": inferred_has_header,
-        "source_samples": _sample_column_values(source_frame, source_columns),
-        "target_samples": _sample_column_values(target_frame, target_columns),
+        "source_samples": source_samples,
+        "target_samples": target_samples,
+        "complex_columns": complex_columns,
+        "needs_order_preference": bool(complex_columns),
         "sample_row_count": sample_rows,
         "file_format": file_format,
     }
@@ -200,6 +258,11 @@ def build_column_preview(
     matched_sources = {m["source_column"] for m in auto_mappings}
     matched_targets = {m["target_column"] for m in auto_mappings}
 
+    source_frame = _align_frame_columns(source_frame, source_columns)
+    target_frame = _align_frame_columns(target_frame, target_columns)
+    source_samples = _sample_column_values(source_frame, source_columns)
+    target_samples = _sample_column_values(target_frame, target_columns)
+    complex_columns = _detect_complex_columns(source_samples, target_samples, compare_columns)
     return {
         "source_columns": source_columns,
         "target_columns": target_columns,
@@ -210,8 +273,10 @@ def build_column_preview(
         "delimiter": resolved_delimiter,
         "has_header": has_header,
         "inferred_has_header": inferred_has_header,
-        "source_samples": _sample_column_values(source_frame, source_columns),
-        "target_samples": _sample_column_values(target_frame, target_columns),
+        "source_samples": source_samples,
+        "target_samples": target_samples,
+        "complex_columns": complex_columns,
+        "needs_order_preference": bool(complex_columns),
         "sample_row_count": sample_rows,
         "file_format": src_fmt,
     }

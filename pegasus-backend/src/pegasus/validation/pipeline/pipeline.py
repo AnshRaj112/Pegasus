@@ -25,6 +25,7 @@ from pegasus.validation.pipeline.fingerprint import (
     row_fingerprint_bytes,
     row_fingerprint_from_parts,
     _canonical_parts,
+    _identity_parts,
 )
 from pegasus.validation.lifecycle_profiler import lifecycle_span
 from pegasus.validation.pipeline.in_memory import (
@@ -203,9 +204,26 @@ class TabularReconciliationPipeline:
         self._config = config
 
     def _resolved_compare_columns(self, schema_names: list[str]) -> list[str]:
+        policy = self._config.compare_policy
+        if policy is not None and policy.fields:
+            return policy.compare_keys
         return filter_compare_columns(self._compare_columns, schema_names)
 
     def run(
+        self,
+        *,
+        workspace: Path | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> PipelineResult:
+        from pegasus.validation.comparators.policy import compare_policy_context
+
+        with compare_policy_context(self._config.compare_policy):
+            return self._run_impl(
+                workspace=workspace,
+                progress_callback=progress_callback,
+            )
+
+    def _run_impl(
         self,
         *,
         workspace: Path | None = None,
@@ -338,6 +356,7 @@ class TabularReconciliationPipeline:
                 drilldown_cache=drilldown_cache,
                 progress_callback=progress_callback,
                 est_rows=est_rows,
+                persist_drilldown=not owned_workspace,
             )
         finally:
             if owned_workspace:
@@ -363,6 +382,7 @@ class TabularReconciliationPipeline:
         drilldown_cache: DrilldownCache | None,
         progress_callback: Callable[[dict[str, Any]], None] | None,
         est_rows: int,
+        persist_drilldown: bool = False,
     ) -> PipelineResult:
         from pegasus.validation.pipeline.partition_merkle import PartitionMerkleAccumulator
 
@@ -663,6 +683,8 @@ class TabularReconciliationPipeline:
         publish_final_stages(
             timings, io, progress_callback=progress_callback, include_report=False
         )
+        if persist_drilldown and drilldown_cache is not None:
+            drilldown_cache.persist(work)
         return PipelineResult(
             schema_valid=len(schema_diffs) == 0,
             schema_differences=schema_diffs,
@@ -775,10 +797,11 @@ class TabularReconciliationPipeline:
                         chunk_index=chunk_index,
                         rows_in_chunk=len(chunk),
                     )
+                side_name = "source" if is_source else "target"
                 for record in chunk:
                     with StageTimer(timings, "canonicalization_seconds"):
-                        id_parts = _canonical_parts(record, id_cols)
-                        cmp_parts = _canonical_parts(record, cmp_cols)
+                        id_parts = _identity_parts(record, id_cols)
+                        cmp_parts = _canonical_parts(record, cmp_cols, side=side_name)
                     with StageTimer(timings, "identity_generation_seconds"):
                         identity = identity_key_from_parts(id_parts)
                     with StageTimer(timings, "fingerprint_generation_seconds"):

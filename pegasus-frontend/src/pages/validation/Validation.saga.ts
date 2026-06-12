@@ -35,6 +35,7 @@ function* submitValidationSaga() {
       target_cloud: validationForm.targetCloud,
       uid_column: validationForm.uidColumn,
       delimiter: validationForm.delimiter || 'auto',
+      has_header: validationForm.hasHeader,
       column_mappings: validationForm.columnMappings,
     });
     jobId = accepted.data.job_id;

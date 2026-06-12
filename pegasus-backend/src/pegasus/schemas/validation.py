@@ -316,13 +316,20 @@ class LocalPathValidateRequest(BaseModel):
 
 
 class ColumnMapping(BaseModel):
-    """Pair one source column name with the corresponding target column name."""
+    """Map source column(s) to target column(s) for reconciliation."""
 
-    source_column: str = Field(description="Source column name to validate")
-    target_column: str = Field(description="Target column name to compare against the source column")
+    source_column: str = Field(description="Logical source column name (reporting key and primary source field)")
+    target_column: str = Field(
+        default="",
+        description="Primary target column name (defaults to source_column when empty)",
+    )
+    source_columns: list[str] | None = Field(
+        default=None,
+        description="Optional extra source columns for many-to-one mapping (N source -> 1 target)",
+    )
     target_columns: list[str] | None = Field(
         default=None,
-        description="Optional list of multiple target columns for 1-to-many mapping",
+        description="Optional extra target columns for one-to-many mapping (1 source -> N targets)",
     )
     compare_mode: str = Field(
         default="auto",
@@ -557,6 +564,14 @@ class LocalColumnPreviewResponse(BaseModel):
         ge=1,
         le=20,
         description="Number of data rows included in source_samples / target_samples",
+    )
+    complex_columns: list[str] = Field(
+        default_factory=list,
+        description="Compared columns whose sample cells contain list/dict/tuple literals",
+    )
+    needs_order_preference: bool = Field(
+        default=False,
+        description="True when complex_columns is non-empty; client may ask about order sensitivity",
     )
 
 

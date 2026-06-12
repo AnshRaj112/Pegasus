@@ -24,6 +24,11 @@ def can_use_native_multichar_spill(
     lazy_drilldown: bool,  # noqa: ARG001 — fingerprint-only spill does not need drilldown frames
     use_arrow_ipc_spill: bool,
 ) -> bool:
+    from pegasus.validation.comparators.policy import active_compare_policy
+
+    pol = active_compare_policy()
+    if pol is not None and (pol.needs_smart_canonical or pol.has_non_trivial_mapping):
+        return False
     return (
         native_multichar.native_extension_available()
         and not store_payload

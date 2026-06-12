@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
 
 
-def _canonical_expr(column: str) -> pl.Expr:
+def _plain_canonical_expr(column: str) -> pl.Expr:
     c = pl.col(column).cast(pl.Utf8).str.strip_chars()
     lower = c.str.to_lowercase()
     return (
@@ -48,17 +48,125 @@ def _canonical_expr(column: str) -> pl.Expr:
     )
 
 
+def _canonical_expr(column: str) -> pl.Expr:
+    from pegasus.validation.comparators.policy import active_compare_policy
+
+    pol = active_compare_policy()
+    rule = pol.rule_for(column) if pol is not None else None
+    if pol is not None and rule is not None and (rule.mode != "text" or rule.complex):
+        mapped = pl.col(column).map_elements(
+            lambda v, c=column: pol.canonical(c, v),
+            return_dtype=pl.Utf8,
+            skip_nulls=False,
+        )
+        return pl.when(pl.col(column).is_null()).then(pl.lit("__NULL__")).otherwise(mapped).fill_null("__NULL__")
+    return _plain_canonical_expr(column)
+
+
 def _identity_expr(columns: list[str]) -> pl.Expr:
-    parts = [_canonical_expr(c) for c in columns]
+    parts = [_plain_canonical_expr(c).fill_null("__NULL__") for c in columns]
     return pl.concat_str(parts, separator="|").alias("_identity")
 
 
 def _fingerprint_expr(columns: list[str]) -> pl.Expr:
-    parts = [_canonical_expr(c) for c in columns]
+    parts = [_canonical_expr(c).fill_null("__NULL__") for c in columns]
     if not parts:
         return pl.lit(0, dtype=pl.UInt64).alias("_fp_hash")
     joined = pl.concat_str(parts, separator="\x1f")
     return joined.hash(seed=0, seed_1=1, seed_2=2, seed_3=3).alias("_fp_hash")
+
+
+def _canonical_expr_for_key(logical_key: str, physical_col: str) -> pl.Expr:
+    from pegasus.validation.comparators.policy import active_compare_policy
+
+    pol = active_compare_policy()
+    rule = pol.rule_for(logical_key) if pol is not None else None
+    if pol is not None and rule is not None and (rule.mode != "text" or rule.complex):
+        mapped = pl.col(physical_col).map_elements(
+            lambda v, k=logical_key: pol.canonical(k, v),
+            return_dtype=pl.Utf8,
+            skip_nulls=False,
+        )
+        return (
+            pl.when(pl.col(physical_col).is_null())
+            .then(pl.lit("__NULL__"))
+            .otherwise(mapped)
+            .fill_null("__NULL__")
+        )
+    return _plain_canonical_expr(physical_col)
+
+
+def _logical_canonical_expr(logical_key: str, side: str) -> pl.Expr:
+    from pegasus.validation.comparators.mapping_resolver import target_canonical_from_parts
+    from pegasus.validation.comparators.policy import active_compare_policy
+
+    pol = active_compare_policy()
+    if pol is None:
+        return _canonical_expr(logical_key)
+    fm = pol.field_for(logical_key)
+    if fm is None:
+        return _canonical_expr(logical_key)
+    physical = fm.source_columns if side == "source" else fm.target_columns
+    if len(physical) == 1:
+        return _canonical_expr_for_key(logical_key, physical[0])
+    if side == "source":
+        parts = [_canonical_expr_for_key(logical_key, c).fill_null("__NULL__") for c in physical]
+        return pl.concat_str(parts, separator=" ")
+    cols = list(physical)
+
+    def _combine(row: dict[str, object]) -> str:
+        active = active_compare_policy()
+        if active is None:
+            parts = [str(row.get(c) or "") for c in cols]
+        else:
+            parts = [active.canonical(logical_key, row.get(c)) for c in cols]
+        return target_canonical_from_parts(parts)
+
+    return pl.struct([pl.col(c) for c in cols]).map_elements(
+        _combine,
+        return_dtype=pl.Utf8,
+        skip_nulls=False,
+    )
+
+
+def _mapping_fingerprint_expr(logical_keys: list[str], *, side: str) -> pl.Expr:
+    from pegasus.validation.comparators.policy import active_compare_policy
+
+    pol = active_compare_policy()
+    if pol is None or not pol.fields:
+        return _fingerprint_expr(logical_keys)
+    parts = [_logical_canonical_expr(key, side).fill_null("__NULL__") for key in logical_keys]
+    if not parts:
+        return pl.lit(0, dtype=pl.UInt64).alias("_fp_hash")
+    joined = pl.concat_str(parts, separator="\x1f")
+    return joined.hash(seed=0, seed_1=1, seed_2=2, seed_3=3).alias("_fp_hash")
+
+
+def _physical_project_columns(identity_columns: list[str], logical_keys: list[str], side: str) -> list[str]:
+    from pegasus.validation.comparators.policy import active_compare_policy
+
+    pol = active_compare_policy()
+    if pol is not None and pol.fields:
+        physical = pol.physical_columns(side)  # type: ignore[arg-type]
+    else:
+        physical = logical_keys
+    return list(dict.fromkeys([*identity_columns, *physical]))
+
+
+def _with_compare_expressions(
+    frame: pl.DataFrame,
+    *,
+    identity_columns: list[str],
+    logical_keys: list[str],
+    side: str,
+    num_partitions: int,
+    canon_cols: list[str],
+) -> pl.DataFrame:
+    return frame.with_columns([
+        _identity_expr(identity_columns),
+        _mapping_fingerprint_expr(logical_keys, side=side),
+        *([_logical_canonical_expr(key, side).alias(key) for key in canon_cols]),
+    ]).with_columns(_partition_expr(num_partitions))
 
 
 def _partition_expr(num_partitions: int) -> pl.Expr:
@@ -249,9 +357,10 @@ def partition_side_streaming_batches(
     read_field = "source_read_seconds" if is_source else "target_read_seconds"
     part_field = "source_partition_seconds" if is_source else "target_partition_seconds"
     side = "source" if is_source else "target"
-    project_cols = list(dict.fromkeys([*identity_columns, *compare_columns]))
+    side_name = "source" if is_source else "target"
+    project_cols = _physical_project_columns(identity_columns, compare_columns, side_name)
     canon_cols = compare_columns if (store_payload or lazy_drilldown) else []
-    cache_side = "source" if is_source else "target"
+    cache_side = side_name
     drilldown_parts: list[pl.DataFrame] = []
     total = 0
     chunk_index = 0
@@ -273,11 +382,14 @@ def partition_side_streaming_batches(
                     rows_in_chunk=batch.num_rows,
                 )
             frame = table_to_polars(pa.Table.from_batches([batch]))
-            frame = frame.with_columns([
-                _identity_expr(identity_columns),
-                _fingerprint_expr(compare_columns),
-                *([_canonical_expr(c).alias(c) for c in canon_cols]),
-            ]).with_columns(_partition_expr(num_partitions))
+            frame = _with_compare_expressions(
+                frame,
+                identity_columns=identity_columns,
+                logical_keys=compare_columns,
+                side=side_name,
+                num_partitions=num_partitions,
+                canon_cols=canon_cols,
+            )
             if lazy_drilldown and drilldown_cache is not None:
                 drilldown_parts.append(frame.select(["_identity", *canon_cols]))
             total += _spill_partition_groups(
@@ -395,12 +507,16 @@ def partition_side_multichar_batches(
                 identity_columns=identity_columns,
                 compare_columns=compare_columns,
                 adapter=adapter,
+                side=side,
             )
-            frame = frame.with_columns([
-                _identity_expr(identity_columns),
-                _fingerprint_expr(compare_columns),
-                *([_canonical_expr(c).alias(c) for c in canon_cols]),
-            ]).with_columns(_partition_expr(num_partitions))
+            frame = _with_compare_expressions(
+                frame,
+                identity_columns=identity_columns,
+                logical_keys=compare_columns,
+                side=side,
+                num_partitions=num_partitions,
+                canon_cols=canon_cols,
+            )
             total += _spill_partition_groups(
                 frame,
                 writer,
@@ -436,7 +552,8 @@ def partition_side_polars(
 
     with StageTimer(timings, part_field):
         with StageTimer(timings, read_field):
-            project_cols = list(dict.fromkeys([*identity_columns, *compare_columns]))
+            side_name = "source" if is_source else "target"
+            project_cols = _physical_project_columns(identity_columns, compare_columns, side_name)
             frame = table_to_polars(
                 read_csv_table(
                     adapter.path,
@@ -447,11 +564,14 @@ def partition_side_polars(
                 )
             )
         canon_cols = compare_columns if (store_payload or lazy_drilldown) else []
-        frame = frame.with_columns([
-            _identity_expr(identity_columns),
-            _fingerprint_expr(compare_columns),
-            *([_canonical_expr(c).alias(c) for c in canon_cols]),
-        ]).with_columns(_partition_expr(num_partitions))
+        frame = _with_compare_expressions(
+            frame,
+            identity_columns=identity_columns,
+            logical_keys=compare_columns,
+            side=side_name,
+            num_partitions=num_partitions,
+            canon_cols=canon_cols,
+        )
         return _write_frame_partitions(
             frame,
             writer,
@@ -472,10 +592,19 @@ def _validate_frame_columns(
     identity_columns: list[str],
     compare_columns: list[str],
     adapter: TabularSourceAdapter,
+    side: str = "source",
 ) -> None:
+    from pegasus.validation.comparators.policy import active_compare_policy
+
+    pol = active_compare_policy()
+    physical = (
+        pol.physical_columns(side)  # type: ignore[arg-type]
+        if pol is not None and pol.fields
+        else compare_columns
+    )
     missing = [
         c
-        for c in (*identity_columns, *compare_columns)
+        for c in (*identity_columns, *physical)
         if c not in frame.columns
     ]
     if missing:
@@ -544,6 +673,7 @@ def _partition_cached_gcs_frame(
     if frame is None:
         return None
     canon_cols = compare_columns if (store_payload or lazy_drilldown) else []
+    side_name = "source" if is_source else "target"
     with StageTimer(timings, part_field):
         with StageTimer(timings, read_field):
             _validate_frame_columns(
@@ -551,12 +681,16 @@ def _partition_cached_gcs_frame(
                 identity_columns=identity_columns,
                 compare_columns=compare_columns,
                 adapter=adapter,
+                side=side_name,
             )
-        frame = frame.with_columns([
-            _identity_expr(identity_columns),
-            _fingerprint_expr(compare_columns),
-            *([_canonical_expr(c).alias(c) for c in canon_cols]),
-        ]).with_columns(_partition_expr(num_partitions))
+        frame = _with_compare_expressions(
+            frame,
+            identity_columns=identity_columns,
+            logical_keys=compare_columns,
+            side=side_name,
+            num_partitions=num_partitions,
+            canon_cols=canon_cols,
+        )
         return _write_frame_partitions(
             frame,
             writer,
@@ -564,7 +698,7 @@ def _partition_cached_gcs_frame(
             store_payload=store_payload,
             timings=timings,
             drilldown_cache=drilldown_cache,
-            cache_side="source" if is_source else "target",
+            cache_side=side_name,
             lazy_drilldown=lazy_drilldown,
             use_columnar_spill=use_columnar_spill,
             use_arrow_ipc_spill=use_arrow_ipc_spill,
@@ -636,12 +770,16 @@ def partition_side_adapter_stream(
                 identity_columns=identity_columns,
                 compare_columns=compare_columns,
                 adapter=adapter,
+                side=side,
             )
-            frame = frame.with_columns([
-                _identity_expr(identity_columns),
-                _fingerprint_expr(compare_columns),
-                *([_canonical_expr(c).alias(c) for c in canon_cols]),
-            ]).with_columns(_partition_expr(num_partitions))
+            frame = _with_compare_expressions(
+                frame,
+                identity_columns=identity_columns,
+                logical_keys=compare_columns,
+                side=side,
+                num_partitions=num_partitions,
+                canon_cols=canon_cols,
+            )
             if lazy_drilldown and drilldown_cache is not None:
                 drilldown_parts.append(frame.select(["_identity", *canon_cols]))
             total += _spill_partition_groups(
@@ -867,18 +1005,23 @@ def try_partition_side_polars(
                 frame = _load_frame(adapter)
             if frame is None or frame.is_empty():
                 return None
+            side_name = "source" if is_source else "target"
             _validate_frame_columns(
                 frame,
                 identity_columns=identity_columns,
                 compare_columns=compare_columns,
                 adapter=adapter,
+                side=side_name,
             )
             canon_cols = compare_columns if (store_payload or lazy_drilldown) else []
-            frame = frame.with_columns([
-                _identity_expr(identity_columns),
-                _fingerprint_expr(compare_columns),
-                *([_canonical_expr(c).alias(c) for c in canon_cols]),
-            ]).with_columns(_partition_expr(num_partitions))
+            frame = _with_compare_expressions(
+                frame,
+                identity_columns=identity_columns,
+                logical_keys=compare_columns,
+                side=side_name,
+                num_partitions=num_partitions,
+                canon_cols=canon_cols,
+            )
             return _write_frame_partitions(
                 frame,
                 writer,
@@ -886,7 +1029,7 @@ def try_partition_side_polars(
                 store_payload=store_payload,
                 timings=timings,
                 drilldown_cache=drilldown_cache,
-                cache_side="source" if is_source else "target",
+                cache_side=side_name,
                 lazy_drilldown=lazy_drilldown,
                 use_columnar_spill=use_columnar_spill,
                 use_arrow_ipc_spill=use_arrow_ipc_spill,

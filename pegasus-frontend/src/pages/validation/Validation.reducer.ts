@@ -21,6 +21,9 @@ const shouldClearOverviewCache = (
   if (patch.targetCloud !== undefined && cloudObjectKey(patch.targetCloud ?? null) !== cloudObjectKey(prev.targetCloud)) {
     return true;
   }
+  if (patch.hasHeader !== undefined && patch.hasHeader !== prev.hasHeader) {
+    return true;
+  }
   return false;
 };
 
@@ -39,6 +42,8 @@ export const initialState: ValidationReducerState = {
     targetFileSize: null,
     uidColumn: 'id',
     delimiter: 'auto',
+    hasHeader: true,
+    structuredOrderSensitive: false,
     columnMappings: [],
   },
   overviewProfileCache: null,

@@ -30,6 +30,7 @@ from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter, creat
 from pegasus.validation.comparators.models import MismatchReport, empty_mismatch_frame
 from pegasus.validation.delimiter_resolve import resolve_delimiter_for_adapters, resolve_delimiter_for_paths
 from pegasus.validation.pipeline.config import TabularPipelineConfig
+from pegasus.validation.comparators.policy import build_compare_policy
 from pegasus.validation.pipeline.fingerprint import filter_compare_columns
 from pegasus.validation.pipeline.pipeline import TabularReconciliationPipeline
 from pegasus.validation.pipeline.reporting import write_validation_results
@@ -55,7 +56,6 @@ def _resolve_compare_columns(
             if m.source_column and m.source_column.strip() and m.source_column.strip() != uid
         )
     )
-    mapped = filter_compare_columns(mapped, schema_names)
     return mapped if mapped else filter_compare_columns(default, schema_names)
 
 __all__ = ("ValidationRunDurations", "ValidationRunResult", "ValidationService")
@@ -244,6 +244,15 @@ class ValidationService:
         with lifecycle_span("Schema And Planning"):
             schema = source.get_schema()
         compare_columns = _resolve_compare_columns(schema.column_names, uid_column, column_mappings)
+        compare_policy = build_compare_policy(
+            source,
+            target,
+            compare_columns,
+            column_mappings,
+            schema_names=schema.column_names,
+            uid_column=uid_column,
+        )
+        compare_columns = compare_policy.compare_keys
 
         cfg = self._pipeline_config(
             source_bytes=source.get_size_bytes(),
@@ -252,6 +261,7 @@ class ValidationService:
             identity_column_count=1,
             resource_policy=resource_policy,
         )
+        cfg.compare_policy = compare_policy
         combined_bytes = source.get_size_bytes() + target.get_size_bytes()
         logger.info(
             "reconciliation delimiter=%r source_bytes=%s target_bytes=%s in_memory=%s "

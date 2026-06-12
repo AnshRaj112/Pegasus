@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pegasus.validation.comparators.policy import ComparePolicy
+
 _PARTITION_PRESETS: dict[str, int] = {
     "small": 1024,
     "medium": 2048,
@@ -40,6 +42,7 @@ class TabularPipelineConfig:
     spill_merkle_max_bytes: int = 32 * 1024 * 1024
     partition_reconcile_workers: int = 1
     streaming_spill_min_bytes: int = 64 * 1024 * 1024
+    compare_policy: ComparePolicy | None = None
 
     def resolved_partition_count(self) -> int:
         if self.partition_preset and self.partition_preset in _PARTITION_PRESETS:

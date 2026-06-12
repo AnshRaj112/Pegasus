@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import signal
@@ -87,6 +88,55 @@ def _resolve_job_mismatch_artifact(
     mismatches.write_ndjson(export_path)
     logger.info("Exported in-memory mismatch report to %s rows=%d", export_path, mismatches.height)
     return export_path
+
+
+def _artifact_lacks_cell_detail(path: Path) -> bool:
+    """True when NDJSON value_mismatch rows have no column-level source/target values."""
+    try:
+        with path.open(encoding="utf-8") as fp:
+            for line in fp:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                if row.get("mismatch_type") != MismatchType.VALUE_MISMATCH.value:
+                    continue
+                if row.get("column_name") and (
+                    row.get("source_value") not in (None, "")
+                    or row.get("target_value") not in (None, "")
+                ):
+                    return False
+                detail = row.get("row_detail")
+                if isinstance(detail, str) and detail.strip():
+                    try:
+                        detail = json.loads(detail)
+                    except json.JSONDecodeError:
+                        detail = None
+                if isinstance(detail, dict):
+                    for side in ("source_record", "target_record"):
+                        rec = detail.get(side)
+                        if isinstance(rec, dict) and any(
+                            k != "uid" for k in rec
+                        ):
+                            return False
+                return True
+    except (OSError, json.JSONDecodeError):
+        return True
+    return False
+
+
+def _compare_policy_for_export(
+    compare_columns: list[str],
+    column_mappings: list[ColumnMapping],
+) -> Any:
+    from pegasus.validation.comparators.policy import ComparePolicy
+
+    scanned: set[str] = set()
+    for mapping in column_mappings:
+        mode = (mapping.compare_mode or "auto").lower()
+        if mode == "structured":
+            scanned.add(mapping.source_column.strip())
+    return ComparePolicy.from_mappings(compare_columns, column_mappings, scanned_complex=scanned)
 
 
 def _cleanup_partial(job_dir: Path) -> None:
@@ -423,13 +473,19 @@ def _run_job_body(
             export_path = job_dir / "mismatches.ndjson"
             if workspace.is_dir() and result.compared_columns:
                 try:
+                    from pegasus.validation.comparators.policy import compare_policy_context
                     from pegasus.validation.pipeline.mismatch_export import export_workspace_mismatches_ndjson
 
-                    export_stats = export_workspace_mismatches_ndjson(
-                        workspace,
-                        export_path,
-                        compare_columns=list(result.compared_columns),
+                    export_policy = _compare_policy_for_export(
+                        list(result.compared_columns),
+                        column_mappings,
                     )
+                    with compare_policy_context(export_policy):
+                        export_stats = export_workspace_mismatches_ndjson(
+                            workspace,
+                            export_path,
+                            compare_columns=list(result.compared_columns),
+                        )
                     if export_stats.total > 0 and export_path.is_file():
                         artifact = export_path
                         result.report.summary = _merge_summary_counts(
@@ -447,6 +503,11 @@ def _run_job_body(
                         )
                 except Exception:
                     logger.exception("Failed to export mismatches from reconcile workspace")
+            if artifact is not None and artifact.is_file() and _artifact_lacks_cell_detail(artifact):
+                rich = _resolve_job_mismatch_artifact(job_dir, result, None)
+                if rich is not None and rich.is_file() and not _artifact_lacks_cell_detail(rich):
+                    artifact = rich
+                    logger.info("Using in-memory mismatch export with column detail at %s", rich)
             if artifact is None or not artifact.is_file():
                 artifact = _resolve_job_mismatch_artifact(job_dir, result, artifact)
             if artifact is not None and artifact.is_file():
