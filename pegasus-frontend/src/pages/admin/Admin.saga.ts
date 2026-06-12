@@ -1,63 +1,92 @@
-import {  delay, put, takeLatest } from 'redux-saga/effects';
+import { call, delay, put, select, takeLatest } from 'redux-saga/effects';
 import { type PayloadAction } from '@reduxjs/toolkit';
-import { adminActions } from './Admin.reducer';
-// import { adminService } from './Admin.service';
-// import { type WorkspaceItem, type StorageProviderItem } from './Admin.interface';
+import { notification } from 'antd';
 
-// --- 1. Worker Saga: Test Connection ---
+import { getApiErrorMessage } from '../../shared/api/apiError';
+import {
+  type AdminReducerState,
+  type CreateStorageProviderPayload,
+  type StorageProviderItem,
+  type WorkspaceItem,
+} from './Admin.interface';
+import { adminActions } from './Admin.reducer';
+import { adminService } from './Admin.service';
+
 function* handleTestConnectionSaga(action: PayloadAction<string>) {
+  const connectionId = action.payload;
   try {
-    // ⚡ Artificial delay just for UX (so users see the smooth loading spinner)
-    yield delay(800); 
-    
-    // ⚡ Make the actual API call through our Service Layer
-    // const response: { status: 'success' | 'failed' } = yield call(adminService.testConnection, action.payload);
-    
-    // ⚡ If the API returns success, tell the Reducer to update the UI
-    // if (response.status === 'success') {
-    //   yield put(adminActions.testConnectionSuccess(action.payload));
-    // }
-    
-    // Clear the success message after 2 seconds to reset the UI
-    yield delay(2000);
-    yield put(adminActions.resetConnectionTest(action.payload));
-    
-  } catch (error: any) {
-    console.error('Connection test failed', error);
-    // In the future, you can dispatch an error action to the reducer here
+    const adminState: AdminReducerState = yield select((state: { admin: AdminReducerState }) => state.admin);
+    const provider = adminState.storageProviders.data.find((p) => p.id === connectionId);
+    const response: { status: 'success' | 'failed' } = yield call(
+      [adminService, adminService.testConnection],
+      connectionId,
+      provider?.bucket,
+    );
+
+    if (response.status === 'success') {
+      yield put(adminActions.testConnectionSuccess(connectionId));
+      yield delay(2500);
+      yield put(adminActions.resetConnectionTest(connectionId));
+    }
+  } catch (error: unknown) {
+    yield put(adminActions.testConnectionFailure(connectionId));
+    notification.error({
+      message: 'Connection test failed',
+      description: getApiErrorMessage(error, 'Could not reach the storage bucket.'),
+    });
+    yield delay(2500);
+    yield put(adminActions.resetConnectionTest(connectionId));
   }
 }
 
-// --- 2. Worker Saga: Fetch Workspaces (Future-Proofing) ---
 function* handleFetchWorkspacesSaga() {
   try {
-    // ⚡ Calls the service to get the data array
-    // const data: WorkspaceItem[] = yield call(adminService.fetchWorkspaces);
-    
-    // Note: Commented out for now so it doesn't overwrite your beautiful Redux mock data with an empty array!
-    // yield put(adminActions.fetchWorkspacesSuccess(data)); 
-  } catch (error: any) {
-    yield put(adminActions.fetchWorkspacesError(error.message || 'Failed to fetch workspaces'));
+    const data: WorkspaceItem[] = yield call([adminService, adminService.fetchWorkspaces]);
+    yield put(adminActions.fetchWorkspacesSuccess(data));
+  } catch (error: unknown) {
+    yield put(adminActions.fetchWorkspacesError(getApiErrorMessage(error, 'Failed to fetch workspaces')));
   }
 }
 
-// --- 3. Worker Saga: Fetch Storage Providers (Future-Proofing) ---
 function* handleFetchProvidersSaga() {
   try {
-    // ⚡ Calls the service to get the data array
-    // const data: StorageProviderItem[] = yield call(adminService.fetchStorageProviders);
-    
-    // Note: Commented out for now
-    // yield put(adminActions.fetchProvidersSuccess(data));
-  } catch (error: any) {
-    console.error('Failed to fetch providers', error);
+    const data: StorageProviderItem[] = yield call([adminService, adminService.fetchStorageProviders]);
+    yield put(adminActions.fetchProvidersSuccess(data));
+  } catch (error: unknown) {
+    yield put(adminActions.fetchProvidersError(getApiErrorMessage(error, 'Failed to fetch storage connections')));
   }
 }
 
-// --- Watcher Saga ---
+function* handleCreateProviderSaga(action: PayloadAction<CreateStorageProviderPayload>) {
+  try {
+    const created: StorageProviderItem = yield call(
+      [adminService, adminService.createStorageProvider],
+      action.payload,
+    );
+    yield put(adminActions.createProviderSuccess(created));
+    notification.success({
+      message: 'Storage connected',
+      description: `${created.name} is ready to use in validation workflows.`,
+    });
+  } catch (error: unknown) {
+    yield put(adminActions.createProviderError(getApiErrorMessage(error, 'Failed to create storage connection')));
+  }
+}
+
+function* handleDeleteProviderSaga(action: PayloadAction<string>) {
+  try {
+    yield call([adminService, adminService.deleteStorageProvider], action.payload);
+    yield put(adminActions.deleteProviderSuccess(action.payload));
+    notification.success({ message: 'Storage connection removed' });
+  } catch (error: unknown) {
+    yield put(adminActions.deleteProviderError(getApiErrorMessage(error, 'Failed to delete storage connection')));
+  }
+}
+
 export default function* adminSaga() {
-  // This listens for actions dispatched from the UI and triggers the correct Worker Saga above
   yield takeLatest(adminActions.testConnectionRequest.type, handleTestConnectionSaga);
   yield takeLatest(adminActions.fetchWorkspacesRequest.type, handleFetchWorkspacesSaga);
   yield takeLatest(adminActions.fetchProvidersRequest.type, handleFetchProvidersSaga);
+  yield takeLatest(adminActions.createProviderRequest.type, handleCreateProviderSaga);
+  yield takeLatest(adminActions.deleteProviderRequest.type, handleDeleteProviderSaga);
 }

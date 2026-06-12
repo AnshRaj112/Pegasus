@@ -94,6 +94,26 @@ export interface CloudConnection {
   bucket: string;
   project_id: string | null;
   active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CloudConnectionCreateRequest {
+  name: string;
+  provider?: string;
+  bucket: string;
+  project_id?: string | null;
+  credentials_json: string;
+  active?: boolean;
+}
+
+export interface CloudConnectionUpdateRequest {
+  name?: string;
+  provider?: string;
+  bucket?: string;
+  project_id?: string | null;
+  credentials_json?: string;
+  active?: boolean;
 }
 
 export interface LocalColumnPreviewResponse {
@@ -281,6 +301,21 @@ export const Api = {
   /** GET /admin/cloud-connections — saved GCS connection profiles (admin session cookie) */
   listCloudConnections: (): Promise<AxiosResponse<CloudConnection[]>> =>
     httpClient.get(E.cloudConnections),
+
+  /** POST /admin/cloud-connections — create a saved GCS connection profile */
+  createCloudConnection: (body: CloudConnectionCreateRequest): Promise<AxiosResponse<CloudConnection>> =>
+    httpClient.post(E.cloudConnections, body),
+
+  /** PATCH /admin/cloud-connections/{id} — update a saved connection */
+  updateCloudConnection: (
+    connectionId: string,
+    body: CloudConnectionUpdateRequest,
+  ): Promise<AxiosResponse<CloudConnection>> =>
+    httpClient.patch(`${E.cloudConnections}/${connectionId}`, body),
+
+  /** DELETE /admin/cloud-connections/{id} */
+  deleteCloudConnection: (connectionId: string): Promise<AxiosResponse<void>> =>
+    httpClient.delete(`${E.cloudConnections}/${connectionId}`),
 
   /** POST /validate/cloud/browse — list GCS prefixes/objects under a bucket prefix */
   browseCloud: (body: CloudBrowseRequest): Promise<AxiosResponse<CloudBrowseResponse>> =>

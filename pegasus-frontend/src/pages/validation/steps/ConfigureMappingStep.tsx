@@ -400,6 +400,8 @@ export const ConfigureMappingStep: React.FC = () => {
     return (
       <ValidationReport
         jobId={validationResult?.jobId ?? undefined}
+        runId={validationResult?.runId ?? undefined}
+        initialResult={results ?? null}
         onBack={() => setViewDetailedReport(false)}
       />
     );

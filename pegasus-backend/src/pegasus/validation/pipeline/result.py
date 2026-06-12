@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import polars as pl
+
 
 @dataclass(slots=True)
 class SchemaDifference:
@@ -47,6 +49,7 @@ class PipelineResult:
     partitions_processed: int = 0
     mismatched_partitions: int = 0
     sample_mismatches: list[MismatchSample] = field(default_factory=list)
+    full_mismatches: pl.DataFrame | None = None
     compared_columns: list[str] = field(default_factory=list)
     execution_seconds: float = 0.0
     extra_stats: dict[str, Any] = field(default_factory=dict)

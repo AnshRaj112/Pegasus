@@ -46,6 +46,40 @@ def _records_from_column_diffs(
 
 
 def pipeline_result_to_run_result(result: PipelineResult) -> ValidationRunResult:
+    if result.full_mismatches is not None and result.full_mismatches.height > 0:
+        frame = result.full_mismatches
+        value_row_count = int(
+            frame.filter(pl.col("mismatch_type") == pl.lit(MismatchType.VALUE_MISMATCH.value)).height
+        )
+        summary = {
+            MismatchType.MISSING_IN_TARGET.value: result.missing_count,
+            MismatchType.EXTRA_IN_TARGET.value: result.extra_count,
+            MismatchType.VALUE_MISMATCH.value: max(result.changed_count, value_row_count),
+        }
+        return ValidationRunResult(
+            report=MismatchReport(mismatches=frame, summary=summary),
+            source_row_count=result.source_row_count,
+            target_row_count=result.target_row_count,
+            compared_column_count=len(result.compared_columns),
+            compared_columns=result.compared_columns,
+            test_mode="full",
+            pipeline_metadata={
+                "schema_valid": result.schema_valid,
+                "mismatched_partitions": result.mismatched_partitions,
+                "execution_seconds": result.execution_seconds,
+                "path": (result.extra_stats or {}).get("path"),
+                "timings": (result.extra_stats or {}).get("timings"),
+                "stages": (result.extra_stats or {}).get("stages"),
+                "stage_report": (result.extra_stats or {}).get("stage_report"),
+                "io": (result.extra_stats or {}).get("io"),
+                "lazy_column_drilldown": (result.extra_stats or {}).get("lazy_column_drilldown"),
+                "columnar_spill": (result.extra_stats or {}).get("columnar_spill"),
+                "chunk_rows": (result.extra_stats or {}).get("chunk_rows"),
+                "partition_buckets": (result.extra_stats or {}).get("partition_buckets"),
+                "reconcile_workers": (result.extra_stats or {}).get("reconcile_workers"),
+            },
+        )
+
     rows: list[dict] = []
     for m in result.sample_mismatches:
         if m.mismatch_type == "missing":
