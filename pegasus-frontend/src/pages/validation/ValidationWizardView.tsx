@@ -3,9 +3,13 @@ import { ArrowRightOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
 import { validationActions } from './Validation.reducer';
+
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
 import { ConfigureMappingStep } from './steps/ConfigureMappingStep';
+
+// ⚡ Import the newly created CSS module
+import styles from './Validation.module.scss';
 
 export const ValidationWizardView: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -70,61 +74,69 @@ export const ValidationWizardView: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-      <header className="wizardHeaderShell">
-        <div className="wizardHeaderLogoGroup">
-          <div style={{ width: '24px', height: '24px', color: 'var(--primary)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '24px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
+      
+      {/* ⚡ Swapped to styles.wizardHeaderShell */}
+      <header className={styles.wizardHeaderShell}>
+        <div className={styles.wizardHeaderLogoGroup}>
+          <div style={{ width: '24px', height: '24px', color: 'var(--primary, #1677ff)' }}>
             <svg fill="none" viewBox="0 0 48 48" xmlns="http://w3.org">
               <path d="M44 4H30.6666V17.3334H17.3334V30.6666H4V44H44V4Z" fill="currentColor" />
             </svg>
           </div>
-          <h2 style={{ fontSize: 'var(--h3)', fontWeight: 700, margin: 0, letterSpacing: '-0.015em' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: 700, margin: 0, letterSpacing: '-0.015em' }}>
             File-to-File Validation Tool
           </h2>
         </div>
       </header>
 
-      {/* ⚡ UPDATED TAB NAMES */}
-      <div className="wizardStepTabBanner">
-        <div className="wizardStepRow">
-          <div className={`stepTabItem ${currentStep === 1 ? 'stepTabActive' : 'stepTabInactive'}`} style={{ cursor: 'default' }}>
-            <span className={`stepNumberBadge ${currentStep === 1 ? 'stepNumberActive' : 'stepNumberInactive'}`}>1</span>
-            <span style={{ fontSize: 'var(--label-md)', fontWeight: 600 }}>File Selection</span>
+      {/* ⚡ Swapped tab banner classes to use dynamic module styles */}
+      <div className={styles.wizardStepTabBanner}>
+        <div className={styles.wizardStepRow}>
+          
+          <div className={`${styles.stepTabItem} ${currentStep === 1 ? styles.stepTabActive : styles.stepTabInactive}`} style={{ cursor: 'default' }}>
+            <span className={`${styles.stepNumberBadge} ${currentStep === 1 ? styles.stepNumberActive : styles.stepNumberInactive}`}>1</span>
+            <span style={{ fontSize: '14px', fontWeight: 600 }}>File Selection</span>
           </div>
-          <div className={`stepTabItem ${currentStep === 2 ? 'stepTabActive' : 'stepTabInactive'}`} style={{ cursor: 'default' }}>
-            <span className={`stepNumberBadge ${currentStep === 2 ? 'stepNumberActive' : 'stepNumberInactive'}`}>2</span>
-            <span style={{ fontSize: 'var(--label-md)', fontWeight: 600 }}>File Overview</span>
+          
+          <div className={`${styles.stepTabItem} ${currentStep === 2 ? styles.stepTabActive : styles.stepTabInactive}`} style={{ cursor: 'default' }}>
+            <span className={`${styles.stepNumberBadge} ${currentStep === 2 ? styles.stepNumberActive : styles.stepNumberInactive}`}>2</span>
+            <span style={{ fontSize: '14px', fontWeight: 600 }}>File Overview</span>
           </div>
-          <div className={`stepTabItem ${currentStep === 3 ? 'stepTabActive' : 'stepTabInactive'}`} style={{ cursor: 'default' }}>
-            <span className={`stepNumberBadge ${currentStep === 3 ? 'stepNumberActive' : 'stepNumberInactive'}`}>3</span>
-            <span style={{ fontSize: 'var(--label-md)', fontWeight: 600 }}>File Mapping</span>
+          
+          <div className={`${styles.stepTabItem} ${currentStep === 3 ? styles.stepTabActive : styles.stepTabInactive}`} style={{ cursor: 'default' }}>
+            <span className={`${styles.stepNumberBadge} ${currentStep === 3 ? styles.stepNumberActive : styles.stepNumberInactive}`}>3</span>
+            <span style={{ fontSize: '14px', fontWeight: 600 }}>File Mapping</span>
           </div>
+
         </div>
       </div>
 
-      <main className="wizardWorkspaceArea">
+      {/* ⚡ Swapped to styles.wizardWorkspaceArea */}
+      <main className={styles.wizardWorkspaceArea}>
         {renderStepContent()}
       </main>
 
-      <footer className="wizardActionFooter" style={{ justifyContent: 'space-between' }}>
+      {/* ⚡ Swapped to styles.wizardActionFooter */}
+      <footer className={styles.wizardActionFooter} style={{ justifyContent: 'space-between' }}>
         <div>
           {currentStep > 1 && (
             <button 
               onClick={handleBack}
               disabled={isFetching}
-              style={{ padding: '0 var(--lg)', height: '40px', borderRadius: '8px', border: '1px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', color: 'var(--on-surface-variant)', fontSize: 'var(--body-md)', fontWeight: 600, cursor: 'pointer' }}
+              style={{ padding: '0 24px', height: '40px', borderRadius: '8px', border: '1px solid #d9d9d9', background: '#ffffff', color: '#414755', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}
             >
               Back
             </button>
           )}
         </div>
         
-        <div style={{ display: 'flex', gap: 'var(--md)' }}>
+        <div style={{ display: 'flex', gap: '16px' }}>
           <button
             type="button"
             disabled={!canSaveDraft}
             title="Draft save requires local paths; use GCS selection and Run Validation"
-            style={{ padding: '0 var(--lg)', height: '40px', borderRadius: '8px', border: '1px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', color: 'var(--on-surface-variant)', fontSize: 'var(--body-md)', fontWeight: 600, cursor: 'not-allowed', opacity: 0.6 }}
+            style={{ padding: '0 24px', height: '40px', borderRadius: '8px', border: '1px solid #d9d9d9', background: '#ffffff', color: '#414755', fontSize: '14px', fontWeight: 600, cursor: canSaveDraft ? 'pointer' : 'not-allowed', opacity: canSaveDraft ? 1 : 0.6 }}
           >
             Save Draft
           </button>
@@ -132,11 +144,11 @@ export const ValidationWizardView: React.FC = () => {
             onClick={handleProceed}
             disabled={isNextButtonDisabled}
             style={{ 
-              padding: '0 var(--xl)', height: '40px', borderRadius: '8px', border: 'none', 
-              background: isNextButtonDisabled ? 'var(--surface-variant)' : 'var(--primary)', 
-              color: isNextButtonDisabled ? 'var(--on-surface-variant)' : 'var(--on-primary)', 
-              fontSize: 'var(--body-md)', fontWeight: 700, cursor: isNextButtonDisabled ? 'not-allowed' : 'pointer', 
-              display: 'flex', alignItems: 'center', gap: 'var(--base)', transition: 'all 0.2s'
+              padding: '0 32px', height: '40px', borderRadius: '8px', border: 'none', 
+              background: isNextButtonDisabled ? '#e5e2e1' : '#1677ff', 
+              color: isNextButtonDisabled ? '#727786' : '#ffffff', 
+              fontSize: '14px', fontWeight: 700, cursor: isNextButtonDisabled ? 'not-allowed' : 'pointer', 
+              display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s'
             }}
           >
             {isFetching ? 'Processing...' : (currentStep === 3 ? 'Run Validation' : 'Proceed to Mapping')}
