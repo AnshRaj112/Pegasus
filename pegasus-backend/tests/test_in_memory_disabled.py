@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-12T11:47:55Z
+# Last edited: 2026-06-15T08:08:54Z
 # --- END GENERATED FILE METADATA ---
 
 """In-memory reconcile is opt-in; default uses streaming spill."""
