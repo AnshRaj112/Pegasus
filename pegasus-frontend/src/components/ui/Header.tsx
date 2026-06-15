@@ -51,7 +51,7 @@ export const Header: React.FC = () => {
             <Link to="/validations" style={currentPath === '/validations' ? activeLinkStyle : linkBaseStyle}>Validations</Link>
             {/* Renamed Link targeting the upcoming Admin Workspace panel */}
             <Link to="/admin" style={currentPath === '/admin' ? activeLinkStyle : linkBaseStyle}>Admin</Link>
-            <Link to="/report" style={currentPath === '/report' ? activeLinkStyle : linkBaseStyle}>Report</Link>
+            <Link to="/history" style={currentPath === '/history' ? activeLinkStyle : linkBaseStyle}>History</Link>
             {/* ❌ Settings Option completely removed from the DOM list */}
           </div>
         </div>
