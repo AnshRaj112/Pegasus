@@ -119,7 +119,6 @@ const TargetMappingField: React.FC<{
       ))}
 
       <div style={{ position: 'relative', marginTop: '6px' }} ref={dropdownRef}>
-        {/* ⚡ Strictly hides the button if NO unmapped columns exist globally */}
         {availableColumns.length > 0 && (
           <button 
             onClick={() => setOpen(!open)}
@@ -135,7 +134,6 @@ const TargetMappingField: React.FC<{
             backgroundColor: '#fff', border: '1px solid #c1c6d7', borderRadius: '4px', 
             boxShadow: '0 4px 12px rgba(0,0,0,0.1)', maxHeight: '200px', overflowY: 'auto', minWidth: '160px'
           }}>
-            {/* ⚡ Only renders strictly unmapped columns */}
             {availableColumns.map(col => (
               <div 
                 key={col} 
@@ -181,9 +179,11 @@ export const ConfigureMappingStep: React.FC = () => {
     matrix: ComplexMappingRow[],
     structuredOrderSensitive = validationForm.structuredOrderSensitive,
   ) => {
-    const activePk = matrix.find(m => m.isPk)?.sourceCol || validationForm.uidColumn;
+    const activePks = matrix.filter(m => m.isPk).map(m => m.sourceCol);
+    const activePkString = activePks.length > 0 ? activePks.join(',') : validationForm.uidColumn;
+    
     dispatch(validationActions.setValidationForm({
-      uidColumn: activePk,
+      uidColumn: activePkString,
       columnMappings: matrixToColumnMappings(matrix, complexColumns, structuredOrderSensitive),
     }));
   };
@@ -208,8 +208,9 @@ export const ConfigureMappingStep: React.FC = () => {
           return;
         }
 
+        const savedUids = validationForm.uidColumn?.split(',') || [];
         const defaultUid = preview.source_columns.includes('column_1') ? 'column_1' : preview.source_columns[0] ?? 'id';
-        const uid = preview.source_columns.includes(validationForm.uidColumn) ? validationForm.uidColumn : defaultUid;
+        const isUidMatch = (col: string) => savedUids.includes(col) || (savedUids.length === 0 && col === defaultUid);
         
         const autoMappings = preview.auto_mappings ?? [];
         const complex = preview.complex_columns ?? [];
@@ -221,7 +222,7 @@ export const ConfigureMappingStep: React.FC = () => {
 
         const mappings: ComplexMappingRow[] = preview.source_columns.map((col) => {
           const auto = autoMappings.find((m) => m.source_column === col);
-          const isUid = col === uid;
+          const isUid = isUidMatch(col);
           const uidTarget = isUid && preview.target_columns.includes(col) ? col : null;
           const targets = auto ? [auto.target_column] : uidTarget ? [uidTarget] : [];
           
@@ -253,8 +254,9 @@ export const ConfigureMappingStep: React.FC = () => {
         setColumnsMatrix(mappings);
         setPage(1);
         
+        const initialPks = mappings.filter(m => m.isPk).map(m => m.sourceCol).join(',');
         dispatch(validationActions.setValidationForm({
-          uidColumn: uid,
+          uidColumn: initialPks || defaultUid,
           delimiter: preview.delimiter,
           hasHeader: preview.has_header ?? validationForm.hasHeader,
           columnMappings: matrixToColumnMappings(mappings, complex, validationForm.structuredOrderSensitive),
@@ -276,16 +278,6 @@ export const ConfigureMappingStep: React.FC = () => {
   }, [validationForm.sourceCloud, validationForm.targetCloud, validationForm.uidColumn, validationForm.delimiter, validationForm.hasHeader, dispatch]);
 
   const toggleProperty = (id: string, prop: keyof ComplexMappingRow) => {
-    if (prop === 'isPk') {
-      const next = columnsMatrix.map(row => ({
-        ...row,
-        isPk: row.id === id ? !row.isPk : false
-      }));
-      setColumnsMatrix(next);
-      syncMappings(next);
-      return;
-    }
-
     const next = columnsMatrix.map(row => row.id === id ? { ...row, [prop]: !row[prop] } : row);
     setColumnsMatrix(next);
     syncMappings(next);
@@ -321,7 +313,6 @@ export const ConfigureMappingStep: React.FC = () => {
     syncMappings(columnsMatrix, structuredOrderSensitive);
   };
 
-  // ⚡ Calculates exactly which target columns are completely unmapped globally
   const globalAvailableTargets = useMemo(() => {
     const usedTargets = new Set<string>();
     columnsMatrix.forEach(row => {
@@ -469,14 +460,15 @@ export const ConfigureMappingStep: React.FC = () => {
                       <span style={{ backgroundColor: '#f0eded', border: '1px solid #c1c6d7', padding: '2px 4px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, color: '#727786' }}>{row.sourceType}</span>
                     </td>
                     <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
-                      <code style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{row.previewValue || '—'}</code>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                        <code style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{row.previewValue || '—'}</code>
+                      </div>
                     </td>
                     <td style={{ padding: '12px 8px', textAlign: 'center', color: '#c1c6d7', verticalAlign: 'top' }}><ArrowRightOutlined /></td>
                     <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
                       {row.isIgnored ? <span style={{ fontStyle: 'italic', color: '#727786' }}>Dropped</span> : (
                         <TargetMappingField 
                           targets={row.targetCols} 
-                          // ⚡ Pass strictly the global unmapped targets here
                           availableColumns={globalAvailableTargets} 
                           onAdd={(col) => addTargetCol(row.id, col)} 
                           onRemove={(idx) => removeTargetCol(row.id, idx)} 
@@ -485,7 +477,7 @@ export const ConfigureMappingStep: React.FC = () => {
                     </td>
                     <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
                       {!row.isIgnored && row.targetCols.length > 0 ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-start' }}>
                           {row.targetCols.map((tc, idx) => (
                             <code key={idx} style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{tc.sample || '—'}</code>
                           ))}
