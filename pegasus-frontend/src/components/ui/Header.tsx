@@ -29,7 +29,10 @@ export const Header: React.FC = () => {
       borderBottom: '1px solid var(--surface-variant)',
       position: 'sticky',
       top: 0,
-      zIndex: 50
+      zIndex: 50,
+      width: '100%',             // ⚡ FIX: Force it to span the full screen
+      boxSizing: 'border-box',   // ⚡ FIX: Keep borders from bleeding
+      flexShrink: 0              // ⚡ FIX: Stop the flexbox BaseLayout from squishing it vertically
     }}>
       <div style={{
         display: 'flex',
@@ -39,7 +42,8 @@ export const Header: React.FC = () => {
         padding: '0 var(--gutter)',
         maxWidth: 'var(--container-max)',
         margin: '0 auto',
-        height: '64px'
+        height: '64px',
+        boxSizing: 'border-box'  // ⚡ FIX: Stop horizontal padding bleed here as well
       }}>
         {/* Branding Title Platform Anchor */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--xl)' }}>

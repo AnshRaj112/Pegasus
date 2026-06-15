@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-10T17:19:02+05:30
+# Last edited: 2026-06-15T08:08:54Z
 # --- END GENERATED FILE METADATA ---
 
 """Benchmark 100M-row / 12-column validation (local fixture)."""
