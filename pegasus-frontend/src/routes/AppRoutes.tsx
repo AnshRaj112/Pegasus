@@ -10,6 +10,8 @@ import { ValidationReport } from '../pages/validation/components/ValidationRepor
 import { MappingSchemaView } from '../pages/history/components/MappingSchemaView';
 import { Login } from '../pages/auth/Login';
 import { ProtectedRoute } from './ProtectedRoute';
+import { SnippetComparison } from '../pages/report/views/SnippetComparison';
+import { ExecutionHistory } from '../pages/report/views/ExecutionHistory';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -24,6 +26,8 @@ export const AppRoutes: React.FC = () => {
               <Route path="/history" element={<HistoryView />} />
               <Route path="/reports" element={<Report />} />
               <Route path="/history/mapping/:runId/schema" element={<MappingSchemaView />} />
+              <Route path="/reports/:mappingId/history" element={<ExecutionHistory />} />
+              <Route path="/reports/:mappingId/history/:runId/snippet" element={<SnippetComparison />} />
               <Route path="/validation/report/:jobId" element={<ValidationReport onBack={() => window.history.back()} />} />
               <Route path="/admin" element={<AdminView />} />
               <Route path="*" element={<div style={{ color: 'var(--on-surface)', padding: 'var(--lg)' }}>404 Error: Section View Not Found</div>} />

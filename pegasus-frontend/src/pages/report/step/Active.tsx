@@ -3,9 +3,12 @@ import { TableOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useAppSelector } from '../../../redux/store';
 // ⚡ FIX: Import the types from your interface file
 import { type ReportItem, type ReportBadge } from '../Report.interface';
+import { useNavigate } from 'react-router-dom'; // ⚡ 1. Add this import
 
 export const Active: React.FC = () => {
   const { activeReports, searchQuery, isLoading } = useAppSelector((s) => s.report);
+  const navigate = useNavigate(); // ⚡ 2. Initialize the navigate function
+  
 
   // ⚡ FIX: Added (r: ReportItem)
   const filtered = activeReports.filter((r: ReportItem) => 
@@ -20,7 +23,7 @@ export const Active: React.FC = () => {
     <>
       {/* ⚡ FIX: Added (report: ReportItem, index: number) */}
       {filtered.map((report: ReportItem, index: number) => (
-        <div key={report.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px 24px', borderBottom: index !== filtered.length - 1 ? '1px solid #f1f5f9' : 'none', backgroundColor: '#fff', transition: 'background-color 0.2s', cursor: 'pointer' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}>
+        <div key={report.id} onClick={() => navigate(`/reports/${report.id}/history`)} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px 24px', borderBottom: index !== filtered.length - 1 ? '1px solid #f1f5f9' : 'none', backgroundColor: '#fff', transition: 'background-color 0.2s', cursor: 'pointer' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}>
           <div style={{ color: '#94a3b8', fontSize: '14px', width: '16px' }}>-</div>
 
           <div style={{ flex: 1, minWidth: '200px' }}>
