@@ -28,7 +28,7 @@ interface ComplexMappingRow {
   id: string;
   sourceCol: string;
   sourceType: string;
-  targetCols: { name: string; type: string }[];
+  targetCols: { name: string; type: string; sample: string }[];
   isPk: boolean;
   isIgnored: boolean;
   isSensitive: boolean;
@@ -83,9 +83,8 @@ const matrixToColumnMappings = (
       return base;
     });
 
-// ⚡ FIX: Clean Target Mapping UI Component with functioning Dropdown
 const TargetMappingField: React.FC<{
-  targets: { name: string; type: string }[];
+  targets: { name: string; type: string; sample: string }[];
   availableColumns: string[];
   onAdd: (colName: string) => void;
   onRemove: (colIndex: number) => void;
@@ -93,7 +92,6 @@ const TargetMappingField: React.FC<{
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     if (!open) return;
     const handleClick = (e: MouseEvent) => {
@@ -103,43 +101,42 @@ const TargetMappingField: React.FC<{
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
-  // Filter out columns that are already selected in this specific row
-  const addable = availableColumns.filter(c => !targets.some(t => t.name === c));
-
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-start' }}>
       {targets.map((tc, idx) => (
-        <span key={idx} style={{ 
-          backgroundColor: '#f0eded', // Clean gray instead of purple
-          border: '1px solid #c1c6d7', 
-          color: '#1b1b1c', 
-          padding: '2px 8px', 
-          borderRadius: '4px', // Standard slight rounding instead of ellipse
-          fontSize: '12px', 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '6px' 
-        }}>
-          {tc.name} 
-          <CloseOutlined onClick={() => onRemove(idx)} style={{ fontSize: '10px', cursor: 'pointer', color: '#727786' }} />
-        </span>
+        <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <span style={{ 
+            backgroundColor: '#f6f3f2', border: '1px solid #c1c6d7', color: '#1b1b1c', 
+            padding: '4px 8px', borderRadius: '4px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' 
+          }}>
+            {tc.name} 
+            <CloseOutlined onClick={() => onRemove(idx)} style={{ fontSize: '10px', cursor: 'pointer', color: '#727786' }} />
+          </span>
+          <span style={{ backgroundColor: '#f0eded', border: '1px solid #c1c6d7', padding: '2px 4px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, color: '#727786', alignSelf: 'flex-start' }}>
+            {tc.type}
+          </span>
+        </div>
       ))}
 
-      <div style={{ position: 'relative' }} ref={dropdownRef}>
-        <button 
-          onClick={() => setOpen(!open)}
-          style={{ background: 'none', border: 'none', color: '#0057c2', fontSize: '12px', fontWeight: 500, cursor: 'pointer', padding: 0 }}
-        >
-          + Add target
-        </button>
+      <div style={{ position: 'relative', marginTop: '6px' }} ref={dropdownRef}>
+        {/* ⚡ Strictly hides the button if NO unmapped columns exist globally */}
+        {availableColumns.length > 0 && (
+          <button 
+            onClick={() => setOpen(!open)}
+            style={{ background: 'none', border: 'none', color: '#0057c2', fontSize: '12px', fontWeight: 500, cursor: 'pointer', padding: 0 }}
+          >
+            + Add target
+          </button>
+        )}
         
-        {open && addable.length > 0 && (
+        {open && availableColumns.length > 0 && (
           <div style={{ 
             position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 50,
             backgroundColor: '#fff', border: '1px solid #c1c6d7', borderRadius: '4px', 
             boxShadow: '0 4px 12px rgba(0,0,0,0.1)', maxHeight: '200px', overflowY: 'auto', minWidth: '160px'
           }}>
-            {addable.map(col => (
+            {/* ⚡ Only renders strictly unmapped columns */}
+            {availableColumns.map(col => (
               <div 
                 key={col} 
                 onClick={() => { onAdd(col); setOpen(false); }}
@@ -167,7 +164,8 @@ export const ConfigureMappingStep: React.FC = () => {
   const [showUnmappedOnly, setShowUnmappedOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [columnsMatrix, setColumnsMatrix] = useState<ComplexMappingRow[]>([]);
-  const [targetColumnsList, setTargetColumnsList] = useState<string[]>([]); // ⚡ Added to track available targets for dropdown
+  const [targetColumnsList, setTargetColumnsList] = useState<string[]>([]); 
+  const [targetSamplesRecord, setTargetSamplesRecord] = useState<Record<string, string>>({});
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [complexColumns, setComplexColumns] = useState<string[]>([]);
   const [needsOrderPreference, setNeedsOrderPreference] = useState(false);
@@ -184,14 +182,9 @@ export const ConfigureMappingStep: React.FC = () => {
     structuredOrderSensitive = validationForm.structuredOrderSensitive,
   ) => {
     const activePk = matrix.find(m => m.isPk)?.sourceCol || validationForm.uidColumn;
-    
     dispatch(validationActions.setValidationForm({
       uidColumn: activePk,
-      columnMappings: matrixToColumnMappings(
-        matrix,
-        complexColumns,
-        structuredOrderSensitive,
-      ),
+      columnMappings: matrixToColumnMappings(matrix, complexColumns, structuredOrderSensitive),
     }));
   };
 
@@ -220,6 +213,11 @@ export const ConfigureMappingStep: React.FC = () => {
         
         const autoMappings = preview.auto_mappings ?? [];
         const complex = preview.complex_columns ?? [];
+        
+        const tSamples: Record<string, string> = {};
+        Object.entries(preview.target_samples ?? {}).forEach(([k, v]) => {
+           tSamples[k] = (v as string[])[0] ?? '';
+        });
 
         const mappings: ComplexMappingRow[] = preview.source_columns.map((col) => {
           const auto = autoMappings.find((m) => m.source_column === col);
@@ -234,7 +232,10 @@ export const ConfigureMappingStep: React.FC = () => {
             id: col,
             sourceCol: col,
             sourceType: inferredType,
-            targetCols: targets.map(t => ({ name: t, type: inferredType })),
+            targetCols: targets.map(t => {
+              const targetSample = tSamples[t] ?? '';
+              return { name: t, type: inferType(targetSample, false), sample: targetSample };
+            }),
             isPk: isUid,
             isIgnored: false,
             isSensitive: false,
@@ -245,6 +246,7 @@ export const ConfigureMappingStep: React.FC = () => {
           };
         });
 
+        setTargetSamplesRecord(tSamples);
         setTargetColumnsList(preview.target_columns || []);
         setComplexColumns(complex);
         setNeedsOrderPreference(Boolean(preview.needs_order_preference ?? complex.length > 0));
@@ -274,6 +276,16 @@ export const ConfigureMappingStep: React.FC = () => {
   }, [validationForm.sourceCloud, validationForm.targetCloud, validationForm.uidColumn, validationForm.delimiter, validationForm.hasHeader, dispatch]);
 
   const toggleProperty = (id: string, prop: keyof ComplexMappingRow) => {
+    if (prop === 'isPk') {
+      const next = columnsMatrix.map(row => ({
+        ...row,
+        isPk: row.id === id ? !row.isPk : false
+      }));
+      setColumnsMatrix(next);
+      syncMappings(next);
+      return;
+    }
+
     const next = columnsMatrix.map(row => row.id === id ? { ...row, [prop]: !row[prop] } : row);
     setColumnsMatrix(next);
     syncMappings(next);
@@ -293,9 +305,10 @@ export const ConfigureMappingStep: React.FC = () => {
   };
 
   const addTargetCol = (rowId: string, targetColName: string) => {
+    const targetSample = targetSamplesRecord[targetColName] ?? '';
     const next = columnsMatrix.map(row => {
       if (row.id === rowId) {
-        return { ...row, targetCols: [...row.targetCols, { name: targetColName, type: row.sourceType }] };
+        return { ...row, targetCols: [...row.targetCols, { name: targetColName, type: inferType(targetSample, false), sample: targetSample }] };
       }
       return row;
     });
@@ -307,6 +320,15 @@ export const ConfigureMappingStep: React.FC = () => {
     dispatch(validationActions.setValidationForm({ structuredOrderSensitive }));
     syncMappings(columnsMatrix, structuredOrderSensitive);
   };
+
+  // ⚡ Calculates exactly which target columns are completely unmapped globally
+  const globalAvailableTargets = useMemo(() => {
+    const usedTargets = new Set<string>();
+    columnsMatrix.forEach(row => {
+      row.targetCols.forEach(tc => usedTargets.add(tc.name));
+    });
+    return targetColumnsList.filter(col => !usedTargets.has(col));
+  }, [columnsMatrix, targetColumnsList]);
 
   const filteredColumns = useMemo(() => {
     let rows = columnsMatrix;
@@ -379,7 +401,6 @@ export const ConfigureMappingStep: React.FC = () => {
           <span style={{ backgroundColor: '#eef2ff', color: '#4f46e5', padding: '6px 12px', borderRadius: '999px', fontSize: '14px', fontWeight: 500 }}>
             {loadingPreview ? 'Loading...' : `Configured (${columnsMatrix.filter(m => m.targetCols.length > 0 && !m.isIgnored).length})`}
           </span>
-          {/* ⚡ Add Column button REMOVED from here */}
         </div>
       </div>
 
@@ -398,7 +419,6 @@ export const ConfigureMappingStep: React.FC = () => {
         </div>
       )}
 
-      {/* Toolbar */}
       <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: '420px' }}>
           <SearchOutlined style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
@@ -417,10 +437,8 @@ export const ConfigureMappingStep: React.FC = () => {
         >
           <FilterOutlined /> Unmapped Only
         </button>
-        {/* ⚡ Auto-Map button REMOVED from here */}
       </div>
 
-      {/* ⚡ FIX: Parent Box scrolling behavior improved. Replaced hard maxHeight with flexGrow and minHeight */}
       <div style={{ backgroundColor: '#fff', border: '1px solid #c1c6d7', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: '300px' }}>
         <div style={{ overflowX: 'auto', overflowY: 'auto', flexGrow: 1 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
@@ -428,47 +446,56 @@ export const ConfigureMappingStep: React.FC = () => {
               <tr>
                 <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755', borderRight: '1px solid #c1c6d7', width: '160px' }}>ACTIONS</th>
                 <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>SOURCE COLUMN</th>
-                <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>SOURCE TYPE</th>
+                <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>SOURCE SAMPLE</th>
                 <th style={{ padding: '12px 8px', fontSize: '12px', fontWeight: 600, color: '#414755', textAlign: 'center', width: '48px' }}></th>
                 <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>TARGET COLUMN</th>
-                <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>TARGET TYPE</th>
+                <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>TARGET SAMPLE</th>
               </tr>
             </thead>
             <tbody>
               {pageRows.map(row => (
                 <React.Fragment key={row.id}>
-                  <tr style={{ borderBottom: '1px solid #e5e2e1', backgroundColor: row.isExpanded ? '#fcf9f8' : row.isIgnored ? '#fcf9f8' : 'transparent', opacity: row.isIgnored ? 0.6 : 1, transition: 'background-color 0.2s' }}>
+                  <tr style={{ borderBottom: '1px solid #e5e2e1', backgroundColor: row.isExpanded ? '#fcf9f8' : row.isIgnored ? '#fcf9f8' : row.isPk ? '#eef2ff' : 'transparent', opacity: row.isIgnored ? 0.6 : 1, transition: 'background-color 0.2s' }}>
                     <td style={{ padding: '12px 16px', borderRight: '1px solid #c1c6d7', verticalAlign: 'top' }}>
                       <div style={{ display: 'flex', gap: '4px' }}>
-                        <button onClick={() => toggleProperty(row.id, 'isPk')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isPk ? 'rgba(0, 87, 194, 0.1)' : 'transparent', color: row.isPk ? '#0057c2' : '#727786', cursor: 'pointer' }} title="Primary Key"><KeyOutlined /></button>
+                        <button onClick={() => toggleProperty(row.id, 'isPk')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isPk ? '#4f46e5' : 'transparent', color: row.isPk ? '#fff' : '#727786', cursor: 'pointer' }} title="Primary Key"><KeyOutlined /></button>
                         <button onClick={() => toggleProperty(row.id, 'isIgnored')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isIgnored ? '#414755' : 'transparent', color: row.isIgnored ? '#fff' : '#727786', cursor: 'pointer' }} title="Ignore"><StopOutlined /></button>
                         <button onClick={() => toggleProperty(row.id, 'isSensitive')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isSensitive ? 'rgba(186, 26, 26, 0.1)' : 'transparent', color: row.isSensitive ? '#ba1a1a' : '#727786', cursor: 'pointer' }} title="Sensitive">{row.isSensitive ? <EyeInvisibleOutlined /> : <EyeOutlined />}</button>
                         <button onClick={() => toggleProperty(row.id, 'isExpanded')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isExpanded ? '#0057c2' : 'transparent', color: row.isExpanded ? '#fff' : '#727786', cursor: 'pointer' }} title="Expression"><CodeOutlined /></button>
                       </div>
                     </td>
-                    <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '13px', textDecoration: row.isIgnored ? 'line-through' : 'none' }}>
-                      {row.sourceCol}
-                      <br/>
-                      <span style={{ fontSize: '10px', color: '#94a3b8' }}>Sample: {row.previewValue}</span>
+                    <td style={{ padding: '12px 16px', verticalAlign: 'top', textDecoration: row.isIgnored ? 'line-through' : 'none' }}>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 500, color: '#1b1b1c', marginBottom: '4px' }}>{row.sourceCol}</div>
+                      <span style={{ backgroundColor: '#f0eded', border: '1px solid #c1c6d7', padding: '2px 4px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, color: '#727786' }}>{row.sourceType}</span>
                     </td>
-                    <td style={{ padding: '12px 16px' }}><span style={{ backgroundColor: '#f0eded', border: '1px solid #c1c6d7', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, color: '#727786' }}>{row.sourceType}</span></td>
-                    <td style={{ padding: '12px 8px', textAlign: 'center', color: '#c1c6d7' }}><ArrowRightOutlined /></td>
-                    <td style={{ padding: '12px 16px' }}>
+                    <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
+                      <code style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{row.previewValue || '—'}</code>
+                    </td>
+                    <td style={{ padding: '12px 8px', textAlign: 'center', color: '#c1c6d7', verticalAlign: 'top' }}><ArrowRightOutlined /></td>
+                    <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
                       {row.isIgnored ? <span style={{ fontStyle: 'italic', color: '#727786' }}>Dropped</span> : (
                         <TargetMappingField 
                           targets={row.targetCols} 
-                          availableColumns={targetColumnsList} 
+                          // ⚡ Pass strictly the global unmapped targets here
+                          availableColumns={globalAvailableTargets} 
                           onAdd={(col) => addTargetCol(row.id, col)} 
                           onRemove={(idx) => removeTargetCol(row.id, idx)} 
                         />
                       )}
                     </td>
-                    <td style={{ padding: '12px 16px' }}>
-                      {!row.isIgnored && row.targetCols.length > 0 && <span style={{ backgroundColor: '#f0eded', border: '1px solid #c1c6d7', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, color: '#727786' }}>{row.targetCols[0]?.type}</span>}
+                    <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
+                      {!row.isIgnored && row.targetCols.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {row.targetCols.map((tc, idx) => (
+                            <code key={idx} style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{tc.sample || '—'}</code>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ color: '#c1c6d7' }}>—</span>
+                      )}
                     </td>
                   </tr>
                   
-                  {/* EXPANDED PANEL */}
                   {row.isExpanded && !row.isIgnored && (
                     <tr style={{ backgroundColor: '#fcf9f8', borderBottom: '1px solid #c1c6d7' }}>
                       <td colSpan={6} style={{ padding: '16px 24px 24px 176px' }}>
@@ -477,7 +504,6 @@ export const ConfigureMappingStep: React.FC = () => {
                             <div style={{ display: 'flex', borderBottom: '1px solid #c1c6d7', gap: '16px' }}>
                               <span style={{ borderBottom: '2px solid #0057c2', color: '#0057c2', paddingBottom: '4px', fontSize: '12px', fontWeight: 600 }}>Source Expression</span>
                             </div>
-                            {/* ⚡ Textareas can now be vertically resized by the user */}
                             <textarea style={{ width: '100%', minHeight: '80px', border: '1px solid #c1c6d7', borderRadius: '8px', padding: '8px', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: '12px', resize: 'vertical' }} placeholder="e.g. CAST(src.value AS STRING)" defaultValue={row.sourceExpr} />
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
