@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { useAppDispatch } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { Api, type CloudBrowseEntry, type CloudConnection } from '../../../shared/api/Api';
@@ -225,7 +226,12 @@ export const FileSelectionStep: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', fontWeight: 600, fontSize: '14px' }}>
             <CloudOutlined /> GCS Connections
           </div>
-          {connectionsError && <p style={{ fontSize: '12px', color: '#ba1a1a', padding: '0 12px' }}>{connectionsError}</p>}
+          {connectionsError && (
+            <p style={{ fontSize: '12px', color: '#ba1a1a', padding: '0 12px' }}>
+              {connectionsError}{' '}
+              <Link to="/admin" style={{ color: '#1677ff' }}>Sign in as admin</Link>
+            </p>
+          )}
           {connections.map((conn) => (
             <div
               key={conn.id}
