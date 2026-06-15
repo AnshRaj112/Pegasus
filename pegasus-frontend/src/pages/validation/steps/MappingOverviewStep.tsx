@@ -17,6 +17,36 @@ const formatBytes = (bytes: number | null) => {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 };
 
+const getFriendlyFormatLabel = (format: string | null | undefined): string => {
+  if (!format || format === '—' || format === '…') return format ?? '—';
+  const fmt = format.toLowerCase().trim();
+  if (fmt === 'empty file') return 'Empty File';
+  if (['csv', 'tsv', 'psv', 'tsc'].includes(fmt) || fmt.includes('delimited')) {
+    return 'Delimited File';
+  }
+  if (['fixed-width', 'fixed_width', 'fixed', 'fixedwidth'].includes(fmt)) {
+    return 'Fixed Width';
+  }
+  if (fmt === 'zip') {
+    return 'Zip';
+  }
+  if (fmt === 'tar') {
+    return 'Tar';
+  }
+  if (fmt === 'json') {
+    return 'JSON';
+  }
+  if (['archive', '7z', 'rar', 'container', 'decompress_first', 'gzip', 'bzip2', 'xz', 'zstd', 'lz4'].includes(fmt)) {
+    return 'Archive';
+  }
+  if (fmt === 'parquet') return 'Parquet';
+  if (fmt === 'orc') return 'ORC';
+  if (fmt === 'avro') return 'Avro';
+  if (fmt === 'excel') return 'Excel';
+  // Capitalize first letter of any other format as a fallback
+  return fmt.charAt(0).toUpperCase() + fmt.slice(1);
+};
+
 const formatCount = (value: number | null | undefined, loading: boolean) => {
   if (loading) return '…';
   if (value == null) return '—';
@@ -100,7 +130,7 @@ export const MappingOverviewStep: React.FC = () => {
       ? '…'
       : sourceProfile.error
         ? '—'
-        : (form.sourceFileSize === 0 ? 'empty file' : sourceProfile.profile?.file_format ?? '—'),
+        : getFriendlyFormatLabel(form.sourceFileSize === 0 ? 'empty file' : sourceProfile.profile?.file_format ?? '—'),
     sizeBytes: sourceProfile.profile?.file_size_bytes ?? form.sourceFileSize,
     columnCount: form.sourceFileSize === 0 ? 0 : sourceProfile.profile?.column_count ?? null,
     rowCount: form.sourceFileSize === 0 ? 0 : sourceProfile.profile?.row_count ?? null,
@@ -114,7 +144,7 @@ export const MappingOverviewStep: React.FC = () => {
       ? '…'
       : targetProfile.error
         ? '—'
-        : targetProfile.profile?.file_format ?? '—',
+        : getFriendlyFormatLabel(targetProfile.profile?.file_format ?? '—'),
     sizeBytes: targetProfile.profile?.file_size_bytes ?? form.targetFileSize,
     columnCount: targetProfile.profile?.column_count ?? null,
     rowCount: targetProfile.profile?.row_count ?? null,

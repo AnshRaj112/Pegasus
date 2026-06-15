@@ -3,7 +3,7 @@ import { Routes, Route } from 'react-router-dom';
 import { BaseLayout } from '../layouts/BaseLayout';
 import { Dashboard } from '../pages/dashboard/Dashboard';
 import { ValidationWizardView } from '../pages/validation/ValidationWizardView';
-import { HistoryView } from '../pages/report/HistoryView';
+import { HistoryView } from '../pages/history/HistoryView';
 import { AdminView } from '../pages/admin/AdminView';
 import { ValidationReport } from '../pages/validation/components/ValidationReport';
 import { Login } from '../pages/auth/Login';
@@ -21,7 +21,7 @@ export const AppRoutes: React.FC = () => {
               <Route path="/validations" element={<ValidationWizardView />} />
               <Route path="/history" element={<HistoryView />} />
               <Route path="/validation/report/:jobId" element={<ValidationReport onBack={() => window.history.back()} />} />
-              <Route path="/admin" element={<AdminView />} />              
+              <Route path="/admin" element={<AdminView />} />
               <Route path="*" element={<div style={{ color: 'var(--on-surface)', padding: 'var(--lg)' }}>404 Error: Section View Not Found</div>} />
             </Routes>
           </BaseLayout>
