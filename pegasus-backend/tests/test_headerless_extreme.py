@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-12T11:47:55Z
+# --- END GENERATED FILE METADATA ---
+
 """Headerless CSV handling and partition reconcile imports."""
 
 from __future__ import annotations

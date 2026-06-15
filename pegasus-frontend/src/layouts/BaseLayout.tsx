@@ -12,9 +12,10 @@ export const BaseLayout: React.FC<BaseLayoutProps> = ({ children }) => {
       color: 'var(--on-background)',
       fontFamily: 'var(--font-body-md)',
       fontSize: 'var(--body-md)',
-      minHeight: '100vh',
+      minHeight: '100%',
       display: 'flex',
-      flexDirection: 'column'
+      flexDirection: 'column',
+      overflowX: 'hidden' // ⚡ FIX: Safety catch to ensure no rogue children cause scrolling
     }}>
       {/* Dynamic persistent header layer */}
       <Header />
@@ -28,7 +29,8 @@ export const BaseLayout: React.FC<BaseLayoutProps> = ({ children }) => {
         margin: '0 auto',
         display: 'flex',
         flexDirection: 'column',
-        gap: 'var(--lg)'
+        gap: 'var(--lg)',
+        boxSizing: 'border-box' // ⚡ FIX: Forces padding to stay inside the 100% width
       }}>
         {children}
       </main>
@@ -43,7 +45,8 @@ export const BaseLayout: React.FC<BaseLayoutProps> = ({ children }) => {
           width: '100%',
           padding: 'var(--md) var(--gutter)',
           maxWidth: 'var(--container-max)',
-          margin: '0 auto'
+          margin: '0 auto',
+          boxSizing: 'border-box' // ⚡ FIX: Forces padding to stay inside the 100% width
         }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--xs)' }}>
             <span style={{ fontFamily: 'var(--font-h3)', fontSize: 'var(--h3)', color: 'var(--on-surface)' }}>Pegasus</span>

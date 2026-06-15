@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-12T11:47:55Z
+# --- END GENERATED FILE METADATA ---
+
 """In-memory reconciliation must export every mismatch row, not just capped samples."""
 
 from __future__ import annotations
