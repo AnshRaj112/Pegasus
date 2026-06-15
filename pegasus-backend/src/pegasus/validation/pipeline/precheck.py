@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T12:51:39+05:30
+# Last edited: 2026-06-12T11:47:55Z
 # --- END GENERATED FILE METADATA ---
 
 """Fast prechecks before full reconciliation (metadata, content digest, partition hashes)."""
