@@ -63,6 +63,10 @@ def resolve_field_mapping(m: ColumnMapping, *, scanned_complex: set[str]) -> Fie
     )
 
 
+def uid_column_names(uid_column: str) -> set[str]:
+    return {c.strip() for c in uid_column.split(",") if c.strip()}
+
+
 def resolve_field_mappings(
     mappings: list[ColumnMapping] | None,
     *,
@@ -71,12 +75,12 @@ def resolve_field_mappings(
     uid_column: str = "",
 ) -> list[FieldMapping]:
     """Build ordered logical fields from explicit mappings or schema column names."""
-    uid = uid_column.strip()
+    uid_cols = uid_column_names(uid_column)
     if mappings:
         fields: list[FieldMapping] = []
         for m in mappings:
             fm = resolve_field_mapping(m, scanned_complex=scanned_complex)
-            if fm is None or fm.key == uid:
+            if fm is None or fm.key in uid_cols:
                 continue
             fields.append(fm)
         return fields
@@ -86,7 +90,7 @@ def resolve_field_mappings(
     return [
         FieldMapping(key=col, source_columns=(col,), target_columns=(col,))
         for col in schema_names
-        if col != uid
+        if col not in uid_cols
     ]
 
 

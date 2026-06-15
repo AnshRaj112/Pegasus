@@ -51,6 +51,11 @@ def _identity_parts(record: dict[str, Any], columns: list[str]) -> list[str]:
     return [canonical(record.get(c)) for c in columns]
 
 
+def parse_identity_columns(uid_column: str) -> list[str]:
+    """Split comma-separated UID column names (e.g. ``region,id``)."""
+    return [c.strip() for c in uid_column.split(",") if c.strip()]
+
+
 def identity_key(record: dict[str, Any], columns: list[str]) -> str:
     return identity_key_from_parts(_identity_parts(record, columns))
 

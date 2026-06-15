@@ -22,7 +22,7 @@ from pegasus.validation.csv_header import infer_csv_has_header, infer_has_header
 _COMPLEX_TYPES = (list, dict, tuple)
 from pegasus.validation.delimited_sample import read_delimited_sample_frame
 from pegasus.validation.delimiter_resolve import resolve_delimiter_for_paths
-from pegasus.validation.file_format import infer_file_format_from_path, is_columnar_format, normalize_file_format
+from pegasus.validation.pipeline.fingerprint import parse_identity_columns
 
 _MAPPING_PREVIEW_SAMPLE_ROWS = 6
 
@@ -148,7 +148,7 @@ def build_column_preview_from_adapters(
     file_format: str = "csv",
 ) -> dict[str, Any]:
     """Return headers and sample values using streaming adapters (local or GCS)."""
-    uid = uid_column.strip()
+    uid_cols = set(parse_identity_columns(uid_column))
     sample_rows = _MAPPING_PREVIEW_SAMPLE_ROWS
     source_columns = source.get_schema().column_names
     target_columns = target.get_schema().column_names
@@ -156,8 +156,8 @@ def build_column_preview_from_adapters(
     source_frame = _sample_delimited_frame(source, sample_rows=sample_rows)
     target_frame = _sample_delimited_frame(target, sample_rows=sample_rows)
 
-    compare_columns = [c for c in source_columns if c != uid]
-    compare_targets = [c for c in target_columns if c != uid]
+    compare_columns = [c for c in source_columns if c not in uid_cols]
+    compare_targets = [c for c in target_columns if c not in uid_cols]
     auto_mappings = auto_map_columns(compare_columns, compare_targets)
     matched_sources = {m["source_column"] for m in auto_mappings}
     matched_targets = {m["target_column"] for m in auto_mappings}
@@ -197,7 +197,7 @@ def build_column_preview(
     file_format: str | None = None,
 ) -> dict[str, Any]:
     """Return source/target headers, auto mappings, and sample values for the UI."""
-    uid = uid_column.strip()
+    uid_cols = set(parse_identity_columns(uid_column))
     src_fmt = infer_file_format_from_path(source_path, file_format)
     tgt_fmt = infer_file_format_from_path(target_path, file_format)
     if src_fmt != tgt_fmt:
@@ -252,8 +252,8 @@ def build_column_preview(
             header_leading_rows=header_leading_rows,
         )
 
-    compare_columns = [c for c in source_columns if c != uid]
-    compare_targets = [c for c in target_columns if c != uid]
+    compare_columns = [c for c in source_columns if c not in uid_cols]
+    compare_targets = [c for c in target_columns if c not in uid_cols]
     auto_mappings = auto_map_columns(compare_columns, compare_targets)
     matched_sources = {m["source_column"] for m in auto_mappings}
     matched_targets = {m["target_column"] for m in auto_mappings}

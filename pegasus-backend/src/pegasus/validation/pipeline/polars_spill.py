@@ -48,14 +48,14 @@ def _plain_canonical_expr(column: str) -> pl.Expr:
     )
 
 
-def _canonical_expr(column: str) -> pl.Expr:
+def _canonical_expr(column: str, *, side: str = "source") -> pl.Expr:
     from pegasus.validation.comparators.policy import active_compare_policy
 
     pol = active_compare_policy()
     rule = pol.rule_for(column) if pol is not None else None
-    if pol is not None and rule is not None and (rule.mode != "text" or rule.complex):
+    if pol is not None and rule is not None and pol._rule_needs_policy_canonical(rule, side=side):  # noqa: SLF001
         mapped = pl.col(column).map_elements(
-            lambda v, c=column: pol.canonical(c, v),
+            lambda v, c=column, s=side: pol.canonical(c, v, side=s),
             return_dtype=pl.Utf8,
             skip_nulls=False,
         )
@@ -76,14 +76,14 @@ def _fingerprint_expr(columns: list[str]) -> pl.Expr:
     return joined.hash(seed=0, seed_1=1, seed_2=2, seed_3=3).alias("_fp_hash")
 
 
-def _canonical_expr_for_key(logical_key: str, physical_col: str) -> pl.Expr:
+def _canonical_expr_for_key(logical_key: str, physical_col: str, *, side: str = "source") -> pl.Expr:
     from pegasus.validation.comparators.policy import active_compare_policy
 
     pol = active_compare_policy()
     rule = pol.rule_for(logical_key) if pol is not None else None
-    if pol is not None and rule is not None and (rule.mode != "text" or rule.complex):
+    if pol is not None and rule is not None and pol._rule_needs_policy_canonical(rule, side=side):  # noqa: SLF001
         mapped = pl.col(physical_col).map_elements(
-            lambda v, k=logical_key: pol.canonical(k, v),
+            lambda v, k=logical_key, s=side: pol.canonical(k, v, side=s),
             return_dtype=pl.Utf8,
             skip_nulls=False,
         )
@@ -102,15 +102,15 @@ def _logical_canonical_expr(logical_key: str, side: str) -> pl.Expr:
 
     pol = active_compare_policy()
     if pol is None:
-        return _canonical_expr(logical_key)
+        return _canonical_expr(logical_key, side=side)
     fm = pol.field_for(logical_key)
     if fm is None:
-        return _canonical_expr(logical_key)
+        return _canonical_expr(logical_key, side=side)
     physical = fm.source_columns if side == "source" else fm.target_columns
     if len(physical) == 1:
-        return _canonical_expr_for_key(logical_key, physical[0])
+        return _canonical_expr_for_key(logical_key, physical[0], side=side)
     if side == "source":
-        parts = [_canonical_expr_for_key(logical_key, c).fill_null("__NULL__") for c in physical]
+        parts = [_canonical_expr_for_key(logical_key, c, side=side).fill_null("__NULL__") for c in physical]
         return pl.concat_str(parts, separator=" ")
     cols = list(physical)
 
@@ -119,7 +119,7 @@ def _logical_canonical_expr(logical_key: str, side: str) -> pl.Expr:
         if active is None:
             parts = [str(row.get(c) or "") for c in cols]
         else:
-            parts = [active.canonical(logical_key, row.get(c)) for c in cols]
+            parts = [active.canonical(logical_key, row.get(c), side=side) for c in cols]
         return target_canonical_from_parts(parts)
 
     return pl.struct([pl.col(c) for c in cols]).map_elements(

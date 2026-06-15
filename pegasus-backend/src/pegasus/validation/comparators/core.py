@@ -30,6 +30,40 @@ _DF = (
 )
 _N = frozenset({"", "null", "none", "na", "n/a"})
 _DIGITS = re.compile(r"\D+")
+_SQL_REGEXP_REPLACE = re.compile(
+    r"REGEXP_REPLACE\s*\([^,]+,\s*'((?:\\'|[^'])*)'\s*,\s*'((?:\\'|[^'])*)'",
+    re.IGNORECASE,
+)
+
+
+def resolve_regex_transform(pattern: str | None, replacement: str = "") -> tuple[str, str] | None:
+    """Return (pattern, replacement) from a plain regex or SQL REGEXP_REPLACE expression."""
+    if not pattern or not pattern.strip():
+        return None
+    text = pattern.strip()
+    match = _SQL_REGEXP_REPLACE.search(text)
+    if match:
+        return match.group(1), match.group(2)
+    return text, replacement
+
+
+def apply_value_transform(
+    value: Any,
+    *,
+    pattern: str | None = None,
+    replacement: str = "",
+    strip_prefix: str | None = None,
+) -> Any:
+    if value is None:
+        return value
+    text = str(value)
+    if strip_prefix and text.startswith(strip_prefix):
+        text = text[len(strip_prefix) :]
+    resolved = resolve_regex_transform(pattern, replacement)
+    if resolved:
+        pat, repl = resolved
+        text = re.sub(pat, repl, text)
+    return text
 
 
 def _idx(header: Sequence[str] | None, col: Any) -> int:
