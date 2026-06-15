@@ -21,13 +21,18 @@ export interface MappingLogItem {
 export interface HistoryReducerState {
   activeTab: 'validation' | 'mapping';
   searchQuery: string;
+  pageSize: number;
   validationLogs: {
     data: ValidationLogItem[];
+    total: number;
+    page: number;
     isFetching: boolean;
     error: string | null;
   };
   mappingLogs: {
     data: MappingLogItem[];
+    total: number;
+    page: number;
     isFetching: boolean;
     error: string | null;
   };

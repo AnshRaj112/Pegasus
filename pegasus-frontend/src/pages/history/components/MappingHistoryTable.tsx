@@ -1,9 +1,11 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../../../redux/store';
 import { historyActions } from '../History.reducer';
 import styles from '../History.module.scss';
 
 export const MappingHistoryTable: React.FC = () => {
+  const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { data: logs } = useAppSelector((state) => state.history.mappingLogs);
   const searchQuery = useAppSelector((state) => state.history.searchQuery);
@@ -31,7 +33,13 @@ export const MappingHistoryTable: React.FC = () => {
           </tr>
         </thead>
         <tbody>
-          {filteredLogs.map(row => (
+          {filteredLogs.length === 0 ? (
+            <tr>
+              <td colSpan={4} style={{ textAlign: 'center', padding: '32px', color: '#727786' }}>
+                No mapping history records found.
+              </td>
+            </tr>
+          ) : filteredLogs.map(row => (
             <tr key={row.id} className={styles.antTableRow}>
               <td>
                 <div className={styles.rowDetailsGroup} style={{ gap: '4px' }}>
@@ -50,7 +58,11 @@ export const MappingHistoryTable: React.FC = () => {
               </td>
               <td style={{ textAlign: 'right' }}>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px' }}>
-                  <button type="button" style={{ color: '#0057c2', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 500 }}>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/history/mapping/${row.id}/schema`)}
+                    style={{ color: '#0057c2', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 500 }}
+                  >
                     View Schema
                   </button>
                   <button 

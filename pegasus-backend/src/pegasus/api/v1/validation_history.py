@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-10T11:49:33Z
+# Last edited: 2026-06-15T14:09:24+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Persisted validation history (mappings, reports, durations)."""
@@ -53,6 +53,17 @@ from pegasus.schemas.validation_history import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["validation-history"])
+
+_VALIDATION_HISTORY_STATUSES = [
+    ValidationRunStatus.COMPLETED,
+    ValidationRunStatus.FAILED,
+]
+_MAPPING_HISTORY_STATUSES = [
+    ValidationRunStatus.PENDING,
+    ValidationRunStatus.RUNNING,
+    ValidationRunStatus.COMPLETED,
+    ValidationRunStatus.FAILED,
+]
 
 
 async def _list_entity_definitions(session) -> list[EntityDefinition]:
@@ -158,6 +169,10 @@ async def list_validation_history(
     offset: Annotated[int, Query(ge=0)] = 0,
     source_path: Annotated[str | None, Query(description="Filter to runs for this source file path")] = None,
     target_path: Annotated[str | None, Query(description="Filter to runs for this target file path")] = None,
+    kind: Annotated[
+        str | None,
+        Query(description="validation = completed/failed runs; mapping = saved/active mappings"),
+    ] = None,
 ) -> ValidationHistoryListResponse:
     _require_persistence(settings)
     pair_key = None
@@ -166,14 +181,27 @@ async def list_validation_history(
         if pair_key is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid source_path or target_path")
 
+    statuses = None
+    if kind == "validation":
+        statuses = _VALIDATION_HISTORY_STATUSES
+    elif kind == "mapping":
+        statuses = _MAPPING_HISTORY_STATUSES
+    elif kind is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="kind must be 'validation' or 'mapping'")
+
     try:
         async with AsyncSessionLocal() as session:
-            total = await ValidationRunRepository.count_runs(session, file_pair_key=pair_key)
+            total = await ValidationRunRepository.count_runs(
+                session,
+                file_pair_key=pair_key,
+                statuses=statuses,
+            )
             runs = await ValidationRunRepository.list_recent(
                 session,
                 limit=limit,
                 offset=offset,
                 file_pair_key=pair_key,
+                statuses=statuses,
             )
     except Exception as exc:
         logger.exception("Failed to list validation history: %s", exc)

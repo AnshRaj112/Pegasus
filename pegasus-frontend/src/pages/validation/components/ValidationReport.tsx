@@ -62,6 +62,13 @@ const TAB_TO_TYPE: Record<ActiveSectionTab, string> = {
   extra: 'extra_in_target',
 };
 
+const pickInitialTab = (counts: ValidateResult['mismatch_counts']): ActiveSectionTab => {
+  if (counts.value_mismatch > 0) return 'mismatches';
+  if (counts.missing_in_target > 0) return 'missing';
+  if (counts.extra_in_target > 0) return 'extra';
+  return 'mismatches';
+};
+
 type RowDetail = {
   source_record?: Record<string, unknown> | null;
   target_record?: Record<string, unknown> | null;
@@ -330,6 +337,7 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
         missing: counts.missing_in_target,
         extra: counts.extra_in_target,
       });
+      setActiveTab(pickInitialTab(counts));
       setReportMeta(meta);
       setResolvedRunId(runId);
       const cols = result.compared_columns ?? meta.comparedColumns ?? [];
@@ -381,6 +389,18 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
             }
           } catch {
             // Job may have expired from disk; fall back to history via run id.
+          }
+
+          if (!result) {
+            try {
+              const { data: history } = await Api.getValidationHistoryRun(jobId);
+              if (cancelled) return;
+              result = historyToResult(history);
+              meta = metaFromHistory(history);
+              runId = history.run_id;
+            } catch {
+              // Not a valid job id or run id.
+            }
           }
         }
 
@@ -435,7 +455,9 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
 
   const currentTabTotalRows = tabTotals[activeTab];
   const wantsServerPage = Boolean(
-    resolvedRunId && currentTabTotalRows > embeddedCounts[activeTab],
+    resolvedRunId
+    && currentTabTotalRows > 0
+    && (serverPageActive || currentTabTotalRows > embeddedCounts[activeTab]),
   );
 
   useEffect(() => {

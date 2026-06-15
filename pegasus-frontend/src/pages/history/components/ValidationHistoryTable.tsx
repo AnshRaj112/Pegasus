@@ -51,7 +51,13 @@ export const ValidationHistoryTable: React.FC = () => {
           </tr>
         </thead>
         <tbody>
-          {filteredLogs.map(row => (
+          {filteredLogs.length === 0 ? (
+            <tr>
+              <td colSpan={6} style={{ textAlign: 'center', padding: '32px', color: '#727786' }}>
+                No validation history records found.
+              </td>
+            </tr>
+          ) : filteredLogs.map(row => (
             <tr key={row.id} className={styles.antTableRow}>
               <td>
                 <div className={styles.rowDetailsGroup} style={{ gap: '4px' }}>

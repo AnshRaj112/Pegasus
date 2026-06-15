@@ -1,27 +1,24 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { type HistoryReducerState } from './History.interface';
+import { type HistoryReducerState, type ValidationLogItem, type MappingLogItem } from './History.interface';
 
 export const initialState: HistoryReducerState = {
   activeTab: 'validation',
   searchQuery: '',
+  pageSize: 10,
   validationLogs: {
-    data: [
-      { id: 'v1', sourceFile: 'production_sales_v2.parquet', sourceUri: 's3://data-warehouse/raw/2024/05/22/sales/sales_v2.parquet', targetTable: 'dim_sales_fact', targetUri: 'snowflake://PROD_DB/TRANSFORMED/PUBLIC/DIM_SALES_FACT', rowCount: '42,109,221 rows', duration: '2m 14s', status: 'Success' },
-      { id: 'v2', sourceFile: 'customer_master_full.csv', sourceUri: 'gs://internal-audit/temp/customers_20240520.csv', targetTable: 'CRM_CORE_STAGING', targetUri: 'postgres://prod-cluster:5432/crm/staging/customer_master', rowCount: '1,244,000 rows', duration: '48s', status: 'Fail' },
-      { id: 'v3', sourceFile: 'inventory_snapshot.avro', sourceUri: 's3://supply-chain/snapshots/inventory_0521.avro', targetTable: 'STG_INVENTORY', targetUri: 'redshift://analytics-dw/sc_stg/inventory_records', rowCount: '850,200 rows', duration: '1m 05s', status: 'Pass' }
-    ],
+    data: [],
+    total: 0,
+    page: 1,
     isFetching: false,
-    error: null
+    error: null,
   },
   mappingLogs: {
-    data: [
-      { id: 'm1', sourceSchema: 'Legacy_Orders_Schema', sourcePath: 'mysql://legacy-orders/schema_v1_2', targetSchema: 'Modern_Unified_Orders', targetPath: 'snowflake://UNIFIED/SCHEMAS/ORDERS_CORE', status: 'Active' },
-      { id: 'm2', sourceSchema: 'External_API_Payload_v4', sourcePath: 'json://api-gateway/docs/v4/users.json', targetSchema: 'USER_PROFILE_TRANSFORM', targetPath: 'bigquery://prod-data/identity/users_v4', status: 'Draft' },
-      { id: 'm3', sourceSchema: 'Deprecated_Customer_Feed', sourcePath: 'ftp://legacy-reports/customer_v1.csv', targetSchema: 'ARCHIVED_CUSTOMERS', targetPath: 's3://archive-storage/2023/customers/', status: 'Archived' }
-    ],
+    data: [],
+    total: 0,
+    page: 1,
     isFetching: false,
-    error: null
-  }
+    error: null,
+  },
 };
 
 const historySlice = createSlice({
@@ -30,23 +27,72 @@ const historySlice = createSlice({
   reducers: {
     setActiveTab: (state, action: PayloadAction<'validation' | 'mapping'>) => {
       state.activeTab = action.payload;
-      state.searchQuery = ''; // Reset search when switching tabs
+      state.searchQuery = '';
+      if (action.payload === 'validation') {
+        state.validationLogs.page = 1;
+      } else {
+        state.mappingLogs.page = 1;
+      }
     },
     setSearchQuery: (state, action: PayloadAction<string>) => {
       state.searchQuery = action.payload;
     },
+    setPage: (state, action: PayloadAction<{ tab: 'validation' | 'mapping'; page: number }>) => {
+      if (action.payload.tab === 'validation') {
+        state.validationLogs.page = action.payload.page;
+      } else {
+        state.mappingLogs.page = action.payload.page;
+      }
+    },
+    fetchHistoryRequest: (state, action: PayloadAction<{ tab?: 'validation' | 'mapping' } | undefined>) => {
+      const tab = action.payload?.tab ?? state.activeTab;
+      if (tab === 'validation') {
+        state.validationLogs.isFetching = true;
+        state.validationLogs.error = null;
+      } else {
+        state.mappingLogs.isFetching = true;
+        state.mappingLogs.error = null;
+      }
+    },
+    fetchValidationLogsSuccess: (
+      state,
+      action: PayloadAction<{ items: ValidationLogItem[]; total: number }>,
+    ) => {
+      state.validationLogs.data = action.payload.items;
+      state.validationLogs.total = action.payload.total;
+      state.validationLogs.isFetching = false;
+      state.validationLogs.error = null;
+    },
+    fetchMappingLogsSuccess: (
+      state,
+      action: PayloadAction<{ items: MappingLogItem[]; total: number }>,
+    ) => {
+      state.mappingLogs.data = action.payload.items;
+      state.mappingLogs.total = action.payload.total;
+      state.mappingLogs.isFetching = false;
+      state.mappingLogs.error = null;
+    },
+    fetchHistoryFailure: (
+      state,
+      action: PayloadAction<{ tab: 'validation' | 'mapping'; error: string }>,
+    ) => {
+      if (action.payload.tab === 'validation') {
+        state.validationLogs.isFetching = false;
+        state.validationLogs.error = action.payload.error;
+      } else {
+        state.mappingLogs.isFetching = false;
+        state.mappingLogs.error = action.payload.error;
+      }
+    },
     deleteValidationLog: (state, action: PayloadAction<string>) => {
-      state.validationLogs.data = state.validationLogs.data.filter(log => log.id !== action.payload);
+      state.validationLogs.data = state.validationLogs.data.filter((log) => log.id !== action.payload);
+      state.validationLogs.total = Math.max(0, state.validationLogs.total - 1);
     },
     deleteMappingLog: (state, action: PayloadAction<string>) => {
-      state.mappingLogs.data = state.mappingLogs.data.filter(log => log.id !== action.payload);
+      state.mappingLogs.data = state.mappingLogs.data.filter((log) => log.id !== action.payload);
+      state.mappingLogs.total = Math.max(0, state.mappingLogs.total - 1);
     },
-    // Future-proofing fetch actions
-    fetchHistoryRequest: (state) => {
-      state.validationLogs.isFetching = true;
-      state.mappingLogs.isFetching = true;
-    }
-  }
+  },
 });
 
 export const historyActions = { ...historySlice.actions };
