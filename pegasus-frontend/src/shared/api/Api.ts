@@ -186,7 +186,7 @@ export interface ValidationMismatchesResponse {
   limit: number;
 }
 
-export interface ValidationHistoryDetail {
+export interface ValidationHistorySummary {
   run_id: string;
   status: string;
   source_path: string | null;
@@ -197,11 +197,23 @@ export interface ValidationHistoryDetail {
   delimiter: string;
   is_match: boolean | null;
   mismatch_counts: MismatchCounts;
+  mapping_count: number;
+  durations?: { upload_seconds?: number; validation_seconds?: number; total_seconds?: number };
+  created_at: string;
+  completed_at?: string | null;
+}
+
+export interface ValidationHistoryDetail extends ValidationHistorySummary {
+  column_mappings?: ColumnMapping[];
   source_row_count: number | null;
   target_row_count: number | null;
   compared_column_count: number | null;
   compared_columns: string[];
-  durations?: { validation_seconds?: number; total_seconds?: number };
+}
+
+export interface ValidationHistoryListResponse {
+  items: ValidationHistorySummary[];
+  total: number;
 }
 
 export interface QueueJobSnapshot {
@@ -272,6 +284,7 @@ const E = {
   validateEntityInsights: '/validate/history/entities/insights',
   validateCreateEntity: '/validate/history/entities',
   validateHistoryDraft: '/validate/history/draft',
+  validateHistory: '/validate/history',
   validateHistoryRun: (runId: string) => `/validate/history/${runId}`,
   validateHistoryMismatches: (runId: string) => `/validate/history/${runId}/mismatches`,
 } as const;
@@ -354,6 +367,18 @@ export const Api = {
       }
     }
   },
+
+  /** GET /validate/history — paginated validation or mapping history */
+  listValidationHistory: (params: {
+    limit?: number;
+    offset?: number;
+    kind?: 'validation' | 'mapping';
+  } = {}): Promise<AxiosResponse<ValidationHistoryListResponse>> =>
+    httpClient.get(E.validateHistory, { params }),
+
+  /** DELETE /validate/history/{run_id} — remove one persisted run */
+  deleteValidationHistoryRun: (runId: string): Promise<AxiosResponse<void>> =>
+    httpClient.delete(E.validateHistoryRun(runId)),
 
   /** GET /validate/history/{run_id} — persisted run summary (fallback when job poll expires) */
   getValidationHistoryRun: (runId: string): Promise<AxiosResponse<ValidationHistoryDetail>> =>

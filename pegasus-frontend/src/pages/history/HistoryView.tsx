@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { SearchOutlined, FilterOutlined, BarChartOutlined, NodeIndexOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { useAppSelector, useAppDispatch } from '../../redux/store';
 import { historyActions } from './History.reducer';
@@ -7,10 +7,40 @@ import { ValidationHistoryTable } from './components/ValidationHistoryTable';
 import { MappingHistoryTable } from './components/MappingHistoryTable';
 import styles from './History.module.scss';
 
+const buildPageNumbers = (current: number, totalPages: number): (number | 'ellipsis')[] => {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+  const pages: (number | 'ellipsis')[] = [1];
+  if (current > 3) pages.push('ellipsis');
+  const start = Math.max(2, current - 1);
+  const end = Math.min(totalPages - 1, current + 1);
+  for (let p = start; p <= end; p += 1) pages.push(p);
+  if (current < totalPages - 2) pages.push('ellipsis');
+  pages.push(totalPages);
+  return pages;
+};
+
 export const HistoryView: React.FC = () => {
   const dispatch = useAppDispatch();
   const activeTab = useAppSelector((state) => state.history.activeTab);
   const searchQuery = useAppSelector((state) => state.history.searchQuery);
+  const pageSize = useAppSelector((state) => state.history.pageSize);
+  const validationLogs = useAppSelector((state) => state.history.validationLogs);
+  const mappingLogs = useAppSelector((state) => state.history.mappingLogs);
+
+  const activeLogs = activeTab === 'validation' ? validationLogs : mappingLogs;
+  const totalPages = Math.max(1, Math.ceil(activeLogs.total / pageSize));
+  const pageNumbers = useMemo(() => buildPageNumbers(activeLogs.page, totalPages), [activeLogs.page, totalPages]);
+  const rangeStart = activeLogs.total === 0 ? 0 : (activeLogs.page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(activeLogs.page * pageSize, activeLogs.total);
+
+  useEffect(() => {
+    dispatch(historyActions.fetchHistoryRequest({ tab: activeTab }));
+  }, [dispatch, activeTab]);
+
+  const goToPage = (page: number) => {
+    if (page < 1 || page > totalPages || page === activeLogs.page) return;
+    dispatch(historyActions.setPage({ tab: activeTab, page }));
+  };
 
   return (
     <div className={styles.historyLayout}>
@@ -63,16 +93,35 @@ export const HistoryView: React.FC = () => {
         
         <div className={styles.historyPaginationRow}>
           <span style={{ color: '#414755', fontSize: '12px' }}>
-            Showing <strong>1 to 10</strong> of 2,451 records
+            {activeLogs.isFetching ? (
+              'Loading...'
+            ) : (
+              <>
+                Showing <strong>{rangeStart} to {rangeEnd}</strong> of {activeLogs.total.toLocaleString()} records
+              </>
+            )}
           </span>
           <div className={styles.paginationNavBox}>
-            <button className={styles.paginationNumBtn}><LeftOutlined style={{ fontSize: '12px' }} /></button>
-            <button className={`${styles.paginationNumBtn} ${styles.paginationNumBtnActive}`}>1</button>
-            <button className={styles.paginationNumBtn}>2</button>
-            <button className={styles.paginationNumBtn}>3</button>
-            <span style={{ padding: '0 4px', color: '#414755' }}>...</span>
-            <button className={styles.paginationNumBtn}>246</button>
-            <button className={styles.paginationNumBtn}><RightOutlined style={{ fontSize: '12px' }} /></button>
+            <button type="button" className={styles.paginationNumBtn} onClick={() => goToPage(activeLogs.page - 1)} disabled={activeLogs.page <= 1}>
+              <LeftOutlined style={{ fontSize: '12px' }} />
+            </button>
+            {pageNumbers.map((page, idx) =>
+              page === 'ellipsis' ? (
+                <span key={`ellipsis-${idx}`} style={{ padding: '0 4px', color: '#414755' }}>...</span>
+              ) : (
+                <button
+                  key={page}
+                  type="button"
+                  className={`${styles.paginationNumBtn} ${page === activeLogs.page ? styles.paginationNumBtnActive : ''}`}
+                  onClick={() => goToPage(page)}
+                >
+                  {page}
+                </button>
+              ),
+            )}
+            <button type="button" className={styles.paginationNumBtn} onClick={() => goToPage(activeLogs.page + 1)} disabled={activeLogs.page >= totalPages}>
+              <RightOutlined style={{ fontSize: '12px' }} />
+            </button>
           </div>
         </div>
       </div>
