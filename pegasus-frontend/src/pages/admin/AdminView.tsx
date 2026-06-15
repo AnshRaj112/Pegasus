@@ -1,8 +1,11 @@
-import React from 'react';
-import { SafetyCertificateOutlined, AppstoreOutlined, ApiOutlined, PlusCircleOutlined } from '@ant-design/icons';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Spin } from 'antd';
+import { SafetyCertificateOutlined, AppstoreOutlined, ApiOutlined, LogoutOutlined } from '@ant-design/icons';
 import { useAppSelector, useAppDispatch } from '../../redux/store';
 import { adminActions } from './Admin.reducer';
+import { adminLogout, fetchAdminMe } from '../../shared/api/adminAuth';
 
+import { AdminLoginPanel } from './AdminLoginPanel';
 import { ConfigureStoreSubView } from './sections/ConfigureStoreSubView';
 import { WorkspaceMgmtSubView } from './sections/WorkspaceMgmtSubView';
 import styles from './Admin.module.scss'; // ⚡ Import Module
@@ -10,6 +13,44 @@ import styles from './Admin.module.scss'; // ⚡ Import Module
 export const AdminView: React.FC = () => {
   const dispatch = useAppDispatch();
   const activeSubSection = useAppSelector((state) => state.admin.activeSubSection);
+  const [adminEmail, setAdminEmail] = useState<string | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  const refreshAdminSession = useCallback(async () => {
+    setCheckingSession(true);
+    try {
+      const user = await fetchAdminMe();
+      setAdminEmail(user.email);
+    } catch {
+      setAdminEmail(null);
+    } finally {
+      setCheckingSession(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAdminSession();
+  }, [refreshAdminSession]);
+
+  const handleAdminLogout = async () => {
+    try {
+      await adminLogout();
+    } finally {
+      setAdminEmail(null);
+    }
+  };
+
+  if (checkingSession) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 'calc(100vh - 64px)' }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  if (!adminEmail) {
+    return <AdminLoginPanel onSuccess={setAdminEmail} />;
+  }
 
   return (
     <div className={styles.adminLayout}>
@@ -22,6 +63,7 @@ export const AdminView: React.FC = () => {
             <span style={{ fontSize: '24px', fontWeight: 700, color: '#1b1b1c' }}>Admin Center</span>
           </div>
           <span style={{ fontSize: '14px', color: '#414755', fontWeight: 500, opacity: 0.7 }}>Technical Operations</span>
+          <p style={{ fontSize: '12px', color: '#727786', margin: '8px 0 0', wordBreak: 'break-all' }}>{adminEmail}</p>
         </div>
 
         <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px', flexGrow: 1 }}>
@@ -42,9 +84,13 @@ export const AdminView: React.FC = () => {
           </button>
         </nav>
         
-        <button style={{ marginTop: 'auto', width: '100%', padding: '12px', backgroundColor: '#e5e2e1', border: '1px solid #c1c6d7', color: '#1b1b1c', fontSize: '14px', fontWeight: 500, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' }}>
-          <PlusCircleOutlined style={{ fontSize: '18px' }} />
-          New Configuration
+        <button
+          type="button"
+          onClick={() => void handleAdminLogout()}
+          style={{ marginTop: 'auto', width: '100%', padding: '12px', backgroundColor: '#fff', border: '1px solid #d9d9d9', color: '#414755', fontSize: '14px', fontWeight: 500, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' }}
+        >
+          <LogoutOutlined style={{ fontSize: '18px' }} />
+          Admin sign out
         </button>
       </aside>
 
