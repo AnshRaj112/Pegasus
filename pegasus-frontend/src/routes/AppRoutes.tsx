@@ -4,6 +4,7 @@ import { BaseLayout } from '../layouts/BaseLayout';
 import { Dashboard } from '../pages/dashboard/Dashboard';
 import { ValidationWizardView } from '../pages/validation/ValidationWizardView';
 import { HistoryView } from '../pages/history/HistoryView';
+import { Report } from '../pages/report/Report';
 import { AdminView } from '../pages/admin/AdminView';
 import { ValidationReport } from '../pages/validation/components/ValidationReport';
 import { MappingSchemaView } from '../pages/history/components/MappingSchemaView';
@@ -21,6 +22,7 @@ export const AppRoutes: React.FC = () => {
               <Route path="/" element={<Dashboard />} />
               <Route path="/validations" element={<ValidationWizardView />} />
               <Route path="/history" element={<HistoryView />} />
+              <Route path="/reports" element={<Report />} />
               <Route path="/history/mapping/:runId/schema" element={<MappingSchemaView />} />
               <Route path="/validation/report/:jobId" element={<ValidationReport onBack={() => window.history.back()} />} />
               <Route path="/admin" element={<AdminView />} />
