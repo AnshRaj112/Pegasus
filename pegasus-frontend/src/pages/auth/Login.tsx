@@ -34,13 +34,16 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div className={`${styles.authWrapper} ${styles.glassBackground}`}>
-      <header style={{ width: '100%', height: '64px', borderBottom: '1px solid var(--outline-variant)', backgroundColor: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' }}>
+    <div 
+      className={`${styles.authWrapper} ${styles.glassBackground}`}
+      style={{ minHeight: '100vh', width: '100%', boxSizing: 'border-box', overflowX: 'hidden', display: 'flex', flexDirection: 'column' }}
+    >
+      <header style={{ width: '100%', height: '64px', flexShrink: 0, boxSizing: 'border-box', display: 'flex', borderBottom: '1px solid var(--outline-variant)', backgroundColor: 'var(--surface)', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' }}>
         <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--primary)' }}>Pegasus</div>
         <QuestionCircleOutlined style={{ fontSize: '20px', color: 'var(--on-surface-variant)', cursor: 'pointer' }} />
       </header>
 
-      <main className={styles.authMain}>
+      <main className={styles.authMain} style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
         <div className={styles.authCard}>
           <div style={{ marginBottom: '32px', textAlign: 'center' }}>
             <h1 style={{ fontSize: '30px', fontWeight: 600, color: 'var(--on-surface)', margin: '0 0 4px 0' }}>Welcome Back</h1>
@@ -85,24 +88,11 @@ export const Login: React.FC = () => {
               </div>
             </div>
 
-            {/* <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" id="remember" style={{ accentColor: 'var(--primary)', cursor: 'pointer', width: '16px', height: '16px' }} />
-              <label htmlFor="remember" style={{ fontSize: '14px', color: 'var(--on-surface-variant)', cursor: 'pointer', userSelect: 'none' }}>Remember this device for 30 days</label>
-            </div> */}
-
             <button type="submit" className={styles.submitBtn}>
               Sign In <LoginOutlined style={{ fontSize: '18px' }} />
             </button>
           </form>
         </div>
-{/* 
-        <div style={{ position: 'absolute', bottom: '100px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', opacity: 0.6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--on-surface)' }}>
-            <SafetyCertificateOutlined style={{ fontSize: '16px' }} />
-            <span style={{ fontSize: '12px' }}>Bank-grade data encryption</span>
-          </div>
-          <p style={{ fontSize: '12px', color: 'var(--on-surface)', margin: 0 }}>Trusted by 500+ data engineering teams worldwide.</p>
-        </div> */}
       </main>
     </div>
   );

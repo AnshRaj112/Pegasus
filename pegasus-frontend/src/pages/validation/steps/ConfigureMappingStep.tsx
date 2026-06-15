@@ -1,28 +1,40 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   CloseCircleFilled,
   CheckCircleOutlined,
   SyncOutlined,
-  HolderOutlined,
   SearchOutlined,
   FilterOutlined,
-  ThunderboltOutlined,
   LeftOutlined,
   RightOutlined,
+  KeyOutlined,
+  StopOutlined,
+  EyeOutlined,
+  EyeInvisibleOutlined,
+  CodeOutlined,
+  ArrowRightOutlined,
+  CloseOutlined
 } from '@ant-design/icons';
 
-import { Api, type ColumnMapping } from '../../../shared/api/Api';
+import { Api, type ColumnMapping, type GoogleCloudStorageConfig } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { ValidationReport } from '../components/ValidationReport';
 
 const PAGE_SIZE = 10;
 
-interface MappingItem {
+interface ComplexMappingRow {
   id: string;
-  sourceColumn: string;
-  targetMappings: string[];
+  sourceCol: string;
+  sourceType: string;
+  targetCols: { name: string; type: string }[];
+  isPk: boolean;
+  isIgnored: boolean;
+  isSensitive: boolean;
+  isExpanded: boolean;
+  sourceExpr: string;
+  targetExpr: string;
   previewValue: string;
 }
 
@@ -39,30 +51,29 @@ const inferType = (value: string, isComplex: boolean): string => {
   return 'String';
 };
 
-const TYPE_BADGE: Record<string, { bg: string; color: string }> = {
-  String: { bg: '#e8f0fe', color: '#1a56db' },
-  Float: { bg: '#f3e8ff', color: '#7c3aed' },
-  Int: { bg: '#fff7ed', color: '#c2410c' },
-  Bool: { bg: '#ecfdf5', color: '#047857' },
-  Structured: { bg: '#ede9fe', color: '#5b21b6' },
+const getCloudLabel = (cloud: string | GoogleCloudStorageConfig | null | undefined): string => {
+  if (!cloud) return 'Pending';
+  if (typeof cloud === 'string') return cloud;
+  if (cloud.bucket && cloud.object_name) return `gs://${cloud.bucket}/${cloud.object_name}`;
+  return cloud.object_name || 'GCS Source Configured';
 };
 
 const matrixToColumnMappings = (
-  matrix: MappingItem[],
+  matrix: ComplexMappingRow[],
   complexColumns: string[],
-  structuredOrderSensitive: boolean,
-  uidColumn: string,
+  structuredOrderSensitive: boolean
 ): ColumnMapping[] =>
   matrix
-    .filter((row) => row.sourceColumn !== uidColumn && row.targetMappings.length > 0)
+    .filter((row) => !row.isIgnored && row.targetCols.length > 0)
     .map((row) => {
-      const [primary, ...extra] = row.targetMappings;
+      const [primary, ...extra] = row.targetCols.map(t => t.name);
       const base: ColumnMapping = {
-        source_column: row.sourceColumn,
+        source_column: row.sourceCol,
         target_column: primary,
         ...(extra.length > 0 ? { target_columns: extra } : {}),
       };
-      if (complexColumns.includes(row.sourceColumn)) {
+
+      if (complexColumns.includes(row.sourceCol)) {
         return {
           ...base,
           compare_mode: 'structured',
@@ -72,153 +83,76 @@ const matrixToColumnMappings = (
       return base;
     });
 
-const buildMatrixFromPreview = (
-  sourceColumns: string[],
-  targetColumns: string[],
-  autoMappings: Array<{ source_column: string; target_column: string }>,
-  sourceSamples: Record<string, string[]>,
-  uid: string,
-): MappingItem[] =>
-  sourceColumns.map((col) => {
-    const auto = autoMappings.find((m) => m.source_column === col);
-    const uidTarget = col === uid && targetColumns.includes(col) ? col : null;
-    const targets = auto ? [auto.target_column] : uidTarget ? [uidTarget] : [];
-    const sample = sourceSamples[col]?.[0] ?? '';
-    return { id: col, sourceColumn: col, targetMappings: targets, previewValue: sample };
-  });
-
+// ⚡ FIX: Clean Target Mapping UI Component with functioning Dropdown
 const TargetMappingField: React.FC<{
-  targets: string[];
-  available: string[];
-  disabled?: boolean;
-  onChange: (next: string[]) => void;
-}> = ({ targets, available, disabled, onChange }) => {
+  targets: { name: string; type: string }[];
+  availableColumns: string[];
+  onAdd: (colName: string) => void;
+  onRemove: (colIndex: number) => void;
+}> = ({ targets, availableColumns, onAdd, onRemove }) => {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Close dropdown when clicking outside
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setOpen(false);
     };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
-  const addable = available.filter((col) => !targets.includes(col));
-
-  if (disabled) {
-    return (
-      <span style={{ fontSize: '13px', color: '#64748b' }}>
-        {targets.join(', ') || '—'}
-      </span>
-    );
-  }
+  // Filter out columns that are already selected in this specific row
+  const addable = availableColumns.filter(c => !targets.some(t => t.name === c));
 
   return (
-    <div ref={ref} style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', minHeight: '32px' }}>
-      {targets.map((target) => (
-        <span
-          key={target}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '4px 10px',
-            borderRadius: '6px',
-            backgroundColor: '#f1f5f9',
-            border: '1px solid #e2e8f0',
-            fontSize: '12px',
-            fontWeight: 500,
-            color: '#334155',
-          }}
-        >
-          {target}
-          <button
-            type="button"
-            onClick={() => onChange(targets.filter((t) => t !== target))}
-            style={{
-              border: 'none',
-              background: 'none',
-              padding: 0,
-              cursor: 'pointer',
-              color: '#94a3b8',
-              fontSize: '14px',
-              lineHeight: 1,
-            }}
-            aria-label={`Remove ${target}`}
-          >
-            ×
-          </button>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+      {targets.map((tc, idx) => (
+        <span key={idx} style={{ 
+          backgroundColor: '#f0eded', // Clean gray instead of purple
+          border: '1px solid #c1c6d7', 
+          color: '#1b1b1c', 
+          padding: '2px 8px', 
+          borderRadius: '4px', // Standard slight rounding instead of ellipse
+          fontSize: '12px', 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '6px' 
+        }}>
+          {tc.name} 
+          <CloseOutlined onClick={() => onRemove(idx)} style={{ fontSize: '10px', cursor: 'pointer', color: '#727786' }} />
         </span>
       ))}
-      {targets.length === 0 && (
-        <span style={{ fontSize: '13px', color: '#94a3b8', fontStyle: 'italic' }}>
-          Unmapped column field...
-        </span>
-      )}
-      {addable.length > 0 && (
-        <div style={{ position: 'relative' }}>
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            style={{
-              border: 'none',
-              background: 'none',
-              color: '#6366f1',
-              fontSize: '13px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              padding: '4px 0',
-            }}
-          >
-            + Add...
-          </button>
-          {open && (
-            <div
-              style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                zIndex: 20,
-                marginTop: '4px',
-                minWidth: '160px',
-                backgroundColor: '#fff',
-                border: '1px solid #e2e8f0',
-                borderRadius: '8px',
-                boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)',
-                padding: '4px 0',
-              }}
-            >
-              {addable.map((col) => (
-                <button
-                  key={col}
-                  type="button"
-                  onClick={() => {
-                    onChange([...targets, col]);
-                    setOpen(false);
-                  }}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    textAlign: 'left',
-                    border: 'none',
-                    background: 'none',
-                    padding: '8px 12px',
-                    fontSize: '13px',
-                    cursor: 'pointer',
-                    color: '#334155',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f8fafc'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                >
-                  {col}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+
+      <div style={{ position: 'relative' }} ref={dropdownRef}>
+        <button 
+          onClick={() => setOpen(!open)}
+          style={{ background: 'none', border: 'none', color: '#0057c2', fontSize: '12px', fontWeight: 500, cursor: 'pointer', padding: 0 }}
+        >
+          + Add target
+        </button>
+        
+        {open && addable.length > 0 && (
+          <div style={{ 
+            position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 50,
+            backgroundColor: '#fff', border: '1px solid #c1c6d7', borderRadius: '4px', 
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)', maxHeight: '200px', overflowY: 'auto', minWidth: '160px'
+          }}>
+            {addable.map(col => (
+              <div 
+                key={col} 
+                onClick={() => { onAdd(col); setOpen(false); }}
+                style={{ padding: '8px 12px', fontSize: '12px', cursor: 'pointer', borderBottom: '1px solid #f0eded' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f6f3f2')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+              >
+                {col}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -232,32 +166,31 @@ export const ConfigureMappingStep: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showUnmappedOnly, setShowUnmappedOnly] = useState(false);
   const [page, setPage] = useState(1);
-  const [sourceColumns, setSourceColumns] = useState<string[]>([]);
-  const [targetColumns, setTargetColumns] = useState<string[]>([]);
-  const [autoMappings, setAutoMappings] = useState<Array<{ source_column: string; target_column: string }>>([]);
-  const [columnsMatrix, setColumnsMatrix] = useState<MappingItem[]>([]);
+  const [columnsMatrix, setColumnsMatrix] = useState<ComplexMappingRow[]>([]);
+  const [targetColumnsList, setTargetColumnsList] = useState<string[]>([]); // ⚡ Added to track available targets for dropdown
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [complexColumns, setComplexColumns] = useState<string[]>([]);
   const [needsOrderPreference, setNeedsOrderPreference] = useState(false);
   const [viewDetailedReport, setViewDetailedReport] = useState(false);
 
+  const [itemsPerPage, setItemsPerPage] = useState(PAGE_SIZE);
+
   const loadingPreview = Boolean(
     validationForm.sourceCloud && validationForm.targetCloud && columnsMatrix.length === 0 && !previewError,
   );
 
-  const selectedUidColumn = validationForm.uidColumn;
-  const compareTargets = targetColumns.filter((col) => col !== selectedUidColumn);
-
   const syncMappings = (
-    matrix: MappingItem[],
+    matrix: ComplexMappingRow[],
     structuredOrderSensitive = validationForm.structuredOrderSensitive,
   ) => {
+    const activePk = matrix.find(m => m.isPk)?.sourceCol || validationForm.uidColumn;
+    
     dispatch(validationActions.setValidationForm({
+      uidColumn: activePk,
       columnMappings: matrixToColumnMappings(
         matrix,
         complexColumns,
         structuredOrderSensitive,
-        selectedUidColumn,
       ),
     }));
   };
@@ -265,6 +198,7 @@ export const ConfigureMappingStep: React.FC = () => {
   useEffect(() => {
     if (!validationForm.sourceCloud || !validationForm.targetCloud) return;
     let cancelled = false;
+
     Api.previewValidationColumns({
       source_cloud: validationForm.sourceCloud,
       target_cloud: validationForm.targetCloud,
@@ -275,95 +209,98 @@ export const ConfigureMappingStep: React.FC = () => {
       .then((res) => {
         if (cancelled) return;
         const preview = res.data;
+
         if (preview.inferred_has_header === false && validationForm.hasHeader) {
           dispatch(validationActions.setValidationForm({ hasHeader: false }));
           return;
         }
-        const defaultUid = preview.source_columns.includes('column_1')
-          ? 'column_1'
-          : preview.source_columns[0] ?? 'id';
-        const uid = preview.source_columns.includes(validationForm.uidColumn)
-          ? validationForm.uidColumn
-          : defaultUid;
-        const auto = preview.auto_mappings ?? [];
-        const mappings = buildMatrixFromPreview(
-          preview.source_columns,
-          preview.target_columns,
-          auto,
-          preview.source_samples ?? {},
-          uid,
-        );
+
+        const defaultUid = preview.source_columns.includes('column_1') ? 'column_1' : preview.source_columns[0] ?? 'id';
+        const uid = preview.source_columns.includes(validationForm.uidColumn) ? validationForm.uidColumn : defaultUid;
+        
+        const autoMappings = preview.auto_mappings ?? [];
         const complex = preview.complex_columns ?? [];
-        setAutoMappings(auto);
+
+        const mappings: ComplexMappingRow[] = preview.source_columns.map((col) => {
+          const auto = autoMappings.find((m) => m.source_column === col);
+          const isUid = col === uid;
+          const uidTarget = isUid && preview.target_columns.includes(col) ? col : null;
+          const targets = auto ? [auto.target_column] : uidTarget ? [uidTarget] : [];
+          
+          const sample = preview.source_samples?.[col]?.[0] ?? '';
+          const inferredType = inferType(sample, complex.includes(col));
+
+          return {
+            id: col,
+            sourceCol: col,
+            sourceType: inferredType,
+            targetCols: targets.map(t => ({ name: t, type: inferredType })),
+            isPk: isUid,
+            isIgnored: false,
+            isSensitive: false,
+            isExpanded: false,
+            sourceExpr: '',
+            targetExpr: '',
+            previewValue: sample
+          };
+        });
+
+        setTargetColumnsList(preview.target_columns || []);
         setComplexColumns(complex);
         setNeedsOrderPreference(Boolean(preview.needs_order_preference ?? complex.length > 0));
-        setSourceColumns(preview.source_columns);
-        setTargetColumns(preview.target_columns);
         setColumnsMatrix(mappings);
         setPage(1);
+        
         dispatch(validationActions.setValidationForm({
           uidColumn: uid,
           delimiter: preview.delimiter,
           hasHeader: preview.has_header ?? validationForm.hasHeader,
-          columnMappings: matrixToColumnMappings(
-            mappings,
-            complex,
-            validationForm.structuredOrderSensitive,
-            uid,
-          ),
+          columnMappings: matrixToColumnMappings(mappings, complex, validationForm.structuredOrderSensitive),
         }));
       })
       .catch((err: { response?: { data?: { detail?: unknown } } }) => {
         if (cancelled) return;
         const detail = err.response?.data?.detail;
-        const message =
-          typeof detail === 'string'
-            ? detail
-            : Array.isArray(detail)
-              ? detail.map((item) => (typeof item === 'object' && item && 'msg' in item ? String(item.msg) : String(item))).join('; ')
-              : null;
+        const message = typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((item) => (typeof item === 'object' && item && 'msg' in item ? String(item.msg) : String(item))).join('; ')
+            : null;
         setPreviewError(message ?? 'Could not load column preview from server');
+        console.error('[Column Preview Failed]:', err);
       });
+
     return () => { cancelled = true; };
   }, [validationForm.sourceCloud, validationForm.targetCloud, validationForm.uidColumn, validationForm.delimiter, validationForm.hasHeader, dispatch]);
 
-  const usedTargetsByOthers = (sourceColumn: string) => {
-    const used = new Set<string>();
-    columnsMatrix.forEach((row) => {
-      if (row.sourceColumn !== sourceColumn) {
-        row.targetMappings.forEach((t) => used.add(t));
+  const toggleProperty = (id: string, prop: keyof ComplexMappingRow) => {
+    const next = columnsMatrix.map(row => row.id === id ? { ...row, [prop]: !row[prop] } : row);
+    setColumnsMatrix(next);
+    syncMappings(next);
+  };
+
+  const removeTargetCol = (rowId: string, colIndex: number) => {
+    const next = columnsMatrix.map(row => {
+      if (row.id === rowId) {
+        const newTargets = [...row.targetCols];
+        newTargets.splice(colIndex, 1);
+        return { ...row, targetCols: newTargets };
       }
+      return row;
     });
-    return used;
-  };
-
-  const availableForRow = (sourceColumn: string) => {
-    const used = usedTargetsByOthers(sourceColumn);
-    return compareTargets.filter((col) => !used.has(col));
-  };
-
-  const handleAutoMap = () => {
-    const next = buildMatrixFromPreview(
-      sourceColumns,
-      targetColumns,
-      autoMappings,
-      Object.fromEntries(columnsMatrix.map((r) => [r.sourceColumn, [r.previewValue]])),
-      selectedUidColumn,
-    );
     setColumnsMatrix(next);
     syncMappings(next);
   };
 
-  const handleTargetChange = (sourceColumn: string, targets: string[]) => {
-    const next = columnsMatrix.map((row) =>
-      row.sourceColumn === sourceColumn ? { ...row, targetMappings: targets } : row,
-    );
+  const addTargetCol = (rowId: string, targetColName: string) => {
+    const next = columnsMatrix.map(row => {
+      if (row.id === rowId) {
+        return { ...row, targetCols: [...row.targetCols, { name: targetColName, type: row.sourceType }] };
+      }
+      return row;
+    });
     setColumnsMatrix(next);
     syncMappings(next);
-  };
-
-  const handleUidChange = (uid: string) => {
-    dispatch(validationActions.setValidationForm({ uidColumn: uid }));
   };
 
   const handleStructuredOrderChange = (structuredOrderSensitive: boolean) => {
@@ -375,24 +312,18 @@ export const ConfigureMappingStep: React.FC = () => {
     let rows = columnsMatrix;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      rows = rows.filter((col) => col.sourceColumn.toLowerCase().includes(q));
+      rows = rows.filter((col) => col.sourceCol.toLowerCase().includes(q));
     }
     if (showUnmappedOnly) {
-      rows = rows.filter(
-        (col) => col.sourceColumn !== selectedUidColumn && col.targetMappings.length === 0,
-      );
+      rows = rows.filter((col) => col.targetCols.length === 0 && !col.isIgnored);
     }
     return rows;
-  }, [columnsMatrix, searchQuery, showUnmappedOnly, selectedUidColumn]);
+  }, [columnsMatrix, searchQuery, showUnmappedOnly]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredColumns.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(filteredColumns.length / itemsPerPage));
   const safePage = Math.min(page, totalPages);
-  const pageStart = (safePage - 1) * PAGE_SIZE;
-  const pageRows = filteredColumns.slice(pageStart, pageStart + PAGE_SIZE);
-
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
+  const pageStart = (safePage - 1) * itemsPerPage;
+  const pageRows = filteredColumns.slice(pageStart, pageStart + itemsPerPage);
 
   const results = validationResult?.results;
 
@@ -408,23 +339,14 @@ export const ConfigureMappingStep: React.FC = () => {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
-      {/* Compact file options */}
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '16px',
-          alignItems: 'center',
-          fontSize: '13px',
-          color: '#64748b',
-        }}
-      >
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1440px', margin: '0 auto', width: '100%', height: '100%' }}>
+      
+      <div style={{ display: 'flex', gap: '16px', alignItems: 'center', fontSize: '13px', color: '#64748b' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           Delimiter
           <input
             type="text"
-            value={validationForm.delimiter}
+            value={validationForm.delimiter || ''}
             onChange={(e) => dispatch(validationActions.setValidationForm({ delimiter: e.target.value || 'auto' }))}
             style={{ width: '56px', height: '28px', textAlign: 'center', borderRadius: '6px', border: '1px solid #e2e8f0' }}
           />
@@ -432,36 +354,43 @@ export const ConfigureMappingStep: React.FC = () => {
         <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <input
             type="checkbox"
-            checked={validationForm.hasHeader}
+            checked={validationForm.hasHeader || false}
             onChange={(e) => dispatch(validationActions.setValidationForm({ hasHeader: e.target.checked }))}
           />
           Header row
         </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          UID column
-          <select
-            value={selectedUidColumn}
-            onChange={(e) => handleUidChange(e.target.value)}
-            style={{ height: '28px', padding: '0 8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}
-          >
-            {sourceColumns.map((col) => (
-              <option key={col} value={col}>{col}</option>
-            ))}
-          </select>
-        </label>
-        {loadingPreview && <span>Loading columns…</span>}
       </div>
 
-      {previewError && (
-        <p style={{ color: '#ba1a1a', margin: 0, fontSize: '13px' }}>{previewError}</p>
-      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#1b1b1c', margin: '0 0 8px 0', fontFamily: 'var(--font-mono)' }}>
+            Pegasus_Data_Mapping
+          </h2>
+          <div style={{ display: 'flex', gap: '16px', fontSize: '14px', color: '#414755' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <strong>Source:</strong> <code style={{ backgroundColor: '#f6f3f2', padding: '2px 6px', borderRadius: '4px' }}>{getCloudLabel(validationForm.sourceCloud)}</code>
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <strong>Target:</strong> <code style={{ backgroundColor: '#f6f3f2', padding: '2px 6px', borderRadius: '4px' }}>{getCloudLabel(validationForm.targetCloud)}</code>
+            </span>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ backgroundColor: '#eef2ff', color: '#4f46e5', padding: '6px 12px', borderRadius: '999px', fontSize: '14px', fontWeight: 500 }}>
+            {loadingPreview ? 'Loading...' : `Configured (${columnsMatrix.filter(m => m.targetCols.length > 0 && !m.isIgnored).length})`}
+          </span>
+          {/* ⚡ Add Column button REMOVED from here */}
+        </div>
+      </div>
+
+      {previewError && <div style={{ padding: '12px', backgroundColor: '#fef2f2', color: '#dc2626', borderRadius: '8px' }}>{previewError}</div>}
 
       {needsOrderPreference && (
         <div style={{ backgroundColor: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '8px', padding: '12px 16px' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
             <input
               type="checkbox"
-              checked={validationForm.structuredOrderSensitive}
+              checked={validationForm.structuredOrderSensitive || false}
               onChange={(e) => handleStructuredOrderChange(e.target.checked)}
             />
             Require list/dict element order to match for structured columns ({complexColumns.join(', ')})
@@ -475,220 +404,115 @@ export const ConfigureMappingStep: React.FC = () => {
           <SearchOutlined style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
           <input
             type="text"
-            placeholder="Filter attributes by label names..."
+            placeholder="Filter attributes by names..."
             value={searchQuery}
             onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
-            style={{
-              width: '100%',
-              padding: '10px 12px 10px 36px',
-              borderRadius: '8px',
-              border: '1px solid #e2e8f0',
-              fontSize: '14px',
-              boxSizing: 'border-box',
-            }}
+            style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
           />
         </div>
         <button
           type="button"
           onClick={() => { setShowUnmappedOnly((v) => !v); setPage(1); }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '10px 16px',
-            borderRadius: '8px',
-            border: `1px solid ${showUnmappedOnly ? '#6366f1' : '#e2e8f0'}`,
-            backgroundColor: showUnmappedOnly ? '#eef2ff' : '#fff',
-            color: showUnmappedOnly ? '#4f46e5' : '#475569',
-            fontSize: '14px',
-            fontWeight: 500,
-            cursor: 'pointer',
-          }}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderRadius: '8px', border: `1px solid ${showUnmappedOnly ? '#6366f1' : '#e2e8f0'}`, backgroundColor: showUnmappedOnly ? '#eef2ff' : '#fff', color: showUnmappedOnly ? '#4f46e5' : '#475569', fontSize: '14px', fontWeight: 500, cursor: 'pointer' }}
         >
-          <FilterOutlined /> Filters
+          <FilterOutlined /> Unmapped Only
         </button>
-        <button
-          type="button"
-          onClick={handleAutoMap}
-          disabled={loadingPreview || autoMappings.length === 0}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '10px 16px',
-            borderRadius: '8px',
-            border: '1px solid #e2e8f0',
-            backgroundColor: '#fff',
-            color: '#475569',
-            fontSize: '14px',
-            fontWeight: 500,
-            cursor: loadingPreview ? 'not-allowed' : 'pointer',
-            opacity: loadingPreview ? 0.6 : 1,
-          }}
-        >
-          <ThunderboltOutlined /> Auto-Map
-        </button>
+        {/* ⚡ Auto-Map button REMOVED from here */}
       </div>
 
-      {/* Mapping table */}
-      <div
-        style={{
-          backgroundColor: '#fff',
-          borderRadius: '12px',
-          border: '1px solid #e2e8f0',
-          overflow: 'hidden',
-          boxShadow: '0 1px 3px rgba(15, 23, 42, 0.06)',
-        }}
-      >
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '720px' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                {['Source Column', 'Data Type', 'Target Mapping Fields', 'Preview Value'].map((label) => (
-                  <th
-                    key={label}
-                    style={{
-                      padding: '14px 16px',
-                      textAlign: 'left',
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      letterSpacing: '0.06em',
-                      textTransform: 'uppercase',
-                      color: '#64748b',
-                    }}
-                  >
-                    {label}
-                  </th>
-                ))}
+      {/* ⚡ FIX: Parent Box scrolling behavior improved. Replaced hard maxHeight with flexGrow and minHeight */}
+      <div style={{ backgroundColor: '#fff', border: '1px solid #c1c6d7', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: '300px' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', flexGrow: 1 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10, borderBottom: '1px solid #c1c6d7' }}>
+              <tr>
+                <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755', borderRight: '1px solid #c1c6d7', width: '160px' }}>ACTIONS</th>
+                <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>SOURCE COLUMN</th>
+                <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>SOURCE TYPE</th>
+                <th style={{ padding: '12px 8px', fontSize: '12px', fontWeight: 600, color: '#414755', textAlign: 'center', width: '48px' }}></th>
+                <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>TARGET COLUMN</th>
+                <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>TARGET TYPE</th>
               </tr>
             </thead>
             <tbody>
-              {pageRows.length === 0 ? (
-                <tr>
-                  <td colSpan={4} style={{ padding: '32px', textAlign: 'center', color: '#94a3b8', fontSize: '14px' }}>
-                    {loadingPreview ? 'Loading…' : 'No columns match your filter.'}
-                  </td>
-                </tr>
-              ) : (
-                pageRows.map((row) => {
-                  const isUid = row.sourceColumn === selectedUidColumn;
-                  const typeName = inferType(row.previewValue, complexColumns.includes(row.sourceColumn));
-                  const badge = TYPE_BADGE[typeName] ?? TYPE_BADGE.String;
-                  return (
-                    <tr
-                      key={row.id}
-                      style={{
-                        borderBottom: '1px solid #f1f5f9',
-                        backgroundColor: isUid ? '#fffbeb' : '#fff',
-                      }}
-                    >
-                      <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <HolderOutlined style={{ color: '#cbd5e1', fontSize: '14px' }} />
-                          <span style={{ fontSize: '14px', fontWeight: 500, color: '#1e293b' }}>
-                            {row.sourceColumn}
-                          </span>
-                          {isUid && (
-                            <span
-                              style={{
-                                fontSize: '10px',
-                                fontWeight: 700,
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                backgroundColor: '#ffedd5',
-                                color: '#c2410c',
-                                letterSpacing: '0.04em',
-                              }}
-                            >
-                              UID
-                            </span>
-                          )}
+              {pageRows.map(row => (
+                <React.Fragment key={row.id}>
+                  <tr style={{ borderBottom: '1px solid #e5e2e1', backgroundColor: row.isExpanded ? '#fcf9f8' : row.isIgnored ? '#fcf9f8' : 'transparent', opacity: row.isIgnored ? 0.6 : 1, transition: 'background-color 0.2s' }}>
+                    <td style={{ padding: '12px 16px', borderRight: '1px solid #c1c6d7', verticalAlign: 'top' }}>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <button onClick={() => toggleProperty(row.id, 'isPk')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isPk ? 'rgba(0, 87, 194, 0.1)' : 'transparent', color: row.isPk ? '#0057c2' : '#727786', cursor: 'pointer' }} title="Primary Key"><KeyOutlined /></button>
+                        <button onClick={() => toggleProperty(row.id, 'isIgnored')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isIgnored ? '#414755' : 'transparent', color: row.isIgnored ? '#fff' : '#727786', cursor: 'pointer' }} title="Ignore"><StopOutlined /></button>
+                        <button onClick={() => toggleProperty(row.id, 'isSensitive')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isSensitive ? 'rgba(186, 26, 26, 0.1)' : 'transparent', color: row.isSensitive ? '#ba1a1a' : '#727786', cursor: 'pointer' }} title="Sensitive">{row.isSensitive ? <EyeInvisibleOutlined /> : <EyeOutlined />}</button>
+                        <button onClick={() => toggleProperty(row.id, 'isExpanded')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isExpanded ? '#0057c2' : 'transparent', color: row.isExpanded ? '#fff' : '#727786', cursor: 'pointer' }} title="Expression"><CodeOutlined /></button>
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '13px', textDecoration: row.isIgnored ? 'line-through' : 'none' }}>
+                      {row.sourceCol}
+                      <br/>
+                      <span style={{ fontSize: '10px', color: '#94a3b8' }}>Sample: {row.previewValue}</span>
+                    </td>
+                    <td style={{ padding: '12px 16px' }}><span style={{ backgroundColor: '#f0eded', border: '1px solid #c1c6d7', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, color: '#727786' }}>{row.sourceType}</span></td>
+                    <td style={{ padding: '12px 8px', textAlign: 'center', color: '#c1c6d7' }}><ArrowRightOutlined /></td>
+                    <td style={{ padding: '12px 16px' }}>
+                      {row.isIgnored ? <span style={{ fontStyle: 'italic', color: '#727786' }}>Dropped</span> : (
+                        <TargetMappingField 
+                          targets={row.targetCols} 
+                          availableColumns={targetColumnsList} 
+                          onAdd={(col) => addTargetCol(row.id, col)} 
+                          onRemove={(idx) => removeTargetCol(row.id, idx)} 
+                        />
+                      )}
+                    </td>
+                    <td style={{ padding: '12px 16px' }}>
+                      {!row.isIgnored && row.targetCols.length > 0 && <span style={{ backgroundColor: '#f0eded', border: '1px solid #c1c6d7', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, color: '#727786' }}>{row.targetCols[0]?.type}</span>}
+                    </td>
+                  </tr>
+                  
+                  {/* EXPANDED PANEL */}
+                  {row.isExpanded && !row.isIgnored && (
+                    <tr style={{ backgroundColor: '#fcf9f8', borderBottom: '1px solid #c1c6d7' }}>
+                      <td colSpan={6} style={{ padding: '16px 24px 24px 176px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <div style={{ display: 'flex', borderBottom: '1px solid #c1c6d7', gap: '16px' }}>
+                              <span style={{ borderBottom: '2px solid #0057c2', color: '#0057c2', paddingBottom: '4px', fontSize: '12px', fontWeight: 600 }}>Source Expression</span>
+                            </div>
+                            {/* ⚡ Textareas can now be vertically resized by the user */}
+                            <textarea style={{ width: '100%', minHeight: '80px', border: '1px solid #c1c6d7', borderRadius: '8px', padding: '8px', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: '12px', resize: 'vertical' }} placeholder="e.g. CAST(src.value AS STRING)" defaultValue={row.sourceExpr} />
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <div style={{ display: 'flex', borderBottom: '1px solid #c1c6d7', gap: '16px' }}>
+                              <span style={{ borderBottom: '2px solid #0057c2', color: '#0057c2', paddingBottom: '4px', fontSize: '12px', fontWeight: 600 }}>Target Expression</span>
+                            </div>
+                            <textarea style={{ width: '100%', minHeight: '80px', border: '1px solid #c1c6d7', borderRadius: '8px', padding: '8px', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: '12px', resize: 'vertical' }} placeholder="e.g. DATE_TRUNC('day', val)" defaultValue={row.targetExpr} />
+                          </div>
                         </div>
                       </td>
-                      <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            padding: '4px 10px',
-                            borderRadius: '6px',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            backgroundColor: badge.bg,
-                            color: badge.color,
-                          }}
-                        >
-                          {typeName}
-                        </span>
-                      </td>
-                      <td style={{ padding: '14px 16px', verticalAlign: 'middle', minWidth: '220px' }}>
-                        <TargetMappingField
-                          targets={row.targetMappings}
-                          available={availableForRow(row.sourceColumn)}
-                          disabled={isUid}
-                          onChange={(next) => handleTargetChange(row.sourceColumn, next)}
-                        />
-                      </td>
-                      <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
-                        <code
-                          style={{
-                            fontSize: '13px',
-                            color: '#475569',
-                            backgroundColor: '#f8fafc',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                          }}
-                        >
-                          {row.previewValue || '—'}
-                        </code>
-                      </td>
                     </tr>
-                  );
-                })
-              )}
+                  )}
+                </React.Fragment>
+              ))}
             </tbody>
           </table>
         </div>
 
-        {/* Pagination footer */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '12px 16px',
-            borderTop: '1px solid #e2e8f0',
-            backgroundColor: '#fafafa',
-            fontSize: '13px',
-            color: '#64748b',
-          }}
-        >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderTop: '1px solid #e2e8f0', backgroundColor: '#fafafa', fontSize: '13px', color: '#64748b', flexShrink: 0 }}>
           <span>
             {filteredColumns.length === 0
               ? 'Showing 0 attributes'
-              : `Showing ${pageStart + 1}-${Math.min(pageStart + PAGE_SIZE, filteredColumns.length)} of ${filteredColumns.length} attributes`}
+              : `Showing ${pageStart + 1}-${Math.min(pageStart + itemsPerPage, filteredColumns.length)} of ${filteredColumns.length} attributes`}
           </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button
-              type="button"
-              disabled={safePage <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              style={paginationBtnStyle}
-              aria-label="Previous page"
-            >
-              <LeftOutlined />
-            </button>
-            <span style={{ minWidth: '88px', textAlign: 'center' }}>
-              Page {safePage} of {totalPages}
-            </span>
-            <button
-              type="button"
-              disabled={safePage >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              style={paginationBtnStyle}
-              aria-label="Next page"
-            >
-              <RightOutlined />
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #e2e8f0', borderRadius: '6px', backgroundColor: '#fff', cursor: 'pointer', color: '#475569' }}><LeftOutlined /></button>
+              <span style={{ minWidth: '88px', textAlign: 'center' }}>Page {safePage} of {totalPages}</span>
+              <button disabled={safePage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #e2e8f0', borderRadius: '6px', backgroundColor: '#fff', cursor: 'pointer', color: '#475569' }}><RightOutlined /></button>
+            </div>
+            <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setPage(1); }} style={{ padding: '4px', borderRadius: '4px', border: '1px solid #e2e8f0', backgroundColor: '#fff', color: '#475569' }}>
+              <option value={10}>10/page</option>
+              <option value={25}>25/page</option>
+              <option value={50}>50/page</option>
+            </select>
           </div>
         </div>
       </div>
@@ -719,19 +543,7 @@ export const ConfigureMappingStep: React.FC = () => {
           <button
             type="button"
             onClick={() => (validationResult.jobId ? navigate(`/validation/report/${validationResult.jobId}`) : setViewDetailedReport(true))}
-            style={{
-              alignSelf: 'center',
-              padding: '10px 24px',
-              backgroundColor: '#fff',
-              color: '#6366f1',
-              border: '1px solid #6366f1',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontWeight: 600,
-            }}
+            style={{ alignSelf: 'center', padding: '10px 24px', backgroundColor: '#fff', color: '#6366f1', border: '1px solid #6366f1', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}
           >
             <CheckCircleOutlined /> View Detailed Report
           </button>
@@ -739,19 +551,6 @@ export const ConfigureMappingStep: React.FC = () => {
       )}
     </div>
   );
-};
-
-const paginationBtnStyle: React.CSSProperties = {
-  width: '32px',
-  height: '32px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  border: '1px solid #e2e8f0',
-  borderRadius: '6px',
-  backgroundColor: '#fff',
-  cursor: 'pointer',
-  color: '#475569',
 };
 
 const Stat: React.FC<{ label: string; value: string; color?: string }> = ({ label, value, color = '#1e293b' }) => (
