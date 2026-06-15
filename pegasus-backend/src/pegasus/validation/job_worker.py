@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-15T08:43:26Z
+# Last edited: 2026-06-15T16:31:14+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Subprocess / pool entrypoint: run one validation job from files under *job_dir*."""
@@ -480,11 +480,17 @@ def _run_job_body(
                         list(result.compared_columns),
                         column_mappings,
                     )
+                    sensitive_cols = {
+                        m.source_column.strip()
+                        for m in column_mappings
+                        if m.is_sensitive
+                    } or None
                     with compare_policy_context(export_policy):
                         export_stats = export_workspace_mismatches_ndjson(
                             workspace,
                             export_path,
                             compare_columns=list(result.compared_columns),
+                            sensitive_columns=sensitive_cols,
                         )
                     if export_stats.total > 0 and export_path.is_file():
                         artifact = export_path

@@ -71,6 +71,9 @@ const matrixToColumnMappings = (
         source_column: row.sourceCol,
         target_column: primary,
         ...(extra.length > 0 ? { target_columns: extra } : {}),
+        ...(row.isSensitive ? { is_sensitive: true } : {}),
+        ...(row.sourceExpr ? { source_regex_pattern: row.sourceExpr, source_regex_replacement: '' } : {}),
+        ...(row.targetExpr ? { target_regex_pattern: row.targetExpr, target_regex_replacement: '' } : {}),
       };
 
       if (complexColumns.includes(row.sourceCol)) {
@@ -283,6 +286,12 @@ export const ConfigureMappingStep: React.FC = () => {
     syncMappings(next);
   };
 
+  const updateExpression = (id: string, field: 'sourceExpr' | 'targetExpr', value: string) => {
+    const next = columnsMatrix.map(row => row.id === id ? { ...row, [field]: value } : row);
+    setColumnsMatrix(next);
+    syncMappings(next);
+  };
+
   const removeTargetCol = (rowId: string, colIndex: number) => {
     const next = columnsMatrix.map(row => {
       if (row.id === rowId) {
@@ -377,7 +386,7 @@ export const ConfigureMappingStep: React.FC = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#1b1b1c', margin: '0 0 8px 0', fontFamily: 'var(--font-mono)' }}>
-            Pegasus_Data_Mapping
+            Pegasus Column Mapping
           </h2>
           <div style={{ display: 'flex', gap: '16px', fontSize: '14px', color: '#414755' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -461,7 +470,7 @@ export const ConfigureMappingStep: React.FC = () => {
                     </td>
                     <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                        <code style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{row.previewValue || '—'}</code>
+                        <code style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{row.isSensitive ? '••••••••' : (row.previewValue || '—')}</code>
                       </div>
                     </td>
                     <td style={{ padding: '12px 8px', textAlign: 'center', color: '#c1c6d7', verticalAlign: 'top' }}><ArrowRightOutlined /></td>
@@ -479,7 +488,7 @@ export const ConfigureMappingStep: React.FC = () => {
                       {!row.isIgnored && row.targetCols.length > 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-start' }}>
                           {row.targetCols.map((tc, idx) => (
-                            <code key={idx} style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{tc.sample || '—'}</code>
+                            <code key={idx} style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{row.isSensitive ? '••••••••' : (tc.sample || '—')}</code>
                           ))}
                         </div>
                       ) : (
@@ -496,13 +505,13 @@ export const ConfigureMappingStep: React.FC = () => {
                             <div style={{ display: 'flex', borderBottom: '1px solid #c1c6d7', gap: '16px' }}>
                               <span style={{ borderBottom: '2px solid #0057c2', color: '#0057c2', paddingBottom: '4px', fontSize: '12px', fontWeight: 600 }}>Source Expression</span>
                             </div>
-                            <textarea style={{ width: '100%', minHeight: '80px', border: '1px solid #c1c6d7', borderRadius: '8px', padding: '8px', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: '12px', resize: 'vertical' }} placeholder="e.g. CAST(src.value AS STRING)" defaultValue={row.sourceExpr} />
+                            <textarea style={{ width: '100%', minHeight: '80px', border: '1px solid #c1c6d7', borderRadius: '8px', padding: '8px', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: '12px', resize: 'vertical' }} placeholder="e.g. REGEXP_REPLACE(mobile, '^\+91', '', 'g') or ^\+91 to strip country code" value={row.sourceExpr} onChange={(e) => updateExpression(row.id, 'sourceExpr', e.target.value)} />
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <div style={{ display: 'flex', borderBottom: '1px solid #c1c6d7', gap: '16px' }}>
                               <span style={{ borderBottom: '2px solid #0057c2', color: '#0057c2', paddingBottom: '4px', fontSize: '12px', fontWeight: 600 }}>Target Expression</span>
                             </div>
-                            <textarea style={{ width: '100%', minHeight: '80px', border: '1px solid #c1c6d7', borderRadius: '8px', padding: '8px', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: '12px', resize: 'vertical' }} placeholder="e.g. DATE_TRUNC('day', val)" defaultValue={row.targetExpr} />
+                            <textarea style={{ width: '100%', minHeight: '80px', border: '1px solid #c1c6d7', borderRadius: '8px', padding: '8px', outline: 'none', fontFamily: 'var(--font-mono)', fontSize: '12px', resize: 'vertical' }} placeholder="e.g. REGEXP_REPLACE(mobile, '[^0-9]', '', 'g') or [^0-9] for digits only" value={row.targetExpr} onChange={(e) => updateExpression(row.id, 'targetExpr', e.target.value)} />
                           </div>
                         </div>
                       </td>

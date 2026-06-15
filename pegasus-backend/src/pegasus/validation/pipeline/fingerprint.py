@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-15T08:43:26Z
+# Last edited: 2026-06-15T16:31:14+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Fast row fingerprinting for reconciliation."""
@@ -49,6 +49,11 @@ def canonical(
 def _identity_parts(record: dict[str, Any], columns: list[str]) -> list[str]:
     """Plain text identity parts — never apply compare-policy canonicalization."""
     return [canonical(record.get(c)) for c in columns]
+
+
+def parse_identity_columns(uid_column: str) -> list[str]:
+    """Split comma-separated UID column names (e.g. ``region,id``)."""
+    return [c.strip() for c in uid_column.split(",") if c.strip()]
 
 
 def identity_key(record: dict[str, Any], columns: list[str]) -> str:

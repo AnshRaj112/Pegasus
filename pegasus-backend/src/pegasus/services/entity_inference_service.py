@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-15T08:43:26Z
+# Last edited: 2026-06-15T09:02:38Z
 # --- END GENERATED FILE METADATA ---
 
 """Inference helpers for deriving an entity from source/target filenames."""

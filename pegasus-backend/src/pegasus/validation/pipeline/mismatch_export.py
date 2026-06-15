@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-15T08:43:26Z
+# Last edited: 2026-06-15T16:31:14+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Export full mismatch rows from reconciliation spill files to NDJSON."""
@@ -94,6 +94,7 @@ def export_workspace_mismatches_ndjson(
     out_path: Path,
     *,
     compare_columns: list[str],
+    sensitive_columns: set[str] | None = None,
 ) -> MismatchExportStats:
     """Scan spill partitions and write every mismatch row with row_detail payloads."""
     workspace = Path(workspace)
@@ -197,14 +198,19 @@ def export_workspace_mismatches_ndjson(
                     if _column_values_match(col, source_value, target_value):
                         continue
                     wrote = True
+                    sv = _serialize_value(source_value)
+                    tv = _serialize_value(target_value)
+                    if sensitive_columns and col in sensitive_columns:
+                        sv = '****' if sv else sv
+                        tv = '****' if tv else tv
                     _write_line(
                         fp,
                         {
                             "uid": key,
                             "mismatch_type": MismatchType.VALUE_MISMATCH.value,
                             "column_name": col,
-                            "source_value": _serialize_value(source_value),
-                            "target_value": _serialize_value(target_value),
+                            "source_value": sv,
+                            "target_value": tv,
                             "row_detail": row_detail,
                         },
                     )

@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-15T08:43:26Z
+# Last edited: 2026-06-15T16:31:14+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Validation service — routes tabular full validation through Category-1 pipeline."""
@@ -31,7 +31,7 @@ from pegasus.validation.comparators.models import MismatchReport, empty_mismatch
 from pegasus.validation.delimiter_resolve import resolve_delimiter_for_adapters, resolve_delimiter_for_paths
 from pegasus.validation.pipeline.config import TabularPipelineConfig
 from pegasus.validation.comparators.policy import build_compare_policy
-from pegasus.validation.pipeline.fingerprint import filter_compare_columns
+from pegasus.validation.pipeline.fingerprint import filter_compare_columns, parse_identity_columns
 from pegasus.validation.pipeline.pipeline import TabularReconciliationPipeline
 from pegasus.validation.pipeline.reporting import write_validation_results
 from pegasus.validation.services.validation_run import pipeline_result_to_run_result
@@ -45,15 +45,15 @@ def _resolve_compare_columns(
     column_mappings: list[ColumnMapping] | None,
 ) -> list[str]:
     """Columns used for value comparison (never the UID / identity column)."""
-    uid = uid_column.strip()
-    default = [c for c in schema_names if c != uid]
+    uid_cols = set(parse_identity_columns(uid_column))
+    default = [c for c in schema_names if c not in uid_cols]
     if not column_mappings:
         return filter_compare_columns(default, schema_names)
     mapped = list(
         dict.fromkeys(
             m.source_column.strip()
             for m in column_mappings
-            if m.source_column and m.source_column.strip() and m.source_column.strip() != uid
+            if m.source_column and m.source_column.strip() and m.source_column.strip() not in uid_cols
         )
     )
     return mapped if mapped else filter_compare_columns(default, schema_names)
@@ -253,12 +253,13 @@ class ValidationService:
             uid_column=uid_column,
         )
         compare_columns = compare_policy.compare_keys
+        identity_columns = parse_identity_columns(uid_column) or [uid_column.strip()]
 
         cfg = self._pipeline_config(
             source_bytes=source.get_size_bytes(),
             target_bytes=target.get_size_bytes(),
             compare_column_count=len(compare_columns),
-            identity_column_count=1,
+            identity_column_count=len(identity_columns),
             resource_policy=resource_policy,
         )
         cfg.compare_policy = compare_policy
@@ -297,7 +298,7 @@ class ValidationService:
         pipeline = TabularReconciliationPipeline(
             source,
             target,
-            identity_columns=[uid_column],
+            identity_columns=identity_columns,
             compare_columns=compare_columns,
             config=cfg,
         )
@@ -470,12 +471,13 @@ class ValidationService:
         src_adapter = FileColumnarAdapter(source_path, file_format=file_format)
         tgt_adapter = FileColumnarAdapter(target_path, file_format=file_format)
         schema = src_adapter.get_schema()
-        compare_columns = [c for c in schema.column_names if c != uid_column]
+        identity_columns = parse_identity_columns(uid_column) or [uid_column.strip()]
+        compare_columns = [c for c in schema.column_names if c not in identity_columns]
         cfg = self._pipeline_config(
             source_bytes=source_path.stat().st_size,
             target_bytes=target_path.stat().st_size,
             compare_column_count=len(compare_columns),
-            identity_column_count=1,
+            identity_column_count=len(identity_columns),
             resource_policy=resource_policy,
         )
         workspace = None
@@ -485,7 +487,7 @@ class ValidationService:
         pipeline = TabularReconciliationPipeline(
             src_adapter,
             tgt_adapter,
-            identity_columns=[uid_column],
+            identity_columns=identity_columns,
             compare_columns=compare_columns,
             config=cfg,
         )

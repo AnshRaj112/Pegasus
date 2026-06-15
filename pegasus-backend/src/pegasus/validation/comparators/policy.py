@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-15T08:43:26Z
+# Last edited: 2026-06-15T16:31:14+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Per-column compare rules wired from API column_mappings into the pipeline."""
@@ -38,6 +38,13 @@ class ColumnRule:
     target_column: str | None = None
     source_columns: tuple[str, ...] = ()
     target_columns: tuple[str, ...] = ()
+    source_regex_pattern: str | None = None
+    source_regex_replacement: str = ""
+    target_regex_pattern: str | None = None
+    target_regex_replacement: str = ""
+    source_strip_prefix: str | None = None
+    target_strip_prefix: str | None = None
+    is_sensitive: bool = False
 
 
 @dataclass(slots=True)
@@ -66,6 +73,24 @@ class ComparePolicy:
         if self.fields:
             return physical_columns_for_side(self.fields, side)
         return self.compare_keys
+
+    def _preprocess_value(self, key: str, value: Any, *, side: Literal["source", "target"]) -> Any:
+        from pegasus.validation.comparators.core import apply_value_transform
+
+        r = self.rule_for(key)
+        if side == "source":
+            return apply_value_transform(
+                value,
+                pattern=r.source_regex_pattern,
+                replacement=r.source_regex_replacement,
+                strip_prefix=r.source_strip_prefix,
+            )
+        return apply_value_transform(
+            value,
+            pattern=r.target_regex_pattern,
+            replacement=r.target_regex_replacement,
+            strip_prefix=r.target_strip_prefix,
+        )
 
     def _canonical_cell(self, key: str, value: Any) -> str:
         from pegasus.validation.comparators.core import _date_candidates, canonical_key
@@ -107,9 +132,12 @@ class ComparePolicy:
     ) -> str:
         fm = self.field_for(key)
         if fm is None:
-            return self._canonical_cell(key, record.get(key))
+            return self._canonical_cell(key, self._preprocess_value(key, record.get(key), side=side))
         physical = fm.source_columns if side == "source" else fm.target_columns
-        parts = [self._canonical_cell(key, record.get(col)) for col in physical]
+        parts = [
+            self._canonical_cell(key, self._preprocess_value(key, record.get(col), side=side))
+            for col in physical
+        ]
         if side == "source":
             return join_canonical_parts(parts)
         return target_canonical_from_parts(parts)
@@ -143,8 +171,23 @@ class ComparePolicy:
             complex_mode=r.complex or r.mode == "structured",
         )
 
-    def canonical(self, col: str, value: Any) -> str:
-        return self._canonical_cell(col, value)
+    def is_sensitive_column(self, col: str) -> bool:
+        return self.rule_for(col).is_sensitive
+
+    def mask_if_sensitive(self, col: str, value: str | None) -> str | None:
+        if value and self.is_sensitive_column(col):
+            return "****"
+        return value
+
+    def canonical(self, col: str, value: Any, *, side: Literal["source", "target"] = "source") -> str:
+        return self._canonical_cell(col, self._preprocess_value(col, value, side=side))
+
+    def _rule_needs_policy_canonical(self, rule: ColumnRule, *, side: Literal["source", "target"]) -> bool:
+        if rule.mode != "text" or rule.complex:
+            return True
+        if side == "source":
+            return bool(rule.source_regex_pattern or rule.source_strip_prefix)
+        return bool(rule.target_regex_pattern or rule.target_strip_prefix)
 
     def drilldown_values(
         self,
@@ -205,6 +248,13 @@ class ComparePolicy:
                     target_column=fm.target_columns[0] if fm.target_columns else col,
                     source_columns=fm.source_columns,
                     target_columns=fm.target_columns,
+                    source_regex_pattern=m.source_regex_pattern if m else None,
+                    source_regex_replacement=m.source_regex_replacement if m else "",
+                    target_regex_pattern=m.target_regex_pattern if m else None,
+                    target_regex_replacement=m.target_regex_replacement if m else "",
+                    source_strip_prefix=m.source_strip_prefix if m else None,
+                    target_strip_prefix=m.target_strip_prefix if m else None,
+                    is_sensitive=bool(m.is_sensitive) if m else False,
                 )
                 continue
             if m is None:
@@ -222,6 +272,13 @@ class ComparePolicy:
                 target_column=tgt,
                 source_columns=src_cols,
                 target_columns=tgt_cols,
+                source_regex_pattern=m.source_regex_pattern,
+                source_regex_replacement=m.source_regex_replacement,
+                target_regex_pattern=m.target_regex_pattern,
+                target_regex_replacement=m.target_regex_replacement,
+                source_strip_prefix=m.source_strip_prefix,
+                target_strip_prefix=m.target_strip_prefix,
+                is_sensitive=bool(m.is_sensitive),
             )
         return cls(rules=rules, fields=fields)
 

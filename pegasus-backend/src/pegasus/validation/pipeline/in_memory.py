@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-15T08:43:26Z
+# Last edited: 2026-06-15T16:31:14+05:30
 # --- END GENERATED FILE METADATA ---
 
 """In-memory reconciliation for datasets that fit in RAM (fast path)."""
@@ -180,12 +180,17 @@ def build_in_memory_mismatch_frame(
             }
             row_detail = _row_detail_json(source_record=source_record, target_record=target_record)
             for cd in col_diffs:
+                sv = _serialize_cell(cd.source_value)
+                tv = _serialize_cell(cd.target_value)
+                if pol is not None:
+                    sv = pol.mask_if_sensitive(cd.column, sv)
+                    tv = pol.mask_if_sensitive(cd.column, tv)
                 rows.append({
                     "uid": key,
                     "mismatch_type": MismatchType.VALUE_MISMATCH.value,
                     "column_name": cd.column,
-                    "source_value": _serialize_cell(cd.source_value),
-                    "target_value": _serialize_cell(cd.target_value),
+                    "source_value": sv,
+                    "target_value": tv,
                     "row_detail": row_detail,
                 })
 

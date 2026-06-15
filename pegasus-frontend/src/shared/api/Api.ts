@@ -21,6 +21,11 @@ export interface ColumnMapping {
   target_columns?: string[];
   compare_mode?: string;
   structured_order_sensitive?: boolean;
+  is_sensitive?: boolean;
+  source_regex_pattern?: string;
+  source_regex_replacement?: string;
+  target_regex_pattern?: string;
+  target_regex_replacement?: string;
 }
 
 export interface GoogleCloudStorageConfig {

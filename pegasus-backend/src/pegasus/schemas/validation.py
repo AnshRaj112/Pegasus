@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-15T08:43:26Z
+# Last edited: 2026-06-15T16:31:14+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Request/response models for the validation API."""
@@ -372,6 +372,10 @@ class ColumnMapping(BaseModel):
         description="Optional regex applied to target value before compare",
     )
     target_regex_replacement: str = Field(default="", description="Replacement for target_regex_pattern")
+    is_sensitive: bool = Field(
+        default=False,
+        description="When true, mismatch output values for this column are masked (e.g. ****) to protect PII.",
+    )
 
 
 class LocalBrowseEntry(BaseModel):
