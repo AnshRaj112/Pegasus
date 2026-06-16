@@ -27,14 +27,11 @@ export const ValidationWizardView: React.FC = () => {
   const isStep1Valid = useAppSelector((state) => state.validation.isStep1Valid);
   const { isFetching, data } = useAppSelector((state) => state.validation.validationDataState);
   const validationForm = useAppSelector((state) => state.validation.validationForm);
-<<<<<<< HEAD
   
   // ⚡ Pull the Step 2 cache from Redux
   const overviewCache = useAppSelector((state) => state.validation.overviewProfileCache);
   
-=======
   const pendingReportJobId = useAppSelector((state) => state.validation.pendingReportJobId);
->>>>>>> 0d5bc8520d6c5767fbabc66188d1dc587cd5e9fc
   const wasFetchingRef = useRef(false);
   const [savingDraft, setSavingDraft] = useState(false);
 
