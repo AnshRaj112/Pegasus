@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-15T11:01:33Z
+# Last edited: 2026-06-15T13:34:40Z
 # --- END GENERATED FILE METADATA ---
 
 """Benchmark native multichar spill + full reconciliation at scale."""
