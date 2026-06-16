@@ -1,15 +1,10 @@
 import React, { useEffect, useState } from 'react';
+import { PlayCircleOutlined, BranchesOutlined, ClockCircleOutlined, CalendarOutlined, FileTextOutlined, RightOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
-import {
-  PlayCircleOutlined,
-  BranchesOutlined,
-  ClockCircleOutlined,
-  CalendarOutlined,
-  FileTextOutlined,
-  RightOutlined,
-} from '@ant-design/icons';
+import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { ReportService } from '../Report.service';
 import type { ValidationHistorySummary } from '../../../shared/api/Api';
+import { validationActions } from '../../validation/Validation.reducer';
 
 const formatEnd = (iso: string | null | undefined) => {
   if (!iso) return '—';
@@ -27,7 +22,9 @@ const formatDuration = (sec: number | null | undefined) => {
 };
 
 export const ExecutionHistory: React.FC = () => {
+  const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const pendingReportJobId = useAppSelector((s) => s.validation.pendingReportJobId);
   const { mappingId } = useParams<{ mappingId: string }>();
   const [runs, setRuns] = useState<ValidationHistorySummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,6 +52,13 @@ export const ExecutionHistory: React.FC = () => {
     })();
     return () => { cancelled = true; };
   }, [mappingId]);
+
+  useEffect(() => {
+    if (pendingReportJobId) {
+      navigate(`/validation/report/${pendingReportJobId}`);
+      dispatch(validationActions.clearPendingReportJob());
+    }
+  }, [pendingReportJobId, navigate, dispatch]);
 
   const MAPPING_NAME = pairLabel || mappingId || 'Report';
 
@@ -90,7 +94,12 @@ export const ExecutionHistory: React.FC = () => {
           </div>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
-          <button type="button" onClick={() => navigate('/validations')} style={{ backgroundColor: '#0057c2', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 500, cursor: 'pointer' }}>
+          <button
+            type="button"
+            disabled={!runs[0]?.run_id}
+            onClick={() => runs[0]?.run_id && dispatch(validationActions.runValidationFromHistoryRequest(runs[0].run_id))}
+            style={{ backgroundColor: '#0057c2', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 500, cursor: runs[0]?.run_id ? 'pointer' : 'not-allowed', opacity: runs[0]?.run_id ? 1 : 0.6 }}
+          >
             <PlayCircleOutlined /> Run Validation
           </button>
         </div>

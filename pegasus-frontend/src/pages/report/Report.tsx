@@ -12,9 +12,14 @@ export const Report: React.FC = () => {
   const { activeTab, searchQuery } = useAppSelector((s) => s.report);
 
   useEffect(() => {
-    // Fetch data whenever this container loads
     dispatch(reportActions.fetchReportsRequest());
   }, [dispatch]);
+
+  useEffect(() => {
+    if (activeTab !== 'Active') return;
+    const timer = setInterval(() => dispatch(reportActions.fetchReportsRequest()), 5000);
+    return () => clearInterval(timer);
+  }, [activeTab, dispatch]);
 
   // Dynamic component rendering based on tab
   const renderStep = () => {

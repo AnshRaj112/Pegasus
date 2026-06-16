@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeftOutlined,
   ExclamationCircleFilled,
   CheckCircleFilled,
+  SyncOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons';
 
 import {
@@ -11,6 +13,10 @@ import {
   type ValidateResult,
   type ValidationHistoryDetail,
 } from '../../../shared/api/Api';
+import { useAppDispatch, useAppSelector } from '../../../redux/store';
+import { reportActions } from '../../report/Report.reducer';
+import { validationActions } from '../Validation.reducer';
+import { getActiveSession, removeActiveSession } from '../validationSessionStorage';
 
 type ActiveSectionTab = 'mismatches' | 'missing' | 'extra';
 
@@ -117,10 +123,12 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
   runId: runIdProp,
   initialResult: initialResultProp,
 }) => {
+  const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const { jobId: routeJobId, runId: routeRunId } = useParams<{ jobId?: string; runId?: string }>();
   const jobId = jobIdProp ?? routeJobId ?? null;
   const runIdParam = runIdProp ?? routeRunId ?? null;
+  const pendingReportJobId = useAppSelector((s) => s.validation.pendingReportJobId);
 
   const [activeTab, setActiveTab] = useState<ActiveSectionTab>('mismatches');
   const [pageSize] = useState<number>(10);
@@ -146,42 +154,47 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
     missing: 0,
     extra: 0,
   });
+  const [isRunning, setIsRunning] = useState(false);
+  const [runningMessage, setRunningMessage] = useState('Validating…');
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const applyResult = useCallback((
+    result: ValidateResult,
+    meta: ReportMeta,
+    runId: string | null,
+  ) => {
+    const counts = result.mismatch_counts;
+    const totalWrong = counts.missing_in_target + counts.extra_in_target + counts.value_mismatch;
+    setStatsOverview({
+      totalWrong,
+      mismatchedCount: counts.value_mismatch,
+      missingCount: counts.missing_in_target,
+      extraCount: counts.extra_in_target,
+    });
+    setTabTotals({
+      mismatches: counts.value_mismatch,
+      missing: counts.missing_in_target,
+      extra: counts.extra_in_target,
+    });
+    setActiveTab(pickInitialTab(counts));
+    setReportMeta(meta);
+    setResolvedRunId(runId);
+    const cols = result.compared_columns ?? meta.comparedColumns ?? [];
+    setComparedColumns(cols);
+    setEmbeddedCounts({
+      mismatches: result.mismatch_sample_groups.value_mismatch.length,
+      missing: result.mismatch_sample_groups.missing_in_target.length,
+      extra: result.mismatch_sample_groups.extra_in_target.length,
+    });
+    setServerPageActive(false);
+    setIsRunning(false);
+    setError(null);
+  }, []);
 
   useEffect(() => {
     if (!jobId && !runIdParam && !initialResultProp) return;
 
     let cancelled = false;
-
-    const applyResult = (
-      result: ValidateResult,
-      meta: ReportMeta,
-      runId: string | null,
-    ) => {
-      const counts = result.mismatch_counts;
-      const totalWrong = counts.missing_in_target + counts.extra_in_target + counts.value_mismatch;
-      setStatsOverview({
-        totalWrong,
-        mismatchedCount: counts.value_mismatch,
-        missingCount: counts.missing_in_target,
-        extraCount: counts.extra_in_target,
-      });
-      setTabTotals({
-        mismatches: counts.value_mismatch,
-        missing: counts.missing_in_target,
-        extra: counts.extra_in_target,
-      });
-      setActiveTab(pickInitialTab(counts));
-      setReportMeta(meta);
-      setResolvedRunId(runId);
-      const cols = result.compared_columns ?? meta.comparedColumns ?? [];
-      setComparedColumns(cols);
-      setEmbeddedCounts({
-        mismatches: result.mismatch_sample_groups.value_mismatch.length,
-        missing: result.mismatch_sample_groups.missing_in_target.length,
-        extra: result.mismatch_sample_groups.extra_in_target.length,
-      });
-      setServerPageActive(false);
-    };
 
     const load = async () => {
       setLoading(true);
@@ -210,7 +223,22 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
               setLoading(false);
               return;
             } else if (job.status !== 'completed') {
-              setError(job.error || 'Validation is still running');
+              const session = getActiveSession(jobId);
+              setIsRunning(true);
+              setRunningMessage(job.message || job.phase || 'Validation in progress…');
+              setReportMeta({
+                jobId,
+                runId: null,
+                sourceLabel: session?.sourcePath ?? null,
+                targetLabel: session?.targetPath ?? null,
+                uidColumn: session?.formSnapshot?.uidColumn ?? null,
+                delimiter: session?.formSnapshot?.delimiter ?? null,
+                isMatch: false,
+                sourceRowCount: 0,
+                targetRowCount: 0,
+                comparedColumnCount: session?.formSnapshot?.columnMappings.length ?? 0,
+                comparedColumns: [],
+              });
               setLoading(false);
               return;
             }
@@ -276,7 +304,50 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
 
     void load();
     return () => { cancelled = true; };
-  }, [jobId, runIdParam, initialResultProp]);
+  }, [jobId, runIdParam, initialResultProp, reloadToken, applyResult]);
+
+  useEffect(() => {
+    if (!jobId || !isRunning) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      try {
+        const { data: job } = await Api.getValidationJob(jobId);
+        if (cancelled) return;
+        if (job.status === 'completed' && job.result) {
+          removeActiveSession(jobId);
+          dispatch(reportActions.fetchReportsRequest());
+          setReloadToken((t) => t + 1);
+          return;
+        }
+        if (job.status === 'failed') {
+          removeActiveSession(jobId);
+          setIsRunning(false);
+          setError(job.error || 'Validation failed');
+          dispatch(reportActions.fetchReportsRequest());
+          return;
+        }
+        setRunningMessage(job.message || job.phase || 'Validation in progress…');
+        timer = setTimeout(() => { void poll(); }, 2000);
+      } catch {
+        timer = setTimeout(() => { void poll(); }, 3000);
+      }
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [jobId, isRunning, dispatch]);
+
+  useEffect(() => {
+    if (pendingReportJobId) {
+      navigate(`/validation/report/${pendingReportJobId}`);
+      dispatch(validationActions.clearPendingReportJob());
+    }
+  }, [pendingReportJobId, navigate, dispatch]);
 
   const currentTabTotalRows = tabTotals[activeTab];
   const wantsServerPage = Boolean(
@@ -326,6 +397,12 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
     else navigate(-1);
   };
 
+  const handleRerun = () => {
+    const runId = resolvedRunId ?? reportMeta?.runId;
+    if (!runId) return;
+    dispatch(validationActions.runValidationFromHistoryRequest(runId));
+  };
+
   if (!jobId && !runIdParam && !initialResultProp) {
     return (
       <div style={{ padding: '24px' }}>
@@ -337,6 +414,30 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
 
   if (loading) {
     return <p style={{ padding: '24px' }}>Loading validation report…</p>;
+  }
+
+  if (isRunning && reportMeta) {
+    return (
+      <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <SyncOutlined spin style={{ fontSize: '24px', color: '#1677ff' }} />
+          <div>
+            <h2 style={{ margin: 0, fontSize: '20px' }}>Validation in progress</h2>
+            <p style={{ margin: '4px 0 0', color: '#64748b' }}>{runningMessage}</p>
+          </div>
+        </div>
+        {(reportMeta.sourceLabel || reportMeta.targetLabel) && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '16px' }}>
+            <FileLabel label="Source" path={reportMeta.sourceLabel} />
+            <FileLabel label="Target" path={reportMeta.targetLabel} />
+          </div>
+        )}
+        <p style={{ color: '#64748b', fontSize: '13px' }}>
+          This session stays in Reports → Active until validation finishes. You will be notified when the report is ready.
+        </p>
+        <button onClick={handleBack} type="button" style={{ alignSelf: 'flex-start', padding: '8px 16px' }}>Back</button>
+      </div>
+    );
   }
 
   if (error || !reportMeta) {
@@ -363,9 +464,20 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
             {reportMeta.runId ? `Run ${reportMeta.runId}` : ''}
           </p>
         </div>
-        <button onClick={handleBack} type="button" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 16px', backgroundColor: '#ffffff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
-          <ArrowLeftOutlined /> Back
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {(resolvedRunId ?? reportMeta.runId) && (
+            <button
+              type="button"
+              onClick={handleRerun}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 16px', backgroundColor: '#0057c2', border: 'none', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
+            >
+              <PlayCircleOutlined /> Run Again
+            </button>
+          )}
+          <button onClick={handleBack} type="button" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 16px', backgroundColor: '#ffffff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+            <ArrowLeftOutlined /> Back
+          </button>
+        </div>
       </div>
 
       {(reportMeta.sourceLabel || reportMeta.targetLabel) && (

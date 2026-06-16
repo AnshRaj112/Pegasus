@@ -1,13 +1,22 @@
-import React from 'react';
-import { TableOutlined, HistoryOutlined } from '@ant-design/icons';
-import { useAppSelector } from '../../../redux/store';
-// ⚡ FIX: Import the types from your interface file
+import React, { useEffect } from 'react';
+import { TableOutlined, HistoryOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { type ReportItem, type ReportBadge } from '../Report.interface';
 import { useNavigate } from 'react-router-dom';
+import { validationActions } from '../../validation/Validation.reducer';
 
 export const Saved: React.FC = () => {
+  const dispatch = useAppDispatch();
   const { savedReports, searchQuery, isLoading } = useAppSelector((s) => s.report);
+  const pendingReportJobId = useAppSelector((s) => s.validation.pendingReportJobId);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (pendingReportJobId) {
+      navigate(`/validation/report/${pendingReportJobId}`);
+      dispatch(validationActions.clearPendingReportJob());
+    }
+  }, [pendingReportJobId, navigate, dispatch]);
 
   // ⚡ FIX: Added (r: ReportItem)
   const filtered = savedReports.filter((r: ReportItem) =>
@@ -22,7 +31,8 @@ export const Saved: React.FC = () => {
     <>
       {/* ⚡ FIX: Added (report: ReportItem, index: number) */}
       {filtered.map((report: ReportItem, index: number) => (
-        <div key={report.id} onClick={() => navigate(`/reports/${report.id}/history`)} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px 24px', borderBottom: index !== filtered.length - 1 ? '1px solid #f1f5f9' : 'none', backgroundColor: '#fff', transition: 'background-color 0.2s', cursor: 'pointer' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}>
+        <div key={report.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px 24px', borderBottom: index !== filtered.length - 1 ? '1px solid #f1f5f9' : 'none', backgroundColor: '#fff' }}>
+          <div onClick={() => navigate(`/reports/${report.id}/history`)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }} onMouseEnter={(e) => e.currentTarget.style.opacity = '0.85'} onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}>
           <div style={{ color: '#94a3b8', fontSize: '14px', width: '16px' }}>-</div>
 
           <div style={{ flex: 1, minWidth: '200px' }}>
@@ -54,6 +64,19 @@ export const Saved: React.FC = () => {
               ))}
             </div>
           </div>
+          </div>
+          {report.draftRunId && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                dispatch(validationActions.runValidationFromHistoryRequest(report.draftRunId!));
+              }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '6px', border: '1px solid #c1c6d7', background: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
+            >
+              <PlayCircleOutlined /> Run
+            </button>
+          )}
         </div>
       ))}
     </>
