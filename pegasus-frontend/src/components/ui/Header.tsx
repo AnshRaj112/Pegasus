@@ -25,11 +25,11 @@ export const Header: React.FC = () => {
 
   return (
     <nav style={{
-      background: 'var(--surface)',
+      background: '#ffffff',
       borderBottom: '1px solid var(--surface-variant)',
       position: 'sticky',
       top: 0,
-      zIndex: 50,
+      zIndex: 999,
       width: '100%',             // ⚡ FIX: Force it to span the full screen
       boxSizing: 'border-box',   // ⚡ FIX: Keep borders from bleeding
       flexShrink: 0              // ⚡ FIX: Stop the flexbox BaseLayout from squishing it vertically
@@ -56,7 +56,7 @@ export const Header: React.FC = () => {
             {/* Renamed Link targeting the upcoming Admin Workspace panel */}
             <Link to="/admin" style={currentPath === '/admin' ? activeLinkStyle : linkBaseStyle}>Admin</Link>
             <Link to="/history" style={currentPath === '/history' ? activeLinkStyle : linkBaseStyle}>History</Link>
-            {/* ❌ Settings Option completely removed from the DOM list */}
+            <Link to="/reports" style={currentPath === '/reports' ? activeLinkStyle : linkBaseStyle}>Reports</Link>
           </div>
         </div>
         
