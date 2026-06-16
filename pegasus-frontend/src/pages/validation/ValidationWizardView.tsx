@@ -13,14 +13,21 @@ import { gcsUri } from '../report/reportPairId';
 // ⚡ Import the newly created CSS module
 import styles from './Validation.module.scss';
 
+// ⚡ Helper to calculate if Step 2 is still fetching
+const cloudObjectKey = (cloud: any): string =>
+  cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';
+
 export const ValidationWizardView: React.FC = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  
   const currentStep = useAppSelector((state) => state.validation.currentStep);
   const isStep1Valid = useAppSelector((state) => state.validation.isStep1Valid);
   const { isFetching, data } = useAppSelector((state) => state.validation.validationDataState);
   const validationForm = useAppSelector((state) => state.validation.validationForm);
+  
+  // ⚡ Pull the Step 2 cache from Redux
+  const overviewCache = useAppSelector((state) => state.validation.overviewProfileCache);
+  
   const wasFetchingRef = useRef(false);
 
   // Opening the wizard tab after a finished run should start fresh, not reopen the report.
@@ -50,7 +57,22 @@ export const ValidationWizardView: React.FC = () => {
     wasFetchingRef.current = isFetching;
   }, [isFetching, data, navigate, validationForm.sourceCloud, validationForm.targetCloud]);
 
-  const isNextButtonDisabled = isFetching || (currentStep === 1 && !isStep1Valid);
+  // ⚡ Calculate if Step 2 is actively loading its profiles
+  const isStep2Loading = currentStep === 2 && (
+    overviewCache?.sourceKey !== cloudObjectKey(validationForm.sourceCloud) ||
+    overviewCache?.targetKey !== cloudObjectKey(validationForm.targetCloud)
+  );
+
+  // ⚡ Calculate if Step 3 is actively loading its columns
+  const isStep3Loading = currentStep === 3 && (
+    !validationForm.columnMappings || validationForm.columnMappings.length === 0
+  );
+
+  // ⚡ Master loading variable
+  const isActuallyLoading = isFetching || isStep2Loading || isStep3Loading;
+
+  // ⚡ Master disabled variable
+  const isNextButtonDisabled = isActuallyLoading || (currentStep === 1 && !isStep1Valid);
 
   const handleProceed = () => {
     if (currentStep === 1 && !isStep1Valid) return;
@@ -130,8 +152,8 @@ export const ValidationWizardView: React.FC = () => {
           {currentStep > 1 && (
             <button 
               onClick={handleBack}
-              disabled={isFetching}
-              style={{ padding: '0 24px', height: '40px', borderRadius: '8px', border: '1px solid #d9d9d9', background: '#ffffff', color: '#414755', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}
+              disabled={isActuallyLoading} // ⚡ Disabled while loading
+              style={{ padding: '0 24px', height: '40px', borderRadius: '8px', border: '1px solid #d9d9d9', background: '#ffffff', color: '#414755', fontSize: '14px', fontWeight: 600, cursor: isActuallyLoading ? 'not-allowed' : 'pointer', opacity: isActuallyLoading ? 0.6 : 1 }}
             >
               Back
             </button>
@@ -141,15 +163,15 @@ export const ValidationWizardView: React.FC = () => {
         <div style={{ display: 'flex', gap: '16px' }}>
           <button
             type="button"
-            disabled={!canSaveDraft}
+            disabled={!canSaveDraft || isActuallyLoading} // ⚡ Disabled while loading
             title="Draft save requires local paths; use GCS selection and Run Validation"
-            style={{ padding: '0 24px', height: '40px', borderRadius: '8px', border: '1px solid #d9d9d9', background: '#ffffff', color: '#414755', fontSize: '14px', fontWeight: 600, cursor: canSaveDraft ? 'pointer' : 'not-allowed', opacity: canSaveDraft ? 1 : 0.6 }}
+            style={{ padding: '0 24px', height: '40px', borderRadius: '8px', border: '1px solid #d9d9d9', background: '#ffffff', color: '#414755', fontSize: '14px', fontWeight: 600, cursor: !canSaveDraft || isActuallyLoading ? 'not-allowed' : 'pointer', opacity: !canSaveDraft || isActuallyLoading ? 0.6 : 1 }}
           >
             Save Draft
           </button>
           <button 
             onClick={handleProceed}
-            disabled={isNextButtonDisabled}
+            disabled={isNextButtonDisabled} // ⚡ Disables based on new master loading state
             style={{ 
               padding: '0 32px', height: '40px', borderRadius: '8px', border: 'none', 
               background: isNextButtonDisabled ? '#e5e2e1' : '#1677ff', 
@@ -158,8 +180,8 @@ export const ValidationWizardView: React.FC = () => {
               display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s'
             }}
           >
-            {isFetching ? 'Processing...' : (currentStep === 3 ? 'Run Validation' : 'Proceed to Mapping')}
-            {!isFetching && <ArrowRightOutlined style={{ fontSize: '16px' }} />}
+            {isActuallyLoading ? 'Processing...' : (currentStep === 3 ? 'Run Validation' : 'Proceed to Mapping')}
+            {!isActuallyLoading && <ArrowRightOutlined style={{ fontSize: '16px' }} />}
           </button>
         </div>
       </footer>

@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-16T03:42:52Z
+# Last edited: 2026-06-16T14:31:36+05:30
 # --- END GENERATED FILE METADATA ---
 
 from functools import lru_cache
@@ -76,11 +76,11 @@ class Settings(BaseSettings):
             "(for example cloud connection management)."
         ),
     )
-    admin_session_ttl_hours: int = Field(
-        default=24 * 7,
-        ge=1,
-        le=24 * 365,
-        description="Admin session lifetime in hours.",
+    admin_session_ttl_minutes: int = Field(
+        default=35,
+        ge=5,
+        le=24 * 60,
+        description="Admin session lifetime in minutes (includes warning grace window).",
     )
     admin_session_cookie_secure: bool = Field(
         default=False,
