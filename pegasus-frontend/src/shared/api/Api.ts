@@ -288,6 +288,7 @@ const E = {
   validateCloudProfile: '/validate/cloud/profile',
   cloudConnections: '/admin/cloud-connections',
   validateJob: (jobId: string) => `/validate/jobs/${jobId}`,
+  validateJobMismatches: (jobId: string) => `/validate/jobs/${jobId}/mismatches`,
   validateDailyStats: '/validate/history/daily-stats',
   validateEntityInsights: '/validate/history/entities/insights',
   validateCreateEntity: '/validate/history/entities',
@@ -355,15 +356,28 @@ export const Api = {
     httpClient.post(E.validateLocal, body),
 
   /** GET /validate/jobs/{job_id} — poll job status/result */
-  getValidationJob: (jobId: string): Promise<AxiosResponse<ValidationJobDetailResponse>> =>
-    httpClient.get(E.validateJob(jobId), { timeout: JOB_POLL_TIMEOUT_MS }),
+  getValidationJob: (
+    jobId: string,
+    options: { summaryOnly?: boolean } = {},
+  ): Promise<AxiosResponse<ValidationJobDetailResponse>> =>
+    httpClient.get(E.validateJob(jobId), {
+      params: options.summaryOnly ? { summary_only: true } : undefined,
+      timeout: JOB_POLL_TIMEOUT_MS,
+    }),
+
+  /** GET /validate/jobs/{job_id}/mismatches — paginated rows from on-disk job artifact */
+  getValidationJobMismatches: (
+    jobId: string,
+    params: { limit: number; offset: number; mismatch_type?: string },
+  ): Promise<AxiosResponse<ValidationMismatchesResponse>> =>
+    httpClient.get(E.validateJobMismatches(jobId), { params }),
 
   /** Poll until completed or failed; retries transient network/gateway errors. */
   pollValidationUntilComplete: async (jobId: string): Promise<ValidateResult> => {
     let backoffMs = POLL_INTERVAL_MS;
     for (;;) {
       try {
-        const { data } = await Api.getValidationJob(jobId);
+        const { data } = await Api.getValidationJob(jobId, { summaryOnly: true });
         backoffMs = POLL_INTERVAL_MS;
         if (data.status === 'completed' && data.result) return data.result;
         if (data.status === 'failed') throw new Error(data.error || 'Validation failed');
