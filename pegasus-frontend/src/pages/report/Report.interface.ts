@@ -9,11 +9,15 @@ export interface ReportBadge {
 
 export interface ReportItem {
   id: string;
+  sourcePath: string;
+  targetPath: string;
   sourceTitle: string;
   sourceSubtitle: string;
   jobTitle: string;
   jobSubtitle: string;
   badges: ReportBadge[];
+  latestRunId: string | null;
+  latestIsMatch: boolean | null;
 }
 
 export interface ReportState {

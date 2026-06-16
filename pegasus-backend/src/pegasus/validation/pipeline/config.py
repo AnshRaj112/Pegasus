@@ -29,6 +29,7 @@ class TabularPipelineConfig:
     use_columnar_spill: bool = True
     use_arrow_ipc_spill: bool = True
     fingerprint_only_spill: bool = True
+    force_native_multichar_spill: bool = True
     gcs_streaming_only: bool = False  # noqa: kept for service wiring; prefetch gated in ValidationService
     enable_in_memory_reconcile: bool = False
     auto_in_memory_max_bytes: int = 256 * 1024 * 1024

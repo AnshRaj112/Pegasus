@@ -134,6 +134,8 @@ def _summary_from_run(run, settings: AppSettings) -> ValidationHistorySummary:
         durations=_durations_from_run(run),
         created_at=run.created_at,
         completed_at=run.completed_at,
+        source_row_count=run.source_row_count,
+        target_row_count=run.target_row_count,
     )
 
 
@@ -151,8 +153,6 @@ def _detail_from_run(run, settings: AppSettings) -> ValidationHistoryDetail:
         footer_validation=FooterValidationResult.model_validate(footer_raw) if footer_raw else None,
         validate_header_formats=bool(run.validate_header_formats),
         validate_footers=bool(run.validate_footers),
-        source_row_count=run.source_row_count,
-        target_row_count=run.target_row_count,
         compared_column_count=run.compared_column_count,
         error_detail=run.error_detail,
     )

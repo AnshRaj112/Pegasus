@@ -459,18 +459,29 @@ def partition_side_multichar_batches(
     use_arrow_ipc_spill: bool = True,
     merkle: PartitionMerkleAccumulator | None = None,
     live_progress: LiveProgressTracker | None = None,
+    force_native_multichar_spill: bool = True,
 ) -> int:
-    """Batched multichar line reader → native inline spill or Polars fallback."""
+    """Batched multichar line reader → native inline spill (required when extension is built)."""
     from pegasus.validation.pipeline.native_spill import (
         can_use_native_multichar_spill,
         partition_side_native_multichar,
     )
+    from pegasus.validation.readers import native_multichar
 
-    if can_use_native_multichar_spill(
+    native_ok = can_use_native_multichar_spill(
         store_payload=store_payload,
-        lazy_drilldown=lazy_drilldown,
         use_arrow_ipc_spill=use_arrow_ipc_spill,
-    ):
+    )
+    if native_ok or force_native_multichar_spill:
+        if not native_multichar.native_extension_available():
+            raise RuntimeError(
+                "Native multichar spill is required but pegasus_native is not installed"
+            )
+        if not native_ok:
+            raise RuntimeError(
+                "Native multichar spill is required but preconditions were not met "
+                "(compare policy mapping or payload spill mode)"
+            )
         return partition_side_native_multichar(
             adapter,
             writer,
@@ -481,12 +492,16 @@ def partition_side_multichar_batches(
             chunk_rows=chunk_rows,
             is_source=is_source,
             merkle=merkle,
+            lazy_drilldown=lazy_drilldown,
         )
 
     read_field = "source_read_seconds" if is_source else "target_read_seconds"
     part_field = "source_partition_seconds" if is_source else "target_partition_seconds"
     side = "source" if is_source else "target"
+    side_name = side
     canon_cols = compare_columns if (store_payload or lazy_drilldown) else []
+    cache_side = side_name
+    drilldown_parts: list[pl.DataFrame] = []
     total = 0
     chunk_index = 0
 
@@ -513,10 +528,12 @@ def partition_side_multichar_batches(
                 frame,
                 identity_columns=identity_columns,
                 logical_keys=compare_columns,
-                side=side,
+                side=side_name,
                 num_partitions=num_partitions,
                 canon_cols=canon_cols,
             )
+            if lazy_drilldown and drilldown_cache is not None:
+                drilldown_parts.append(frame.select(["_identity", *canon_cols]))
             total += _spill_partition_groups(
                 frame,
                 writer,
@@ -529,6 +546,10 @@ def partition_side_multichar_batches(
                 merkle=merkle,
             )
             chunk_index += 1
+
+    if lazy_drilldown and drilldown_cache is not None and drilldown_parts:
+        drilldown_cache.register_side(cache_side, pl.concat(drilldown_parts, how="vertical"))
+
     return total
 
 
@@ -819,6 +840,7 @@ def try_partition_side_polars(
     chunk_rows: int = 50_000,
     merkle: PartitionMerkleAccumulator | None = None,
     live_progress: LiveProgressTracker | None = None,
+    force_native_multichar_spill: bool = True,
 ) -> int | None:
     """Spill via streaming batches or a single in-memory frame (PyArrow-friendly delimiters)."""
     from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
@@ -828,8 +850,54 @@ def try_partition_side_polars(
         can_use_fast_multichar_load_bytes,
     )
 
+    if isinstance(adapter, FileDelimitedAdapter):
+        if force_native_multichar_spill and can_use_fast_multichar_load(
+            adapter.path, adapter._delimiter
+        ):
+            return partition_side_multichar_batches(
+                adapter,
+                writer,
+                identity_columns=identity_columns,
+                compare_columns=compare_columns,
+                num_partitions=num_partitions,
+                store_payload=store_payload,
+                timings=timings,
+                chunk_rows=chunk_rows,
+                is_source=is_source,
+                drilldown_cache=drilldown_cache,
+                lazy_drilldown=lazy_drilldown,
+                use_columnar_spill=use_columnar_spill,
+                use_arrow_ipc_spill=use_arrow_ipc_spill,
+                merkle=merkle,
+                live_progress=live_progress,
+                force_native_multichar_spill=force_native_multichar_spill,
+            )
+
     if isinstance(adapter, GcsDelimitedAdapter):
         try:
+            multichar = can_use_fast_multichar_load_bytes(
+                adapter._load_header_prefix(),
+                adapter._delimiter,
+            )
+            if force_native_multichar_spill and multichar:
+                return partition_side_multichar_batches(
+                    adapter,
+                    writer,
+                    identity_columns=identity_columns,
+                    compare_columns=compare_columns,
+                    num_partitions=num_partitions,
+                    store_payload=store_payload,
+                    timings=timings,
+                    chunk_rows=chunk_rows,
+                    is_source=is_source,
+                    drilldown_cache=drilldown_cache,
+                    lazy_drilldown=lazy_drilldown,
+                    use_columnar_spill=use_columnar_spill,
+                    use_arrow_ipc_spill=use_arrow_ipc_spill,
+                    merkle=merkle,
+                    live_progress=live_progress,
+                    force_native_multichar_spill=force_native_multichar_spill,
+                )
             cached = _partition_cached_gcs_frame(
                 adapter,
                 writer,
@@ -885,6 +953,7 @@ def try_partition_side_polars(
                     use_arrow_ipc_spill=use_arrow_ipc_spill,
                     merkle=merkle,
                     live_progress=live_progress,
+                    force_native_multichar_spill=force_native_multichar_spill,
                 )
             return partition_side_adapter_stream(
                 adapter,
@@ -908,6 +977,29 @@ def try_partition_side_polars(
 
     if _should_use_streaming_spill(adapter, streaming_spill_min_bytes):
         try:
+            multichar_local = (
+                isinstance(adapter, FileDelimitedAdapter)
+                and can_use_fast_multichar_load(adapter.path, adapter._delimiter)
+            )
+            if force_native_multichar_spill and multichar_local:
+                return partition_side_multichar_batches(
+                    adapter,
+                    writer,
+                    identity_columns=identity_columns,
+                    compare_columns=compare_columns,
+                    num_partitions=num_partitions,
+                    store_payload=store_payload,
+                    timings=timings,
+                    chunk_rows=chunk_rows,
+                    is_source=is_source,
+                    drilldown_cache=drilldown_cache,
+                    lazy_drilldown=lazy_drilldown,
+                    use_columnar_spill=use_columnar_spill,
+                    use_arrow_ipc_spill=use_arrow_ipc_spill,
+                    merkle=merkle,
+                    live_progress=live_progress,
+                    force_native_multichar_spill=force_native_multichar_spill,
+                )
             cached = _partition_cached_gcs_frame(
                 adapter,
                 writer,
@@ -957,6 +1049,7 @@ def try_partition_side_polars(
                     use_arrow_ipc_spill=use_arrow_ipc_spill,
                     merkle=merkle,
                     live_progress=live_progress,
+                    force_native_multichar_spill=force_native_multichar_spill,
                 )
             if pyarrow_supports_delimiter(getattr(adapter, "_delimiter", "")):
                 return partition_side_streaming_batches(

@@ -89,6 +89,31 @@ def _load_partition_entries(
     return entries
 
 
+def _collect_mismatch_keys(
+    workspace: Path,
+    *,
+    compare_columns: list[str],
+) -> set[str]:
+    """Lightweight pass over spill partitions to find UIDs that need drilldown."""
+    active = list_partition_ids(workspace, "source") | list_partition_ids(workspace, "target")
+    needed: set[str] = set()
+    for pid in active:
+        src_path = workspace / "source" / f"part_{pid:05d}.bin"
+        tgt_path = workspace / "target" / f"part_{pid:05d}.bin"
+        src_payload = _load_partition_entries(src_path, compare_columns=compare_columns)
+        tgt_payload = _load_partition_entries(tgt_path, compare_columns=compare_columns)
+        src_keys = set(src_payload)
+        tgt_keys = set(tgt_payload)
+        needed |= src_keys - tgt_keys
+        needed |= tgt_keys - src_keys
+        for key in src_keys & tgt_keys:
+            source_data = src_payload[key]
+            target_data = tgt_payload[key]
+            if source_data.get("_fp") != target_data.get("_fp"):
+                needed.add(key)
+    return needed
+
+
 def export_workspace_mismatches_ndjson(
     workspace: Path,
     out_path: Path,
@@ -105,8 +130,17 @@ def export_workspace_mismatches_ndjson(
     if not active:
         return MismatchExportStats()
 
-    src_drilldown = load_drilldown_lookup(workspace, "source", compare_columns)
-    tgt_drilldown = load_drilldown_lookup(workspace, "target", compare_columns)
+    needed_keys = _collect_mismatch_keys(workspace, compare_columns=compare_columns)
+    if needed_keys:
+        src_drilldown = load_drilldown_lookup(
+            workspace, "source", compare_columns, keys=needed_keys
+        )
+        tgt_drilldown = load_drilldown_lookup(
+            workspace, "target", compare_columns, keys=needed_keys
+        )
+    else:
+        src_drilldown = {}
+        tgt_drilldown = {}
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

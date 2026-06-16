@@ -7,6 +7,8 @@ import { validationActions } from './Validation.reducer';
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
 import { ConfigureMappingStep } from './steps/ConfigureMappingStep';
+import { ReportService } from '../report/Report.service';
+import { gcsUri } from '../report/reportPairId';
 
 // ⚡ Import the newly created CSS module
 import styles from './Validation.module.scss';
@@ -30,18 +32,23 @@ export const ValidationWizardView: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Redirect to the report once, immediately after a run finishes on this page.
+  // Redirect to reports history for this file pair after a run finishes.
   useEffect(() => {
     if (
       wasFetchingRef.current
       && !isFetching
       && data?.status === 'Complete'
-      && data.jobId
+      && validationForm.sourceCloud
+      && validationForm.targetCloud
     ) {
-      navigate(`/validation/report/${data.jobId}`);
+      const src = gcsUri(validationForm.sourceCloud);
+      const tgt = gcsUri(validationForm.targetCloud);
+      void ReportService.getMappingIdForPaths(src, tgt).then((mappingId) => {
+        navigate(`/reports/${mappingId}/history`);
+      });
     }
     wasFetchingRef.current = isFetching;
-  }, [isFetching, data, navigate]);
+  }, [isFetching, data, navigate, validationForm.sourceCloud, validationForm.targetCloud]);
 
   const isNextButtonDisabled = isFetching || (currentStep === 1 && !isStep1Valid);
 

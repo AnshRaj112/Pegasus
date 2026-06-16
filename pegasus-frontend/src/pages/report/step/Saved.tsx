@@ -6,17 +6,17 @@ import { type ReportItem, type ReportBadge } from '../Report.interface';
 import { useNavigate } from 'react-router-dom';
 
 export const Saved: React.FC = () => {
-  const { activeReports, searchQuery, isLoading } = useAppSelector((s) => s.report);
+  const { savedReports, searchQuery, isLoading } = useAppSelector((s) => s.report);
   const navigate = useNavigate();
 
   // ⚡ FIX: Added (r: ReportItem)
-  const filtered = activeReports.filter((r: ReportItem) => 
+  const filtered = savedReports.filter((r: ReportItem) =>
     r.jobTitle.toLowerCase().includes(searchQuery.toLowerCase()) || 
     r.sourceTitle.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  if (isLoading) return <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>Loading active reports...</div>;
-  if (filtered.length === 0) return <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>No active reports found.</div>;
+  if (isLoading) return <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>Loading saved mappings...</div>;
+  if (filtered.length === 0) return <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>No saved mappings found.</div>;
 
   return (
     <>

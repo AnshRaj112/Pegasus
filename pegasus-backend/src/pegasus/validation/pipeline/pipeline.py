@@ -318,12 +318,23 @@ class TabularReconciliationPipeline:
             max(source_bytes, target_bytes),
             column_count=len(compare_columns) + len(self._identity_columns),
         )
+        from pegasus.validation.readers import native_multichar
+
+        native_disk_drilldown = (
+            native_multichar.native_extension_available()
+            and self._config.fingerprint_only_spill
+            and self._config.force_native_multichar_spill
+        )
         lazy_drilldown = enable_drilldown and (
             self._config.lazy_column_drilldown or self._config.fingerprint_only_spill
         )
-        if est_rows > 250_000:
+        if lazy_drilldown and not native_disk_drilldown and est_rows > 250_000:
             lazy_drilldown = False
-        drilldown_cache = DrilldownCache(compare_columns) if lazy_drilldown else None
+        drilldown_cache = (
+            DrilldownCache(compare_columns)
+            if lazy_drilldown and not native_disk_drilldown
+            else None
+        )
         spill_payload = (
             enable_drilldown
             and not lazy_drilldown
@@ -357,6 +368,7 @@ class TabularReconciliationPipeline:
                 progress_callback=progress_callback,
                 est_rows=est_rows,
                 persist_drilldown=not owned_workspace,
+                native_disk_drilldown=native_disk_drilldown,
             )
         finally:
             if owned_workspace:
@@ -383,6 +395,7 @@ class TabularReconciliationPipeline:
         progress_callback: Callable[[dict[str, Any]], None] | None,
         est_rows: int,
         persist_drilldown: bool = False,
+        native_disk_drilldown: bool = False,
     ) -> PipelineResult:
         from pegasus.validation.pipeline.partition_merkle import PartitionMerkleAccumulator
 
@@ -652,7 +665,9 @@ class TabularReconciliationPipeline:
         )
         publish_stage(reconcile_stage, progress_callback=progress_callback)
         spill_path = "spill_binary"
-        if self._config.use_arrow_ipc_spill and not spill_payload:
+        if lazy_drilldown and native_disk_drilldown:
+            spill_path = "spill_native_multichar_drilldown"
+        elif self._config.use_arrow_ipc_spill and not spill_payload:
             spill_path = "spill_arrow_ipc"
         elif lazy_drilldown:
             spill_path = "spill_binary_lazy_drilldown"
@@ -729,6 +744,7 @@ class TabularReconciliationPipeline:
             "use_columnar_spill": self._config.use_columnar_spill,
             "use_arrow_ipc_spill": self._config.use_arrow_ipc_spill,
             "merkle": merkle,
+            "force_native_multichar_spill": self._config.force_native_multichar_spill,
         }
         polars_rows = try_partition_side_polars(
             adapter,

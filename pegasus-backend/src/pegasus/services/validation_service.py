@@ -137,6 +137,7 @@ class ValidationService:
             enable_content_digest_precheck=self._settings.validation_enable_content_digest_precheck,
             lazy_column_drilldown=True,
             fingerprint_only_spill=True,
+            force_native_multichar_spill=True,
             use_arrow_ipc_spill=True,
             partition_reconcile_workers=reconcile_workers,
             gcs_streaming_only=self._settings.validation_gcs_streaming_only,

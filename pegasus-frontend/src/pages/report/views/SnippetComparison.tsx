@@ -1,79 +1,182 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { DownloadOutlined, RightOutlined, DatabaseOutlined, LeftOutlined } from '@ant-design/icons';
+import { Api, type MismatchSampleRow } from '../../../shared/api/Api';
+import { downloadSnippetCsv, downloadSnippetPdf, downloadSnippetXlsx } from '../snippetExport';
 
-// ⚡ DEMO DATA IMPLEMENTING THE SPECIFIC STATUSES
 type RowStatus = 'match' | 'mismatch' | 'extra_source' | 'missing_target';
 
-const DEMO_COLUMNS = [
-  'transaction_id', 
-  'amount_usd', 
-  'vendor_name', 
-  'status', 
-  'region', 
-  'currency', 
-  'account_tier', 
-  't_stamp'
-];
+type SnippetRow = {
+  uid: string;
+  status: RowStatus;
+  source: Record<string, string>;
+  target: Record<string, string>;
+  mismatchColumns: Set<string>;
+};
 
-const DEMO_ROWS: { id: string; status: RowStatus; source: string[]; target: string[]; mismatchIndices: number[] }[] = [
-  { id: '1', status: 'match', 
-    source: ['TX_001', '1200.50', 'Cloudflare', 'SUCCESS', 'US-EAST', 'USD', 'ENTERPRISE', '2023-11-20'], 
-    target: ['TX_001', '1200.50', 'Cloudflare', 'SUCCESS', 'US-EAST', 'USD', 'ENTERPRISE', '2023-11-20'], 
-    mismatchIndices: [] },
-  { id: '2', status: 'match', 
-    source: ['TX_002', '850.00', 'AWS', 'SUCCESS', 'US-WEST', 'USD', 'PRO', '2023-11-20'], 
-    target: ['TX_002', '850.00', 'AWS', 'SUCCESS', 'US-WEST', 'USD', 'PRO', '2023-11-20'], 
-    mismatchIndices: [] },
-  { id: '3', status: 'match', 
-    source: ['TX_003', '15.00', 'Stripe', 'PENDING', 'EU-CENTRAL', 'EUR', 'BASIC', '2023-11-20'], 
-    target: ['TX_003', '15.00', 'Stripe', 'PENDING', 'EU-CENTRAL', 'EUR', 'BASIC', '2023-11-20'], 
-    mismatchIndices: [] },
-  
-  // ⚡ Mismatches (Now with multiple mismatched columns: Vendor and Region)
-  { id: '4', status: 'mismatch', 
-    source: ['TX_004', '99.00', 'Sybase', 'SUCCESS', 'US-EAST', 'USD', 'PRO', '2023-11-21'], 
-    target: ['TX_004', '99.00', 'Oracle', 'SUCCESS', 'US-WEST', 'USD', 'PRO', '2023-11-21'], 
-    mismatchIndices: [2, 4] },
-  { id: '5', status: 'mismatch', 
-    source: ['TX_005', '450.00', 'GCP', 'FAILED', 'AP-SOUTH', 'INR', 'ENTERPRISE', '2023-11-21'], 
-    target: ['TX_005', '400.00', 'GCP', 'FAILED', 'AP-SOUTH', 'INR', 'ENTERPRISE', '2023-11-21'], 
-    mismatchIndices: [1] },
+const COLS_PER_PAGE = 10;
+const EMPTY = '—';
+const FETCH_BATCH = 5000;
 
-  // ⚡ Extra Rows in Source (Missing in Target)
-  { id: '6', status: 'extra_source', 
-    source: ['TX_006', '120.00', 'Azure', 'SUCCESS', 'EU-WEST', 'GBP', 'PRO', '2023-11-22'], 
-    target: ['—', '—', '—', '—', '—', '—', '—', '—'], 
-    mismatchIndices: [] },
-  { id: '7', status: 'extra_source', 
-    source: ['TX_007', '55.00', 'Vercel', 'SUCCESS', 'US-EAST', 'USD', 'BASIC', '2023-11-22'], 
-    target: ['—', '—', '—', '—', '—', '—', '—', '—'], 
-    mismatchIndices: [] },
+const parseDetail = (raw: unknown): Record<string, unknown> | null => {
+  if (!raw) return null;
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (typeof parsed === 'string') return parseDetail(parsed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+    } catch { /* ignore */ }
+  }
+  return null;
+};
 
-  // ⚡ Missing in Source (Extra in Target)
-  { id: '8', status: 'missing_target', 
-    source: ['—', '—', '—', '—', '—', '—', '—', '—'], 
-    target: ['TX_008', '890.00', 'Databricks', 'SUCCESS', 'US-WEST', 'USD', 'ENTERPRISE', '2023-11-23'], 
-    mismatchIndices: [] },
+const pickCell = (val: string | null | undefined, existing: string): string => {
+  if (val != null && val !== '' && val !== '__NULL__') return val;
+  return existing;
+};
 
-  { id: '9', status: 'match', 
-    source: ['TX_009', '75.00', 'DigitalOcean', 'SUCCESS', 'AP-EAST', 'SGD', 'PRO', '2023-11-23'], 
-    target: ['TX_009', '75.00', 'DigitalOcean', 'SUCCESS', 'AP-EAST', 'SGD', 'PRO', '2023-11-23'], 
-    mismatchIndices: [] },
-  { id: '10', status: 'match', 
-    source: ['TX_010', '150.00', 'MongoDB', 'PENDING', 'US-EAST', 'USD', 'ENTERPRISE', '2023-11-24'], 
-    target: ['TX_010', '150.00', 'MongoDB', 'PENDING', 'US-EAST', 'USD', 'ENTERPRISE', '2023-11-24'], 
-    mismatchIndices: [] },
-];
+const mergeRecord = (
+  cells: Record<string, string>,
+  rec: unknown,
+  columns: string[],
+) => {
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return;
+  const obj = rec as Record<string, unknown>;
+  for (const col of columns) {
+    const v = obj[col];
+    if (v != null && String(v) !== '' && String(v) !== '__NULL__') cells[col] = String(v);
+  }
+};
+
+const emptyCells = (columns: string[]): Record<string, string> =>
+  Object.fromEntries(columns.map((c) => [c, EMPTY]));
+
+const buildSnippetRows = (items: MismatchSampleRow[], columns: string[]): SnippetRow[] => {
+  const byUid = new Map<string, SnippetRow>();
+
+  for (const item of items) {
+    let row = byUid.get(item.uid);
+    if (!row) {
+      let status: RowStatus = 'mismatch';
+      if (item.mismatch_type === 'missing_in_target') status = 'extra_source';
+      else if (item.mismatch_type === 'extra_in_target') status = 'missing_target';
+      row = {
+        uid: item.uid,
+        status,
+        source: emptyCells(columns),
+        target: emptyCells(columns),
+        mismatchColumns: new Set(),
+      };
+      byUid.set(item.uid, row);
+    }
+
+    const detail = parseDetail(item.row_detail);
+    mergeRecord(row.source, detail?.source_record, columns);
+    mergeRecord(row.target, detail?.target_record, columns);
+
+    if (item.mismatch_type === 'value_mismatch' && item.column_name) {
+      row.mismatchColumns.add(item.column_name);
+      row.source[item.column_name] = pickCell(item.source_value, row.source[item.column_name] ?? EMPTY);
+      row.target[item.column_name] = pickCell(item.target_value, row.target[item.column_name] ?? EMPTY);
+      row.status = 'mismatch';
+    } else if (item.mismatch_type === 'missing_in_target') {
+      row.status = 'extra_source';
+    } else if (item.mismatch_type === 'extra_in_target') {
+      row.status = 'missing_target';
+    }
+  }
+
+  return [...byUid.values()];
+};
+
+/** UID visible only if it has a row-level issue or a value mismatch in the column window. */
+const rowHasIssueInCols = (row: SnippetRow, visibleCols: string[]): boolean => {
+  if (row.status === 'extra_source' || row.status === 'missing_target') return true;
+  return visibleCols.some((c) => row.mismatchColumns.has(c));
+};
 
 export const SnippetComparison: React.FC = () => {
-  const MAPPING_NAME = "DEMO_MAPPING_2026";
-  const RUN_ID = "RUN_882910_A";
-
+  const navigate = useNavigate();
+  const { mappingId, runId } = useParams<{ mappingId: string; runId: string }>();
+  const [loading, setLoading] = useState(true);
+  const [loadProgress, setLoadProgress] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [columns, setColumns] = useState<string[]>([]);
+  const [allItems, setAllItems] = useState<MismatchSampleRow[]>([]);
+  const [sourceLabel, setSourceLabel] = useState('Source');
+  const [targetLabel, setTargetLabel] = useState('Target');
+  const [colPage, setColPage] = useState(0);
+  const [rowPage, setRowPage] = useState(0);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  
-  // Ref hooks to sync the scrollbar between the two tables
+  const [downloadOpen, setDownloadOpen] = useState(false);
   const sourceRef = useRef<HTMLDivElement>(null);
   const targetRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!runId) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      setLoadProgress('Loading run…');
+      try {
+        const { data: detail } = await Api.getValidationHistoryRun(runId);
+        const cols = detail.compared_columns?.length ? detail.compared_columns : [];
+        const collected: MismatchSampleRow[] = [];
+        let offset = 0;
+        for (;;) {
+          const { data: page } = await Api.getValidationMismatches(runId, { limit: FETCH_BATCH, offset });
+          collected.push(...page.items);
+          if (cancelled) return;
+          setLoadProgress(`Loaded ${collected.length.toLocaleString()} / ${page.total.toLocaleString()} mismatch rows…`);
+          if (collected.length >= page.total || page.items.length < FETCH_BATCH) break;
+          offset += FETCH_BATCH;
+        }
+        if (cancelled) return;
+        setColumns(cols);
+        setAllItems(collected);
+        setSourceLabel(detail.source_path ?? detail.source_filename ?? 'Source');
+        setTargetLabel(detail.target_path ?? detail.target_filename ?? 'Target');
+        setColPage(0);
+        setRowPage(0);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load snippet');
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setLoadProgress('');
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [runId]);
+
+  const allRows = useMemo(() => buildSnippetRows(allItems, columns), [allItems, columns]);
+
+  const totalColPages = Math.max(1, Math.ceil(columns.length / COLS_PER_PAGE));
+  const visibleCols = columns.slice(colPage * COLS_PER_PAGE, (colPage + 1) * COLS_PER_PAGE);
+  const displayCols = ['uid', ...visibleCols];
+
+  const filteredRows = useMemo(
+    () => allRows.filter((r) => rowHasIssueInCols(r, visibleCols)),
+    [allRows, visibleCols],
+  );
+
+  const totalRowPages = Math.max(1, Math.ceil(filteredRows.length / itemsPerPage));
+  const pageRows = filteredRows.slice(rowPage * itemsPerPage, (rowPage + 1) * itemsPerPage);
+
+  useEffect(() => {
+    setRowPage(0);
+  }, [colPage, itemsPerPage]);
+
+  useEffect(() => {
+    if (rowPage >= totalRowPages) setRowPage(Math.max(0, totalRowPages - 1));
+  }, [rowPage, totalRowPages]);
+
+  const pairLabel = mappingId ?? sourceLabel.split('/').pop() ?? 'Report';
 
   const handleSourceScroll = (e: React.UIEvent<HTMLDivElement>) => {
     if (targetRef.current) {
@@ -89,104 +192,152 @@ export const SnippetComparison: React.FC = () => {
     }
   };
 
+  const exportRows = () => pageRows.map((row) => ({
+    uid: row.uid,
+    status: row.status,
+    columns: visibleCols,
+    source: visibleCols.map((c) => row.source[c] ?? EMPTY),
+    target: visibleCols.map((c) => row.target[c] ?? EMPTY),
+  }));
+
+  const cellStyle = (row: SnippetRow, side: 'source' | 'target', col: string): React.CSSProperties => {
+    if (col === 'uid') return { fontWeight: 600 };
+    const src = row.source[col] ?? EMPTY;
+    const tgt = row.target[col] ?? EMPTY;
+    const isMismatch = row.mismatchColumns.has(col);
+    const isRowIssue = row.status === 'extra_source' || row.status === 'missing_target';
+
+    if (isMismatch) {
+      return { backgroundColor: '#fee2e2', color: '#991b1b', fontWeight: 600 };
+    }
+    if (isRowIssue) {
+      const hasValue = side === 'source' ? src !== EMPTY : tgt !== EMPTY;
+      return {
+        backgroundColor: '#fff7ed',
+        color: hasValue ? '#c2410c' : '#94a3b8',
+      };
+    }
+    if (src !== EMPTY && tgt !== EMPTY && src === tgt) {
+      return { color: '#166534' };
+    }
+    return { color: '#1b1b1c' };
+  };
+
+  const rowBg = (row: SnippetRow) =>
+    (row.status === 'extra_source' || row.status === 'missing_target' ? '#fff7ed' : '#fff');
+
+  const renderCells = (row: SnippetRow, side: 'source' | 'target') => displayCols.map((col) => {
+    const cell = col === 'uid' ? row.uid : (row[side][col] ?? EMPTY);
+    return (
+      <td key={`${side}-${col}`} style={{
+        padding: '12px 16px',
+        fontSize: '13px',
+        fontFamily: 'var(--font-mono)',
+        ...cellStyle(row, side, col),
+      }}>
+        {cell}
+      </td>
+    );
+  });
+
+  if (loading) {
+    return (
+      <div style={{ padding: '24px', color: '#64748b' }}>
+        Loading snippet… {loadProgress && <span style={{ display: 'block', marginTop: '8px', fontSize: '12px' }}>{loadProgress}</span>}
+      </div>
+    );
+  }
+  if (error) return <div style={{ padding: '24px', color: '#ba1a1a' }}>{error}</div>;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      
-      {/* Header & Breadcrumbs */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#64748b', fontSize: '13px' }}>
-          <span style={{ cursor: 'pointer' }}>Reports</span> <RightOutlined style={{ fontSize: '10px' }} />
-          <span style={{ backgroundColor: '#f0eded', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>{MAPPING_NAME}</span> <RightOutlined style={{ fontSize: '10px' }} />
-          <span style={{ backgroundColor: '#f0eded', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>{RUN_ID}</span> <RightOutlined style={{ fontSize: '10px' }} />
+          <span style={{ cursor: 'pointer' }} onClick={() => navigate('/reports')}>Reports</span>
+          <RightOutlined style={{ fontSize: '10px' }} />
+          <span style={{ backgroundColor: '#f0eded', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>{pairLabel}</span>
+          <RightOutlined style={{ fontSize: '10px' }} />
+          <span style={{ backgroundColor: '#f0eded', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>{runId}</span>
+          <RightOutlined style={{ fontSize: '10px' }} />
           <span style={{ color: '#1b1b1c', fontWeight: 600 }}>Snippet</span>
         </div>
-
-        {/* ⚡ Only Download Button kept */}
-        <button style={{ backgroundColor: '#1e293b', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 500, cursor: 'pointer' }}>
-          <DownloadOutlined /> Download Snippet
-        </button>
+        <div style={{ position: 'relative' }}>
+          <button type="button" onClick={() => setDownloadOpen((o) => !o)} style={{ backgroundColor: '#1e293b', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 500, cursor: 'pointer' }}>
+            <DownloadOutlined /> Download Snippet
+          </button>
+          {downloadOpen && (
+            <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: '4px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 20, minWidth: '140px' }}>
+              {(['CSV', 'XLSX', 'PDF'] as const).map((fmt) => (
+                <button key={fmt} type="button" onClick={() => {
+                  setDownloadOpen(false);
+                  const base = `snippet-${runId}-cols${colPage + 1}`;
+                  const data = exportRows();
+                  if (fmt === 'CSV') downloadSnippetCsv(data, visibleCols, `${base}.csv`);
+                  else if (fmt === 'XLSX') downloadSnippetXlsx(data, visibleCols, `${base}.xlsx`);
+                  else downloadSnippetPdf(data, visibleCols, `Snippet ${runId}`);
+                }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '13px' }}>
+                  {fmt}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Side-by-Side Tables Container */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '12px', color: '#64748b' }}>
+          Columns {columns.length ? colPage * COLS_PER_PAGE + 1 : 0}–{Math.min((colPage + 1) * COLS_PER_PAGE, columns.length)} of {columns.length}
+        </span>
+        <button type="button" disabled={colPage <= 0} onClick={() => setColPage((p) => p - 1)} style={{ padding: '4px 10px', fontSize: '12px', cursor: colPage <= 0 ? 'not-allowed' : 'pointer' }}>← Prev cols</button>
+        <button type="button" disabled={colPage >= totalColPages - 1} onClick={() => setColPage((p) => p + 1)} style={{ padding: '4px 10px', fontSize: '12px', cursor: colPage >= totalColPages - 1 ? 'not-allowed' : 'pointer' }}>Next cols →</button>
+        <span style={{ fontSize: '12px', color: '#64748b' }}>
+          {filteredRows.length.toLocaleString()} UID(s) with issues in this column window
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '12px', fontSize: '11px', color: '#64748b' }}>
+        <span><span style={{ color: '#166534', fontWeight: 600 }}>Green</span> = matching</span>
+        <span><span style={{ color: '#991b1b', fontWeight: 600 }}>Red</span> = mismatch</span>
+        <span><span style={{ color: '#c2410c', fontWeight: 600 }}>Orange</span> = missing / extra row</span>
+      </div>
+
       <div style={{ display: 'flex', gap: '24px', flex: 1, minHeight: '400px', overflow: 'hidden' }}>
-        
-        {/* SOURCE TABLE */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden', minWidth: 0 }}>
           <div style={{ backgroundColor: '#1e293b', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#fff' }}>
-            <DatabaseOutlined /> <span style={{ fontSize: '14px', fontWeight: 600 }}>Source &gt; db_prod_core</span>
+            <DatabaseOutlined /> <span style={{ fontSize: '14px', fontWeight: 600 }}>Source &gt; {sourceLabel}</span>
           </div>
           <div ref={sourceRef} onScroll={handleSourceScroll} style={{ overflow: 'auto', flex: 1 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', whiteSpace: 'nowrap' }}>
               <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>
-                <tr>
-                  {DEMO_COLUMNS.map(col => (
-                    <th key={col} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>{col}</th>
-                  ))}
-                </tr>
+                <tr>{displayCols.map((col) => <th key={col} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>{col === 'uid' ? 'UID' : col}</th>)}</tr>
               </thead>
               <tbody>
-                {DEMO_ROWS.map((row) => (
-                  <tr key={`src-${row.id}`} style={{ 
-                    // ⚡ ORANGE BG for Missing/Extra, normal otherwise
-                    backgroundColor: row.status === 'extra_source' || row.status === 'missing_target' ? '#fff7ed' : '#fff',
-                    borderBottom: '1px solid #f1f5f9'
-                  }}>
-                    {row.source.map((cell, cIdx) => {
-                      const isMismatchCell = row.status === 'mismatch' && row.mismatchIndices.includes(cIdx);
-                      return (
-                        <td key={cIdx} style={{ 
-                          padding: '12px 16px', fontSize: '13px', fontFamily: 'var(--font-mono)',
-                          // ⚡ RED BG for Mismatch cell. GREEN text for Match. ORANGE text for extra/missing.
-                          backgroundColor: isMismatchCell ? '#fee2e2' : 'transparent',
-                          color: isMismatchCell ? '#991b1b' : (row.status === 'match' ? '#166534' : (row.status === 'extra_source' || row.status === 'missing_target' ? '#c2410c' : '#1b1b1c')),
-                          fontWeight: isMismatchCell ? 600 : 400
-                        }}>
-                          {cell}
-                        </td>
-                      );
-                    })}
+                {pageRows.length === 0 ? (
+                  <tr><td colSpan={displayCols.length} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No UIDs with mismatches, missing, or extra rows in these columns. Try the next column page.</td></tr>
+                ) : pageRows.map((row) => (
+                  <tr key={`src-${row.uid}`} style={{ backgroundColor: rowBg(row), borderBottom: '1px solid #f1f5f9' }}>
+                    {renderCells(row, 'source')}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </div>
-
-        {/* TARGET TABLE */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden', minWidth: 0 }}>
           <div style={{ backgroundColor: '#e2e8f0', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#1b1b1c' }}>
-            <DatabaseOutlined /> <span style={{ fontSize: '14px', fontWeight: 600 }}>Target &gt; dwh_snowflake_core</span>
+            <DatabaseOutlined /> <span style={{ fontSize: '14px', fontWeight: 600 }}>Target &gt; {targetLabel}</span>
           </div>
           <div ref={targetRef} onScroll={handleTargetScroll} style={{ overflow: 'auto', flex: 1 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', whiteSpace: 'nowrap' }}>
               <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>
-                <tr>
-                  {DEMO_COLUMNS.map(col => (
-                    <th key={col} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>{col}</th>
-                  ))}
-                </tr>
+                <tr>{displayCols.map((col) => <th key={col} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>{col === 'uid' ? 'UID' : col}</th>)}</tr>
               </thead>
               <tbody>
-                {DEMO_ROWS.map((row) => (
-                  <tr key={`tgt-${row.id}`} style={{ 
-                    // ⚡ ORANGE BG for Missing/Extra
-                    backgroundColor: row.status === 'extra_source' || row.status === 'missing_target' ? '#fff7ed' : '#fff',
-                    borderBottom: '1px solid #f1f5f9'
-                  }}>
-                    {row.target.map((cell, cIdx) => {
-                      const isMismatchCell = row.status === 'mismatch' && row.mismatchIndices.includes(cIdx);
-                      return (
-                        <td key={cIdx} style={{ 
-                          padding: '12px 16px', fontSize: '13px', fontFamily: 'var(--font-mono)',
-                          // ⚡ RED BG for Mismatch cell. GREEN text for Match. ORANGE text for extra/missing.
-                          backgroundColor: isMismatchCell ? '#fee2e2' : 'transparent',
-                          color: isMismatchCell ? '#991b1b' : (row.status === 'match' ? '#166534' : (row.status === 'extra_source' || row.status === 'missing_target' ? '#c2410c' : '#1b1b1c')),
-                          fontWeight: isMismatchCell ? 600 : 400
-                        }}>
-                          {cell}
-                        </td>
-                      );
-                    })}
+                {pageRows.length === 0 ? (
+                  <tr><td colSpan={displayCols.length} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No UIDs with mismatches, missing, or extra rows in these columns. Try the next column page.</td></tr>
+                ) : pageRows.map((row) => (
+                  <tr key={`tgt-${row.uid}`} style={{ backgroundColor: rowBg(row), borderBottom: '1px solid #f1f5f9' }}>
+                    {renderCells(row, 'target')}
                   </tr>
                 ))}
               </tbody>
@@ -195,28 +346,30 @@ export const SnippetComparison: React.FC = () => {
         </div>
       </div>
 
-      {/* Footer / Pagination */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0', borderTop: '1px solid #e2e8f0', marginTop: '16px' }}>
-        <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>Note: Download snippet to get more information on this Test.</span>
-        
+        <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>
+          Row pages only include UIDs with an issue in the visible {COLS_PER_PAGE} columns.
+        </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#64748b' }}>
-            Rows per page: 
+            Rows per page:
             <select value={itemsPerPage} onChange={(e) => setItemsPerPage(Number(e.target.value))} style={{ border: 'none', fontWeight: 600, outline: 'none', backgroundColor: 'transparent' }}>
               <option value={10}>10</option>
+              <option value={20}>20</option>
               <option value={50}>50</option>
-              <option value={100}>100</option>
             </select>
           </div>
-          
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', backgroundColor: '#f0eded', padding: '4px 8px', borderRadius: '6px' }}>
-            <LeftOutlined style={{ fontSize: '12px', color: '#a0aabf', cursor: 'not-allowed' }} />
-            <span style={{ fontSize: '13px', fontWeight: 600 }}>1 <span style={{ color: '#a0aabf', margin: '0 4px', fontWeight: 400 }}>/</span> 1</span>
-            <RightOutlined style={{ fontSize: '12px', color: '#a0aabf', cursor: 'not-allowed' }} />
+            <LeftOutlined style={{ fontSize: '12px', color: rowPage <= 0 ? '#a0aabf' : '#414755', cursor: rowPage <= 0 ? 'not-allowed' : 'pointer' }} onClick={() => rowPage > 0 && setRowPage((p) => p - 1)} />
+            <span style={{ fontSize: '13px', fontWeight: 600 }}>
+              {filteredRows.length ? rowPage + 1 : 0}
+              <span style={{ color: '#a0aabf', margin: '0 4px', fontWeight: 400 }}>/</span>
+              {totalRowPages}
+            </span>
+            <RightOutlined style={{ fontSize: '12px', color: rowPage >= totalRowPages - 1 ? '#a0aabf' : '#414755', cursor: rowPage >= totalRowPages - 1 ? 'not-allowed' : 'pointer' }} onClick={() => rowPage < totalRowPages - 1 && setRowPage((p) => p + 1)} />
           </div>
         </div>
       </div>
-
     </div>
   );
 };

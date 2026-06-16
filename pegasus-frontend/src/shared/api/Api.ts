@@ -206,12 +206,12 @@ export interface ValidationHistorySummary {
   durations?: { upload_seconds?: number; validation_seconds?: number; total_seconds?: number };
   created_at: string;
   completed_at?: string | null;
+  source_row_count?: number | null;
+  target_row_count?: number | null;
 }
 
 export interface ValidationHistoryDetail extends ValidationHistorySummary {
   column_mappings?: ColumnMapping[];
-  source_row_count: number | null;
-  target_row_count: number | null;
   compared_column_count: number | null;
   compared_columns: string[];
 }
@@ -219,6 +219,7 @@ export interface ValidationHistoryDetail extends ValidationHistorySummary {
 export interface ValidationHistoryListResponse {
   items: ValidationHistorySummary[];
   total: number;
+  file_pair_key?: string | null;
 }
 
 export interface QueueJobSnapshot {
@@ -378,6 +379,8 @@ export const Api = {
     limit?: number;
     offset?: number;
     kind?: 'validation' | 'mapping';
+    source_path?: string;
+    target_path?: string;
   } = {}): Promise<AxiosResponse<ValidationHistoryListResponse>> =>
     httpClient.get(E.validateHistory, { params }),
 

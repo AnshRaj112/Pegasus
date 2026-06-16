@@ -1,16 +1,21 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-15T13:34:40Z
+# Last edited: 2026-06-16T07:30:00Z
 # --- END GENERATED FILE METADATA ---
 
 """Lazy drilldown: columnar frames + batch lookup for mismatch keys only."""
 
 from __future__ import annotations
 
+import json
+import struct
 from pathlib import Path
 from typing import Any
 
 import polars as pl
+
+DRILLDOWN_SUFFIX = ".ddrill"
+DRILLDOWN_LEGACY_SUFFIX = ".ndjsonl"
 
 
 class DrilldownCache:
@@ -84,14 +89,36 @@ def load_drilldown_lookup(
     workspace: Path,
     side: str,
     compare_columns: list[str],
+    *,
+    keys: set[str] | None = None,
 ) -> dict[str, dict[str, str]]:
-    """Load uid -> column values written by :meth:`DrilldownCache.persist`."""
-    path = Path(workspace) / f"drilldown_{side}.parquet"
-    if not path.is_file():
-        return {}
+    """Load uid -> column values; when *keys* is set, skip unrelated rows and exit early."""
+    root = Path(workspace)
+    parquet_path = root / f"drilldown_{side}.parquet"
+    if parquet_path.is_file():
+        return _load_drilldown_parquet(parquet_path, compare_columns, keys=keys)
+
+    bin_path = root / f"drilldown_{side}{DRILLDOWN_SUFFIX}"
+    if bin_path.is_file():
+        return _load_drilldown_ddrill(bin_path, compare_columns, keys=keys)
+
+    ndjson_path = root / f"drilldown_{side}{DRILLDOWN_LEGACY_SUFFIX}"
+    if ndjson_path.is_file():
+        return _load_drilldown_ndjsonl(ndjson_path, compare_columns, keys=keys)
+    return {}
+
+
+def _load_drilldown_parquet(
+    path: Path,
+    compare_columns: list[str],
+    *,
+    keys: set[str] | None = None,
+) -> dict[str, dict[str, str]]:
     frame = pl.read_parquet(path)
     if frame.is_empty() or "_identity" not in frame.columns:
         return {}
+    if keys is not None:
+        frame = frame.filter(pl.col("_identity").is_in(list(keys)))
     out: dict[str, dict[str, str]] = {}
     for row in frame.iter_rows(named=True):
         uid = str(row.get("_identity") or "")
@@ -102,6 +129,89 @@ def load_drilldown_lookup(
             for col in compare_columns
             if col in row
         }
+    return out
+
+
+def _read_u16_be(fp) -> int | None:
+    raw = fp.read(2)
+    if not raw:
+        return None
+    if len(raw) < 2:
+        raise ValueError("truncated native drilldown record")
+    return struct.unpack(">H", raw)[0]
+
+
+def _load_drilldown_ddrill(
+    path: Path,
+    compare_columns: list[str],
+    *,
+    keys: set[str] | None = None,
+) -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
+    need = len(keys) if keys is not None else None
+    col_count = len(compare_columns)
+    with path.open("rb") as fp:
+        while True:
+            id_len = _read_u16_be(fp)
+            if id_len is None:
+                break
+            uid_b = fp.read(id_len)
+            if len(uid_b) < id_len:
+                break
+            uid = uid_b.decode("utf-8", errors="replace")
+            if keys is None or uid in keys:
+                cells: dict[str, str] = {}
+                for col in compare_columns:
+                    vlen = _read_u16_be(fp)
+                    if vlen is None:
+                        return out
+                    val_b = fp.read(vlen)
+                    if len(val_b) < vlen:
+                        return out
+                    cells[col] = _as_str(val_b.decode("utf-8", errors="replace"))
+                out[uid] = cells
+                if need is not None and len(out) >= need:
+                    return out
+            else:
+                for _ in range(col_count):
+                    vlen = _read_u16_be(fp)
+                    if vlen is None:
+                        return out
+                    fp.seek(vlen, 1)
+    return out
+
+
+def _load_drilldown_ndjsonl(
+    path: Path,
+    compare_columns: list[str],
+    *,
+    keys: set[str] | None = None,
+) -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
+    need = len(keys) if keys is not None else None
+    with path.open(encoding="utf-8") as fp:
+        for line in fp:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            uid = str(row.get("_identity") or "")
+            if not uid:
+                continue
+            if keys is not None and uid not in keys:
+                continue
+            out[uid] = {
+                col: _as_str(row[col])
+                for col in compare_columns
+                if col in row
+            }
+            if need is not None and len(out) >= need:
+                return out
     return out
 
 
