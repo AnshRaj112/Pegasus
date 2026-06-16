@@ -4,7 +4,6 @@ import {
   CheckCircleFilled, WarningFilled, ProfileOutlined,
   HddOutlined, TableOutlined, BarcodeOutlined
 } from '@ant-design/icons';
-
 import { Api, type CloudFileProfileResponse, type GoogleCloudStorageConfig } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
@@ -43,12 +42,10 @@ const getFriendlyFormatLabel = (format: string | null | undefined): string => {
   if (fmt === 'orc') return 'ORC';
   if (fmt === 'avro') return 'Avro';
   if (fmt === 'excel') return 'Excel';
-  // Capitalize first letter of any other format as a fallback
   return fmt.charAt(0).toUpperCase() + fmt.slice(1);
 };
 
-const formatCount = (value: number | null | undefined, loading: boolean) => {
-  if (loading) return '…';
+const formatCount = (value: number | null | undefined) => {
   if (value == null) return '—';
   return value.toLocaleString();
 };
@@ -64,8 +61,12 @@ type FileProfileState = {
   loading: boolean;
   error: boolean;
 };
-
 const emptyProfileState: FileProfileState = { profile: null, loading: false, error: false };
+
+// ⚡ 1. The reusable animated skeleton block
+const SkeletonBlock: React.FC<{ width?: string; height?: string }> = ({ width = '100%', height = '16px' }) => (
+  <div style={{ width, height, backgroundColor: '#e2e8f0', borderRadius: '4px', animation: 'skeleton-pulse 1.5s ease-in-out infinite' }} />
+);
 
 export const MappingOverviewStep: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -81,7 +82,7 @@ export const MappingOverviewStep: React.FC = () => {
     : cacheHit
       ? { profile: cache.source, loading: false, error: cache.sourceError }
       : { profile: null, loading: true, error: false };
-
+      
   const targetProfile: FileProfileState = !form.targetCloud
     ? emptyProfileState
     : cacheHit
@@ -119,37 +120,31 @@ export const MappingOverviewStep: React.FC = () => {
         nextCache.targetError = true;
         commit();
       });
-
+      
     return () => { cancelled = true; };
   }, [form.sourceCloud, form.targetCloud, sourceKey, targetKey, cacheHit, dispatch, form.delimiter, form.hasHeader]);
 
+  // ⚡ 2. Cleaned up stats variables since the Skeleton UI now handles the loading visuals
   const sourceStats = {
     name: form.sourceFileName ?? '—',
     path: gsPath(form.bucket, form.sourceCloud?.object_name ?? null),
-    format: sourceProfile.loading
-      ? '…'
-      : sourceProfile.error
-        ? '—'
-        : getFriendlyFormatLabel(form.sourceFileSize === 0 ? 'empty file' : sourceProfile.profile?.file_format ?? '—'),
+    format: getFriendlyFormatLabel(form.sourceFileSize === 0 ? 'empty file' : sourceProfile.profile?.file_format),
     sizeBytes: sourceProfile.profile?.file_size_bytes ?? form.sourceFileSize,
     columnCount: form.sourceFileSize === 0 ? 0 : sourceProfile.profile?.column_count ?? null,
     rowCount: form.sourceFileSize === 0 ? 0 : sourceProfile.profile?.row_count ?? null,
-    loading: sourceProfile.loading && form.sourceFileSize !== 0,
   };
 
   const targetStats = {
     name: form.targetFileName ?? '—',
     path: gsPath(form.bucket, form.targetCloud?.object_name ?? null),
-    format: targetProfile.loading
-      ? '…'
-      : targetProfile.error
-        ? '—'
-        : getFriendlyFormatLabel(targetProfile.profile?.file_format ?? '—'),
+    format: getFriendlyFormatLabel(targetProfile.profile?.file_format),
     sizeBytes: targetProfile.profile?.file_size_bytes ?? form.targetFileSize,
     columnCount: targetProfile.profile?.column_count ?? null,
     rowCount: targetProfile.profile?.row_count ?? null,
-    loading: targetProfile.loading,
   };
+
+  // ⚡ Global fetching boolean to trigger skeletons
+  const isFetching = sourceProfile.loading || targetProfile.loading;
 
   const runComparison = () => {
     if (!form.sourceCloud || !form.targetCloud) {
@@ -160,7 +155,7 @@ export const MappingOverviewStep: React.FC = () => {
         mismatches: { size: false, columns: false, rows: false },
       };
     }
-    if (sourceProfile.loading || targetProfile.loading) {
+    if (isFetching) {
       return {
         status: 'warning' as const,
         title: 'Analyzing files',
@@ -168,61 +163,38 @@ export const MappingOverviewStep: React.FC = () => {
         mismatches: { size: false, columns: false, rows: false },
       };
     }
-    const sizeDiff =
-      sourceStats.sizeBytes && targetStats.sizeBytes
-        ? Math.abs(sourceStats.sizeBytes - targetStats.sizeBytes) / sourceStats.sizeBytes
-        : 0;
-    const columnMismatch =
-      sourceStats.columnCount != null &&
-      targetStats.columnCount != null &&
-      sourceStats.columnCount !== targetStats.columnCount;
-    const rowDiff =
-      sourceStats.rowCount != null && targetStats.rowCount != null
-        ? Math.abs(sourceStats.rowCount - targetStats.rowCount) /
-          Math.max(sourceStats.rowCount, targetStats.rowCount)
-        : 0;
+    const sizeDiff = sourceStats.sizeBytes && targetStats.sizeBytes ? Math.abs(sourceStats.sizeBytes - targetStats.sizeBytes) / sourceStats.sizeBytes : 0;
+    const columnMismatch = sourceStats.columnCount != null && targetStats.columnCount != null && sourceStats.columnCount !== targetStats.columnCount;
+    const rowDiff = sourceStats.rowCount != null && targetStats.rowCount != null ? Math.abs(sourceStats.rowCount - targetStats.rowCount) / Math.max(sourceStats.rowCount, targetStats.rowCount) : 0;
+    
     const rowMismatch = rowDiff > 0.05;
-    const mismatches = {
-      size: sizeDiff > 0.2,
-      columns: columnMismatch,
-      rows: rowMismatch,
-    };
+    const mismatches = { size: sizeDiff > 0.2, columns: columnMismatch, rows: rowMismatch };
+
     if (mismatches.columns) {
-      return {
-        status: 'warning' as const,
-        title: 'Column count mismatch',
-        message: `Source has ${sourceStats.columnCount?.toLocaleString()} columns; target has ${targetStats.columnCount?.toLocaleString()}.`,
-        mismatches,
-      };
+      return { status: 'warning' as const, title: 'Column count mismatch', message: `Source has ${sourceStats.columnCount?.toLocaleString()} columns; target has ${targetStats.columnCount?.toLocaleString()}.`, mismatches };
     }
     if (mismatches.rows) {
-      return {
-        status: 'warning' as const,
-        title: 'Row count mismatch',
-        message: `Source has ${sourceStats.rowCount?.toLocaleString()} rows; target has ${targetStats.rowCount?.toLocaleString()}.`,
-        mismatches,
-      };
+      return { status: 'warning' as const, title: 'Row count mismatch', message: `Source has ${sourceStats.rowCount?.toLocaleString()} rows; target has ${targetStats.rowCount?.toLocaleString()}.`, mismatches };
     }
     if (mismatches.size) {
-      return {
-        status: 'warning' as const,
-        title: 'Size mismatch',
-        message: 'Source and target object sizes differ by more than 20%.',
-        mismatches,
-      };
+      return { status: 'warning' as const, title: 'Size mismatch', message: 'Source and target object sizes differ by more than 20%.', mismatches };
     }
-    return {
-      status: 'success' as const,
-      title: 'Ready for mapping',
-      message: 'GCS source and target objects are selected.',
-      mismatches,
-    };
+    return { status: 'success' as const, title: 'Ready for mapping', message: 'GCS source and target objects are selected.', mismatches };
   };
 
   const alert = runComparison();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+      
+      {/* CSS Keyframes injected for the skeleton pulse */}
+      <style>{`
+        @keyframes skeleton-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
+
       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', alignSelf: 'flex-start' }}>
         <input
           type="checkbox"
@@ -231,10 +203,11 @@ export const MappingOverviewStep: React.FC = () => {
         />
         First row contains column names (uncheck for headerless files)
       </label>
+      
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px' }}>
-        <FileCard label="Source" color="#1677ff" stats={sourceStats} warn={alert.mismatches} />
+        <FileCard label="Source" color="#1677ff" stats={sourceStats} warn={alert.mismatches} loading={isFetching} />
         <ArrowRightOutlined style={{ fontSize: '20px', color: '#727786' }} />
-        <FileCard label="Target" color="#16a34a" icon={<DatabaseOutlined />} stats={targetStats} warn={alert.mismatches} />
+        <FileCard label="Target" color="#16a34a" icon={<DatabaseOutlined />} stats={targetStats} warn={alert.mismatches} loading={isFetching} />
       </div>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '16px 20px', borderRadius: '8px', backgroundColor: alert.status === 'success' ? '#f0fdf4' : '#fffbeb', border: `1px solid ${alert.status === 'success' ? '#bbf7d0' : '#fde68a'}` }}>
@@ -252,40 +225,43 @@ export const MappingOverviewStep: React.FC = () => {
   );
 };
 
+// ⚡ 3. FileCard updated to accept `loading` and conditionally render SkeletonBlocks
 const FileCard: React.FC<{
   label: string;
   color: string;
-  stats: {
-    name: string;
-    path: string;
-    format: string;
-    sizeBytes: number | null;
-    columnCount: number | null;
-    rowCount: number | null;
-    loading: boolean;
-  };
+  stats: { name: string; path: string; format: string; sizeBytes: number | null; columnCount: number | null; rowCount: number | null; };
   warn: { size: boolean; columns: boolean; rows: boolean };
+  loading: boolean;
   icon?: React.ReactNode;
-}> = ({ label, color, stats, warn, icon }) => (
-  <div style={{ flex: 1, backgroundColor: '#fff', border: '1px solid #d9d9d9', borderRadius: '12px', padding: '24px' }}>
+}> = ({ label, color, stats, warn, loading, icon }) => (
+  <div style={{ flex: 1, backgroundColor: '#fff', border: '1px solid #d9d9d9', borderRadius: '12px', padding: '24px', minWidth: '300px' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color }}>
       {icon ?? <FileTextOutlined />}
       <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase' }}>{label}</span>
     </div>
-    <h4 style={{ margin: '0 0 4px 0', fontSize: '18px' }}>{stats.name}</h4>
-    <p style={{ fontSize: '12px', color: '#727786', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>{stats.path}</p>
+    
+    <h4 style={{ margin: '0 0 4px 0', fontSize: '18px', minHeight: '24px' }}>
+      {loading ? <SkeletonBlock width="60%" height="24px" /> : stats.name}
+    </h4>
+    <div style={{ fontSize: '12px', color: '#727786', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', minHeight: '16px' }}>
+      {loading ? <SkeletonBlock width="90%" height="16px" /> : stats.path}
+    </div>
+    
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
-      <Row icon={<ProfileOutlined />} label="Format" value={stats.format} />
-      <Row icon={<HddOutlined />} label="Size" value={formatBytes(stats.sizeBytes)} warn={warn.size} />
-      <Row icon={<TableOutlined />} label="Columns" value={formatCount(stats.columnCount, stats.loading)} warn={warn.columns} />
-      <Row icon={<BarcodeOutlined />} label="Rows" value={formatCount(stats.rowCount, stats.loading)} warn={warn.rows} />
+      <Row icon={<ProfileOutlined />} label="Format" value={stats.format} loading={loading} />
+      <Row icon={<HddOutlined />} label="Size" value={formatBytes(stats.sizeBytes)} warn={warn.size} loading={loading} />
+      <Row icon={<TableOutlined />} label="Columns" value={formatCount(stats.columnCount)} warn={warn.columns} loading={loading} />
+      <Row icon={<BarcodeOutlined />} label="Rows" value={formatCount(stats.rowCount)} warn={warn.rows} loading={loading} />
     </div>
   </div>
 );
 
-const Row: React.FC<{ icon: React.ReactNode; label: string; value: string; warn?: boolean }> = ({ icon, label, value, warn }) => (
-  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f0eded', paddingBottom: '8px' }}>
+// ⚡ 4. Row updated to conditionally replace its value with a small skeleton
+const Row: React.FC<{ icon: React.ReactNode; label: string; value: string; warn?: boolean; loading: boolean }> = ({ icon, label, value, warn, loading }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f0eded', paddingBottom: '8px', alignItems: 'center' }}>
     <span style={{ fontSize: '13px', color: '#414755', display: 'flex', alignItems: 'center', gap: '6px' }}>{icon} {label}</span>
-    <span style={{ fontSize: '13px', fontWeight: 600, color: warn ? '#ba1a1a' : '#1b1b1c' }}>{value}</span>
+    <span style={{ fontSize: '13px', fontWeight: 600, color: warn ? '#ba1a1a' : '#1b1b1c' }}>
+      {loading ? <SkeletonBlock width="48px" height="16px" /> : value}
+    </span>
   </div>
 );

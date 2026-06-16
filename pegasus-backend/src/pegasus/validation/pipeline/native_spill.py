@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-16T07:06:00Z
+# Last edited: 2026-06-16T10:15:03Z
 # --- END GENERATED FILE METADATA ---
 
 """Inline hash → partition spill for multichar CSV (Rust splitter, no Polars frames)."""
