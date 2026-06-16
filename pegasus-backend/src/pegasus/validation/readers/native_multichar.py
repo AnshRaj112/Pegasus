@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-16T14:23:25+05:30
+# Last edited: 2026-06-16T03:42:52Z
 # --- END GENERATED FILE METADATA ---
 
 """Rust-backed multichar splitter with inline hash → partition spill."""
