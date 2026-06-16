@@ -11,6 +11,8 @@ import styles from './Auth.module.scss';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch } from '../../redux/store';
 import { authActions } from './Auth.reducer';
+import { adminLogin } from '../../shared/api/adminAuth';
+import { getApiErrorMessage } from '../../shared/api/apiError';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate(); // ⚡ Initialize router
@@ -19,18 +21,22 @@ export const Login: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // ⚡ Simulate a successful API login response
-    dispatch(authActions.loginSuccess({ 
-      email: email, 
-      fullName: 'Enterprise User' 
-    }));
-    
-    // ⚡ Redirect them to the Dashboard
-    navigate('/');
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const user = await adminLogin(email.trim(), password);
+      dispatch(authActions.setSession({ email: user.email }));
+      navigate('/');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Sign-in failed.'));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -61,7 +67,8 @@ export const Login: React.FC = () => {
                   onChange={(e) => setEmail(e.target.value)}
                   className={styles.authInput} 
                   placeholder="name@company.com" 
-                  required 
+                  required
+                  autoComplete="username"
                 />
               </div>
             </div>
@@ -80,7 +87,8 @@ export const Login: React.FC = () => {
                   className={styles.authInput} 
                   style={{ paddingRight: '40px' }}
                   placeholder="••••••••" 
-                  required 
+                  required
+                  autoComplete="current-password"
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)} className={styles.actionIcon}>
                   {showPassword ? <EyeOutlined /> : <EyeInvisibleOutlined />}
@@ -88,8 +96,10 @@ export const Login: React.FC = () => {
               </div>
             </div>
 
-            <button type="submit" className={styles.submitBtn}>
-              Sign In <LoginOutlined style={{ fontSize: '18px' }} />
+            {error && <p style={{ margin: 0, fontSize: '13px', color: '#ba1a1a' }}>{error}</p>}
+
+            <button type="submit" className={styles.submitBtn} disabled={isSubmitting}>
+              {isSubmitting ? 'Signing in...' : <>Sign In <LoginOutlined style={{ fontSize: '18px' }} /></>}
             </button>
           </form>
         </div>

@@ -52,5 +52,5 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def expires_at_from_now(hours: int) -> datetime:
-    return utc_now() + timedelta(hours=hours)
+def expires_at_from_now(minutes: int) -> datetime:
+    return utc_now() + timedelta(minutes=minutes)

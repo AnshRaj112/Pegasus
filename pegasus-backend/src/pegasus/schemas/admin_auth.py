@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -22,3 +24,8 @@ class AdminLoginRequest(BaseModel):
 
 class AdminAuthUserResponse(BaseModel):
     email: str
+
+
+class AdminSessionStatusResponse(BaseModel):
+    email: str
+    expires_at: datetime

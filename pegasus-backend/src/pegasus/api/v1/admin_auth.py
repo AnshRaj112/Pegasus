@@ -22,7 +22,12 @@ from pegasus.core.admin_auth import (
 )
 from pegasus.models.admin_user import AdminUser
 from pegasus.repositories.admin_auth_repository import AdminAuthRepository
-from pegasus.schemas.admin_auth import AdminAuthUserResponse, AdminLoginRequest, AdminSignupRequest
+from pegasus.schemas.admin_auth import (
+    AdminAuthUserResponse,
+    AdminLoginRequest,
+    AdminSessionStatusResponse,
+    AdminSignupRequest,
+)
 
 router = APIRouter(prefix="/admin/auth", tags=["admin-auth"])
 
@@ -40,7 +45,7 @@ def _set_admin_cookie(response: Response, token: str, settings: AppSettings) -> 
         httponly=True,
         secure=settings.admin_session_cookie_secure,
         samesite="lax",
-        max_age=settings.admin_session_ttl_hours * 3600,
+        max_age=settings.admin_session_ttl_minutes * 60,
         path="/",
     )
 
@@ -106,7 +111,7 @@ async def admin_signup(
         session,
         user_id=user.id,
         token_hash=session_token_hash(token),
-        expires_at=expires_at_from_now(settings.admin_session_ttl_hours),
+        expires_at=expires_at_from_now(settings.admin_session_ttl_minutes),
     )
     await session.commit()
     _set_admin_cookie(response, token, settings)
@@ -130,7 +135,7 @@ async def admin_login(
         session,
         user_id=user.id,
         token_hash=session_token_hash(token),
-        expires_at=expires_at_from_now(settings.admin_session_ttl_hours),
+        expires_at=expires_at_from_now(settings.admin_session_ttl_minutes),
     )
     await session.commit()
     _set_admin_cookie(response, token, settings)
@@ -154,3 +159,39 @@ async def admin_logout(
 @router.get("/me", response_model=AdminAuthUserResponse)
 async def admin_me(current_user: Annotated[AdminUser, Depends(get_current_admin_user)]) -> AdminAuthUserResponse:
     return AdminAuthUserResponse(email=current_user.email)
+
+
+@router.get("/session", response_model=AdminSessionStatusResponse)
+async def admin_session_status(
+    session: DbSession,
+    current_user: Annotated[AdminUser, Depends(get_current_admin_user)],
+    admin_session_token: Annotated[str | None, Cookie(alias=ADMIN_SESSION_COOKIE)] = None,
+) -> AdminSessionStatusResponse:
+    token = (admin_session_token or "").strip()
+    if not token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Admin authentication required.")
+    row = await AdminAuthRepository.get_session_by_hash(session, session_token_hash(token))
+    if row is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid admin session.")
+    return AdminSessionStatusResponse(email=current_user.email, expires_at=row.expires_at)
+
+
+@router.post("/extend", response_model=AdminSessionStatusResponse)
+async def admin_extend_session(
+    response: Response,
+    settings: AppSettings,
+    session: DbSession,
+    current_user: Annotated[AdminUser, Depends(get_current_admin_user)],
+    admin_session_token: Annotated[str | None, Cookie(alias=ADMIN_SESSION_COOKIE)] = None,
+) -> AdminSessionStatusResponse:
+    token = (admin_session_token or "").strip()
+    if not token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Admin authentication required.")
+    token_hash = session_token_hash(token)
+    row = await AdminAuthRepository.get_session_by_hash(session, token_hash)
+    if row is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid admin session.")
+    row.expires_at = expires_at_from_now(settings.admin_session_ttl_minutes)
+    await session.commit()
+    _set_admin_cookie(response, token, settings)
+    return AdminSessionStatusResponse(email=current_user.email, expires_at=row.expires_at)
