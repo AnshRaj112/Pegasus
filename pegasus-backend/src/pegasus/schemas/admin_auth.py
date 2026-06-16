@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-16T15:14:50+05:30
+# Last edited: 2026-06-16T10:14:13Z
 # --- END GENERATED FILE METADATA ---
 
 """Request/response models for admin auth."""
