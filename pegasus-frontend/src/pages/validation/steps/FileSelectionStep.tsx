@@ -175,7 +175,7 @@ export const FileSelectionStep: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '24px' }}>
       <div>
         <label style={{ display: 'block', fontSize: '14px', fontWeight: 500, marginBottom: '8px', color: '#414755' }}>
-          Validation Mode
+          Validation Pattern
         </label>
         <select
           value={validationMode}
