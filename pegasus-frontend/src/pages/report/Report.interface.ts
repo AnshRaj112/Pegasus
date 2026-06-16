@@ -18,6 +18,10 @@ export interface ReportItem {
   badges: ReportBadge[];
   latestRunId: string | null;
   latestIsMatch: boolean | null;
+  /** In-flight validation job (Active tab). */
+  jobId?: string | null;
+  /** Saved draft run id (Saved tab). */
+  draftRunId?: string | null;
 }
 
 export interface ReportState {

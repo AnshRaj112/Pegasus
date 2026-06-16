@@ -1,8 +1,9 @@
 import React from 'react';
-import { ClockCircleOutlined } from '@ant-design/icons';
+import { ClockCircleOutlined, SyncOutlined } from '@ant-design/icons';
 import { Api, type ValidationHistorySummary } from '../../shared/api/Api';
 import { type ReportItem } from './Report.interface';
-import { decodeReportPairId, pairIdFromPathSegment } from './reportPairId';
+import { decodeReportPairId, encodeReportPairId, pairIdFromPathSegment, pairIdToPathSegment } from './reportPairId';
+import { getActiveSessions } from '../validation/validationSessionStorage';
 
 const pairKey = (item: ValidationHistorySummary) =>
   `${item.source_path ?? item.source_filename ?? ''}\0${item.target_path ?? item.target_filename ?? ''}`;
@@ -121,27 +122,108 @@ export const ReportService = {
   },
 
   fetchActive: async (): Promise<ReportItem[]> => {
-    const groups = await getValidationPairGroups();
-    const idMap = idMapForGroups(groups);
-    return groups
-      .filter((runs) => runs[0].is_match === false)
-      .map((runs) => toReportItem(runs, idMap.get(pairKey(runs[0]))!));
+    const sessions = getActiveSessions();
+    const { data: queue } = await Api.getValidationQueue();
+    const activeJobs = queue.jobs.filter(
+      (j) => j.state === 'queued' || j.state === 'running',
+    );
+    const seen = new Set<string>();
+    const items: ReportItem[] = [];
+
+    for (const job of activeJobs) {
+      seen.add(job.job_id);
+      const session = sessions.find((s) => s.jobId === job.job_id);
+      const sourcePath = session?.sourcePath ?? '';
+      const targetPath = session?.targetPath ?? '';
+      const latest = {
+        run_id: job.job_id,
+        status: job.state,
+        uid_column: '',
+        delimiter: 'auto',
+        mismatch_counts: { missing_in_target: 0, extra_in_target: 0, value_mismatch: 0 },
+        mapping_count: 0,
+        source_path: sourcePath || null,
+        target_path: targetPath || null,
+        source_filename: sourcePath ? sourcePath.replace(/\\/g, '/').split('/').pop() ?? null : null,
+        target_filename: targetPath ? targetPath.replace(/\\/g, '/').split('/').pop() ?? null : null,
+        completed_at: null,
+        created_at: new Date(job.enqueued_at * 1000).toISOString(),
+        is_match: null,
+      } as ValidationHistorySummary;
+      items.push({
+        ...toReportItem([latest], job.job_id),
+        jobId: job.job_id,
+        jobSubtitle: job.state === 'queued' ? 'Queued…' : 'Validating…',
+        badges: [
+          { type: 'icon', content: React.createElement(SyncOutlined, { spin: true, style: { fontSize: '12px' } }) },
+          { type: 'text', content: job.state === 'queued' ? 'Queued' : 'Running' },
+        ],
+      });
+    }
+
+    for (const session of sessions) {
+      if (seen.has(session.jobId)) continue;
+      const latest = {
+        run_id: session.jobId,
+        status: 'running',
+        uid_column: '',
+        delimiter: 'auto',
+        mismatch_counts: { missing_in_target: 0, extra_in_target: 0, value_mismatch: 0 },
+        mapping_count: 0,
+        source_path: session.sourcePath,
+        target_path: session.targetPath,
+        source_filename: session.sourcePath.replace(/\\/g, '/').split('/').pop() ?? null,
+        target_filename: session.targetPath.replace(/\\/g, '/').split('/').pop() ?? null,
+        completed_at: null,
+        created_at: new Date(session.startedAt).toISOString(),
+        is_match: null,
+      } as ValidationHistorySummary;
+      items.push({
+        ...toReportItem([latest], session.jobId),
+        jobId: session.jobId,
+        jobSubtitle: 'Validating…',
+        badges: [
+          { type: 'icon', content: React.createElement(SyncOutlined, { spin: true, style: { fontSize: '12px' } }) },
+          { type: 'text', content: 'Running' },
+        ],
+      });
+    }
+
+    return items;
   },
 
   fetchCompleted: async (): Promise<ReportItem[]> => {
     const groups = await getValidationPairGroups();
     const idMap = idMapForGroups(groups);
     return groups
-      .filter((runs) => runs[0].is_match === true)
+      .filter((runs) => {
+        const st = runs[0].status;
+        return st === 'completed' || st === 'failed' || runs[0].completed_at != null;
+      })
       .map((runs) => toReportItem(runs, idMap.get(pairKey(runs[0]))!));
   },
 
   fetchSaved: async (): Promise<ReportItem[]> => {
     const items = await fetchAllHistory('mapping');
     const groups = [...groupByPair(items).values()]
-      .filter((runs) => runs[0].status === 'pending' || runs[0].status === 'running')
+      .filter((runs) => runs[0].status === 'pending')
       .sort((a, b) => latestRunTs(b) - latestRunTs(a));
-    return groups.map((runs, idx) => toReportItem(runs, String(idx + 1)));
+    return groups.map((runs) => {
+      const latest = runs[0];
+      const sourcePath = latest.source_path ?? latest.source_filename ?? '';
+      const targetPath = latest.target_path ?? latest.target_filename ?? '';
+      const pairId = pairIdToPathSegment(encodeReportPairId(sourcePath, targetPath));
+      return {
+        ...toReportItem(runs, pairId),
+        id: pairId,
+        draftRunId: latest.run_id,
+        jobSubtitle: `Draft · ${formatWhen(latest.created_at)}`,
+        badges: [
+          { type: 'text', content: 'Draft' },
+          { type: 'icon', content: React.createElement(ClockCircleOutlined, { style: { fontSize: '12px' } }) },
+        ],
+      };
+    });
   },
 
   fetchRunsForPair: async (sourcePath: string, targetPath: string): Promise<ValidationHistorySummary[]> => {

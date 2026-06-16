@@ -179,6 +179,8 @@ export interface ValidateResult {
 
 export interface ValidationJobDetailResponse {
   status: string;
+  phase?: string | null;
+  message?: string | null;
   error?: string | null;
   result?: ValidateResult | null;
 }

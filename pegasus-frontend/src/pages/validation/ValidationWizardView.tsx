@@ -1,14 +1,17 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowRightOutlined } from '@ant-design/icons';
+import { notification } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
 import { validationActions } from './Validation.reducer';
+import { reportActions } from '../report/Report.reducer';
 
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
 import { ConfigureMappingStep } from './steps/ConfigureMappingStep';
 import { ReportService } from '../report/Report.service';
 import { gcsUri } from '../report/reportPairId';
+import { Api } from '../../shared/api/Api';
 
 // ⚡ Import the newly created CSS module
 import styles from './Validation.module.scss';
@@ -24,11 +27,16 @@ export const ValidationWizardView: React.FC = () => {
   const isStep1Valid = useAppSelector((state) => state.validation.isStep1Valid);
   const { isFetching, data } = useAppSelector((state) => state.validation.validationDataState);
   const validationForm = useAppSelector((state) => state.validation.validationForm);
+<<<<<<< HEAD
   
   // ⚡ Pull the Step 2 cache from Redux
   const overviewCache = useAppSelector((state) => state.validation.overviewProfileCache);
   
+=======
+  const pendingReportJobId = useAppSelector((state) => state.validation.pendingReportJobId);
+>>>>>>> 0d5bc8520d6c5767fbabc66188d1dc587cd5e9fc
   const wasFetchingRef = useRef(false);
+  const [savingDraft, setSavingDraft] = useState(false);
 
   // Opening the wizard tab after a finished run should start fresh, not reopen the report.
   useEffect(() => {
@@ -39,7 +47,14 @@ export const ValidationWizardView: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Redirect to reports history for this file pair after a run finishes.
+  useEffect(() => {
+    if (pendingReportJobId) {
+      navigate(`/validation/report/${pendingReportJobId}`);
+      dispatch(validationActions.clearPendingReportJob());
+    }
+  }, [pendingReportJobId, navigate, dispatch]);
+
+  // Redirect to reports history for this file pair after a fast run finishes in-wizard.
   useEffect(() => {
     if (
       wasFetchingRef.current
@@ -92,6 +107,29 @@ export const ValidationWizardView: React.FC = () => {
   const canSaveDraft = Boolean(
     validationForm.sourceCloud?.object_name && validationForm.targetCloud?.object_name,
   );
+
+  const handleSaveDraft = async () => {
+    if (!canSaveDraft || !validationForm.sourceCloud || !validationForm.targetCloud) return;
+    setSavingDraft(true);
+    try {
+      await Api.saveValidationDraft({
+        source_path: gcsUri(validationForm.sourceCloud),
+        target_path: gcsUri(validationForm.targetCloud),
+        uid_column: validationForm.uidColumn,
+        delimiter: validationForm.delimiter || 'auto',
+        column_mappings: validationForm.columnMappings,
+      });
+      notification.success({ message: 'Draft saved', description: 'Find it under Reports → Saved.' });
+      dispatch(reportActions.fetchReportsRequest());
+    } catch (e) {
+      notification.error({
+        message: 'Could not save draft',
+        description: e instanceof Error ? e.message : 'Save failed',
+      });
+    } finally {
+      setSavingDraft(false);
+    }
+  };
 
   const renderStepContent = () => {
     switch (currentStep) {
@@ -163,11 +201,12 @@ export const ValidationWizardView: React.FC = () => {
         <div style={{ display: 'flex', gap: '16px' }}>
           <button
             type="button"
-            disabled={!canSaveDraft || isActuallyLoading} // ⚡ Disabled while loading
-            title="Draft save requires local paths; use GCS selection and Run Validation"
-            style={{ padding: '0 24px', height: '40px', borderRadius: '8px', border: '1px solid #d9d9d9', background: '#ffffff', color: '#414755', fontSize: '14px', fontWeight: 600, cursor: !canSaveDraft || isActuallyLoading ? 'not-allowed' : 'pointer', opacity: !canSaveDraft || isActuallyLoading ? 0.6 : 1 }}
+            disabled={!canSaveDraft || savingDraft}
+            onClick={() => void handleSaveDraft()}
+            title="Save mapping configuration without running validation"
+            style={{ padding: '0 24px', height: '40px', borderRadius: '8px', border: '1px solid #d9d9d9', background: '#ffffff', color: '#414755', fontSize: '14px', fontWeight: 600, cursor: canSaveDraft && !savingDraft ? 'pointer' : 'not-allowed', opacity: canSaveDraft ? 1 : 0.6 }}
           >
-            Save Draft
+            {savingDraft ? 'Saving…' : 'Save Draft'}
           </button>
           <button 
             onClick={handleProceed}
