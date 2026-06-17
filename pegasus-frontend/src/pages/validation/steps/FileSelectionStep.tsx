@@ -72,7 +72,7 @@ export const FileSelectionStep: React.FC = () => {
   const [browseError, setBrowseError] = useState<string | null>(null);
 
   const [selectingFor, setSelectingFor] = useState<'source' | 'target' | 'none'>('source');
-
+  
   // ⚡ Hydrate local state from Redux so selections persist across steps
   const [sourceFile, setSourceFile] = useState<FileExplorerItem | null>(() => {
     if (!validationForm.sourceCloud) return null;
@@ -194,7 +194,6 @@ export const FileSelectionStep: React.FC = () => {
     }
   };
 
-  // ⚡ Removed the duplicate declarations here and kept the final, correct ones
   const filteredFiles = browseEntries.filter((f) =>
     f.name.toLowerCase().includes(searchQuery.toLowerCase()),
   );
