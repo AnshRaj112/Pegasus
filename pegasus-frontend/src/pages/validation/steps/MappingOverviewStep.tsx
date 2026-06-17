@@ -75,7 +75,7 @@ export const MappingOverviewStep: React.FC = () => {
 
   const sourceStats = {
     name: form.sourceFileName ?? '—',
-    path: gsPath(form.bucket, form.sourceCloud?.object_name ?? null),
+    path: gsPath(form.sourceCloud?.bucket ?? null, form.sourceCloud?.object_name ?? null),
     format: getFriendlyFormatLabel(form.sourceFileSize === 0 ? 'empty file' : sourceProfile.profile?.file_format),
     sizeBytes: sourceProfile.profile?.file_size_bytes ?? form.sourceFileSize,
     columnCount: form.sourceFileSize === 0 ? 0 : sourceProfile.profile?.column_count ?? null,
@@ -87,7 +87,7 @@ export const MappingOverviewStep: React.FC = () => {
 
   const targetStats = {
     name: form.targetFileName ?? '—',
-    path: gsPath(form.bucket, form.targetCloud?.object_name ?? null),
+    path: gsPath(form.targetCloud?.bucket ?? null, form.targetCloud?.object_name ?? null),
     format: getFriendlyFormatLabel(targetProfile.profile?.file_format),
     sizeBytes: targetProfile.profile?.file_size_bytes ?? form.targetFileSize,
     columnCount: targetProfile.profile?.column_count ?? null,

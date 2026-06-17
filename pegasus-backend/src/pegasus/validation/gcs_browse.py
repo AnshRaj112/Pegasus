@@ -32,6 +32,10 @@ class GcsBrowseEntry:
     path: str
     is_dir: bool
     size_bytes: int | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    owner: str | None = None
+    created_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +89,59 @@ def _blob_size_bytes(blob: object) -> int | None:
     return coerce_gcs_object_size(getattr(blob, "size", None))
 
 
+def _dt_iso(value: object | None) -> str | None:
+    if value is None:
+        return None
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return str(isoformat())
+    text = str(value).strip()
+    return text or None
+
+
+def _blob_metadata(blob: object) -> dict[str, str]:
+    raw = getattr(blob, "metadata", None) or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items() if v is not None and str(v).strip()}
+
+
+def _blob_owner(blob: object) -> str | None:
+    owner = getattr(blob, "owner", None)
+    if isinstance(owner, dict):
+        entity = owner.get("entity") or owner.get("entityId")
+        if entity:
+            return str(entity)
+    if owner:
+        return str(owner)
+    metadata = _blob_metadata(blob)
+    for key in ("owner", "Owner"):
+        if metadata.get(key):
+            return metadata[key]
+    return None
+
+
+def _blob_created_by(blob: object) -> str | None:
+    metadata = _blob_metadata(blob)
+    for key in ("created_by", "createdBy", "CreatedBy", "creator", "Creator"):
+        if metadata.get(key):
+            return metadata[key]
+    return None
+
+
+def _entry_from_blob(blob: object, *, path: str, display_name: str) -> GcsBrowseEntry:
+    return GcsBrowseEntry(
+        name=display_name,
+        path=path,
+        is_dir=False,
+        size_bytes=_blob_size_bytes(blob),
+        created_at=_dt_iso(getattr(blob, "time_created", None)),
+        updated_at=_dt_iso(getattr(blob, "updated", None)),
+        owner=_blob_owner(blob),
+        created_by=_blob_created_by(blob),
+    )
+
+
 def _file_allowed(name: str, allowed: frozenset[str]) -> bool:
     return object_name_matches_format(name, allowed)
 
@@ -118,7 +175,7 @@ def browse_gcs_prefix(
         projection="full",
     )
 
-    rows: list[tuple[bool, str, str, str, int | None]] = []
+    rows: list[tuple[bool, str, str, str, object | None]] = []
     truncated = False
 
     for page in iterator.pages:
@@ -135,22 +192,19 @@ def browse_gcs_prefix(
                 continue
             if not _file_allowed(blob.name, allowed):
                 continue
-            rows.append((True, rel_name.lower(), blob.name, rel_name, _blob_size_bytes(blob)))
+            rows.append((True, rel_name.lower(), blob.name, rel_name, blob))
 
     rows.sort(key=lambda t: (t[0], t[1]))
     if len(rows) > max_entries:
         truncated = True
         rows = rows[:max_entries]
 
-    entries = [
-        GcsBrowseEntry(
-            name=display_name,
-            path=path,
-            is_dir=not is_file,
-            size_bytes=size_bytes,
-        )
-        for is_file, _, path, display_name, size_bytes in rows
-    ]
+    entries: list[GcsBrowseEntry] = []
+    for is_file, _, path, display_name, blob in rows:
+        if is_file and blob is not None:
+            entries.append(_entry_from_blob(blob, path=path, display_name=display_name))
+        else:
+            entries.append(GcsBrowseEntry(name=display_name, path=path, is_dir=True))
     return GcsBrowseResult(
         bucket=bucket_name,
         prefix=norm_prefix,

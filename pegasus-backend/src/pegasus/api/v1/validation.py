@@ -336,6 +336,10 @@ async def browse_cloud_prefix(
                 path=e.path,
                 is_dir=e.is_dir,
                 size_bytes=e.size_bytes,
+                created_at=e.created_at,
+                updated_at=e.updated_at,
+                owner=e.owner,
+                created_by=e.created_by,
             )
             for e in result.entries
         ],

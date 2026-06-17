@@ -3,6 +3,7 @@ import { Modal } from 'antd';
 
 import { useAppDispatch, useAppSelector } from '../../redux/store';
 import { authActions } from './Auth.reducer';
+import { resetValidationOnLogout } from '../validation/resetValidationOnLogout';
 import {
   adminLogout,
   extendAdminSession,
@@ -30,6 +31,7 @@ export const AuthSessionManager: React.FC = () => {
       setShowPrompt(false);
       setExpiresAtMs(null);
       forceLogoutAtRef.current = null;
+      resetValidationOnLogout(dispatch);
       dispatch(authActions.logoutSuccess());
     }
   }, [dispatch]);

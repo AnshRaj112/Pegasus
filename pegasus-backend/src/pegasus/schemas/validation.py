@@ -794,6 +794,22 @@ class CloudBrowseEntry(BaseModel):
         ge=0,
         description="Object size from GCS metadata (files only; omitted for prefixes)",
     )
+    created_at: str | None = Field(
+        default=None,
+        description="Object creation time from GCS metadata (files only)",
+    )
+    updated_at: str | None = Field(
+        default=None,
+        description="Object last-modified time from GCS metadata (files only)",
+    )
+    owner: str | None = Field(
+        default=None,
+        description="Object owner entity from GCS metadata or custom metadata",
+    )
+    created_by: str | None = Field(
+        default=None,
+        description="Creator from GCS custom object metadata when present",
+    )
 
 
 class CloudBrowseResponse(BaseModel):

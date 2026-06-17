@@ -63,6 +63,10 @@ export interface CloudBrowseEntry {
   path: string;
   is_dir: boolean;
   size_bytes?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  owner?: string | null;
+  created_by?: string | null;
 }
 
 export interface CloudBrowseResponse {

@@ -46,3 +46,7 @@ export const removeActiveSession = (jobId: string) => {
 
 export const getActiveSession = (jobId: string): ActiveValidationSession | undefined =>
   readAll().find((s) => s.jobId === jobId);
+
+export const clearAllActiveSessions = () => {
+  sessionStorage.removeItem(STORAGE_KEY);
+};
