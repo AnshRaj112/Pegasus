@@ -5,6 +5,7 @@ import { useAppSelector, useAppDispatch } from '../../redux/store';
 import { adminActions } from './Admin.reducer';
 import { adminLogout, fetchAdminMe } from '../../shared/api/adminAuth';
 import { authActions } from '../auth/Auth.reducer';
+import { resetValidationOnLogout } from '../validation/resetValidationOnLogout';
 
 import { AdminLoginPanel } from './AdminLoginPanel';
 import { ConfigureStoreSubView } from './sections/ConfigureStoreSubView';
@@ -38,6 +39,7 @@ export const AdminView: React.FC = () => {
       await adminLogout();
     } finally {
       setAdminEmail(null);
+      resetValidationOnLogout(dispatch);
       dispatch(authActions.logoutSuccess());
     }
   };
