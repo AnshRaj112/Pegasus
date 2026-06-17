@@ -17,6 +17,25 @@ type SnippetRow = {
 const COLS_PER_PAGE = 10;
 const EMPTY = '—';
 const FETCH_BATCH = 5000;
+const SKELETON_ROWS = 8;
+
+const SkeletonCell: React.FC<{ width?: string }> = ({ width = '100%' }) => (
+  <div style={{ width, height: '14px', backgroundColor: '#e2e8f0', borderRadius: '4px', animation: 'snippet-skeleton-pulse 1.5s ease-in-out infinite' }} />
+);
+
+const SnippetSkeletonRows: React.FC<{ colCount: number; rows?: number }> = ({ colCount, rows = SKELETON_ROWS }) => (
+  <>
+    {Array.from({ length: rows }, (_, i) => (
+      <tr key={`skeleton-${i}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
+        {Array.from({ length: colCount }, (_, j) => (
+          <td key={j} style={{ padding: '12px 16px' }}>
+            <SkeletonCell width={j === 0 ? '72px' : `${50 + ((i + j) % 4) * 10}%`} />
+          </td>
+        ))}
+      </tr>
+    ))}
+  </>
+);
 
 const parseDetail = (raw: unknown): Record<string, unknown> | null => {
   if (!raw) return null;
@@ -101,7 +120,8 @@ const rowHasIssueInCols = (row: SnippetRow, visibleCols: string[]): boolean => {
 export const SnippetComparison: React.FC = () => {
   const navigate = useNavigate();
   const { mappingId, runId } = useParams<{ mappingId: string; runId: string }>();
-  const [loading, setLoading] = useState(true);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [rowsLoading, setRowsLoading] = useState(true);
   const [loadProgress, setLoadProgress] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
@@ -119,7 +139,8 @@ export const SnippetComparison: React.FC = () => {
     if (!runId) return;
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      setSummaryLoading(true);
+      setRowsLoading(true);
       setError(null);
       setLoadProgress('Loading run summary…');
       try {
@@ -131,8 +152,8 @@ export const SnippetComparison: React.FC = () => {
         setTargetLabel(detail.target_path ?? detail.target_filename ?? 'Target');
         setColPage(0);
         setRowPage(0);
-        setLoading(false);
-        setLoadProgress('');
+        setSummaryLoading(false);
+        setLoadProgress('Loading mismatch rows…');
 
         let offset = 0;
         const collected: MismatchSampleRow[] = [];
@@ -153,7 +174,8 @@ export const SnippetComparison: React.FC = () => {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load snippet');
       } finally {
         if (!cancelled) {
-          setLoading(false);
+          setSummaryLoading(false);
+          setRowsLoading(false);
           setLoadProgress('');
         }
       }
@@ -247,17 +269,14 @@ export const SnippetComparison: React.FC = () => {
     );
   });
 
-  if (loading) {
-    return (
-      <div style={{ padding: '24px', color: '#64748b' }}>
-        Loading snippet… {loadProgress && <span style={{ display: 'block', marginTop: '8px', fontSize: '12px' }}>{loadProgress}</span>}
-      </div>
-    );
-  }
+  const isDataLoading = summaryLoading || rowsLoading;
+  const skeletonColCount = displayCols.length || COLS_PER_PAGE + 1;
+
   if (error) return <div style={{ padding: '24px', color: '#ba1a1a' }}>{error}</div>;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <style>{`@keyframes snippet-skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }`}</style>
       {loadProgress && (
         <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#64748b' }}>{loadProgress}</p>
       )}
@@ -301,7 +320,7 @@ export const SnippetComparison: React.FC = () => {
         <button type="button" disabled={colPage <= 0} onClick={() => setColPage((p) => p - 1)} style={{ padding: '4px 10px', fontSize: '12px', cursor: colPage <= 0 ? 'not-allowed' : 'pointer' }}>← Prev cols</button>
         <button type="button" disabled={colPage >= totalColPages - 1} onClick={() => setColPage((p) => p + 1)} style={{ padding: '4px 10px', fontSize: '12px', cursor: colPage >= totalColPages - 1 ? 'not-allowed' : 'pointer' }}>Next cols →</button>
         <span style={{ fontSize: '12px', color: '#64748b' }}>
-          {filteredRows.length.toLocaleString()} UID(s) with issues in this column window
+          {isDataLoading ? 'Loading…' : `${filteredRows.length.toLocaleString()} UID(s) with issues in this column window`}
         </span>
       </div>
 
@@ -319,11 +338,21 @@ export const SnippetComparison: React.FC = () => {
           <div ref={sourceRef} onScroll={handleSourceScroll} style={{ overflow: 'auto', flex: 1 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', whiteSpace: 'nowrap' }}>
               <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>
-                <tr>{displayCols.map((col) => <th key={col} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>{col === 'uid' ? 'UID' : col}</th>)}</tr>
+                <tr>
+                  {isDataLoading && displayCols.length === 0
+                    ? Array.from({ length: skeletonColCount }, (_, i) => (
+                      <th key={i} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>
+                        {i === 0 ? 'UID' : <SkeletonCell width={`${40 + (i % 3) * 15}%`} />}
+                      </th>
+                    ))
+                    : displayCols.map((col) => <th key={col} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>{col === 'uid' ? 'UID' : col}</th>)}
+                </tr>
               </thead>
               <tbody>
-                {pageRows.length === 0 ? (
-                  <tr><td colSpan={displayCols.length} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No UIDs with mismatches, missing, or extra rows in these columns. Try the next column page.</td></tr>
+                {isDataLoading ? (
+                  <SnippetSkeletonRows colCount={skeletonColCount} />
+                ) : pageRows.length === 0 ? (
+                  <tr><td colSpan={displayCols.length || 1} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No UIDs with mismatches, missing, or extra rows in these columns. Try the next column page.</td></tr>
                 ) : pageRows.map((row) => (
                   <tr key={`src-${row.uid}`} style={{ backgroundColor: rowBg(row), borderBottom: '1px solid #f1f5f9' }}>
                     {renderCells(row, 'source')}
@@ -340,11 +369,21 @@ export const SnippetComparison: React.FC = () => {
           <div ref={targetRef} onScroll={handleTargetScroll} style={{ overflow: 'auto', flex: 1 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', whiteSpace: 'nowrap' }}>
               <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>
-                <tr>{displayCols.map((col) => <th key={col} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>{col === 'uid' ? 'UID' : col}</th>)}</tr>
+                <tr>
+                  {isDataLoading && displayCols.length === 0
+                    ? Array.from({ length: skeletonColCount }, (_, i) => (
+                      <th key={i} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>
+                        {i === 0 ? 'UID' : <SkeletonCell width={`${40 + (i % 3) * 15}%`} />}
+                      </th>
+                    ))
+                    : displayCols.map((col) => <th key={col} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>{col === 'uid' ? 'UID' : col}</th>)}
+                </tr>
               </thead>
               <tbody>
-                {pageRows.length === 0 ? (
-                  <tr><td colSpan={displayCols.length} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No UIDs with mismatches, missing, or extra rows in these columns. Try the next column page.</td></tr>
+                {isDataLoading ? (
+                  <SnippetSkeletonRows colCount={skeletonColCount} />
+                ) : pageRows.length === 0 ? (
+                  <tr><td colSpan={displayCols.length || 1} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No UIDs with mismatches, missing, or extra rows in these columns. Try the next column page.</td></tr>
                 ) : pageRows.map((row) => (
                   <tr key={`tgt-${row.uid}`} style={{ backgroundColor: rowBg(row), borderBottom: '1px solid #f1f5f9' }}>
                     {renderCells(row, 'target')}
@@ -372,9 +411,9 @@ export const SnippetComparison: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', backgroundColor: '#f0eded', padding: '4px 8px', borderRadius: '6px' }}>
             <LeftOutlined style={{ fontSize: '12px', color: rowPage <= 0 ? '#a0aabf' : '#414755', cursor: rowPage <= 0 ? 'not-allowed' : 'pointer' }} onClick={() => rowPage > 0 && setRowPage((p) => p - 1)} />
             <span style={{ fontSize: '13px', fontWeight: 600 }}>
-              {filteredRows.length ? rowPage + 1 : 0}
+              {isDataLoading ? '—' : (filteredRows.length ? rowPage + 1 : 0)}
               <span style={{ color: '#a0aabf', margin: '0 4px', fontWeight: 400 }}>/</span>
-              {totalRowPages}
+              {isDataLoading ? '—' : totalRowPages}
             </span>
             <RightOutlined style={{ fontSize: '12px', color: rowPage >= totalRowPages - 1 ? '#a0aabf' : '#414755', cursor: rowPage >= totalRowPages - 1 ? 'not-allowed' : 'pointer' }} onClick={() => rowPage < totalRowPages - 1 && setRowPage((p) => p + 1)} />
           </div>
