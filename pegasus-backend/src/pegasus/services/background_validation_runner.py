@@ -39,8 +39,13 @@ class BackgroundValidationRunner:
     def __init__(self, settings: Settings, *, pegasus_src_root: Path | None = None) -> None:
         self._inner = IsolatedValidationRunner(settings, pegasus_src_root=pegasus_src_root)
 
-    def start_job(self, job_dir: Path) -> IsolatedValidationHandle:
-        return self._inner.start_job(job_dir)
+    def start_job(
+        self,
+        job_dir: Path,
+        *,
+        allocated_cpu_cores: float | None = None,
+    ) -> IsolatedValidationHandle:
+        return self._inner.start_job(job_dir, allocated_cpu_cores=allocated_cpu_cores)
 
     def check_timeout(self, handle: IsolatedValidationHandle, started_at: float) -> bool:
         return self._inner.check_timeout(handle, started_at)

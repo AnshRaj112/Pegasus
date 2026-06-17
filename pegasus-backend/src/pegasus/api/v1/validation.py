@@ -701,13 +701,6 @@ async def validate_csv_local_paths(
     )
 
     queue = get_validation_queue(settings)
-    from pegasus.services.distributed_validation_queue import get_distributed_queue
-
-    dist = get_distributed_queue(settings)
-    try:
-        dist.enqueue(job_id, job_dir)
-    except Exception:
-        logger.debug("Distributed queue enqueue skipped", exc_info=True)
     queued_job = queue.enqueue(job_id, job_dir)
     poll = f"{settings.api_v1_prefix.rstrip('/')}/validate/jobs/{job_id}"
     queue_stats = queue.stats

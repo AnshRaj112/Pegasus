@@ -89,7 +89,7 @@ async def _wait_for_jobs(queue: ValidationJobQueue, job_ids: list[uuid.UUID]) ->
         all_done = True
         with queue._lock:  # noqa: SLF001
             for jid in job_ids:
-                job = queue._all_jobs.get(jid)  # noqa: SLF001
+                job = queue._active_jobs.get(jid) or queue._finished.get(jid)  # noqa: SLF001
                 if job is None:
                     continue
                 rec = records[jid]
@@ -137,10 +137,15 @@ def main() -> None:
     settings = Settings(
         validation_allow_local_paths=True,
         validation_enable_in_memory_reconcile=False,
-        validation_auto_tune_enabled=args.auto_tune,
+        validation_auto_tune_enabled=False,
         validation_max_concurrency=10,
         validation_worker_pool_size=0,
-        validation_partition_reconcile_workers=0,
+        validation_partition_reconcile_workers=1,
+        validation_global_memory_budget_bytes=7 * 1024**3,
+        validation_memory_budget_bytes=7 * 1024**3,
+        validation_api_memory_reserve_bytes=2 * 1024**3,
+        validation_reconciliation_chunk_rows=500_000,
+        validation_reconciliation_partition_buckets=1024,
         validation_enable_content_digest_precheck=False,
         validation_cleanup_workspace_on_complete=True,
     )

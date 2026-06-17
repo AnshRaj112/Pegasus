@@ -85,6 +85,13 @@ class IsolatedValidationHandle:
     def was_force_killed(self) -> bool:
         return self._force_killed
 
+    def set_cpu_quota(self, cpu_cores: float) -> None:
+        from pegasus.services.cpu_quota import update_cpu_limit
+
+        pid = self._proc.pid
+        if pid is not None:
+            update_cpu_limit(pid, cpu_cores)
+
 
 class IsolatedValidationRunner:
     """Always starts a fresh ``job_worker`` subprocess (no shared worker pool)."""
@@ -97,7 +104,12 @@ class IsolatedValidationRunner:
         self._src_root = pegasus_src_root
         self._settings = settings
 
-    def start_job(self, job_dir: Path) -> IsolatedValidationHandle:
+    def start_job(
+        self,
+        job_dir: Path,
+        *,
+        allocated_cpu_cores: float | None = None,
+    ) -> IsolatedValidationHandle:
         job_dir = job_dir.resolve()
         log_path = job_dir / "worker.log"
         env = os.environ.copy()
@@ -115,7 +127,12 @@ class IsolatedValidationRunner:
             close_fds=True,
             start_new_session=True,
         )
-        return IsolatedValidationHandle(proc, log_path)
+        handle = IsolatedValidationHandle(proc, log_path)
+        if allocated_cpu_cores is not None and proc.pid is not None:
+            from pegasus.services.cpu_quota import apply_cpu_limit
+
+            apply_cpu_limit(proc.pid, allocated_cpu_cores)
+        return handle
 
     def check_timeout(self, handle: IsolatedValidationHandle, started_at: float) -> bool:
         limit = int(self._settings.validation_job_timeout_seconds or 0)

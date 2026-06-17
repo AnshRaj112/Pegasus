@@ -215,6 +215,14 @@ def run_job_directory(job_dir: Path) -> int:
     delimiter = str(meta.get("delimiter") or "auto")
     column_mappings = [ColumnMapping.model_validate(m) for m in list(meta.get("column_mappings") or [])]
     has_header = bool(meta.get("has_header", True))
+    if delimiter not in ("auto", ",", "\t", "|", ";", "") and len(delimiter) > 1:
+        from pegasus.validation.readers.native_multichar import native_extension_available
+
+        if not native_extension_available():
+            return _fail(
+                "Native multichar spill (pegasus_native) is required for delimiter "
+                f"{delimiter!r} but the extension is not installed"
+            )
     header_leading_rows = int(meta.get("header_leading_rows") or 0)
     test_mode = str(meta.get("test_mode") or "full").strip().lower()
     file_format = str(meta.get("file_format") or "csv").lower()

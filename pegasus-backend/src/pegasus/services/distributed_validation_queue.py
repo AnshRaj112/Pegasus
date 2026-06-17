@@ -79,7 +79,7 @@ def get_distributed_queue(settings: Settings) -> DistributedQueueBackend:
     if not url:
         _backend = InProcessDistributedQueue()
         return _backend
-    from pegasus.services.validation_helpers import validation_jobs_root
+    from pegasus.services.validation_paths import validation_jobs_root
 
     try:
         _backend = RedisDistributedQueue(url, jobs_root=validation_jobs_root(settings))

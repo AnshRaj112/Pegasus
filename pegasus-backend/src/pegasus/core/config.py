@@ -454,6 +454,29 @@ class Settings(BaseSettings):
         le=32,
         description="CPU cores kept free for the OS, API, and other services (never given to workers).",
     )
+    validation_cpu_reserve_fraction: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=32.0,
+        description=(
+            "Fractional CPU reserve for fair scheduler (e.g. 0.5 on a 4-core host → 3.5 schedulable). "
+            "When >0, overrides validation_cpu_reserve_cores for schedulable CPU math."
+        ),
+    )
+    validation_min_cpu_per_job: float = Field(
+        default=0.5,
+        ge=0.1,
+        le=32.0,
+        description="Minimum CPU share allocated to each running validation job.",
+    )
+    validation_max_concurrent_jobs: int = Field(
+        default=0,
+        ge=0,
+        le=64,
+        description=(
+            "Hard cap on parallel validation jobs for the fair scheduler (0 = use validation_max_concurrency)."
+        ),
+    )
     validation_cleanup_workspace_on_complete: bool = Field(
         default=True,
         description="Legacy flag; ephemeral workspaces under /tmp are always removed in job_worker finally.",
@@ -494,6 +517,18 @@ class Settings(BaseSettings):
             "Optional Redis URL (redis://host:6379/0) for cross-replica validation job dispatch. "
             "When unset, the in-process FIFO queue is used."
         ),
+    )
+    validation_spawn_local_workers: bool = Field(
+        default=True,
+        description=(
+            "When false and validation_distributed_queue_url is set, the API queue dispatches "
+            "to Redis instead of spawning job_worker subprocesses in-process."
+        ),
+    )
+    validation_api_memory_reserve_bytes: int = Field(
+        default=2 * 1024**3,
+        ge=256 * 1024 * 1024,
+        description="RAM reserved for API/OS when stamping per-job worker memory budgets.",
     )
 
     def cors_origin_list(self) -> list[str]:

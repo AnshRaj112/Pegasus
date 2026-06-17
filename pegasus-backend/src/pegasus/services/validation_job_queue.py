@@ -3,16 +3,7 @@
 # Last edited: 2026-06-17T07:01:32Z
 # --- END GENERATED FILE METADATA ---
 
-"""Concurrency-limited validation job queue.
-
-Jobs are submitted via :meth:`ValidationJobQueue.enqueue`.  A background
-drain loop picks them up in FIFO order, respecting ``max_concurrency``
-(the number of validation workers allowed to run simultaneously).
-
-The queue itself is process-local and lives inside the FastAPI app.  It
-replaces the old "fire-and-forget subprocess" model with an explicit
-queued → running → completed/failed lifecycle.
-"""
+"""Concurrency-limited validation job queue with fair multi-slot scheduling."""
 
 from __future__ import annotations
 
@@ -30,7 +21,14 @@ from typing import Any
 
 from pegasus.core.config import Settings
 from pegasus.core.json_util import dumps_bytes, loads_str
-from pegasus.core.resource_tuning import schedulable_cpu_cores
+from pegasus.services.fair_cpu_scheduler import (
+    allocate_cpu_shares,
+    estimate_runtime_seconds,
+    pick_next_pending,
+    priority_score,
+    schedulable_cpu_cores as fair_schedulable_cpu_cores,
+)
+from pegasus.services.cpu_quota import update_cpu_limit
 from pegasus.services.background_validation_runner import (
     BackgroundValidationRunner,
     ValidationJobHandle,
@@ -40,10 +38,40 @@ from pegasus.services.resource_advisor import (
     ResourceSnapshot,
     compute_resource_recommendation,
 )
-from pegasus.services.resource_governor import can_admit_job
+from pegasus.services.host_memory import available_worker_memory_bytes
+from pegasus.services.job_resource_meta import job_column_count, read_job_meta
+from pegasus.services.queue_recovery import collect_orphaned_queued_job_dirs, recover_orphaned_jobs
 from pegasus.validation.job_workspace import release_job_workspace
 
 logger = logging.getLogger(__name__)
+
+_ACTIVE_JOB_CAP = 2000
+
+
+def _failure_message(rc: int | None, detail: str) -> str:
+    if rc in (-9, 137):
+        tail = detail.strip()
+        base = "Worker killed (likely out of memory)"
+        return f"{base}: {tail}" if tail else base
+    if rc == -15:
+        return "Worker terminated (SIGTERM)"
+    tail = detail.strip()
+    if tail:
+        return f"Validation worker exited with code {rc}: {tail[-2000:]}"
+    return f"Validation worker exited with code {rc}"
+
+
+def _read_disk_job_status(job_dir: Path) -> str | None:
+    status_path = job_dir / "status.json"
+    if not status_path.is_file():
+        return None
+    try:
+        st = loads_str(status_path.read_text(encoding="utf-8"))
+        if isinstance(st, dict):
+            return str(st.get("status") or "").lower() or None
+    except (OSError, ValueError, TypeError):
+        pass
+    return None
 
 
 class JobState(StrEnum):
@@ -66,11 +94,13 @@ class QueuedJob:
     finished_at: float | None = None
     state: JobState = JobState.QUEUED
     handle: ValidationJobHandle | None = None
+    external: bool = False
     position: int = 0  # 0-based queue position when queued
+    allocated_cpu_cores: float | None = None
 
 
 class ValidationJobQueue:
-    """Concurrency-limited FIFO queue for validation jobs.
+    """Fair multi-slot queue for validation jobs.
 
     Parameters
     ----------
@@ -97,10 +127,9 @@ class ValidationJobQueue:
         self._pending: deque[QueuedJob] = deque()
         # Currently running jobs keyed by job_id
         self._running: dict[uuid.UUID, QueuedJob] = {}
-        # Completed/failed jobs (kept in memory briefly for status queries)
+        # Active jobs only (pending + running + recent finished); status.json is durable.
         self._finished: dict[uuid.UUID, QueuedJob] = {}
-        # All jobs index for fast lookup
-        self._all_jobs: dict[uuid.UUID, QueuedJob] = {}
+        self._active_jobs: dict[uuid.UUID, QueuedJob] = {}
         # Last resource snapshot (cached for stats endpoint)
         self._last_resource_snapshot: ResourceSnapshot | None = None
 
@@ -111,13 +140,34 @@ class ValidationJobQueue:
         self._avg_runtime_seconds: float = 15 * 60
 
         logger.info(
-            "ValidationJobQueue created max_concurrency=%d auto_tune=%s threads_per_job=%d disk_mult=%.2f mem_budget_mib=%.1f",
+            "ValidationJobQueue created max_concurrency=%d auto_tune=%s external_workers=%s "
+            "threads_per_job=%d disk_mult=%.2f mem_budget_mib=%.1f",
             self._max_concurrency,
             self._auto_tune_enabled,
+            self._uses_external_workers(),
             self._resource_policy.threads_per_job,
             self._resource_policy.disk_headroom_multiplier,
             self._resource_policy.memory_budget_bytes / (1024**2),
         )
+
+    def _uses_external_workers(self) -> bool:
+        if self._settings.validation_spawn_local_workers:
+            return False
+        return bool((self._settings.validation_distributed_queue_url or "").strip())
+
+    def recover_from_disk(self) -> None:
+        """On API startup: fail stale running jobs and re-enqueue orphaned queued jobs."""
+        _requeued, failed = recover_orphaned_jobs(self._settings)
+        if failed:
+            logger.warning("Recovery marked %d stale running jobs as failed", failed)
+        orphans = collect_orphaned_queued_job_dirs(self._settings)
+        for job_id, job_dir in orphans:
+            with self._lock:
+                if job_id in self._active_jobs or job_id in self._running:
+                    continue
+            self.enqueue(job_id, job_dir)
+        if orphans:
+            logger.info("Re-enqueued %d orphaned queued jobs from disk", len(orphans))
 
     @property
     def max_concurrency(self) -> int:
@@ -140,10 +190,11 @@ class ValidationJobQueue:
 
     def schedulable_cpu_cores_available(self) -> int:
         """CPUs workers may use (one or more cores reserved for OS/API)."""
-        return schedulable_cpu_cores(
+        sched = fair_schedulable_cpu_cores(
+            self._settings,
             ncpu=self.cpu_cores_available(),
-            reserve=self._settings.validation_cpu_reserve_cores,
         )
+        return max(1, int(sched))
 
     def set_max_concurrency(self, value: int) -> int:
         """Update the concurrency cap at runtime.  Returns the clamped value actually set.
@@ -259,7 +310,7 @@ class ValidationJobQueue:
                 "pending": len(self._pending),
                 "running": len(self._running),
                 "finished": len(self._finished),
-                "total_tracked": len(self._all_jobs),
+                "total_tracked": len(self._active_jobs) + len(self._finished),
             }
         if self._auto_tune_enabled:
             snapshot = self.resource_recommendation()
@@ -274,12 +325,16 @@ class ValidationJobQueue:
 
     def enqueue(self, job_id: uuid.UUID, job_dir: Path) -> QueuedJob:
         """Add a job to the queue.  Returns the :class:`QueuedJob` immediately."""
+        with self._lock:
+            existing = self._active_jobs.get(job_id)
+            if existing is not None and existing.state in (JobState.QUEUED, JobState.RUNNING):
+                return existing
         job = QueuedJob(job_id=job_id, job_dir=job_dir.resolve())
         effective, _snapshot = self._drain_slot_cap()
         with self._lock:
             job.position = len(self._pending)
             self._pending.append(job)
-            self._all_jobs[job_id] = job
+            self._active_jobs[job_id] = job
             self._update_queue_positions()
             self._refresh_pending_statuses_locked(effective_max=effective)
             logger.info(
@@ -301,9 +356,12 @@ class ValidationJobQueue:
         return job
 
     def get_job(self, job_id: uuid.UUID) -> QueuedJob | None:
-        """Return the in-memory job record, or None if unknown."""
+        """Return the in-memory job record when active; None if only on disk."""
         with self._lock:
-            return self._all_jobs.get(job_id)
+            hit = self._active_jobs.get(job_id)
+            if hit is not None:
+                return hit
+            return self._finished.get(job_id)
 
     def get_queue_position(self, job_id: uuid.UUID) -> int | None:
         """0-based position in the pending queue, or None if not queued."""
@@ -314,9 +372,13 @@ class ValidationJobQueue:
             return None
 
     def list_jobs(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        """Return a snapshot of all tracked jobs (most recent first)."""
+        """Return a snapshot of active/recent jobs (most recent first)."""
         with self._lock:
-            jobs = sorted(self._all_jobs.values(), key=lambda j: j.enqueued_at, reverse=True)
+            jobs = sorted(
+                {**self._active_jobs, **self._finished}.values(),
+                key=lambda j: j.enqueued_at,
+                reverse=True,
+            )
             running_jobs = len(self._running)
         effective_max = self.effective_max_concurrency()
         return [
@@ -375,95 +437,163 @@ class ValidationJobQueue:
                 pass
 
     def _try_start_pending(self) -> None:
-        """Start the FIFO head job only when no other validation is running."""
+        """Start as many pending jobs as CPU, RAM, and disk allow (priority order)."""
         effective_max, snapshot = self._drain_slot_cap()
         if snapshot is None:
             snapshot = self.resource_recommendation()
 
-        with self._lock:
-            if not self._pending:
-                return
-            if self._running:
-                self._refresh_pending_statuses_locked(
-                    effective_max=1,
-                    queue_reason="Queued — waiting for the job ahead to finish",
-                )
-                logger.debug(
-                    "Deferring pending=%d until running job completes (serial FIFO)",
-                    len(self._pending),
-                )
-                return
-            next_job = self._pending[0]
-            running_copy = dict(self._running)
-
         policy = self._resource_policy
-        admitted, reason = can_admit_job(
-            next_job,
-            running_copy,
-            snapshot,
-            settings=self._settings,
-            effective_max=1,
-            disk_headroom_multiplier=policy.disk_headroom_multiplier,
-            ram_multiplier=self._settings.validation_queue_ram_multiplier,
-            min_ram_per_job_bytes=self._settings.validation_queue_min_ram_per_job_bytes,
-            min_disk_per_job_bytes=self._settings.validation_queue_min_disk_per_job_bytes,
-            ram_reserve_bytes=self._settings.validation_queue_ram_reserve_bytes,
-            disk_reserve_bytes=self._settings.validation_queue_disk_reserve_bytes,
+        schedulable = fair_schedulable_cpu_cores(
+            self._settings,
+            ncpu=self.cpu_cores_available(),
         )
-        if not admitted:
+        min_cpu = float(self._settings.validation_min_cpu_per_job)
+
+        while True:
             with self._lock:
-                self._refresh_pending_statuses_locked(
-                    effective_max=1,
-                    queue_reason=reason,
-                )
-            logger.debug(
-                "Job %s queued (waiting for resources): %s (pending=%d)",
-                next_job.job_id,
-                reason,
-                len(self._pending),
-            )
-            return
-
-        with self._lock:
-            if not self._pending or self._running:
-                return
-            job = self._pending.popleft()
-            self._update_queue_positions()
-            self._refresh_pending_statuses_locked(effective_max=1)
-            try:
-                self._stamp_resource_policy(
-                    job,
-                    effective_slots=1,
-                    active_slots=1,
-                )
-                handle = self._runner.start_job(job.job_dir)
-                if handle.poll() is not None:
-                    detail = handle.failure_detail()
-                    logger.error("Job %s worker died on start: %s", job.job_id, detail)
-                    job.state = JobState.FAILED
-                    job.finished_at = time.time()
-                    self._finished[job.job_id] = job
-                    handle.force_reap(reason="died on start")
-                    release_job_workspace(job.job_dir)
-                    self._write_failed_status(job, f"Worker died on start: {detail}")
+                if not self._pending:
                     return
-            except Exception as exc:
-                logger.exception("Failed to start worker for job %s: %s", job.job_id, exc)
-                job.state = JobState.FAILED
-                job.finished_at = time.time()
-                self._finished[job.job_id] = job
-                self._write_failed_status(job, f"Failed to start: {exc!r}")
+                if len(self._running) >= effective_max:
+                    return
+                pending_list = list(self._pending)
+                running_copy = dict(self._running)
+
+            next_job, reason = pick_next_pending(
+                pending_list,
+                running_copy,
+                settings=self._settings,
+                snapshot=snapshot,
+                effective_max=effective_max,
+                avg_runtime_seconds=self._avg_runtime_seconds,
+                disk_headroom_multiplier=policy.disk_headroom_multiplier,
+                ram_multiplier=self._settings.validation_queue_ram_multiplier,
+                min_ram_per_job_bytes=self._settings.validation_queue_min_ram_per_job_bytes,
+                min_disk_per_job_bytes=self._settings.validation_queue_min_disk_per_job_bytes,
+                ram_reserve_bytes=self._settings.validation_queue_ram_reserve_bytes,
+                disk_reserve_bytes=self._settings.validation_queue_disk_reserve_bytes,
+            )
+            if next_job is None:
+                with self._lock:
+                    self._refresh_pending_statuses_locked(
+                        effective_max=effective_max,
+                        queue_reason=reason,
+                    )
+                logger.debug(
+                    "No admissible pending job (pending=%d running=%d): %s",
+                    len(pending_list),
+                    len(running_copy),
+                    reason,
+                )
                 return
 
-            job.state = JobState.RUNNING
-            job.started_at = time.time()
-            job.handle = handle
-            self._running[job.job_id] = job
-            logger.info(
-                "Job %s started (serial queue) pending=%d",
-                job.job_id,
-                len(self._pending),
+            prospective = list(running_copy.values()) + [next_job]
+            shares = allocate_cpu_shares(
+                prospective,
+                schedulable,
+                min_cpu_per_job=min_cpu,
             )
+            allocated = shares.get(next_job.job_id, min_cpu)
+            job_added_to_running = False
+
+            with self._lock:
+                if len(self._running) >= effective_max:
+                    return
+                try:
+                    self._pending.remove(next_job)
+                except ValueError:
+                    continue
+                self._update_queue_positions()
+                concurrent = len(self._running) + 1
+                self._refresh_pending_statuses_locked(effective_max=effective_max)
+                try:
+                    next_job.allocated_cpu_cores = allocated
+                    self._stamp_resource_policy(
+                        next_job,
+                        effective_slots=effective_max,
+                        active_slots=concurrent,
+                        allocated_cpu_cores=allocated,
+                    )
+                    if self._uses_external_workers():
+                        from pegasus.services.distributed_validation_queue import get_distributed_queue
+
+                        get_distributed_queue(self._settings).enqueue(next_job.job_id, next_job.job_dir)
+                        next_job.state = JobState.RUNNING
+                        next_job.started_at = time.time()
+                        next_job.handle = None
+                        next_job.external = True
+                        self._running[next_job.job_id] = next_job
+                        job_added_to_running = True
+                        logger.info(
+                            "Job %s dispatched to external worker pending=%d allocated_cpu=%.2f",
+                            next_job.job_id,
+                            len(self._pending),
+                            allocated,
+                        )
+                    else:
+                        handle = self._runner.start_job(
+                            next_job.job_dir,
+                            allocated_cpu_cores=allocated,
+                        )
+                        if handle.poll() is not None:
+                            detail = handle.failure_detail()
+                            logger.error("Job %s worker died on start: %s", next_job.job_id, detail)
+                            next_job.state = JobState.FAILED
+                            next_job.finished_at = time.time()
+                            self._finished[next_job.job_id] = next_job
+                            handle.force_reap(reason="died on start")
+                            release_job_workspace(next_job.job_dir)
+                            self._write_failed_status(next_job, f"Worker died on start: {detail}")
+                        else:
+                            next_job.state = JobState.RUNNING
+                            next_job.started_at = time.time()
+                            next_job.handle = handle
+                            self._running[next_job.job_id] = next_job
+                            job_added_to_running = True
+                            logger.info(
+                                "Job %s started pending=%d running=%d allocated_cpu=%.2f",
+                                next_job.job_id,
+                                len(self._pending),
+                                len(self._running),
+                                allocated,
+                            )
+                except Exception as exc:
+                    logger.exception("Failed to start worker for job %s: %s", next_job.job_id, exc)
+                    next_job.state = JobState.FAILED
+                    next_job.finished_at = time.time()
+                    self._finished[next_job.job_id] = next_job
+                    self._write_failed_status(next_job, f"Failed to start: {exc!r}")
+
+            if job_added_to_running:
+                self._rebalance_running_cpu_shares_locked()
+
+    def _rebalance_running_cpu_shares_unlocked(self, running_jobs: list[QueuedJob]) -> None:
+        if not running_jobs:
+            return
+        schedulable = fair_schedulable_cpu_cores(
+            self._settings,
+            ncpu=self.cpu_cores_available(),
+        )
+        min_cpu = float(self._settings.validation_min_cpu_per_job)
+        shares = allocate_cpu_shares(
+            running_jobs,
+            schedulable,
+            min_cpu_per_job=min_cpu,
+        )
+        for job in running_jobs:
+            alloc = shares.get(job.job_id, min_cpu)
+            job.allocated_cpu_cores = alloc
+            handle = job.handle
+            if handle is not None and not job.external:
+                if hasattr(handle, "set_cpu_quota"):
+                    handle.set_cpu_quota(alloc)
+                elif getattr(handle, "pid", None):
+                    update_cpu_limit(int(handle.pid), alloc)
+
+    def _rebalance_running_cpu_shares_locked(self) -> None:
+        """Re-split CPU among running jobs."""
+        with self._lock:
+            running_jobs = list(self._running.values())
+        self._rebalance_running_cpu_shares_unlocked(running_jobs)
 
     def _reap_finished(self) -> None:
         """Move completed/failed running jobs to the finished set and force-reap workers."""
@@ -473,6 +603,13 @@ class ValidationJobQueue:
 
         finished_events: list[tuple[QueuedJob, int | None, str]] = []
         for _jid, job in running_snapshot:
+            if job.external or job.handle is None:
+                disk_status = _read_disk_job_status(job.job_dir)
+                if disk_status == "completed":
+                    finished_events.append((job, 0, "external"))
+                elif disk_status == "failed":
+                    finished_events.append((job, 1, "external"))
+                continue
             if job.handle is None:
                 continue
             if job.started_at is not None and self._runner.check_timeout(job.handle, job.started_at):
@@ -483,7 +620,7 @@ class ValidationJobQueue:
                 finished_events.append((job, rc, "finished"))
 
         for job, _rc, reason in finished_events:
-            if job.handle is not None:
+            if job.handle is not None and not job.external:
                 try:
                     job.handle.force_reap(reason=reason)
                 except Exception:
@@ -511,8 +648,15 @@ class ValidationJobQueue:
                         job,
                         f"Validation job timed out after {timeout_s}s",
                     )
+                elif reason == "external":
+                    disk_status = _read_disk_job_status(job.job_dir)
+                    job.state = JobState.COMPLETED if disk_status == "completed" else JobState.FAILED
+                elif rc == 0:
+                    job.state = JobState.COMPLETED
                 else:
-                    job.state = JobState.COMPLETED if rc == 0 else JobState.FAILED
+                    job.state = JobState.FAILED
+                    detail = job.handle.failure_detail() if job.handle is not None else ""
+                    self._write_failed_status(job, _failure_message(rc, detail))
                 self._running.pop(jid)
                 self._finished[jid] = job
                 had_done = True
@@ -532,16 +676,24 @@ class ValidationJobQueue:
                 self._refresh_pending_statuses_locked(effective_max=effective_max)
 
         if had_done:
+            self._rebalance_running_cpu_shares_locked()
             self._try_start_pending()
             self._drain_event.set()
 
-        # Prune old finished entries (keep last 500 max)
+        # Prune old finished entries (keep last 500 max); drop from active index
         with self._lock:
             if len(self._finished) > 500:
                 oldest = sorted(self._finished.values(), key=lambda j: j.finished_at or 0)
                 for j in oldest[: len(self._finished) - 500]:
                     del self._finished[j.job_id]
-                    del self._all_jobs[j.job_id]
+                    self._active_jobs.pop(j.job_id, None)
+            if len(self._active_jobs) > _ACTIVE_JOB_CAP:
+                stale = sorted(
+                    self._finished.values(),
+                    key=lambda j: j.finished_at or 0,
+                )
+                for j in stale[: max(0, len(self._active_jobs) - _ACTIVE_JOB_CAP)]:
+                    self._active_jobs.pop(j.job_id, None)
 
     def _update_queue_positions(self) -> None:
         """Recalculate 0-based position for every pending job (caller holds lock)."""
@@ -569,6 +721,7 @@ class ValidationJobQueue:
         *,
         effective_slots: int | None = None,
         active_slots: int | None = None,
+        allocated_cpu_cores: float | None = None,
     ) -> None:
         """Write current queue resource policy into job meta.json before the worker starts."""
         meta_path = job.job_dir / "meta.json"
@@ -584,30 +737,65 @@ class ValidationJobQueue:
             slots = max(1, effective_slots or self.effective_max_concurrency())
             concurrent = max(1, active_slots or len(self._running) + 1)
             schedulable = self.schedulable_cpu_cores_available()
-            global_budget = max(512 * 1024 * 1024, int(self._settings.validation_global_memory_budget_bytes))
+            per_job_cpu = allocated_cpu_cores
+            if per_job_cpu is None:
+                per_job_cpu = max(
+                    float(self._settings.validation_min_cpu_per_job),
+                    fair_schedulable_cpu_cores(self._settings, ncpu=self.cpu_cores_available())
+                    / concurrent,
+                )
+            per_job_cpu_int = max(1, int(per_job_cpu))
+            avail_ram = available_worker_memory_bytes(
+                api_reserve_bytes=self._settings.validation_api_memory_reserve_bytes,
+            )
+            global_budget = min(
+                max(512 * 1024 * 1024, int(self._settings.validation_global_memory_budget_bytes)),
+                avail_ram,
+            )
             per_job_budget = max(512 * 1024 * 1024, global_budget // concurrent)
+            src_bytes = int(meta.get("source_bytes") or 0)
+            tgt_bytes = int(meta.get("target_bytes") or 0)
+            combined = int(meta.get("combined_bytes") or (src_bytes + tgt_bytes))
+            cols = job_column_count(meta)
             base_reconcile = self._settings.validation_partition_reconcile_workers
             if base_reconcile <= 0:
-                base_reconcile = policy.effective_threads(
-                    cpu_cores=schedulable,
-                )
-            throttled_reconcile = max(
-                1,
-                min(schedulable, int(base_reconcile) // concurrent),
+                base_reconcile = policy.effective_threads(cpu_cores=schedulable)
+            from pegasus.core.workload_budget import plan_workload_budget
+
+            budget = plan_workload_budget(
+                source_bytes=max(1, src_bytes),
+                target_bytes=max(1, tgt_bytes),
+                compare_column_count=cols,
+                cpu_cores=per_job_cpu_int,
+                memory_budget_bytes=per_job_budget,
+                target_duration_seconds=int(self._settings.validation_target_duration_seconds),
+                requested_chunk_rows=int(self._settings.validation_reconciliation_chunk_rows),
+                requested_partition_buckets=int(self._settings.validation_reconciliation_partition_buckets),
+                requested_max_workers=per_job_cpu_int if per_job_cpu_int > 0 else None,
+                requested_sub_partition_buckets=int(
+                    self._settings.validation_reconciliation_sub_partition_buckets
+                ),
+                inline_native_spill=len(str(meta.get("delimiter") or "")) > 1,
             )
+            throttled_reconcile = max(1, min(per_job_cpu_int, budget.max_parallel_workers))
+            per_job_budget = max(512 * 1024 * 1024, per_job_budget)
             meta["resource_policy"] = {
                 **policy.to_dict(),
                 "memory_budget_bytes": per_job_budget,
+                "chunk_rows": budget.chunk_rows,
+                "partition_buckets": budget.partition_buckets,
                 "effective_threads_per_job": max(
                     1,
                     min(
-                        schedulable,
+                        per_job_cpu_int,
                         policy.effective_threads(cpu_cores=schedulable) // concurrent,
                     ),
                 ),
                 "partition_reconcile_workers": throttled_reconcile,
                 "concurrent_jobs_at_start": concurrent,
+                "allocated_cpu_cores": round(float(per_job_cpu), 3),
                 "cpu_reserve_cores": self._settings.validation_cpu_reserve_cores,
+                "available_worker_ram_bytes": avail_ram,
             }
             meta_path.write_bytes(dumps_bytes(meta, indent=True))
         except (OSError, ValueError, TypeError):
@@ -630,6 +818,16 @@ class ValidationJobQueue:
             queue_position=job.position,
             effective_max=eff,
             running_jobs=running,
+        )
+        est_runtime = estimate_runtime_seconds(
+            job,
+            avg_runtime_seconds=self._avg_runtime_seconds,
+            settings=self._settings,
+        )
+        prio = priority_score(
+            job,
+            avg_runtime_seconds=self._avg_runtime_seconds,
+            settings=self._settings,
         )
         try:
             resource_profile = None
@@ -656,7 +854,7 @@ class ValidationJobQueue:
                     if queue_reason
                     else (
                         f"Accepted and queued (position {job.position + 1} of {pend}, "
-                        f"starts after the jobs ahead finish)"
+                        f"starts when CPU/RAM slots are available)"
                     )
                 ),
                 "progress": {
@@ -669,6 +867,9 @@ class ValidationJobQueue:
                     "estimated_start_epoch_s": time.time() + wait_s,
                     "enqueued_at_epoch_s": job.enqueued_at,
                     "queue_reason": queue_reason,
+                    "priority_score": round(prio, 4),
+                    "allocated_cpu_cores": job.allocated_cpu_cores,
+                    "estimated_runtime_seconds": round(est_runtime, 1),
                 },
             }
             if resource_profile is not None:
@@ -699,10 +900,15 @@ class ValidationJobQueue:
         effective_max: int,
         running_jobs: int,
     ) -> float:
-        # Serial FIFO: each pending job waits for the running job plus every job ahead in line.
-        _ = effective_max
-        jobs_ahead = queue_position + (1 if running_jobs > 0 else 0)
-        return float(jobs_ahead * self._avg_runtime_seconds)
+        slots = max(1, effective_max)
+        if running_jobs >= slots:
+            batches_ahead = max(0, queue_position // slots) + 1
+        else:
+            free_slots = slots - running_jobs
+            if queue_position < free_slots:
+                return 0.0
+            batches_ahead = 1 + max(0, (queue_position - free_slots) // slots)
+        return float(batches_ahead * self._avg_runtime_seconds)
 
     def _refresh_pending_statuses_locked(
         self,
