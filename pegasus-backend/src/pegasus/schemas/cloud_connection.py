@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-16T10:16:15Z
+# Last edited: 2026-06-17T10:32:48+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Schemas for admin-managed cloud connections."""
