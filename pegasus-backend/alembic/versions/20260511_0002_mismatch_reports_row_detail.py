@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-17T05:39:44Z
+# Last edited: 2026-06-17T05:46:02Z
 # --- END GENERATED FILE METADATA ---
 
 """Add row_detail JSON column to mismatch_reports.
