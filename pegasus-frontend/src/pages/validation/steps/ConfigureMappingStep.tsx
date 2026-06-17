@@ -1,9 +1,6 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
-  CloseCircleFilled,
   CheckCircleOutlined,
-  SyncOutlined,
   SearchOutlined,
   FilterOutlined,
   LeftOutlined,
@@ -15,13 +12,12 @@ import {
   CodeOutlined,
   ArrowRightOutlined,
   CloseOutlined,
-  SortAscendingOutlined // ⚡ Added for the Structured data type action
+  SortAscendingOutlined
 } from '@ant-design/icons';
 
 import { Api, type ColumnMapping, type GoogleCloudStorageConfig } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
-import { ValidationReport } from '../components/ValidationReport';
 
 const PAGE_SIZE = 10;
 
@@ -34,7 +30,7 @@ interface ComplexMappingRow {
   isIgnored: boolean;
   isSensitive: boolean;
   isExpanded: boolean;
-  isOrderSensitive: boolean; // ⚡ Added for Structured data types
+  isOrderSensitive: boolean;
   sourceExpr: string;
   targetExpr: string;
   previewValue: string;
@@ -79,14 +75,12 @@ const matrixToColumnMappings = (
         return {
           ...base,
           compare_mode: 'structured',
-          // ⚡ Uses the row-specific order preference if it exists
           structured_order_sensitive: row.isOrderSensitive ?? structuredOrderSensitive,
         };
       }
       return base;
     });
 
-// ⚡ Reusable animated skeleton block
 const SkeletonBlock: React.FC<{ width?: string; height?: string; borderRadius?: string }> = ({ width = '100%', height = '16px', borderRadius = '4px' }) => (
   <div style={{ width, height, backgroundColor: '#e2e8f0', borderRadius, animation: 'skeleton-pulse 1.5s ease-in-out infinite' }} />
 );
@@ -162,25 +156,38 @@ const TargetMappingField: React.FC<{
 
 export const ConfigureMappingStep: React.FC = () => {
   const dispatch = useAppDispatch();
-  const navigate = useNavigate();
   const validationForm = useAppSelector((s) => s.validation.validationForm);
-  const { data: validationResult, isFetching, error } = useAppSelector((s) => s.validation.validationDataState);
 
   const [searchQuery, setSearchQuery] = useState('');
+  
   const [showUnmappedOnly, setShowUnmappedOnly] = useState(false);
+  const [showConfiguredOnly, setShowConfiguredOnly] = useState(false);
+  
+  const [actionFilters, setActionFilters] = useState({
+    pk: false,
+    ignored: false,
+    sensitive: false,
+    expanded: false,
+  });
+
   const [page, setPage] = useState(1);
   const [columnsMatrix, setColumnsMatrix] = useState<ComplexMappingRow[]>([]);
   const [targetColumnsList, setTargetColumnsList] = useState<string[]>([]); 
   const [targetSamplesRecord, setTargetSamplesRecord] = useState<Record<string, string>>({});
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [complexColumns, setComplexColumns] = useState<string[]>([]);
-  const [viewDetailedReport, setViewDetailedReport] = useState(false);
 
   const [itemsPerPage, setItemsPerPage] = useState(PAGE_SIZE);
 
   const loadingPreview = Boolean(
     validationForm.sourceCloud && validationForm.targetCloud && columnsMatrix.length === 0 && !previewError,
   );
+
+  const configuredCount = columnsMatrix.filter(m => m.targetCols.length > 0 && !m.isIgnored).length;
+  const pkCount = columnsMatrix.filter(m => m.isPk).length;
+  const ignoredCount = columnsMatrix.filter(m => m.isIgnored).length;
+  const sensitiveCount = columnsMatrix.filter(m => m.isSensitive).length;
+  const expandedCount = columnsMatrix.filter(m => m.isExpanded).length;
 
   const syncMappings = (
     matrix: ComplexMappingRow[],
@@ -248,7 +255,7 @@ export const ConfigureMappingStep: React.FC = () => {
             isIgnored: false,
             isSensitive: false,
             isExpanded: false,
-            isOrderSensitive: false, // Default order sensitivity
+            isOrderSensitive: false,
             sourceExpr: '',
             targetExpr: '',
             previewValue: sample
@@ -315,6 +322,11 @@ export const ConfigureMappingStep: React.FC = () => {
     syncMappings(next);
   };
 
+  const toggleActionFilter = (key: keyof typeof actionFilters) => {
+    setActionFilters(prev => ({ ...prev, [key]: !prev[key] }));
+    setPage(1);
+  };
+
   const globalAvailableTargets = useMemo(() => {
     const usedTargets = new Set<string>();
     columnsMatrix.forEach(row => {
@@ -325,38 +337,35 @@ export const ConfigureMappingStep: React.FC = () => {
 
   const filteredColumns = useMemo(() => {
     let rows = columnsMatrix;
+    
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       rows = rows.filter((col) => col.sourceCol.toLowerCase().includes(q));
     }
+    
     if (showUnmappedOnly) {
       rows = rows.filter((col) => col.targetCols.length === 0 && !col.isIgnored);
     }
+    if (showConfiguredOnly) {
+      rows = rows.filter((col) => col.targetCols.length > 0 && !col.isIgnored);
+    }
+
+    if (actionFilters.pk) rows = rows.filter(col => col.isPk);
+    if (actionFilters.ignored) rows = rows.filter(col => col.isIgnored);
+    if (actionFilters.sensitive) rows = rows.filter(col => col.isSensitive);
+    if (actionFilters.expanded) rows = rows.filter(col => col.isExpanded);
+
     return rows;
-  }, [columnsMatrix, searchQuery, showUnmappedOnly]);
+  }, [columnsMatrix, searchQuery, showUnmappedOnly, showConfiguredOnly, actionFilters]);
 
   const totalPages = Math.max(1, Math.ceil(filteredColumns.length / itemsPerPage));
   const safePage = Math.min(page, totalPages);
   const pageStart = (safePage - 1) * itemsPerPage;
   const pageRows = filteredColumns.slice(pageStart, pageStart + itemsPerPage);
 
-  const results = validationResult?.results;
-
-  if (viewDetailedReport) {
-    return (
-      <ValidationReport
-        jobId={validationResult?.jobId ?? undefined}
-        runId={validationResult?.runId ?? undefined}
-        initialResult={results ?? null}
-        onBack={() => setViewDetailedReport(false)}
-      />
-    );
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1440px', margin: '0 auto', width: '100%', height: '100%', position: 'relative' }}>
       
-      {/* ⚡ CSS Keyframes injected for the skeleton pulse */}
       <style>{`
         @keyframes skeleton-pulse {
           0%, 100% { opacity: 1; }
@@ -371,7 +380,7 @@ export const ConfigureMappingStep: React.FC = () => {
             type="text"
             value={validationForm.delimiter || ''}
             onChange={(e) => dispatch(validationActions.setValidationForm({ delimiter: e.target.value || 'auto' }))}
-            style={{ width: '56px', height: '28px', textAlign: 'center', borderRadius: '6px', border: '1px solid #e2e8f0' }}
+            style={{ width: '56px', height: '28px', textAlign: 'center', borderRadius: '6px', border: '1px solid #e2e8f0', opacity: loadingPreview ? 0.6 : 1 }}
             disabled={loadingPreview}
           />
         </label>
@@ -400,11 +409,6 @@ export const ConfigureMappingStep: React.FC = () => {
             </span>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ backgroundColor: '#eef2ff', color: '#4f46e5', padding: '6px 12px', borderRadius: '999px', fontSize: '14px', fontWeight: 500 }}>
-            {loadingPreview ? 'Loading...' : `Configured (${columnsMatrix.filter(m => m.targetCols.length > 0 && !m.isIgnored).length})`}
-          </span>
-        </div>
       </div>
 
       {previewError && <div style={{ padding: '12px', backgroundColor: '#fef2f2', color: '#dc2626', borderRadius: '8px' }}>{previewError}</div>}
@@ -417,17 +421,27 @@ export const ConfigureMappingStep: React.FC = () => {
             placeholder="Filter attributes by names..."
             value={searchQuery}
             onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
-            style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+            style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', boxSizing: 'border-box', opacity: loadingPreview ? 0.6 : 1 }}
             disabled={loadingPreview}
           />
         </div>
+        
         <button
           type="button"
-          onClick={() => { setShowUnmappedOnly((v) => !v); setPage(1); }}
+          onClick={() => { setShowUnmappedOnly(!showUnmappedOnly); setShowConfiguredOnly(false); setPage(1); }}
           disabled={loadingPreview}
           style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderRadius: '8px', border: `1px solid ${showUnmappedOnly ? '#6366f1' : '#e2e8f0'}`, backgroundColor: showUnmappedOnly ? '#eef2ff' : '#fff', color: showUnmappedOnly ? '#4f46e5' : '#475569', fontSize: '14px', fontWeight: 500, cursor: loadingPreview ? 'not-allowed' : 'pointer', opacity: loadingPreview ? 0.6 : 1 }}
         >
           <FilterOutlined /> Unmapped Only
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setShowConfiguredOnly(!showConfiguredOnly); setShowUnmappedOnly(false); setPage(1); }}
+          disabled={loadingPreview}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderRadius: '8px', border: `1px solid ${showConfiguredOnly ? '#16a34a' : '#e2e8f0'}`, backgroundColor: showConfiguredOnly ? '#f0fdf4' : '#fff', color: showConfiguredOnly ? '#16a34a' : '#475569', fontSize: '14px', fontWeight: 500, cursor: loadingPreview ? 'not-allowed' : 'pointer', opacity: loadingPreview ? 0.6 : 1 }}
+        >
+          <CheckCircleOutlined /> Configured ({configuredCount})
         </button>
       </div>
 
@@ -436,7 +450,43 @@ export const ConfigureMappingStep: React.FC = () => {
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10, borderBottom: '1px solid #c1c6d7' }}>
               <tr>
-                <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755', borderRight: '1px solid #c1c6d7', width: '160px' }}>ACTIONS</th>
+                <th style={{ padding: '8px 16px', borderRight: '1px solid #c1c6d7', width: '200px' }}>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <div onClick={() => toggleActionFilter('pk')} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: actionFilters.pk ? '#4f46e5' : '#727786' }} title="Filter by Primary Key">
+                        <KeyOutlined style={{ fontSize: '14px' }} />
+                        <FilterOutlined style={{ fontSize: '10px', opacity: actionFilters.pk ? 1 : 0.5 }} />
+                      </div>
+                      <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>({pkCount})</span>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <div onClick={() => toggleActionFilter('ignored')} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: actionFilters.ignored ? '#4f46e5' : '#727786' }} title="Filter by Ignored">
+                        <StopOutlined style={{ fontSize: '14px' }} />
+                        <FilterOutlined style={{ fontSize: '10px', opacity: actionFilters.ignored ? 1 : 0.5 }} />
+                      </div>
+                      <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>({ignoredCount})</span>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <div onClick={() => toggleActionFilter('sensitive')} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: actionFilters.sensitive ? '#4f46e5' : '#727786' }} title="Filter by Sensitive">
+                        <EyeInvisibleOutlined style={{ fontSize: '14px' }} />
+                        <FilterOutlined style={{ fontSize: '10px', opacity: actionFilters.sensitive ? 1 : 0.5 }} />
+                      </div>
+                      <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>({sensitiveCount})</span>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <div onClick={() => toggleActionFilter('expanded')} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: actionFilters.expanded ? '#4f46e5' : '#727786' }} title="Filter by Expressions">
+                        <CodeOutlined style={{ fontSize: '14px' }} />
+                        <FilterOutlined style={{ fontSize: '10px', opacity: actionFilters.expanded ? 1 : 0.5 }} />
+                      </div>
+                      <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>({expandedCount})</span>
+                    </div>
+
+                  </div>
+                </th>
                 <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>SOURCE COLUMN</th>
                 <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>SOURCE SAMPLE</th>
                 <th style={{ padding: '12px 8px', fontSize: '12px', fontWeight: 600, color: '#414755', textAlign: 'center', width: '48px' }}></th>
@@ -446,7 +496,6 @@ export const ConfigureMappingStep: React.FC = () => {
             </thead>
             <tbody>
               {loadingPreview ? (
-                // ⚡ Render Skeleton Rows while loading
                 Array.from({ length: 4 }).map((_, idx) => (
                   <tr key={`skeleton-${idx}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
                     <td style={{ padding: '12px 16px', borderRight: '1px solid #c1c6d7', verticalAlign: 'top' }}>
@@ -476,7 +525,6 @@ export const ConfigureMappingStep: React.FC = () => {
                   </tr>
                 ))
               ) : (
-                // Render real data when loading is false
                 pageRows.map(row => (
                   <React.Fragment key={row.id}>
                     <tr style={{ borderBottom: '1px solid #e5e2e1', backgroundColor: row.isExpanded ? '#fcf9f8' : row.isIgnored ? '#fcf9f8' : row.isPk ? '#eef2ff' : 'transparent', opacity: row.isIgnored ? 0.6 : 1, transition: 'background-color 0.2s' }}>
@@ -487,7 +535,6 @@ export const ConfigureMappingStep: React.FC = () => {
                           <button onClick={() => toggleProperty(row.id, 'isSensitive')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isSensitive ? 'rgba(186, 26, 26, 0.1)' : 'transparent', color: row.isSensitive ? '#ba1a1a' : '#727786', cursor: 'pointer' }} title="Sensitive">{row.isSensitive ? <EyeInvisibleOutlined /> : <EyeOutlined />}</button>
                           <button onClick={() => toggleProperty(row.id, 'isExpanded')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isExpanded ? '#0057c2' : 'transparent', color: row.isExpanded ? '#fff' : '#727786', cursor: 'pointer' }} title="Expression"><CodeOutlined /></button>
                           
-                          {/* ⚡ Appears ONLY for Structured columns */}
                           {row.sourceType === 'Structured' && (
                             <button 
                               onClick={() => toggleProperty(row.id, 'isOrderSensitive')} 
@@ -505,7 +552,7 @@ export const ConfigureMappingStep: React.FC = () => {
                       </td>
                       <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                          <code style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{row.previewValue || '—'}</code>
+                          <code style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{row.previewValue ? (row.isSensitive ? '*'.repeat(row.previewValue.length) : row.previewValue) : '—'}</code>
                         </div>
                       </td>
                       <td style={{ padding: '12px 8px', textAlign: 'center', color: '#c1c6d7', verticalAlign: 'top' }}><ArrowRightOutlined /></td>
@@ -523,7 +570,7 @@ export const ConfigureMappingStep: React.FC = () => {
                         {!row.isIgnored && row.targetCols.length > 0 ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-start' }}>
                             {row.targetCols.map((tc, idx) => (
-                              <code key={idx} style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{tc.sample || '—'}</code>
+                              <code key={idx} style={{ fontSize: '12px', color: '#475569', backgroundColor: '#f8fafc', padding: '4px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{tc.sample ? (row.isSensitive ? '*'.repeat(tc.sample.length) : tc.sample) : '—'}</code>
                             ))}
                           </div>
                         ) : (
@@ -580,46 +627,6 @@ export const ConfigureMappingStep: React.FC = () => {
         </div>
       </div>
 
-      {isFetching && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#6366f1', fontSize: '14px' }}>
-          <SyncOutlined spin /> Running validation on server…
-        </div>
-      )}
-
-      {error && (
-        <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', padding: '16px', borderRadius: '8px' }}>
-          <CloseCircleFilled style={{ color: '#dc2626', marginRight: '8px' }} />
-          {error}
-        </div>
-      )}
-
-      {validationResult?.status === 'Complete' && results && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <h3 style={{ margin: 0, fontSize: '16px' }}>Validation Summary</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px' }}>
-            <Stat label="Match" value={results.summary.is_match ? 'YES' : 'NO'} color={results.summary.is_match ? '#16a34a' : '#dc2626'} />
-            <Stat label="Source Rows" value={results.summary.source_row_count.toLocaleString()} />
-            <Stat label="Target Rows" value={results.summary.target_row_count.toLocaleString()} />
-            <Stat label="Mismatches" value={results.summary.total_mismatch_records.toLocaleString()} color="#dc2626" />
-            <Stat label="Run Time" value={`${(results.durations?.validation_seconds ?? results.durations?.total_seconds ?? 0).toFixed(2)}s`} color="#6366f1" />
-          </div>
-          <button
-            type="button"
-            onClick={() => (validationResult.jobId ? navigate(`/validation/report/${validationResult.jobId}`) : setViewDetailedReport(true))}
-            style={{ alignSelf: 'center', padding: '10px 24px', backgroundColor: '#fff', color: '#6366f1', border: '1px solid #6366f1', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}
-          >
-            <CheckCircleOutlined /> View Detailed Report
-          </button>
-        </div>
-      )}
     </div>
   );
 };
-// CheckCircleOutlined
-
-const Stat: React.FC<{ label: string; value: string; color?: string }> = ({ label, value, color = '#1e293b' }) => (
-  <div style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
-    <p style={{ margin: 0, fontSize: '12px', color: '#64748b', textTransform: 'uppercase' }}>{label}</p>
-    <p style={{ margin: '8px 0 0', fontSize: '18px', fontWeight: 700, color }}>{value}</p>
-  </div>
-);
