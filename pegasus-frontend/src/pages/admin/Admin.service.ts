@@ -2,9 +2,15 @@ import {
   Api,
   type CloudConnection,
   type CloudConnectionCreateRequest,
+  type CloudConnectionUpdateRequest,
 } from '../../shared/api/Api';
 
-import { type CreateStorageProviderPayload, type StorageProviderItem, type StorageProviderType } from './Admin.interface';
+import {
+  type CreateStorageProviderPayload,
+  type StorageProviderItem,
+  type StorageProviderPayload,
+  type StorageProviderType,
+} from './Admin.interface';
 
 const PROVIDER_LABELS: Record<string, StorageProviderType> = {
   'google-cloud-storage': 'Google Cloud Storage',
@@ -28,17 +34,18 @@ const formatTimestamp = (iso: string | undefined): string => {
 
 const mapConnection = (conn: CloudConnection): StorageProviderItem => {
   const providerType = PROVIDER_LABELS[conn.provider] ?? 'Google Cloud Storage';
+  const bucket = conn.bucket?.trim() ?? '';
   return {
     id: conn.id,
     name: conn.name,
     providerType,
     provider: conn.provider,
-    bucket: conn.bucket,
+    bucket,
     projectId: conn.project_id,
     active: conn.active,
     status: conn.active ? 'Success' : 'Inactive',
     pathLabel: 'Bucket:',
-    pathValue: `gs://${conn.bucket}`,
+    pathValue: bucket ? `gs://${bucket}` : 'All accessible buckets',
     syncTime: formatTimestamp(conn.updated_at ?? conn.created_at),
     regionLabel: 'Project ID:',
     regionValue: conn.project_id?.trim() || '—',
@@ -68,6 +75,23 @@ class AdminService {
     return mapConnection(data);
   }
 
+  async updateStorageProvider(payload: StorageProviderPayload): Promise<StorageProviderItem> {
+    if (!payload.id) {
+      throw new Error('Connection id is required to update.');
+    }
+    const body: CloudConnectionUpdateRequest = {
+      name: payload.name.trim(),
+      provider: payload.provider ?? 'google-cloud-storage',
+      bucket: payload.bucket.trim(),
+      project_id: payload.projectId?.trim() || null,
+    };
+    if (payload.credentialsJson?.trim()) {
+      body.credentials_json = payload.credentialsJson.trim();
+    }
+    const { data } = await Api.updateCloudConnection(payload.id, body);
+    return mapConnection(data);
+  }
+
   async deleteStorageProvider(connectionId: string): Promise<void> {
     await Api.deleteCloudConnection(connectionId);
   }
@@ -75,7 +99,7 @@ class AdminService {
   async testConnection(connectionId: string, bucket?: string): Promise<{ status: 'success' | 'failed' }> {
     await Api.browseCloud({
       connection_id: connectionId,
-      bucket: bucket ?? null,
+      bucket: bucket?.trim() ? bucket : null,
       prefix: '',
       file_format: 'csv',
     });

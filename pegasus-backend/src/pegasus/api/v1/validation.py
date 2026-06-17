@@ -68,7 +68,7 @@ from pegasus.validation.cloud_input import (
     resolve_delimited_input,
 )
 from pegasus.validation.gcs_object import cloud_config_to_meta
-from pegasus.validation.gcs_browse import browse_gcs_prefix, list_gcs_files_under_prefix
+from pegasus.validation.gcs_browse import browse_gcs_prefix, list_gcs_buckets, list_gcs_files_under_prefix
 from pegasus.validation.local_browse import (
     build_local_browse_response,
     require_local_path_access,
@@ -303,15 +303,22 @@ async def browse_cloud_prefix(
         project_id=body.project_id,
         credentials_json=body.credentials_json,
         connection_id=body.connection_id,
+        allow_empty_bucket=True,
     )
     try:
-        result = browse_gcs_prefix(
-            bucket=bucket,
-            prefix=body.prefix,
-            credentials_info=info,
-            project_id=project_id,
-            file_format=body.file_format,
-        )
+        if not bucket:
+            result = list_gcs_buckets(
+                credentials_info=info,
+                project_id=project_id,
+            )
+        else:
+            result = browse_gcs_prefix(
+                bucket=bucket,
+                prefix=body.prefix,
+                credentials_info=info,
+                project_id=project_id,
+                file_format=body.file_format,
+            )
     except ImportError as exc:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,

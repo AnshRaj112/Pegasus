@@ -106,7 +106,7 @@ export interface CloudConnection {
 export interface CloudConnectionCreateRequest {
   name: string;
   provider?: string;
-  bucket: string;
+  bucket?: string;
   project_id?: string | null;
   credentials_json: string;
   active?: boolean;

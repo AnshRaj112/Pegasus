@@ -55,7 +55,7 @@ async def create_cloud_connection(
     row = CloudConnection(
         name=body.name.strip(),
         provider=body.provider.strip() or "google-cloud-storage",
-        bucket=body.bucket.strip(),
+        bucket=(body.bucket or "").strip(),
         project_id=(body.project_id or "").strip() or None,
         credentials_json=body.credentials_json,
         active=bool(body.active),
