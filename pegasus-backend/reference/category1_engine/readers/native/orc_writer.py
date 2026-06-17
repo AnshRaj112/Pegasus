@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-17T06:57:27Z
+# Last edited: 2026-06-17T07:01:32Z
 # --- END GENERATED FILE METADATA ---
 
 """Native ORC writer — Category-1 direct encoding profile (pure Python)."""
