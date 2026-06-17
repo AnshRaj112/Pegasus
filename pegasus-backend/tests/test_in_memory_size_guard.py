@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-17T06:52:37Z
+# Last edited: 2026-06-17T06:51:18Z
 # --- END GENERATED FILE METADATA ---
 
 """In-memory fast path must not run for multi-GB multichar CSV pairs."""

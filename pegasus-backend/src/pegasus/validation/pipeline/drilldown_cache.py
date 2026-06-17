@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-17T06:52:37Z
+# Last edited: 2026-06-17T06:51:18Z
 # --- END GENERATED FILE METADATA ---
 
 """Lazy drilldown: columnar frames + batch lookup for mismatch keys only."""
