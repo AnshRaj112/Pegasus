@@ -33,6 +33,15 @@ export interface CreateStorageProviderPayload {
   provider?: string;
 }
 
+export interface StorageProviderPayload {
+  id?: string;
+  name: string;
+  bucket: string;
+  projectId?: string;
+  credentialsJson?: string;
+  provider?: string;
+}
+
 export interface AdminReducerState {
   activeSubSection: 'store' | 'workspace';
   workspaces: {
@@ -44,10 +53,12 @@ export interface AdminReducerState {
     data: StorageProviderItem[];
     isFetching: boolean;
     isCreating: boolean;
+    isUpdating: boolean;
     isDeletingId: string | null;
     testingConnectionId: string | null;
     testResult: { [key: string]: 'success' | 'failed' | null };
     error: string | null;
     createError: string | null;
+    updateError: string | null;
   };
 }

@@ -5,6 +5,7 @@ import {
   SearchOutlined,
   FilterOutlined,
   SettingOutlined,
+  EditOutlined,
   ApiOutlined,
   SyncOutlined,
   CheckCircleOutlined,
@@ -20,36 +21,67 @@ import styles from '../Admin.module.scss';
 import { useAppSelector, useAppDispatch } from '../../../redux/store';
 import { adminActions } from '../Admin.reducer';
 import { ConnectStorageModal } from './ConnectStorageModal';
+import { type StorageProviderItem } from '../Admin.interface';
 
 export const ConfigureStoreSubView: React.FC = () => {
   const dispatch = useAppDispatch();
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [connectModalOpen, setConnectModalOpen] = useState(false);
+  const [editingConnection, setEditingConnection] = useState<StorageProviderItem | null>(null);
   const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
 
   const {
     data: storageProviders,
     isFetching,
     isCreating,
+    isUpdating,
     isDeletingId,
     testingConnectionId: testingId,
     testResult,
     error,
     createError,
+    updateError,
   } = useAppSelector((state) => state.admin.storageProviders);
 
   const wasCreatingRef = useRef(false);
+  const wasUpdatingRef = useRef(false);
 
   useEffect(() => {
     dispatch(adminActions.fetchProvidersRequest());
   }, [dispatch]);
 
   useEffect(() => {
-    if (wasCreatingRef.current && !isCreating && connectModalOpen && !createError) {
+    if (wasCreatingRef.current && !isCreating && connectModalOpen && !createError && !editingConnection) {
       setConnectModalOpen(false);
     }
     wasCreatingRef.current = isCreating;
-  }, [isCreating, connectModalOpen, createError]);
+  }, [isCreating, connectModalOpen, createError, editingConnection]);
+
+  useEffect(() => {
+    if (wasUpdatingRef.current && !isUpdating && connectModalOpen && !updateError && editingConnection) {
+      setConnectModalOpen(false);
+      setEditingConnection(null);
+    }
+    wasUpdatingRef.current = isUpdating;
+  }, [isUpdating, connectModalOpen, updateError, editingConnection]);
+
+  const handleOpenCreate = () => {
+    setEditingConnection(null);
+    setConnectModalOpen(true);
+  };
+
+  const handleOpenEdit = (provider: StorageProviderItem) => {
+    setEditingConnection(provider);
+    setConnectModalOpen(true);
+    setSettingsTargetId(null);
+  };
+
+  const handleCloseModal = () => {
+    setConnectModalOpen(false);
+    setEditingConnection(null);
+    dispatch(adminActions.clearCreateProviderError());
+    dispatch(adminActions.clearUpdateProviderError());
+  };
 
   const handleTestConnection = (id: string) => {
     dispatch(adminActions.testConnectionRequest(id));
@@ -163,7 +195,7 @@ export const ConfigureStoreSubView: React.FC = () => {
         </div>
         <button
           type="button"
-          onClick={() => setConnectModalOpen(true)}
+          onClick={handleOpenCreate}
           style={{
             backgroundColor: '#1677ff',
             color: '#ffffff',
@@ -401,28 +433,51 @@ export const ConfigureStoreSubView: React.FC = () => {
               </div>
 
               {settingsTargetId === prov.id && (
-                <button
-                  type="button"
-                  disabled={isDeletingId === prov.id}
-                  onClick={() => handleDelete(prov.id)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                    padding: '8px',
-                    border: '1px solid #ffccc7',
-                    borderRadius: '8px',
-                    backgroundColor: '#fff2f0',
-                    color: '#cf1322',
-                    fontSize: '13px',
-                    fontWeight: 500,
-                    cursor: isDeletingId === prov.id ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  <DeleteOutlined />
-                  {isDeletingId === prov.id ? 'Removing…' : 'Remove connection'}
-                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEdit(prov)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      padding: '8px',
+                      border: '1px solid #d9d9d9',
+                      borderRadius: '8px',
+                      backgroundColor: '#ffffff',
+                      color: '#1b1b1c',
+                      fontSize: '13px',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <EditOutlined />
+                    Edit connection
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isDeletingId === prov.id}
+                    onClick={() => handleDelete(prov.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      padding: '8px',
+                      border: '1px solid #ffccc7',
+                      borderRadius: '8px',
+                      backgroundColor: '#fff2f0',
+                      color: '#cf1322',
+                      fontSize: '13px',
+                      fontWeight: 500,
+                      cursor: isDeletingId === prov.id ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    <DeleteOutlined />
+                    {isDeletingId === prov.id ? 'Removing…' : 'Remove connection'}
+                  </button>
+                </div>
               )}
             </div>
           ))
@@ -455,11 +510,27 @@ export const ConfigureStoreSubView: React.FC = () => {
 
       <ConnectStorageModal
         open={connectModalOpen}
-        isSubmitting={isCreating}
-        error={createError}
-        onClose={() => setConnectModalOpen(false)}
-        onClearError={() => dispatch(adminActions.clearCreateProviderError())}
-        onSubmit={(payload) => dispatch(adminActions.createProviderRequest(payload))}
+        isSubmitting={isCreating || isUpdating}
+        error={editingConnection ? updateError : createError}
+        editingConnection={editingConnection}
+        onClose={handleCloseModal}
+        onClearError={() => {
+          dispatch(adminActions.clearCreateProviderError());
+          dispatch(adminActions.clearUpdateProviderError());
+        }}
+        onSubmit={(payload) => {
+          if (payload.id) {
+            dispatch(adminActions.updateProviderRequest(payload));
+          } else {
+            dispatch(adminActions.createProviderRequest({
+              name: payload.name,
+              bucket: payload.bucket,
+              projectId: payload.projectId,
+              credentialsJson: payload.credentialsJson ?? '',
+              provider: payload.provider,
+            }));
+          }
+        }}
       />
     </div>
   );

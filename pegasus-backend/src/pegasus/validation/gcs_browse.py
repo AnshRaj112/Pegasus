@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-16T10:15:03Z
+# Last edited: 2026-06-17T10:32:48+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Google Cloud Storage prefix browsing for the validation file picker."""
@@ -160,6 +160,44 @@ def browse_gcs_prefix(
     )
 
 
+def list_gcs_buckets(
+    *,
+    credentials_info: dict[str, object],
+    project_id: str | None,
+    max_entries: int = 5000,
+) -> GcsBrowseResult:
+    """List GCS buckets visible to the service account."""
+    from google.cloud import storage as gcs_storage
+    from google.oauth2 import service_account
+
+    credentials = service_account.Credentials.from_service_account_info(credentials_info)
+    client = gcs_storage.Client(credentials=credentials, project=project_id or credentials_info.get("project_id"))
+
+    rows: list[tuple[str, str]] = []
+    truncated = False
+    for bucket in client.list_buckets(project=project_id or credentials_info.get("project_id")):
+        name = bucket.name
+        if not name:
+            continue
+        rows.append((name.lower(), name))
+        if len(rows) >= max_entries:
+            truncated = True
+            break
+
+    rows.sort(key=lambda t: t[0])
+    entries = [
+        GcsBrowseEntry(name=display_name, path=display_name, is_dir=True)
+        for _, display_name in rows
+    ]
+    return GcsBrowseResult(
+        bucket="",
+        prefix="",
+        parent_prefix=None,
+        entries=entries,
+        truncated=truncated,
+    )
+
+
 def list_gcs_files_under_prefix(
     *,
     bucket: str,
@@ -231,6 +269,7 @@ def download_gcs_objects(
         blob = bucket_ref.blob(name)
         _stream_blob_to_path(blob, dest)
         local_paths.append(dest.resolve())
+    return local_paths
 
 
 def _stream_blob_to_path(blob: Any, dest: Path, *, chunk_bytes: int = 256 * 1024) -> None:

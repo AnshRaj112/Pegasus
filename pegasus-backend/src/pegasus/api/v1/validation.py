@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-16T10:15:03Z
+# Last edited: 2026-06-17T10:32:48+05:30
 # --- END GENERATED FILE METADATA ---
 
 """CSV validation endpoints (local paths, browse, job polling)."""
@@ -48,6 +48,10 @@ from pegasus.schemas.validation import (
     ValidationJobAcceptedResponse,
     ValidationJobDetailResponse,
 )
+from pegasus.schemas.validation_history import (
+    ValidationHistoryMismatchRow,
+    ValidationHistoryMismatchesResponse,
+)
 from pegasus.validation.file_detection import detect_file
 from pegasus.validation.file_detection.coerce import coerce_local_validate_fields_with_detection
 from pegasus.validation.file_format import infer_file_format_from_path, normalize_file_format
@@ -64,7 +68,7 @@ from pegasus.validation.cloud_input import (
     resolve_delimited_input,
 )
 from pegasus.validation.gcs_object import cloud_config_to_meta
-from pegasus.validation.gcs_browse import browse_gcs_prefix, list_gcs_files_under_prefix
+from pegasus.validation.gcs_browse import browse_gcs_prefix, list_gcs_buckets, list_gcs_files_under_prefix
 from pegasus.validation.local_browse import (
     build_local_browse_response,
     require_local_path_access,
@@ -74,11 +78,14 @@ from pegasus.validation.local_browse import (
 
 from .validation_helpers import (
     build_validate_response,
+    build_validate_response_summary_only,
     completed_job_cache_get,
     completed_job_cache_put,
     maybe_persist_completed_job,
+    paginate_job_mismatch_rows,
     record_poll_lifecycle,
     run_result_from_job_dir,
+    schedule_persist_completed_job,
     validation_jobs_root,
 )
 
@@ -296,15 +303,22 @@ async def browse_cloud_prefix(
         project_id=body.project_id,
         credentials_json=body.credentials_json,
         connection_id=body.connection_id,
+        allow_empty_bucket=True,
     )
     try:
-        result = browse_gcs_prefix(
-            bucket=bucket,
-            prefix=body.prefix,
-            credentials_info=info,
-            project_id=project_id,
-            file_format=body.file_format,
-        )
+        if not bucket:
+            result = list_gcs_buckets(
+                credentials_info=info,
+                project_id=project_id,
+            )
+        else:
+            result = browse_gcs_prefix(
+                bucket=bucket,
+                prefix=body.prefix,
+                credentials_info=info,
+                project_id=project_id,
+                file_format=body.file_format,
+            )
     except ImportError as exc:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -686,7 +700,20 @@ async def validate_csv_local_paths(
     response_model=ValidationJobDetailResponse,
     summary="Poll a queued validation job",
 )
-async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> ValidationJobDetailResponse:
+async def get_validation_job(
+    settings: AppSettings,
+    job_id: uuid.UUID,
+    summary_only: Annotated[
+        bool,
+        Query(
+            description=(
+                "When true (recommended for UI), return counts and metadata only without "
+                "scanning the full mismatch artifact. Mismatch rows are available via "
+                "GET /validate/jobs/{job_id}/mismatches or history mismatches."
+            ),
+        ),
+    ] = False,
+) -> ValidationJobDetailResponse:
     job_dir = validation_jobs_root(settings) / str(job_id)
     status_path = job_dir / "status.json"
     if not status_path.is_file():
@@ -758,17 +785,47 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
         )
 
     cached = completed_job_cache_get(job_id)
+    if cached is not None and (summary_only or cached.result is not None):
+        if summary_only and cached.result is not None:
+            groups = cached.result.mismatch_sample_groups
+            has_samples = (
+                len(groups.missing_in_target) > 0
+                or len(groups.extra_in_target) > 0
+                or len(groups.value_mismatch) > 0
+            )
+            if has_samples:
+                cached = None
+        elif not summary_only and cached.result is not None:
+            groups = cached.result.mismatch_sample_groups
+            has_samples = (
+                len(groups.missing_in_target) > 0
+                or len(groups.extra_in_target) > 0
+                or len(groups.value_mismatch) > 0
+            )
+            if not has_samples and cached.result.mismatch_counts.value_mismatch > 0:
+                cached = None
     if cached is not None:
         return cached
 
     import time
 
     run_result, rid, job_meta = run_result_from_job_dir(job_dir)
-    db_wall = await maybe_persist_completed_job(
-        settings, run_id=rid, run_result=run_result, job_meta=job_meta
-    )
-    t_build = time.perf_counter()
-    payload = build_validate_response(settings=settings, run_result=run_result, run_id=rid)
+    if summary_only:
+        schedule_persist_completed_job(
+            settings,
+            run_id=rid,
+            run_result=run_result,
+            job_meta=job_meta,
+        )
+        db_wall = 0.0
+        t_build = time.perf_counter()
+        payload = build_validate_response_summary_only(run_result=run_result, run_id=rid)
+    else:
+        db_wall = await maybe_persist_completed_job(
+            settings, run_id=rid, run_result=run_result, job_meta=job_meta
+        )
+        t_build = time.perf_counter()
+        payload = build_validate_response(settings=settings, run_result=run_result, run_id=rid)
     response_wall = time.perf_counter() - t_build
     record_poll_lifecycle(
         job_dir,
@@ -785,6 +842,60 @@ async def get_validation_job(settings: AppSettings, job_id: uuid.UUID) -> Valida
     )
     completed_job_cache_put(job_id, detail)
     return detail
+
+
+@router.get(
+    "/validate/jobs/{job_id}/mismatches",
+    response_model=ValidationHistoryMismatchesResponse,
+    summary="Paginated mismatch rows for a completed validation job (reads on-disk NDJSON)",
+)
+async def list_validation_job_mismatches(
+    settings: AppSettings,
+    job_id: uuid.UUID,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    mismatch_type: Annotated[
+        str | None,
+        Query(description="Filter by missing_in_target | extra_in_target | value_mismatch"),
+    ] = None,
+) -> ValidationHistoryMismatchesResponse:
+    job_dir = validation_jobs_root(settings) / str(job_id)
+    status_path = job_dir / "status.json"
+    if not status_path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown job_id")
+    try:
+        st = loads_str(status_path.read_text(encoding="utf-8"))
+    except (UnicodeError, ValueError, TypeError, OSError) as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Job status unavailable") from exc
+    if str(st.get("status") or "") != "completed":
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="Job is not completed yet")
+    result_path = job_dir / "result.json"
+    if not result_path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Job result not found")
+
+    rows, total, run_uuid = paginate_job_mismatch_rows(
+        job_dir,
+        limit=limit,
+        offset=offset,
+        mismatch_type=mismatch_type,
+    )
+    return ValidationHistoryMismatchesResponse(
+        run_id=run_uuid or job_id,
+        items=[
+            ValidationHistoryMismatchRow(
+                uid=str(r.get("uid") or ""),
+                mismatch_type=str(r.get("mismatch_type") or ""),
+                column_name=r.get("column_name"),
+                source_value=r.get("source_value"),
+                target_value=r.get("target_value"),
+                row_detail=r.get("row_detail"),
+            )
+            for r in rows
+        ],
+        total=total,
+        offset=offset,
+        limit=limit,
+    )
 
 
 @router.get(

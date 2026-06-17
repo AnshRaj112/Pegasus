@@ -3,6 +3,7 @@ import {
   type AdminReducerState,
   type CreateStorageProviderPayload,
   type StorageProviderItem,
+  type StorageProviderPayload,
   type WorkspaceItem,
 } from './Admin.interface';
 
@@ -23,11 +24,13 @@ export const initialState: AdminReducerState = {
     data: [],
     isFetching: false,
     isCreating: false,
+    isUpdating: false,
     isDeletingId: null,
     testingConnectionId: null,
     testResult: {},
     error: null,
     createError: null,
+    updateError: null,
   },
 };
 
@@ -83,6 +86,24 @@ const adminSlice = createSlice({
     },
     clearCreateProviderError: (state) => {
       state.storageProviders.createError = null;
+    },
+
+    updateProviderRequest: (state, _action: PayloadAction<StorageProviderPayload>) => {
+      state.storageProviders.isUpdating = true;
+      state.storageProviders.updateError = null;
+    },
+    updateProviderSuccess: (state, action: PayloadAction<StorageProviderItem>) => {
+      state.storageProviders.isUpdating = false;
+      state.storageProviders.data = state.storageProviders.data.map((p) =>
+        p.id === action.payload.id ? action.payload : p,
+      );
+    },
+    updateProviderError: (state, action: PayloadAction<string>) => {
+      state.storageProviders.isUpdating = false;
+      state.storageProviders.updateError = action.payload;
+    },
+    clearUpdateProviderError: (state) => {
+      state.storageProviders.updateError = null;
     },
 
     deleteProviderRequest: (state, action: PayloadAction<string>) => {
