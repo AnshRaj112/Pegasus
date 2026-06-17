@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppDispatch } from '../../../redux/store';
+import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { Api, type CloudConnection } from '../../../shared/api/Api';
 import {
@@ -19,7 +19,6 @@ export interface FileExplorerItem {
   createdAt: string;
   modifiedAt: string;
   owner: string;
-  // ⚡ Added to support cross-bucket/cross-project selections
   bucket?: string;
   connectionId?: string;
 }
@@ -58,6 +57,9 @@ const envFallbackConnection = (): CloudConnection | null => {
 
 export const FileSelectionStep: React.FC = () => {
   const dispatch = useAppDispatch();
+  // ⚡ Pull existing validation form to restore state if navigating back
+  const validationForm = useAppSelector((s) => s.validation.validationForm);
+
   const [validationMode, setValidationMode] = useState('Single to Single (Default)');
   const [searchQuery, setSearchQuery] = useState('');
   const [connections, setConnections] = useState<CloudConnection[]>([]);
@@ -70,8 +72,31 @@ export const FileSelectionStep: React.FC = () => {
   const [browseError, setBrowseError] = useState<string | null>(null);
 
   const [selectingFor, setSelectingFor] = useState<'source' | 'target' | 'none'>('source');
-  const [sourceFile, setSourceFile] = useState<FileExplorerItem | null>(null);
-  const [targetFile, setTargetFile] = useState<FileExplorerItem | null>(null);
+  
+  // ⚡ Hydrate local state from Redux so selections persist across steps
+  const [sourceFile, setSourceFile] = useState<FileExplorerItem | null>(() => {
+    if (!validationForm.sourceCloud) return null;
+    return {
+      id: validationForm.sourceCloud.object_name,
+      name: validationForm.sourceFileName || validationForm.sourceCloud.object_name.split('/').pop() || '',
+      objectName: validationForm.sourceCloud.object_name,
+      type: 'file', size: formatBytes(validationForm.sourceFileSize), sizeBytes: validationForm.sourceFileSize,
+      bucket: validationForm.sourceCloud.bucket, connectionId: validationForm.sourceCloud.connection_id,
+      createdAt: '—', modifiedAt: '—', owner: '—'
+    } as FileExplorerItem;
+  });
+
+  const [targetFile, setTargetFile] = useState<FileExplorerItem | null>(() => {
+    if (!validationForm.targetCloud) return null;
+    return {
+      id: validationForm.targetCloud.object_name,
+      name: validationForm.targetFileName || validationForm.targetCloud.object_name.split('/').pop() || '',
+      objectName: validationForm.targetCloud.object_name,
+      type: 'file', size: formatBytes(validationForm.targetFileSize), sizeBytes: validationForm.targetFileSize,
+      bucket: validationForm.targetCloud.bucket, connectionId: validationForm.targetCloud.connection_id,
+      createdAt: '—', modifiedAt: '—', owner: '—'
+    } as FileExplorerItem;
+  });
 
   useEffect(() => {
     Api.listCloudConnections()
@@ -100,24 +125,13 @@ export const FileSelectionStep: React.FC = () => {
         setBrowseError(null);
         setBrowsePrefix(res.data.prefix);
         setParentPrefix(res.data.parent_prefix);
-        
-        // ⚡ Attach the exact connection and bucket to each file so they are preserved
         const mappedEntries = res.data.entries.map((entry: any) => ({
-          ...toExplorerItem(entry),
-          connectionId,
-          bucket: res.data.bucket
+          ...toExplorerItem(entry), connectionId, bucket: res.data.bucket
         }));
-        
         setBrowseEntries(mappedEntries);
-        
-        dispatch(validationActions.setValidationForm({
-          connectionId,
-          bucket: res.data.bucket,
-          browsePrefix: res.data.prefix,
-        }));
       })
       .catch(() => setBrowseError('Could not browse GCS bucket. Check connection credentials.'));
-  }, [dispatch]);
+  }, []);
 
   useEffect(() => {
     if (activeConnectionId && activeBucket != null) {
@@ -129,15 +143,9 @@ export const FileSelectionStep: React.FC = () => {
     const isStepFullyConfigured = Boolean(sourceFile && targetFile);
     dispatch(validationActions.setStep1Valid(isStepFullyConfigured));
 
-    // ⚡ Safely pull the connection info from the selected file itself, not the active tab!
     const makeCloudRef = (file: FileExplorerItem | null) =>
       file && file.connectionId
-        ? {
-            provider: 'google-cloud-storage' as const,
-            connection_id: file.connectionId,
-            bucket: file.bucket,
-            object_name: file.objectName,
-          }
+        ? { provider: 'google-cloud-storage' as const, connection_id: file.connectionId, bucket: file.bucket, object_name: file.objectName }
         : null;
 
     dispatch(validationActions.setValidationForm({
@@ -154,7 +162,6 @@ export const FileSelectionStep: React.FC = () => {
     setActiveConnectionId(conn.id);
     setActiveBucket(conn.bucket);
     setBrowsePrefix('');
-    // ⚡ Removed the logic that clears selections when you click a different connection
   };
 
   const handleRowClick = (file: FileExplorerItem) => {
@@ -162,7 +169,6 @@ export const FileSelectionStep: React.FC = () => {
       setBrowsePrefix(file.objectName.endsWith('/') ? file.objectName : `${file.objectName}/`);
       return;
     }
-
     const isMultiMode = validationMode === 'Many to Many' || validationMode === 'Batch Comparison';
     if (selectingFor === 'source') {
       if (isMultiMode) return;
@@ -175,10 +181,7 @@ export const FileSelectionStep: React.FC = () => {
     }
   };
 
-  const filteredFiles = browseEntries.filter((f) =>
-    f.name.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
-
+  const filteredFiles = browseEntries.filter((f) => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
   const breadcrumb = activeBucket ? `gs://${activeBucket}/${browsePrefix}` : 'Select a connection';
 
   return (
@@ -188,16 +191,11 @@ export const FileSelectionStep: React.FC = () => {
         <select
           value={validationMode}
           onChange={(e) => {
-            setValidationMode(e.target.value);
-            setSourceFile(null);
-            setTargetFile(null);
-            setSelectingFor('source');
+            setValidationMode(e.target.value); setSourceFile(null); setTargetFile(null); setSelectingFor('source');
           }}
           style={{ width: '320px', height: '40px', padding: '0 12px', borderRadius: '8px', border: '1px solid #d9d9d9', fontSize: '14px' }}
         >
-          <option>Single to Single (Default)</option>
-          <option>Many to Many</option>
-          <option>Batch Comparison</option>
+          <option>Single to Single (Default)</option><option>Many to Many</option><option>Batch Comparison</option>
         </select>
       </div>
 
@@ -209,10 +207,8 @@ export const FileSelectionStep: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <CheckOutlined style={{ color: '#1677ff' }} />
                 <span style={{ fontSize: '13px', fontWeight: 600 }}>{sourceFile.name}</span>
-                {/* ⚡ Auto-select 'source' when deleting */}
                 <button type="button" onClick={(e) => { e.stopPropagation(); setSourceFile(null); setSelectingFor('source'); }} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ba1a1a' }}><DeleteOutlined /></button>
               </div>
-              {/* ⚡ Added full path display */}
               <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', paddingLeft: '22px' }}>
                 gs://{sourceFile.bucket}/{sourceFile.objectName}
               </span>
@@ -231,10 +227,8 @@ export const FileSelectionStep: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <CheckOutlined style={{ color: '#16a34a' }} />
                 <span style={{ fontSize: '13px', fontWeight: 600 }}>{targetFile.name}</span>
-                {/* ⚡ Auto-select 'target' when deleting */}
                 <button type="button" onClick={(e) => { e.stopPropagation(); setTargetFile(null); setSelectingFor('target'); }} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ba1a1a' }}><DeleteOutlined /></button>
               </div>
-              {/* ⚡ Added full path display */}
               <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', paddingLeft: '22px' }}>
                 gs://{targetFile.bucket}/{targetFile.objectName}
               </span>
@@ -261,9 +255,7 @@ export const FileSelectionStep: React.FC = () => {
               onClick={() => handleConnectionSelect(conn)}
               style={{
                 display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', margin: '4px 0',
-                borderRadius: '6px', cursor: 'pointer',
-                backgroundColor: activeConnectionId === conn.id ? '#e6f4ff' : 'transparent',
-                color: activeConnectionId === conn.id ? '#1677ff' : '#414755',
+                borderRadius: '6px', cursor: 'pointer', backgroundColor: activeConnectionId === conn.id ? '#e6f4ff' : 'transparent', color: activeConnectionId === conn.id ? '#1677ff' : '#414755',
               }}
             >
               <FolderOutlined />
@@ -281,7 +273,7 @@ export const FileSelectionStep: React.FC = () => {
               <FolderOpenOutlined />
               <span>{breadcrumb}</span>
               {parentPrefix != null && (
-                <button type="button" onClick={() => setBrowsePrefix(parentPrefix)} style={{ marginLeft: '8px', border: 'none', background: '#f0f0f0', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontSize: '12px' }}><ArrowUpOutlined /> Back</button>
+                <button type="button" onClick={() => setBrowsePrefix(parentPrefix)} style={{ marginLeft: '8px', border: 'none', background: '#f0f0f0', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontSize: '12px' }}><ArrowUpOutlined /> Up</button>
               )}
             </div>
             <div style={{ position: 'relative' }}>
@@ -314,9 +306,7 @@ export const FileSelectionStep: React.FC = () => {
                       onMouseEnter={(e) => { if (!isSource && !isTarget) e.currentTarget.style.backgroundColor = '#f8fafc'; }}
                       onMouseLeave={(e) => { if (!isSource && !isTarget) e.currentTarget.style.backgroundColor = 'transparent'; }}
                     >
-                      <td style={{ padding: '12px' }}>
-                        {file.type === 'file' && <input type="checkbox" readOnly checked={isSource || isTarget} />}
-                      </td>
+                      <td style={{ padding: '12px' }}>{file.type === 'file' && <input type="checkbox" readOnly checked={isSource || isTarget} />}</td>
                       <td style={{ padding: '12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1b1b1c', fontWeight: 500 }}>
                           {file.type === 'folder' ? <FolderFilled style={{ color: '#faad14', fontSize: '16px' }} /> : <FileTextOutlined style={{ color: '#64748b', fontSize: '16px' }} />}
