@@ -194,8 +194,6 @@ export const FileSelectionStep: React.FC = () => {
     }
   };
 
-  const filteredFiles = browseEntries.filter((f) => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
-  const breadcrumb = activeBucket ? `gs://${activeBucket}/${browsePrefix}` : 'Select a connection';
   const filteredFiles = browseEntries.filter((f) =>
     f.name.toLowerCase().includes(searchQuery.toLowerCase()),
   );
