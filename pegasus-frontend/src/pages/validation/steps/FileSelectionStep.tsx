@@ -442,15 +442,42 @@ export const FileSelectionStep: React.FC = () => {
       });
       return;
     }
+
+    const isSource = sourceFile?.id === file.id;
+    const isTarget = targetFile?.id === file.id;
+
+    // ⚡ 1. Deselection Logic directly on table rows
+    if (isSource && isTarget) {
+      setTargetFile(null);
+      setSelectingFor('target');
+      return;
+    } else if (isTarget) {
+      setTargetFile(null);
+      setSelectingFor('target');
+      return;
+    } else if (isSource) {
+      setSourceFile(null);
+      setSelectingFor('source');
+      return;
+    }
+
+    // ⚡ 2. Lockout logic: Ignore clicks on unselected files if both slots are full
+    if (sourceFile && targetFile) {
+      return;
+    }
+
+    // ⚡ 3. Normal selection logic
     const isMultiMode = validationMode === 'Many to Many' || validationMode === 'Batch Comparison';
     if (selectingFor === 'source') {
       if (isMultiMode) return;
       setSourceFile(file);
       if (!targetFile) setSelectingFor('target');
+      else setSelectingFor('none');
     } else if (selectingFor === 'target') {
       if (isMultiMode) return;
       setTargetFile(file);
-      setSelectingFor('none');
+      if (!sourceFile) setSelectingFor('source');
+      else setSelectingFor('none');
     }
   };
 
