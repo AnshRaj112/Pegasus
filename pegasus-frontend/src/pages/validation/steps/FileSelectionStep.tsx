@@ -57,7 +57,6 @@ const envFallbackConnection = (): CloudConnection | null => {
 
 export const FileSelectionStep: React.FC = () => {
   const dispatch = useAppDispatch();
-  // ⚡ Pull existing validation form to restore state if navigating back
   const validationForm = useAppSelector((s) => s.validation.validationForm);
 
   const [validationMode, setValidationMode] = useState('Single to Single (Default)');
@@ -72,8 +71,7 @@ export const FileSelectionStep: React.FC = () => {
   const [browseError, setBrowseError] = useState<string | null>(null);
 
   const [selectingFor, setSelectingFor] = useState<'source' | 'target' | 'none'>('source');
-  
-  // ⚡ Hydrate local state from Redux so selections persist across steps
+
   const [sourceFile, setSourceFile] = useState<FileExplorerItem | null>(() => {
     if (!validationForm.sourceCloud) return null;
     return {
@@ -182,15 +180,42 @@ export const FileSelectionStep: React.FC = () => {
       setBrowsePrefix(file.objectName.endsWith('/') ? file.objectName : `${file.objectName}/`);
       return;
     }
+
+    const isSource = sourceFile?.id === file.id;
+    const isTarget = targetFile?.id === file.id;
+
+    // ⚡ 1. Deselection Logic directly on table rows
+    if (isSource && isTarget) {
+      setTargetFile(null);
+      setSelectingFor('target');
+      return;
+    } else if (isTarget) {
+      setTargetFile(null);
+      setSelectingFor('target');
+      return;
+    } else if (isSource) {
+      setSourceFile(null);
+      setSelectingFor('source');
+      return;
+    }
+
+    // ⚡ 2. Lockout logic: Ignore clicks on unselected files if both slots are full
+    if (sourceFile && targetFile) {
+      return;
+    }
+
+    // ⚡ 3. Normal selection logic
     const isMultiMode = validationMode === 'Many to Many' || validationMode === 'Batch Comparison';
     if (selectingFor === 'source') {
       if (isMultiMode) return;
       setSourceFile(file);
       if (!targetFile) setSelectingFor('target');
+      else setSelectingFor('none');
     } else if (selectingFor === 'target') {
       if (isMultiMode) return;
       setTargetFile(file);
-      setSelectingFor('none');
+      if (!sourceFile) setSelectingFor('source');
+      else setSelectingFor('none');
     }
   };
 
@@ -321,15 +346,26 @@ export const FileSelectionStep: React.FC = () => {
                 {filteredFiles.map((file) => {
                   const isSource = sourceFile?.id === file.id;
                   const isTarget = targetFile?.id === file.id;
+                  const isSelected = isSource || isTarget;
+                  
+                  // ⚡ Check if both are full, and this file is NOT selected. If so, visually disable it.
+                  const isDisabledFile = Boolean(sourceFile && targetFile && !isSelected && file.type === 'file');
+
                   return (
                     <tr
                       key={file.id}
                       onClick={() => handleRowClick(file)}
-                      style={{ borderBottom: '1px solid #f1f5f9', backgroundColor: isSource || isTarget ? '#f0f8ff' : 'transparent', cursor: 'pointer', transition: 'background-color 0.2s' }}
-                      onMouseEnter={(e) => { if (!isSource && !isTarget) e.currentTarget.style.backgroundColor = '#f8fafc'; }}
-                      onMouseLeave={(e) => { if (!isSource && !isTarget) e.currentTarget.style.backgroundColor = 'transparent'; }}
+                      style={{ 
+                        borderBottom: '1px solid #f1f5f9', 
+                        backgroundColor: isSelected ? '#f0f8ff' : 'transparent', 
+                        cursor: isDisabledFile ? 'not-allowed' : 'pointer', // ⚡ Update cursor
+                        opacity: isDisabledFile ? 0.5 : 1, // ⚡ Visually dim disabled files
+                        transition: 'background-color 0.2s, opacity 0.2s' 
+                      }}
+                      onMouseEnter={(e) => { if (!isSelected && !isDisabledFile) e.currentTarget.style.backgroundColor = '#f8fafc'; }}
+                      onMouseLeave={(e) => { if (!isSelected && !isDisabledFile) e.currentTarget.style.backgroundColor = 'transparent'; }}
                     >
-                      <td style={{ padding: '12px' }}>{file.type === 'file' && <input type="checkbox" readOnly checked={isSource || isTarget} />}</td>
+                      <td style={{ padding: '12px' }}>{file.type === 'file' && <input type="checkbox" readOnly checked={isSelected} disabled={isDisabledFile} />}</td>
                       <td style={{ padding: '12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1b1b1c', fontWeight: 500 }}>
                           {file.type === 'folder' ? <FolderFilled style={{ color: '#faad14', fontSize: '16px' }} /> : <FileTextOutlined style={{ color: '#64748b', fontSize: '16px' }} />}
