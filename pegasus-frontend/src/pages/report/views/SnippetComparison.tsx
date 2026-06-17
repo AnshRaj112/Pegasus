@@ -121,27 +121,34 @@ export const SnippetComparison: React.FC = () => {
     (async () => {
       setLoading(true);
       setError(null);
-      setLoadProgress('Loading run…');
+      setLoadProgress('Loading run summary…');
       try {
         const { data: detail } = await Api.getValidationHistoryRun(runId);
-        const cols = detail.compared_columns?.length ? detail.compared_columns : [];
-        const collected: MismatchSampleRow[] = [];
-        let offset = 0;
-        for (;;) {
-          const { data: page } = await Api.getValidationMismatches(runId, { limit: FETCH_BATCH, offset });
-          collected.push(...page.items);
-          if (cancelled) return;
-          setLoadProgress(`Loaded ${collected.length.toLocaleString()} / ${page.total.toLocaleString()} mismatch rows…`);
-          if (collected.length >= page.total || page.items.length < FETCH_BATCH) break;
-          offset += FETCH_BATCH;
-        }
         if (cancelled) return;
+        const cols = detail.compared_columns?.length ? detail.compared_columns : [];
         setColumns(cols);
-        setAllItems(collected);
         setSourceLabel(detail.source_path ?? detail.source_filename ?? 'Source');
         setTargetLabel(detail.target_path ?? detail.target_filename ?? 'Target');
         setColPage(0);
         setRowPage(0);
+        setLoading(false);
+        setLoadProgress('');
+
+        let offset = 0;
+        const collected: MismatchSampleRow[] = [];
+        for (;;) {
+          const { data: page } = await Api.getValidationMismatches(runId, { limit: FETCH_BATCH, offset });
+          if (cancelled) return;
+          collected.push(...page.items);
+          setAllItems([...collected]);
+          setLoadProgress(
+            page.total > collected.length
+              ? `Loaded ${collected.length.toLocaleString()} / ${page.total.toLocaleString()} mismatch rows…`
+              : '',
+          );
+          if (collected.length >= page.total || page.items.length < FETCH_BATCH) break;
+          offset += FETCH_BATCH;
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load snippet');
       } finally {
@@ -251,6 +258,9 @@ export const SnippetComparison: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {loadProgress && (
+        <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#64748b' }}>{loadProgress}</p>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#64748b', fontSize: '13px' }}>
           <span style={{ cursor: 'pointer' }} onClick={() => navigate('/reports')}>Reports</span>

@@ -72,7 +72,7 @@ export const FileSelectionStep: React.FC = () => {
   const [browseError, setBrowseError] = useState<string | null>(null);
 
   const [selectingFor, setSelectingFor] = useState<'source' | 'target' | 'none'>('source');
-  
+
   // ⚡ Hydrate local state from Redux so selections persist across steps
   const [sourceFile, setSourceFile] = useState<FileExplorerItem | null>(() => {
     if (!validationForm.sourceCloud) return null;
@@ -106,7 +106,7 @@ export const FileSelectionStep: React.FC = () => {
         setConnectionsError(null);
         if (active[0]) {
           setActiveConnectionId(active[0].id);
-          setActiveBucket(active[0].bucket);
+          setActiveBucket(active[0].bucket?.trim() ? active[0].bucket : '');
         }
       })
       .catch(() => {
@@ -120,7 +120,12 @@ export const FileSelectionStep: React.FC = () => {
   }, []);
 
   const loadBrowse = useCallback((connectionId: string, bucket: string, prefix: string) => {
-    Api.browseCloud({ connection_id: connectionId, bucket, prefix, file_format: 'csv' })
+    Api.browseCloud({
+      connection_id: connectionId,
+      bucket: bucket.trim() ? bucket : null,
+      prefix,
+      file_format: 'csv',
+    })
       .then((res) => {
         setBrowseError(null);
         setBrowsePrefix(res.data.prefix);
@@ -160,12 +165,20 @@ export const FileSelectionStep: React.FC = () => {
 
   const handleConnectionSelect = (conn: CloudConnection) => {
     setActiveConnectionId(conn.id);
-    setActiveBucket(conn.bucket);
+    setActiveBucket(conn.bucket?.trim() ? conn.bucket : '');
     setBrowsePrefix('');
   };
 
+  const activeConnection = connections.find((c) => c.id === activeConnectionId) ?? null;
+  const isMultiBucketConnection = Boolean(activeConnection && !activeConnection.bucket?.trim());
+
   const handleRowClick = (file: FileExplorerItem) => {
     if (file.type === 'folder') {
+      if (!activeBucket) {
+        setActiveBucket(file.objectName);
+        setBrowsePrefix('');
+        return;
+      }
       setBrowsePrefix(file.objectName.endsWith('/') ? file.objectName : `${file.objectName}/`);
       return;
     }
@@ -181,8 +194,14 @@ export const FileSelectionStep: React.FC = () => {
     }
   };
 
-  const filteredFiles = browseEntries.filter((f) => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
-  const breadcrumb = activeBucket ? `gs://${activeBucket}/${browsePrefix}` : 'Select a connection';
+  // ⚡ Removed the duplicate declarations here and kept the final, correct ones
+  const filteredFiles = browseEntries.filter((f) =>
+    f.name.toLowerCase().includes(searchQuery.toLowerCase()),
+  );
+
+  const breadcrumb = !activeBucket
+    ? (isMultiBucketConnection ? 'Select a bucket' : 'Select a connection')
+    : `gs://${activeBucket}/${browsePrefix}`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '24px' }}>
@@ -261,7 +280,9 @@ export const FileSelectionStep: React.FC = () => {
               <FolderOutlined />
               <div style={{ overflow: 'hidden' }}>
                 <div style={{ fontSize: '13px', fontWeight: activeConnectionId === conn.id ? 700 : 500, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{conn.name}</div>
-                <div style={{ fontSize: '10px', color: '#727786', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>gs://{conn.bucket}</div>
+                <div style={{ fontSize: '10px', color: '#727786', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                  {conn.bucket?.trim() ? `gs://${conn.bucket}` : 'All accessible buckets'}
+                </div>
               </div>
             </div>
           ))}
@@ -274,6 +295,9 @@ export const FileSelectionStep: React.FC = () => {
               <span>{breadcrumb}</span>
               {parentPrefix != null && (
                 <button type="button" onClick={() => setBrowsePrefix(parentPrefix)} style={{ marginLeft: '8px', border: 'none', background: '#f0f0f0', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontSize: '12px' }}><ArrowUpOutlined /> Up</button>
+              )}
+              {isMultiBucketConnection && activeBucket && !browsePrefix && parentPrefix == null && (
+                <button type="button" onClick={() => setActiveBucket('')} style={{ marginLeft: '8px', border: 'none', background: '#f0f0f0', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontSize: '12px' }}><ArrowUpOutlined /> Buckets</button>
               )}
             </div>
             <div style={{ position: 'relative' }}>

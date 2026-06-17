@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-16T10:15:03Z
+# Last edited: 2026-06-16T17:03:47+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Shared helpers for validation API endpoints and job polling."""
@@ -40,6 +40,7 @@ from .mismatch_sample import (
     load_mismatch_polars_for_api,
     load_value_mismatch_sample_from_ndjson,
     normalize_mismatch_summary,
+    paginate_mismatch_rows_from_ndjson,
     reconcile_summary_with_artifact,
     stream_all_value_mismatch_rows_from_ndjson,
     stream_presence_mismatch_rows_from_ndjson,
@@ -114,7 +115,7 @@ def run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.UU
             cand = job_dir / rel.strip()
             if cand.is_file():
                 apath = cand
-    summary = reconcile_summary_with_artifact(res.get("summary"), apath)
+    summary = normalize_mismatch_summary(res.get("summary"))
     report = MismatchReport(mismatches=empty_mismatch_frame(), summary=summary, mismatch_artifact_path=apath)
     format_checks_raw = res.get("mapping_format_checks")
     footer_raw = res.get("footer_validation")
@@ -132,6 +133,151 @@ def run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.UU
         durations=durations_from_result_json(res),
     )
     return vr, run_uuid, meta
+
+
+def build_validate_response_summary_only(
+    *,
+    run_result: ValidationRunResult,
+    run_id: uuid.UUID | None,
+) -> ValidateResponse:
+    """Fast poll payload: counts and metadata only (no NDJSON scan)."""
+    summary_dict = normalize_mismatch_summary(run_result.report.summary)
+    counts_model = build_mismatch_counts(summary_dict)
+    total_records = (
+        counts_model.missing_in_target + counts_model.extra_in_target + counts_model.value_mismatch
+    )
+
+    summary = ValidationSummary(
+        source_row_count=run_result.source_row_count,
+        target_row_count=run_result.target_row_count,
+        compared_column_count=run_result.compared_column_count,
+        total_mismatch_records=total_records,
+        is_match=total_records == 0,
+    )
+
+    format_checks = [
+        ColumnMappingFormatCheck.model_validate(c)
+        for c in (run_result.mapping_format_checks or [])
+    ]
+    footer_val = (
+        FooterValidationResult.model_validate(run_result.footer_validation)
+        if run_result.footer_validation
+        else None
+    )
+
+    api_durations = None
+    if run_result.durations is not None:
+        api_durations = ValidationDurations(
+            upload_seconds=run_result.durations.upload_seconds,
+            validation_seconds=run_result.durations.validation_seconds,
+            total_seconds=run_result.durations.total_seconds,
+        )
+
+    try:
+        response_test_mode = ValidationTestMode(str(run_result.test_mode or "full"))
+    except ValueError:
+        response_test_mode = ValidationTestMode.FULL
+
+    return ValidateResponse(
+        summary=summary,
+        mismatch_counts=counts_model,
+        mismatch_sample_groups=MismatchSampleGroups(),
+        value_mismatch_by_column={},
+        compared_columns=run_result.compared_columns,
+        run_id=run_id,
+        value_mismatch_by_column_omitted=counts_model.value_mismatch > 0,
+        mapping_format_checks=format_checks,
+        footer_validation=footer_val,
+        durations=api_durations,
+        test_mode=response_test_mode,
+        litmus=run_result.litmus,
+    )
+
+
+def resolve_job_mismatch_artifact(job_dir: Path, res: dict[str, object]) -> Path | None:
+    """Resolve the on-disk mismatch NDJSON for a completed job directory."""
+    artifact_raw = res.get("mismatch_artifact_path")
+    if isinstance(artifact_raw, str) and artifact_raw.strip():
+        cand = Path(artifact_raw.strip()).expanduser()
+        if not cand.is_absolute():
+            cand = job_dir / cand
+        if cand.is_file():
+            return cand
+    rel = res.get("mismatch_artifact_rel")
+    if isinstance(rel, str) and rel.strip():
+        cand = job_dir / rel.strip()
+        if cand.is_file():
+            return cand
+    fallback = job_dir / "mismatches.ndjson"
+    return fallback if fallback.is_file() else None
+
+
+def paginate_job_mismatch_rows(
+    job_dir: Path,
+    *,
+    limit: int,
+    offset: int,
+    mismatch_type: str | None = None,
+) -> tuple[list[dict[str, Any]], int, uuid.UUID | None]:
+    """Paginated mismatch rows from a job's NDJSON artifact."""
+    res = loads_str((job_dir / "result.json").read_text(encoding="utf-8"))
+    meta = loads_str((job_dir / "meta.json").read_text(encoding="utf-8"))
+    rid = meta.get("run_id")
+    run_uuid = uuid.UUID(str(rid)) if rid else None
+    artifact = resolve_job_mismatch_artifact(job_dir, res)
+    totals = normalize_mismatch_summary(res.get("summary"))
+    if artifact is None:
+        return [], int(sum(totals.values()) if not mismatch_type else totals.get(mismatch_type or "", 0)), run_uuid
+    return (
+        *paginate_mismatch_rows_from_ndjson(
+            artifact,
+            limit=limit,
+            offset=offset,
+            mismatch_type=mismatch_type,
+            totals_by_type=totals,
+        ),
+        run_uuid,
+    )
+
+
+_persist_scheduled: set[uuid.UUID] = set()
+_persist_lock = threading.Lock()
+
+
+def schedule_persist_completed_job(
+    settings: Settings,
+    *,
+    run_id: uuid.UUID | None,
+    run_result: ValidationRunResult,
+    job_meta: dict[str, object] | None,
+) -> None:
+    """Persist mismatch rows in the background so summary-only polls stay fast."""
+    if not settings.enable_validation_persistence or run_id is None:
+        return
+    with _persist_lock:
+        if run_id in _persist_scheduled:
+            return
+        _persist_scheduled.add(run_id)
+
+    import asyncio
+
+    async def _persist() -> None:
+        try:
+            await maybe_persist_completed_job(
+                settings,
+                run_id=run_id,
+                run_result=run_result,
+                job_meta=job_meta,
+            )
+        except Exception:
+            with _persist_lock:
+                _persist_scheduled.discard(run_id)
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.create_task(_persist())
 
 
 def build_validate_response(

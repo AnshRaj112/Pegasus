@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-16T10:15:03Z
+# Last edited: 2026-06-17T10:32:48+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Admin APIs to manage reusable cloud connection profiles."""
@@ -55,7 +55,7 @@ async def create_cloud_connection(
     row = CloudConnection(
         name=body.name.strip(),
         provider=body.provider.strip() or "google-cloud-storage",
-        bucket=body.bucket.strip(),
+        bucket=(body.bucket or "").strip(),
         project_id=(body.project_id or "").strip() or None,
         credentials_json=body.credentials_json,
         active=bool(body.active),

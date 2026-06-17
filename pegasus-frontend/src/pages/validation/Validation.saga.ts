@@ -58,7 +58,7 @@ function* pollUntilCompleteOrDefer(jobId: string) {
   for (;;) {
     let job: AxiosResponse<import('../../shared/api/Api').ValidationJobDetailResponse>;
     try {
-      job = yield call(Api.getValidationJob, jobId);
+      job = yield call(Api.getValidationJob, jobId, { summaryOnly: true });
     } catch (error: unknown) {
       if (!isTransientPollError(error)) throw error;
       yield delay(POLL_INTERVAL_MS);
@@ -132,6 +132,7 @@ function* submitValidationSaga() {
         const recovered: AxiosResponse<import('../../shared/api/Api').ValidationJobDetailResponse> = yield call(
           Api.getValidationJob,
           jobId,
+          { summaryOnly: true },
         );
         if (recovered.data.status === 'completed' && recovered.data.result) {
           yield* submitValidationSuccess(jobId, recovered.data.result);

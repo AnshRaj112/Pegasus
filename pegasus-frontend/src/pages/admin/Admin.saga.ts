@@ -7,6 +7,7 @@ import {
   type AdminReducerState,
   type CreateStorageProviderPayload,
   type StorageProviderItem,
+  type StorageProviderPayload,
   type WorkspaceItem,
 } from './Admin.interface';
 import { adminActions } from './Admin.reducer';
@@ -73,6 +74,22 @@ function* handleCreateProviderSaga(action: PayloadAction<CreateStorageProviderPa
   }
 }
 
+function* handleUpdateProviderSaga(action: PayloadAction<StorageProviderPayload>) {
+  try {
+    const updated: StorageProviderItem = yield call(
+      [adminService, adminService.updateStorageProvider],
+      action.payload,
+    );
+    yield put(adminActions.updateProviderSuccess(updated));
+    notification.success({
+      message: 'Storage connection updated',
+      description: `${updated.name} has been saved.`,
+    });
+  } catch (error: unknown) {
+    yield put(adminActions.updateProviderError(getApiErrorMessage(error, 'Failed to update storage connection')));
+  }
+}
+
 function* handleDeleteProviderSaga(action: PayloadAction<string>) {
   try {
     yield call([adminService, adminService.deleteStorageProvider], action.payload);
@@ -88,5 +105,6 @@ export default function* adminSaga() {
   yield takeLatest(adminActions.fetchWorkspacesRequest.type, handleFetchWorkspacesSaga);
   yield takeLatest(adminActions.fetchProvidersRequest.type, handleFetchProvidersSaga);
   yield takeLatest(adminActions.createProviderRequest.type, handleCreateProviderSaga);
+  yield takeLatest(adminActions.updateProviderRequest.type, handleUpdateProviderSaga);
   yield takeLatest(adminActions.deleteProviderRequest.type, handleDeleteProviderSaga);
 }
