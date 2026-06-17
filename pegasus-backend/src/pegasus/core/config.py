@@ -295,27 +295,28 @@ class Settings(BaseSettings):
         description="Compare precomputed content digests before reconcile (GCS metadata MD5/CRC32C).",
     )
     validation_worker_pool_size: int = Field(
-        default=2,
+        default=0,
         ge=0,
         le=32,
         description=(
             "When >0, reuse a ProcessPoolExecutor of that size for validation jobs (warmer imports). "
-            "When 0, spawn a fresh subprocess per job (slow cold start)."
+            "When 0 (default), spawn a fresh isolated subprocess per job for memory isolation."
         ),
     )
     validation_max_concurrency: int = Field(
-        default=2,
+        default=10,
         ge=1,
         description=(
-            "Maximum parallel validation jobs (FIFO queue). "
+            "Maximum parallel validation jobs (FIFO queue ceiling). "
+            "Effective concurrency may be lower when auto-tune is enabled. "
             "Users can override at runtime via PATCH /api/v1/validate/queue."
         ),
     )
     validation_auto_tune_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "When true, cap effective concurrency using live RAM/disk/CPU probes. "
-            "When false (default), only max_concurrency is used."
+            "When false, only max_concurrency is used."
         ),
     )
     validation_auto_detect_format: bool = Field(
@@ -436,6 +437,62 @@ class Settings(BaseSettings):
         description=(
             "Global RAM budget for all concurrent validation jobs combined. "
             "Queue admission splits this across running slots."
+        ),
+    )
+    validation_utilization_slack: float = Field(
+        default=0.70,
+        ge=0.1,
+        le=1.0,
+        description=(
+            "Fraction of computed safe parallel capacity to actually use "
+            "(e.g. 0.70 runs 7 of 10 theoretical slots)."
+        ),
+    )
+    validation_cpu_reserve_cores: int = Field(
+        default=1,
+        ge=0,
+        le=32,
+        description="CPU cores kept free for the OS, API, and other services (never given to workers).",
+    )
+    validation_cleanup_workspace_on_complete: bool = Field(
+        default=True,
+        description="Legacy flag; ephemeral workspaces under /tmp are always removed in job_worker finally.",
+    )
+    validation_job_timeout_seconds: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Kill validation child processes after this many seconds (0 = no limit). "
+            "Parent force-reaps the worker so OS memory is reclaimed."
+        ),
+    )
+    validation_max_read_chunk_bytes: int = Field(
+        default=50 * 1024 * 1024,
+        ge=1024 * 1024,
+        le=256 * 1024 * 1024,
+        description="Hard byte cap per stream read chunk or single logical line (line-bomb guard).",
+    )
+    validation_large_job_subprocess_bytes: int = Field(
+        default=10 * 1024**3,
+        ge=0,
+        description=(
+            "When combined source+target bytes exceed this threshold, run validation in a "
+            "fresh subprocess instead of the shared process pool for memory isolation."
+        ),
+    )
+    validation_workspace_retention_days: int = Field(
+        default=7,
+        ge=0,
+        description=(
+            "Days to retain reconcile_workspace/ for completed jobs when cleanup is disabled. "
+            "0 disables the janitor."
+        ),
+    )
+    validation_distributed_queue_url: str | None = Field(
+        default=None,
+        description=(
+            "Optional Redis URL (redis://host:6379/0) for cross-replica validation job dispatch. "
+            "When unset, the in-process FIFO queue is used."
         ),
     )
 

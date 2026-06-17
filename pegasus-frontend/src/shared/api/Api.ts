@@ -181,12 +181,23 @@ export interface ValidateResult {
   durations?: { validation_seconds?: number; total_seconds?: number };
 }
 
+export interface ValidationJobProgress {
+  queue_reason?: string | null;
+  queue_position?: number | null;
+  pending_ahead?: number | null;
+  running_jobs?: number | null;
+  estimated_wait_seconds?: number | null;
+  effective_max_concurrency?: number | null;
+}
+
 export interface ValidationJobDetailResponse {
   status: string;
   phase?: string | null;
   message?: string | null;
   error?: string | null;
   result?: ValidateResult | null;
+  progress?: ValidationJobProgress;
+  resource_profile?: Record<string, unknown> | null;
 }
 
 export interface ValidationMismatchesResponse {
@@ -234,11 +245,29 @@ export interface QueueJobSnapshot {
   enqueued_at: number;
   started_at: number | null;
   finished_at: number | null;
+  position?: number | null;
+  queue_wait_reason?: string | null;
+  estimated_wait_seconds?: number | null;
+}
+
+export interface QueueResourceAdvisor {
+  recommended_max_concurrency?: number;
+  limits?: {
+    max_safe_by_ram?: number;
+    max_safe_by_disk?: number;
+    max_safe_by_cpu?: number;
+  };
+  warnings?: string[];
 }
 
 export interface QueueStatusResponse {
+  max_concurrency?: number;
+  effective_max_concurrency?: number;
+  utilization_slack?: number;
+  auto_tune_enabled?: boolean;
   running: number;
   pending: number;
+  resource_advisor?: QueueResourceAdvisor;
   jobs: QueueJobSnapshot[];
 }
 

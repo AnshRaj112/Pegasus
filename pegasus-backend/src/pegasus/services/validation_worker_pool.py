@@ -31,7 +31,7 @@ def _validation_pool_initializer() -> None:
     _ = _job_worker
 
 
-def get_validation_pool(max_workers: int) -> ProcessPoolExecutor | None:
+def get_validation_pool(max_workers: int, *, max_tasks_per_child: int = 1) -> ProcessPoolExecutor | None:
     """Return a shared pool sized to *max_workers*, or None if *max_workers* <= 0."""
     global _pool, _pool_workers
     if max_workers <= 0:
@@ -44,11 +44,16 @@ def get_validation_pool(max_workers: int) -> ProcessPoolExecutor | None:
     ctx = mp.get_context("spawn")
     _pool = ProcessPoolExecutor(
         max_workers=max_workers,
+        max_tasks_per_child=max(1, int(max_tasks_per_child)),
         mp_context=ctx,
         initializer=_validation_pool_initializer,
     )
     _pool_workers = max_workers
-    logger.info("Started validation ProcessPoolExecutor max_workers=%d", max_workers)
+    logger.info(
+        "Started validation ProcessPoolExecutor max_workers=%d max_tasks_per_child=%d",
+        max_workers,
+        max(1, int(max_tasks_per_child)),
+    )
     return _pool
 
 

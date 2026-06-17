@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import shutil
@@ -23,10 +24,12 @@ from pegasus.schemas.validation import ColumnMapping, ValidationTestMode
 from pegasus.services.exceptions import format_validation_job_error
 from pegasus.services.validation_service import ValidationRunResult, ValidationService
 from pegasus.validation.comparators.models import MismatchType
+from pegasus.validation.job_workspace import acquire_ephemeral_workspace, release_ephemeral_workspace
 from pegasus.validation.lifecycle_profiler import get_active_profiler, lifecycle_job, lifecycle_span
 from pegasus.validation.resource_profiler import (
     JobResourceProfiler,
     log_resource_snapshot_summary,
+    merge_resource_profile,
     write_resource_profile_artifacts,
 )
 
@@ -146,6 +149,28 @@ def _cleanup_partial(job_dir: Path) -> None:
             p.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def _append_error_log(job_dir: Path, text: str) -> None:
+    path = job_dir / "validation_errors.log"
+    try:
+        with path.open("a", encoding="utf-8") as fp:
+            fp.write(text)
+            if not text.endswith("\n"):
+                fp.write("\n")
+    except OSError:
+        logger.debug("Could not append validation error log", exc_info=True)
+
+
+def _release_process_memory() -> None:
+    gc.collect()
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL("libc.so.6")
+        libc.malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
 
 
 def _configure_file_logging(job_dir: Path) -> None:
@@ -295,10 +320,11 @@ def run_job_directory(job_dir: Path) -> int:
                 "phase": "failed",
                 "message": err_msg,
                 "error": err_msg,
-                "traceback": traceback.format_exc(),
+                "error_log": "validation_errors.log",
                 "progress": {"failed_at_epoch_s": time.time()},
             },
         )
+        _append_error_log(job_dir, traceback.format_exc())
         _cleanup_partial(job_dir)
         return 1
 
@@ -324,7 +350,69 @@ def _run_job_body(
     lifecycle: object,
 ) -> int:
     job_id = job_dir.name
-    resource_profiler = JobResourceProfiler(job_dir=job_dir)
+    ephemeral_ws = acquire_ephemeral_workspace(job_dir, job_id=job_id)
+    resource_profiler = JobResourceProfiler(job_dir=job_dir, workspace_dir=ephemeral_ws)
+    try:
+        return _run_job_body_inner(
+            job_dir=job_dir,
+            meta=meta,
+            meta_path=meta_path,
+            status_path=status_path,
+            uid_column=uid_column,
+            delimiter=delimiter,
+            column_mappings=column_mappings,
+            has_header=has_header,
+            header_leading_rows=header_leading_rows,
+            test_mode=test_mode,
+            file_format=file_format,
+            source_input=source_input,
+            target_input=target_input,
+            uses_cloud=uses_cloud,
+            src=src,
+            tgt=tgt,
+            lifecycle=lifecycle,
+            ephemeral_ws=ephemeral_ws,
+            resource_profiler=resource_profiler,
+            job_id=job_id,
+        )
+    except Exception as exc:
+        _append_error_log(job_dir, traceback.format_exc())
+        raise exc
+    finally:
+        if uses_cloud:
+            from pegasus.validation.gcs_stream import clear_gcs_stream_sessions
+
+            clear_gcs_stream_sessions()
+        release_ephemeral_workspace(ephemeral_ws)
+        try:
+            _release_process_memory()
+        except Exception:
+            pass
+
+
+def _run_job_body_inner(
+    *,
+    job_dir: Path,
+    meta: dict[str, object],
+    meta_path: Path,
+    status_path: Path,
+    uid_column: str,
+    delimiter: str,
+    column_mappings: list[ColumnMapping],
+    has_header: bool,
+    header_leading_rows: int,
+    test_mode: str,
+    file_format: str,
+    source_input: object,
+    target_input: object,
+    uses_cloud: bool,
+    src: object,
+    tgt: object,
+    lifecycle: object,
+    ephemeral_ws: Path,
+    resource_profiler: JobResourceProfiler,
+    job_id: str,
+) -> int:
     before = resource_profiler.capture_before()
     log_resource_snapshot_summary(before, phase="before", job_id=job_id)
 
@@ -387,17 +475,22 @@ def _run_job_body(
             if stage_payload is not None:
                 progress["stage"] = stage_payload
             during_sample = resource_profiler.maybe_capture_during()
+            resource_profile_payload: dict[str, Any] | None = None
             if during_sample is not None:
                 log_resource_snapshot_summary(during_sample, phase="during", job_id=job_id)
-            _write_json(
-                status_path,
-                {
-                    "status": "running",
-                    "phase": str(event.get("phase") or "validating"),
-                    "message": str(event.get("message") or "Running reconciliation"),
-                    "progress": progress,
-                },
-            )
+                resource_profile_payload = merge_resource_profile(
+                    None,
+                    resource_profiler.to_dict(),
+                )
+            status_payload: dict[str, Any] = {
+                "status": "running",
+                "phase": str(event.get("phase") or "validating"),
+                "message": str(event.get("message") or "Running reconciliation"),
+                "progress": progress,
+            }
+            if resource_profile_payload is not None:
+                status_payload["resource_profile"] = resource_profile_payload
+            _write_json(status_path, status_payload)
 
         try:
             src_bytes = src.stat().st_size if isinstance(src, Path) else None
@@ -430,6 +523,7 @@ def _run_job_body(
                 uid_column=uid_column,
                 file_format=file_format,
                 artifact_export_parent=job_dir,
+                reconciliation_workspace=ephemeral_ws,
             )
         elif uses_cloud:
             result = service._validate_delimited_adapters_sync(  # noqa: SLF001
@@ -441,6 +535,7 @@ def _run_job_body(
                 source_label=str(meta.get("source_filename") or source_input.display_name),
                 target_label=str(meta.get("target_filename") or target_input.display_name),
                 artifact_export_parent=job_dir,
+                reconciliation_workspace=ephemeral_ws,
                 progress_callback=_progress_cb,
                 has_header=has_header,
                 header_leading_rows=header_leading_rows,
@@ -455,6 +550,7 @@ def _run_job_body(
                 delimiter,
                 column_mappings,
                 artifact_export_parent=job_dir,
+                reconciliation_workspace=ephemeral_ws,
                 progress_callback=_progress_cb,
                 has_header=has_header,
                 header_leading_rows=header_leading_rows,
@@ -469,9 +565,9 @@ def _run_job_body(
             profiler.mark_worker_finished()
         with lifecycle_span("Mismatch Export"):
             artifact = result.mismatch_artifact_path or result.report.mismatch_artifact_path
-            workspace = job_dir / "reconcile_workspace"
+            spill_workspace = ephemeral_ws
             export_path = job_dir / "mismatches.ndjson"
-            if workspace.is_dir() and result.compared_columns:
+            if spill_workspace.is_dir() and result.compared_columns:
                 try:
                     from pegasus.validation.comparators.policy import compare_policy_context
                     from pegasus.validation.pipeline.mismatch_export import export_workspace_mismatches_ndjson
@@ -487,7 +583,7 @@ def _run_job_body(
                     } or None
                     with compare_policy_context(export_policy):
                         export_stats = export_workspace_mismatches_ndjson(
-                            workspace,
+                            spill_workspace,
                             export_path,
                             compare_columns=list(result.compared_columns),
                             sensitive_columns=sensitive_cols,
@@ -568,6 +664,7 @@ def _run_job_body(
         resource_profiler.capture_after()
         log_resource_snapshot_summary(resource_profiler.after, phase="after", job_id=job_id)
         write_resource_profile_artifacts(job_dir, resource_profiler.to_dict())
+        profile_dict = resource_profiler.to_dict()
         with lifecycle_span("Result Serialization"):
             _write_json(job_dir / "result.json", out, indent=True)
         _write_json(
@@ -584,6 +681,7 @@ def _run_job_body(
                     "total_mismatch_records": int(sum(_normalize_summary(dict(result.report.summary)).values())),
                     "validation_seconds": validation_duration,
                 },
+                "resource_profile": profile_dict,
             },
         )
         return 0
@@ -599,11 +697,6 @@ def _run_job_body(
         except Exception:
             logger.debug("Could not write resource profile artifacts on failure", exc_info=True)
         raise exc
-    finally:
-        if uses_cloud:
-            from pegasus.validation.gcs_stream import clear_gcs_stream_sessions
-
-            clear_gcs_stream_sessions()
 
 
 def run_job_directory_str(job_dir: str) -> int:

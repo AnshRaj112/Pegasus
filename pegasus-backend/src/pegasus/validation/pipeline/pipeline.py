@@ -348,6 +348,25 @@ class TabularReconciliationPipeline:
             work = workspace
             work.mkdir(parents=True, exist_ok=True)
 
+        combined_bytes = source_bytes + target_bytes
+        from pegasus.services.resource_models import estimate_streaming_spill_disk_bytes
+
+        required_disk = estimate_streaming_spill_disk_bytes(
+            combined_bytes,
+            min_disk_per_job_bytes=50 * 1024**2,
+        )
+        try:
+            free_disk = shutil.disk_usage(work if work.exists() else work.parent).free
+        except OSError:
+            free_disk = 0
+        if free_disk < required_disk:
+            from pegasus.services.exceptions import InsufficientDiskError
+
+            raise InsufficientDiskError(
+                f"Insufficient disk for spill workspace: need ~{required_disk // 1024**2} MiB, "
+                f"only {free_disk // 1024**2} MiB free at {work}"
+            )
+
         try:
             return self._run_spill_path(
                 work=work,
@@ -596,7 +615,13 @@ class TabularReconciliationPipeline:
             )
 
         use_spill_payload = spill_payload
-        reconcile_workers = resolved_reconcile_workers(self._config.partition_reconcile_workers)
+        from pegasus.core.config import get_settings
+
+        cpu_reserve = max(0, int(get_settings().validation_cpu_reserve_cores))
+        reconcile_workers = resolved_reconcile_workers(
+            self._config.partition_reconcile_workers,
+            cpu_reserve=cpu_reserve,
+        )
         if live_progress is not None:
             live_progress.begin_reconcile(
                 partitions_total=len(active_pids),

@@ -18,6 +18,12 @@ def physical_cpu_count() -> int:
     return max(1, int(os.cpu_count() or 1))
 
 
+def schedulable_cpu_cores(*, ncpu: int | None = None, reserve: int = 1) -> int:
+    """Logical CPUs available for validation workers (always leave *reserve* for OS/API)."""
+    cores = physical_cpu_count() if ncpu is None else max(1, ncpu)
+    return max(1, cores - max(0, int(reserve)))
+
+
 def physical_ram_bytes() -> int | None:
     try:
         pages = os.sysconf("SC_PHYS_PAGES")
@@ -135,11 +141,16 @@ def cap_partition_buckets(
     return max(1, max(file_floor, min(int(requested), effective_cap)))
 
 
-def effective_local_thread_cap(requested_threads: int, *, ncpu: int | None = None) -> int:
-    """Resolve a requested thread count (0 => full machine) capped to logical CPU count."""
-    cores = physical_cpu_count() if ncpu is None else max(1, ncpu)
-    t = requested_threads if requested_threads > 0 else cores
-    return max(1, min(int(t), cores))
+def effective_local_thread_cap(
+    requested_threads: int,
+    *,
+    ncpu: int | None = None,
+    cpu_reserve: int = 1,
+) -> int:
+    """Resolve thread cap (0 => auto), never exceeding schedulable CPUs."""
+    schedulable = schedulable_cpu_cores(ncpu=ncpu, reserve=cpu_reserve)
+    t = requested_threads if requested_threads > 0 else schedulable
+    return max(1, min(int(t), schedulable))
 
 
 def align_partition_buckets_to_threads(buckets: int, parallel_workers: int) -> int:

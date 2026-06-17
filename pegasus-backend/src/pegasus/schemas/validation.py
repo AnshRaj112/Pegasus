@@ -998,6 +998,10 @@ class QueueStatusResponse(BaseModel):
             "(resource recommendation when auto-tune is on and max_concurrency is 0)"
         ),
     )
+    utilization_slack: float = Field(
+        default=0.70,
+        description="Fraction of computed safe capacity in use (e.g. 0.70 = 70%).",
+    )
     cpu_cores_available: int = Field(description="Logical CPU cores detected on the server")
     auto_tune_enabled: bool = Field(description="Whether resource-based auto-tuning is active")
     threads_per_job: int = Field(

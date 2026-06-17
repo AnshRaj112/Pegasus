@@ -30,6 +30,7 @@ from typing import Any
 
 from pegasus.core.config import Settings
 from pegasus.core.json_util import dumps_bytes, loads_str
+from pegasus.core.resource_tuning import schedulable_cpu_cores
 from pegasus.services.background_validation_runner import (
     BackgroundValidationRunner,
     ValidationJobHandle,
@@ -39,6 +40,8 @@ from pegasus.services.resource_advisor import (
     ResourceSnapshot,
     compute_resource_recommendation,
 )
+from pegasus.services.resource_governor import can_admit_job
+from pegasus.validation.job_workspace import release_job_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +137,13 @@ class ValidationJobQueue:
     def cpu_cores_available() -> int:
         """Number of logical CPU cores on the host."""
         return max(1, os.cpu_count() or 1)
+
+    def schedulable_cpu_cores_available(self) -> int:
+        """CPUs workers may use (one or more cores reserved for OS/API)."""
+        return schedulable_cpu_cores(
+            ncpu=self.cpu_cores_available(),
+            reserve=self._settings.validation_cpu_reserve_cores,
+        )
 
     def set_max_concurrency(self, value: int) -> int:
         """Update the concurrency cap at runtime.  Returns the clamped value actually set.
@@ -254,9 +264,11 @@ class ValidationJobQueue:
         if self._auto_tune_enabled:
             snapshot = self.resource_recommendation()
             result["effective_max_concurrency"] = self.effective_max_concurrency(snapshot=snapshot)
+            result["utilization_slack"] = self._settings.validation_utilization_slack
             result["resource_advisor"] = snapshot.to_dict()
         else:
             result["effective_max_concurrency"] = max(1, self._max_concurrency)
+            result["utilization_slack"] = self._settings.validation_utilization_slack
             result["resource_advisor"] = {}
         return result
 
@@ -334,6 +346,7 @@ class ValidationJobQueue:
                     if j.state == JobState.QUEUED
                     else None
                 ),
+                "queue_wait_reason": self._read_queue_reason(j) if j.state == JobState.QUEUED else None,
             }
             for j in jobs[:limit]
         ]
@@ -362,88 +375,161 @@ class ValidationJobQueue:
                 pass
 
     def _try_start_pending(self) -> None:
-        """Start pending jobs while RAM/disk/CPU headroom allows (re-checked per job)."""
-        while True:
-            effective_max, snapshot = self._drain_slot_cap()
+        """Start the FIFO head job only when no other validation is running."""
+        effective_max, snapshot = self._drain_slot_cap()
+        if snapshot is None:
+            snapshot = self.resource_recommendation()
+
+        with self._lock:
+            if not self._pending:
+                return
+            if self._running:
+                self._refresh_pending_statuses_locked(
+                    effective_max=1,
+                    queue_reason="Queued — waiting for the job ahead to finish",
+                )
+                logger.debug(
+                    "Deferring pending=%d until running job completes (serial FIFO)",
+                    len(self._pending),
+                )
+                return
+            next_job = self._pending[0]
+            running_copy = dict(self._running)
+
+        policy = self._resource_policy
+        admitted, reason = can_admit_job(
+            next_job,
+            running_copy,
+            snapshot,
+            settings=self._settings,
+            effective_max=1,
+            disk_headroom_multiplier=policy.disk_headroom_multiplier,
+            ram_multiplier=self._settings.validation_queue_ram_multiplier,
+            min_ram_per_job_bytes=self._settings.validation_queue_min_ram_per_job_bytes,
+            min_disk_per_job_bytes=self._settings.validation_queue_min_disk_per_job_bytes,
+            ram_reserve_bytes=self._settings.validation_queue_ram_reserve_bytes,
+            disk_reserve_bytes=self._settings.validation_queue_disk_reserve_bytes,
+        )
+        if not admitted:
             with self._lock:
-                if not self._pending:
-                    return
-                if len(self._running) >= effective_max:
-                    if self._auto_tune_enabled and snapshot is not None:
-                        logger.debug(
-                            "Scheduling %d job(s): at resource cap effective=%d "
-                            "(ram_safe=%d disk_safe=%d cpu_safe=%d)",
-                            len(self._pending),
-                            effective_max,
-                            snapshot.max_safe_by_ram,
-                            snapshot.max_safe_by_disk,
-                            snapshot.max_safe_by_cpu,
-                        )
-                    return
-                job = self._pending.popleft()
-                self._update_queue_positions()
-                self._refresh_pending_statuses_locked(effective_max=effective_max)
-                try:
-                    self._stamp_resource_policy(job, effective_slots=effective_max)
-                    handle = self._runner.start_job(job.job_dir)
-                    # Quick sanity: did it die immediately?
-                    if handle.poll() is not None:
-                        detail = handle.failure_detail()
-                        logger.error("Job %s worker died on start: %s", job.job_id, detail)
-                        job.state = JobState.FAILED
-                        job.finished_at = time.time()
-                        self._finished[job.job_id] = job
-                        self._write_failed_status(job, f"Worker died on start: {detail}")
-                        continue
-                except Exception as exc:
-                    logger.exception("Failed to start worker for job %s: %s", job.job_id, exc)
+                self._refresh_pending_statuses_locked(
+                    effective_max=1,
+                    queue_reason=reason,
+                )
+            logger.debug(
+                "Job %s queued (waiting for resources): %s (pending=%d)",
+                next_job.job_id,
+                reason,
+                len(self._pending),
+            )
+            return
+
+        with self._lock:
+            if not self._pending or self._running:
+                return
+            job = self._pending.popleft()
+            self._update_queue_positions()
+            self._refresh_pending_statuses_locked(effective_max=1)
+            try:
+                self._stamp_resource_policy(
+                    job,
+                    effective_slots=1,
+                    active_slots=1,
+                )
+                handle = self._runner.start_job(job.job_dir)
+                if handle.poll() is not None:
+                    detail = handle.failure_detail()
+                    logger.error("Job %s worker died on start: %s", job.job_id, detail)
                     job.state = JobState.FAILED
                     job.finished_at = time.time()
                     self._finished[job.job_id] = job
-                    self._write_failed_status(job, f"Failed to start: {exc!r}")
-                    continue
+                    handle.force_reap(reason="died on start")
+                    release_job_workspace(job.job_dir)
+                    self._write_failed_status(job, f"Worker died on start: {detail}")
+                    return
+            except Exception as exc:
+                logger.exception("Failed to start worker for job %s: %s", job.job_id, exc)
+                job.state = JobState.FAILED
+                job.finished_at = time.time()
+                self._finished[job.job_id] = job
+                self._write_failed_status(job, f"Failed to start: {exc!r}")
+                return
 
-                job.state = JobState.RUNNING
-                job.started_at = time.time()
-                job.handle = handle
-                self._running[job.job_id] = job
-                logger.info(
-                    "Job %s started running=%d/%d pending=%d",
-                    job.job_id,
-                    len(self._running),
-                    self._max_concurrency,
-                    len(self._pending),
-                )
+            job.state = JobState.RUNNING
+            job.started_at = time.time()
+            job.handle = handle
+            self._running[job.job_id] = job
+            logger.info(
+                "Job %s started (serial queue) pending=%d",
+                job.job_id,
+                len(self._pending),
+            )
 
     def _reap_finished(self) -> None:
-        """Move completed/failed running jobs to the finished set."""
+        """Move completed/failed running jobs to the finished set and force-reap workers."""
         effective_max, _snapshot = self._drain_slot_cap()
         with self._lock:
-            done_ids = []
-            for jid, job in self._running.items():
-                if job.handle is not None:
-                    rc = job.handle.poll()
-                    if rc is not None:
-                        job.finished_at = time.time()
-                        job.state = JobState.COMPLETED if rc == 0 else JobState.FAILED
-                        done_ids.append(jid)
-                        logger.info(
-                            "Job %s finished state=%s rc=%s elapsed=%.1fs",
-                            jid,
-                            job.state.value,
-                            rc,
-                            job.finished_at - (job.started_at or job.enqueued_at),
-                        )
-                        elapsed = max(1.0, job.finished_at - (job.started_at or job.enqueued_at))
-                        self._avg_runtime_seconds = (self._avg_runtime_seconds * 0.8) + (elapsed * 0.2)
+            running_snapshot = list(self._running.items())
 
-            for jid in done_ids:
-                job = self._running.pop(jid)
+        finished_events: list[tuple[QueuedJob, int | None, str]] = []
+        for _jid, job in running_snapshot:
+            if job.handle is None:
+                continue
+            if job.started_at is not None and self._runner.check_timeout(job.handle, job.started_at):
+                finished_events.append((job, -9, "timed out"))
+                continue
+            rc = job.handle.poll()
+            if rc is not None:
+                finished_events.append((job, rc, "finished"))
+
+        for job, _rc, reason in finished_events:
+            if job.handle is not None:
+                try:
+                    job.handle.force_reap(reason=reason)
+                except Exception:
+                    logger.warning("force_reap failed for job %s", job.job_id, exc_info=True)
+            try:
+                release_job_workspace(job.job_dir)
+            except Exception:
+                logger.warning(
+                    "release_job_workspace failed for job %s",
+                    job.job_id,
+                    exc_info=True,
+                )
+
+        had_done = False
+        with self._lock:
+            for job, rc, reason in finished_events:
+                jid = job.job_id
+                if jid not in self._running:
+                    continue
+                job.finished_at = time.time()
+                if reason == "timed out":
+                    job.state = JobState.FAILED
+                    timeout_s = int(self._settings.validation_job_timeout_seconds or 0)
+                    self._write_failed_status(
+                        job,
+                        f"Validation job timed out after {timeout_s}s",
+                    )
+                else:
+                    job.state = JobState.COMPLETED if rc == 0 else JobState.FAILED
+                self._running.pop(jid)
                 self._finished[jid] = job
+                had_done = True
+                logger.info(
+                    "Job %s finished state=%s rc=%s elapsed=%.1fs (%s)",
+                    jid,
+                    job.state.value,
+                    rc,
+                    job.finished_at - (job.started_at or job.enqueued_at),
+                    reason,
+                )
+                if reason != "timed out":
+                    elapsed = max(1.0, job.finished_at - (job.started_at or job.enqueued_at))
+                    self._avg_runtime_seconds = (self._avg_runtime_seconds * 0.8) + (elapsed * 0.2)
 
-            if done_ids and self._pending:
+            if had_done and self._pending:
                 self._refresh_pending_statuses_locked(effective_max=effective_max)
-            had_done = bool(done_ids)
 
         if had_done:
             self._try_start_pending()
@@ -477,7 +563,13 @@ class ValidationJobQueue:
 
     # ── Status file helpers ───────────────────────────────────────
 
-    def _stamp_resource_policy(self, job: QueuedJob, *, effective_slots: int | None = None) -> None:
+    def _stamp_resource_policy(
+        self,
+        job: QueuedJob,
+        *,
+        effective_slots: int | None = None,
+        active_slots: int | None = None,
+    ) -> None:
         """Write current queue resource policy into job meta.json before the worker starts."""
         meta_path = job.job_dir / "meta.json"
         if not meta_path.is_file():
@@ -486,17 +578,36 @@ class ValidationJobQueue:
             meta = loads_str(meta_path.read_text(encoding="utf-8"))
             if not isinstance(meta, dict):
                 return
-            policy = self._resource_policy.clamp(cpu_cores=self.cpu_cores_available())
+            policy = self._resource_policy.clamp(
+                cpu_cores=self.schedulable_cpu_cores_available(),
+            )
             slots = max(1, effective_slots or self.effective_max_concurrency())
-            # Split global budget fairly across active slots to avoid over-commit during bursts.
+            concurrent = max(1, active_slots or len(self._running) + 1)
+            schedulable = self.schedulable_cpu_cores_available()
             global_budget = max(512 * 1024 * 1024, int(self._settings.validation_global_memory_budget_bytes))
-            per_job_budget = max(512 * 1024 * 1024, global_budget // slots)
+            per_job_budget = max(512 * 1024 * 1024, global_budget // concurrent)
+            base_reconcile = self._settings.validation_partition_reconcile_workers
+            if base_reconcile <= 0:
+                base_reconcile = policy.effective_threads(
+                    cpu_cores=schedulable,
+                )
+            throttled_reconcile = max(
+                1,
+                min(schedulable, int(base_reconcile) // concurrent),
+            )
             meta["resource_policy"] = {
                 **policy.to_dict(),
                 "memory_budget_bytes": per_job_budget,
-                "effective_threads_per_job": policy.effective_threads(
-                    cpu_cores=self.cpu_cores_available()
+                "effective_threads_per_job": max(
+                    1,
+                    min(
+                        schedulable,
+                        policy.effective_threads(cpu_cores=schedulable) // concurrent,
+                    ),
                 ),
+                "partition_reconcile_workers": throttled_reconcile,
+                "concurrent_jobs_at_start": concurrent,
+                "cpu_reserve_cores": self._settings.validation_cpu_reserve_cores,
             }
             meta_path.write_bytes(dumps_bytes(meta, indent=True))
         except (OSError, ValueError, TypeError):
@@ -509,6 +620,7 @@ class ValidationJobQueue:
         effective_max: int | None = None,
         pending_count: int | None = None,
         running_jobs: int | None = None,
+        queue_reason: str | None = None,
     ) -> None:
         status_path = job.job_dir / "status.json"
         eff = max(1, effective_max if effective_max is not None else self.effective_max_concurrency())
@@ -540,8 +652,12 @@ class ValidationJobQueue:
                 "status": "queued",
                 "phase": "queued",
                 "message": (
-                    f"Waiting in queue (position {job.position + 1} of {pend}, "
-                    f"estimated wait {int(wait_s)}s)"
+                    queue_reason
+                    if queue_reason
+                    else (
+                        f"Accepted and queued (position {job.position + 1} of {pend}, "
+                        f"starts after the jobs ahead finish)"
+                    )
                 ),
                 "progress": {
                     "queue_position": job.position,
@@ -552,6 +668,7 @@ class ValidationJobQueue:
                     "estimated_wait_seconds": wait_s,
                     "estimated_start_epoch_s": time.time() + wait_s,
                     "enqueued_at_epoch_s": job.enqueued_at,
+                    "queue_reason": queue_reason,
                 },
             }
             if resource_profile is not None:
@@ -560,6 +677,21 @@ class ValidationJobQueue:
         except OSError:
             pass
 
+    def _read_queue_reason(self, job: QueuedJob) -> str | None:
+        status_path = job.job_dir / "status.json"
+        if not status_path.is_file():
+            return None
+        try:
+            st = loads_str(status_path.read_text(encoding="utf-8"))
+            prog = st.get("progress") if isinstance(st, dict) else None
+            if isinstance(prog, dict):
+                reason = prog.get("queue_reason")
+                if isinstance(reason, str) and reason.strip():
+                    return reason.strip()
+        except (OSError, ValueError, TypeError):
+            pass
+        return None
+
     def _estimate_wait_seconds_for_position(
         self,
         *,
@@ -567,14 +699,17 @@ class ValidationJobQueue:
         effective_max: int,
         running_jobs: int,
     ) -> float:
-        if queue_position <= 0 and running_jobs < max(1, effective_max):
-            return 0.0
-        slots = max(1, effective_max)
-        groups_ahead = queue_position // slots
-        running_penalty = 1 if running_jobs >= slots else 0
-        return float((groups_ahead + running_penalty) * self._avg_runtime_seconds)
+        # Serial FIFO: each pending job waits for the running job plus every job ahead in line.
+        _ = effective_max
+        jobs_ahead = queue_position + (1 if running_jobs > 0 else 0)
+        return float(jobs_ahead * self._avg_runtime_seconds)
 
-    def _refresh_pending_statuses_locked(self, *, effective_max: int) -> None:
+    def _refresh_pending_statuses_locked(
+        self,
+        *,
+        effective_max: int,
+        queue_reason: str | None = None,
+    ) -> None:
         """Rewrite queued status files with fresh position and ETA (caller holds lock)."""
         eff = max(1, effective_max)
         pend = len(self._pending)
@@ -585,6 +720,7 @@ class ValidationJobQueue:
                 effective_max=eff,
                 pending_count=pend,
                 running_jobs=running,
+                queue_reason=queue_reason if job.position == 0 else None,
             )
 
     def _write_failed_status(self, job: QueuedJob, error: str) -> None:
@@ -595,8 +731,9 @@ class ValidationJobQueue:
                 {
                     "status": "failed",
                     "phase": "failed",
-                    "message": "Job failed before validation started",
+                    "message": error,
                     "error": error,
+                    "error_log": "validation_errors.log",
                     "progress": {"failed_at_epoch_s": time.time()},
                 },
             )

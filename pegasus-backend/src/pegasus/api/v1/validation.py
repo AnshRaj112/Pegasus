@@ -57,6 +57,11 @@ from pegasus.validation.file_detection.coerce import coerce_local_validate_field
 from pegasus.validation.file_format import infer_file_format_from_path, normalize_file_format
 from pegasus.validation.file_pairing import auto_match_files_by_name, list_files_in_directory
 from pegasus.services.exceptions import ValidationBadRequestError
+from pegasus.services.job_resource_meta import (
+    adapter_size_bytes,
+    local_path_size_bytes,
+    stamp_resource_sizes,
+)
 from pegasus.services.validation_job_queue import get_validation_queue
 from pegasus.validation.cloud_credentials import resolve_gcs_auth
 from pegasus.validation.cloud_input import (
@@ -665,6 +670,22 @@ async def validate_csv_local_paths(
         meta["target_cloud"] = cloud_config_to_meta(target_cloud)  # type: ignore[arg-type]
     else:
         meta["target_path"] = str(resolved_target)
+
+    if source_input is not None:
+        src_bytes = adapter_size_bytes(source_input.adapter)
+    else:
+        src_bytes = local_path_size_bytes(resolved_source)
+    if target_input is not None:
+        tgt_bytes = adapter_size_bytes(target_input.adapter)
+    else:
+        tgt_bytes = local_path_size_bytes(resolved_target)
+    stamp_resource_sizes(
+        meta,
+        source_bytes=src_bytes,
+        target_bytes=tgt_bytes,
+        column_count=len(body.column_mappings),
+    )
+
     (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
 
     (job_dir / "status.json").write_bytes(
@@ -672,7 +693,7 @@ async def validate_csv_local_paths(
             {
                 "status": "queued",
                 "phase": "queued",
-                "message": "Job accepted, waiting for worker slot",
+                "message": "Job accepted and queued — will start when resources are free",
                 "progress": {"enqueued_at_epoch_s": time.time()},
             },
             indent=True,
@@ -680,6 +701,13 @@ async def validate_csv_local_paths(
     )
 
     queue = get_validation_queue(settings)
+    from pegasus.services.distributed_validation_queue import get_distributed_queue
+
+    dist = get_distributed_queue(settings)
+    try:
+        dist.enqueue(job_id, job_dir)
+    except Exception:
+        logger.debug("Distributed queue enqueue skipped", exc_info=True)
     queued_job = queue.enqueue(job_id, job_dir)
     poll = f"{settings.api_v1_prefix.rstrip('/')}/validate/jobs/{job_id}"
     queue_stats = queue.stats
@@ -742,6 +770,15 @@ async def get_validation_job(
                 progress["pending_ahead"] = pos
                 progress["running_jobs"] = queue.running_count
                 progress["max_concurrency"] = queue.max_concurrency
+                progress["effective_max_concurrency"] = queue.stats.get("effective_max_concurrency")
+                queue_reason = progress.get("queue_reason")
+                if isinstance(queue_reason, str) and queue_reason.strip():
+                    message = queue_reason
+                elif pos is not None:
+                    message = (
+                        f"Accepted and queued (position {pos + 1}) — "
+                        "starts after the jobs ahead finish"
+                    )
                 eta = progress.get("estimated_wait_seconds")
                 if isinstance(eta, (int, float)):
                     message = (
