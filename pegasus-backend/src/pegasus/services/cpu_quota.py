@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-17T18:00:00Z
+# Last edited: 2026-06-17T20:03:04+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Apply per-process CPU limits (cgroup v2 cpu.max or sched affinity fallback)."""
