@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-17T07:01:32Z
+# Last edited: 2026-06-18T11:43:22+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Host-aware defaults for validation / reconciliation (partitions, threads, swap hints)."""
