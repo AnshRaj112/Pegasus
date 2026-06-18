@@ -1,12 +1,13 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T07:02:42Z
 # --- END GENERATED FILE METADATA ---
 
 """Inline hash → partition spill for multichar CSV (Rust splitter, no Polars frames)."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pegasus.validation.pipeline.partition_merkle import PartitionMerkleAccumulator
@@ -17,13 +18,23 @@ from pegasus.validation.readers import native_multichar
 if TYPE_CHECKING:
     from pegasus.validation.adapters.base import TabularSourceAdapter
 
+from pegasus.validation.pipeline.drilldown_cache import DRILLDOWN_SUFFIX
+
+
+def native_drilldown_path(workspace: Path, side: str) -> Path:
+    return Path(workspace) / f"drilldown_{side}{DRILLDOWN_SUFFIX}"
+
 
 def can_use_native_multichar_spill(
     *,
     store_payload: bool,
-    lazy_drilldown: bool,  # noqa: ARG001 — fingerprint-only spill does not need drilldown frames
     use_arrow_ipc_spill: bool,
 ) -> bool:
+    from pegasus.validation.comparators.policy import active_compare_policy
+
+    pol = active_compare_policy()
+    if pol is not None and (pol.needs_smart_canonical or pol.has_non_trivial_mapping):
+        return False
     return (
         native_multichar.native_extension_available()
         and not store_payload
@@ -42,6 +53,7 @@ def partition_side_native_multichar(
     chunk_rows: int,
     is_source: bool,
     merkle: PartitionMerkleAccumulator | None = None,
+    lazy_drilldown: bool = False,
 ) -> int:
     """Rust line splitter → inline canonical/hash/partition → direct partition spill."""
     from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
@@ -50,6 +62,11 @@ def partition_side_native_multichar(
     read_field = "source_read_seconds" if is_source else "target_read_seconds"
     part_field = "source_partition_seconds" if is_source else "target_partition_seconds"
     track_merkle = merkle is not None
+    side = "source" if is_source else "target"
+    workspace = writer.base.parent
+    drilldown_path: str | None = None
+    if lazy_drilldown:
+        drilldown_path = str(native_drilldown_path(workspace, side))
 
     with StageTimer(timings, part_field):
         with StageTimer(timings, read_field):
@@ -65,6 +82,7 @@ def partition_side_native_multichar(
                     compare_columns=compare_columns,
                     num_partitions=num_partitions,
                     track_merkle=track_merkle,
+                    drilldown_path=drilldown_path,
                 )
             elif isinstance(adapter, GcsDelimitedAdapter):
                 with adapter._stream_session().open_binary(read_ahead=True) as handle:
@@ -79,6 +97,7 @@ def partition_side_native_multichar(
                         compare_columns=compare_columns,
                         num_partitions=num_partitions,
                         track_merkle=track_merkle,
+                        drilldown_path=drilldown_path,
                     )
             else:
                 raise TypeError(

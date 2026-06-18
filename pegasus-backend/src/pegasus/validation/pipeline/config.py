@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T07:02:42Z
 # --- END GENERATED FILE METADATA ---
 
 """Pipeline configuration."""
@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from pegasus.validation.comparators.policy import ComparePolicy
 
 _PARTITION_PRESETS: dict[str, int] = {
     "small": 1024,
@@ -27,6 +29,7 @@ class TabularPipelineConfig:
     use_columnar_spill: bool = True
     use_arrow_ipc_spill: bool = True
     fingerprint_only_spill: bool = True
+    force_native_multichar_spill: bool = True
     gcs_streaming_only: bool = False  # noqa: kept for service wiring; prefetch gated in ValidationService
     enable_in_memory_reconcile: bool = False
     auto_in_memory_max_bytes: int = 256 * 1024 * 1024
@@ -40,6 +43,7 @@ class TabularPipelineConfig:
     spill_merkle_max_bytes: int = 32 * 1024 * 1024
     partition_reconcile_workers: int = 1
     streaming_spill_min_bytes: int = 64 * 1024 * 1024
+    compare_policy: ComparePolicy | None = None
 
     def resolved_partition_count(self) -> int:
         if self.partition_preset and self.partition_preset in _PARTITION_PRESETS:

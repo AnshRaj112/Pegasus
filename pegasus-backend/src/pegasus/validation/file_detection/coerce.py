@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T07:02:42Z
 # --- END GENERATED FILE METADATA ---
 
 """Resolve file_format using detection while preserving API backward compatibility."""

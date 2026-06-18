@@ -1,12 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeftOutlined,
-  SearchOutlined,
   ExclamationCircleFilled,
+  CheckCircleFilled,
+  SyncOutlined,
+  PlayCircleOutlined,
+  SearchOutlined,
   MinusCircleFilled,
   PlusCircleFilled,
-  CheckCircleFilled,
 } from '@ant-design/icons';
 
 import {
@@ -15,6 +17,10 @@ import {
   type ValidateResult,
   type ValidationHistoryDetail,
 } from '../../../shared/api/Api';
+import { useAppDispatch, useAppSelector } from '../../../redux/store';
+import { reportActions } from '../../report/Report.reducer';
+import { validationActions } from '../Validation.reducer';
+import { getActiveSession, removeActiveSession } from '../validationSessionStorage';
 
 type ActiveSectionTab = 'mismatches' | 'missing' | 'extra';
 
@@ -24,8 +30,6 @@ interface ReportRow {
   column: string;
   expected: string;
   actual: string;
-  srcFields: string;
-  tgtFields: string;
 }
 
 interface ReportMeta {
@@ -39,11 +43,14 @@ interface ReportMeta {
   sourceRowCount: number;
   targetRowCount: number;
   comparedColumnCount: number;
+  comparedColumns: string[];
 }
 
 interface ValidationReportProps {
   onBack?: () => void;
   jobId?: string;
+  runId?: string;
+  initialResult?: ValidateResult | null;
 }
 
 const TAB_TO_TYPE: Record<ActiveSectionTab, string> = {
@@ -52,28 +59,84 @@ const TAB_TO_TYPE: Record<ActiveSectionTab, string> = {
   extra: 'extra_in_target',
 };
 
-const mapRow = (row: MismatchSampleRow, index: number): ReportRow => {
-  const detail = typeof row.row_detail === 'string' ? null : row.row_detail;
-  const srcCount = detail?.source_record && typeof detail.source_record === 'object'
-    ? Object.keys(detail.source_record).length
-    : 0;
-  const tgtCount = detail?.target_record && typeof detail.target_record === 'object'
-    ? Object.keys(detail.target_record).length
-    : 0;
-
-  return {
-    id: `${row.uid}-${row.column_name ?? 'row'}-${index}`,
-    uid: row.uid,
-    column: row.column_name ?? '[ALL_COLUMNS]',
-    expected: row.source_value ?? '[Not found in source]',
-    actual: row.target_value ?? '[Null / Record missing from source pool]',
-    srcFields: srcCount ? `${srcCount} fields` : '0 fields',
-    tgtFields: tgtCount ? `${tgtCount} fields` : '0 fields',
-  };
+type RowDetail = {
+  source_record?: Record<string, unknown> | null;
+  target_record?: Record<string, unknown> | null;
 };
 
-const rowsFromSamples = (samples: MismatchSampleRow[]): ReportRow[] =>
-  samples.map((row, index) => mapRow(row, index));
+const pickInitialTab = (counts: ValidateResult['mismatch_counts']): ActiveSectionTab => {
+  if (counts.value_mismatch > 0) return 'mismatches';
+  if (counts.missing_in_target > 0) return 'missing';
+  if (counts.extra_in_target > 0) return 'extra';
+  return 'mismatches';
+};
+
+const parseRowDetail = (raw: MismatchSampleRow['row_detail']): RowDetail | null => {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as RowDetail;
+    } catch {
+      return null;
+    }
+  }
+  return raw as RowDetail;
+};
+
+const formatCell = (value: unknown): string => {
+  if (value === null || value === undefined || value === '') return '—';
+  const text = String(value);
+  if (text === '__NULL__') return '—';
+  return text;
+};
+
+const formatRecord = (
+  record: Record<string, unknown> | null | undefined,
+  column?: string | null,
+): string => {
+  if (!record) return '—';
+  if (column && column !== '—' && record[column] !== undefined && record[column] !== null) {
+    return formatCell(record[column]);
+  }
+  const keys = Object.keys(record).filter((k) => k !== 'uid');
+  if (keys.length === 0) return '—';
+  return keys.map((k) => `${k}: ${formatCell(record[k])}`).join(' · ');
+};
+
+const mapRow = (row: MismatchSampleRow, index: number, tab: ActiveSectionTab): ReportRow => {
+  const detail = parseRowDetail(row.row_detail);
+  const column = row.column_name?.trim() || null;
+
+  let expected = formatCell(row.source_value);
+  let actual = formatCell(row.target_value);
+
+  if (expected === '—' && detail?.source_record) {
+    expected = formatRecord(detail.source_record, column);
+  }
+  if (actual === '—' && detail?.target_record) {
+    actual = formatRecord(detail.target_record, column);
+  }
+
+  if (tab === 'missing') {
+    expected = formatRecord(detail?.source_record) !== '—'
+      ? formatRecord(detail?.source_record)
+      : expected;
+    actual = '— (not in target)';
+  } else if (tab === 'extra') {
+    expected = '— (not in source)';
+    actual = formatRecord(detail?.target_record) !== '—'
+      ? formatRecord(detail?.target_record)
+      : actual;
+  }
+
+  return {
+    id: `${row.uid}-${column ?? 'row'}-${index}`,
+    uid: row.uid,
+    column: column ?? (tab === 'mismatches' ? '—' : 'Full record'),
+    expected,
+    actual,
+  };
+};
 
 const historyToResult = (history: ValidationHistoryDetail): ValidateResult => ({
   summary: {
@@ -106,6 +169,7 @@ const metaFromHistory = (history: ValidationHistoryDetail): ReportMeta => ({
   sourceRowCount: history.source_row_count ?? 0,
   targetRowCount: history.target_row_count ?? 0,
   comparedColumnCount: history.compared_column_count ?? history.compared_columns.length,
+  comparedColumns: history.compared_columns ?? [],
 });
 
 const metaFromResult = (result: ValidateResult, jobId: string | null): ReportMeta => ({
@@ -119,20 +183,47 @@ const metaFromResult = (result: ValidateResult, jobId: string | null): ReportMet
   sourceRowCount: result.summary.source_row_count,
   targetRowCount: result.summary.target_row_count,
   comparedColumnCount: result.summary.compared_column_count ?? result.compared_columns?.length ?? 0,
+  comparedColumns: result.compared_columns ?? [],
 });
 
-export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobId: jobIdProp }) => {
+const fetchMismatchPage = async (
+  runId: string | null,
+  jobId: string | null,
+  params: { limit: number; offset: number; mismatch_type: string },
+) => {
+  if (runId) {
+    try {
+      return await Api.getValidationMismatches(runId, params);
+    } catch {
+      // Fall back to on-disk job artifact when DB persistence is still running.
+    }
+  }
+  if (jobId) {
+    return await Api.getValidationJobMismatches(jobId, params);
+  }
+  throw new Error('No run or job id for mismatch pagination');
+};
+
+export const ValidationReport: React.FC<ValidationReportProps> = ({
+  onBack,
+  jobId: jobIdProp,
+  runId: runIdProp,
+  initialResult: initialResultProp,
+}) => {
+  const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const { jobId: routeJobId, runId: routeRunId } = useParams<{ jobId?: string; runId?: string }>();
   const jobId = jobIdProp ?? routeJobId ?? null;
-  const runIdParam = routeRunId ?? null;
+  const runIdParam = runIdProp ?? routeRunId ?? null;
+  const pendingReportJobId = useAppSelector((s) => s.validation.pendingReportJobId);
 
   const [activeTab, setActiveTab] = useState<ActiveSectionTab>('mismatches');
-  const [uidSearchQuery, setUidSearchQuery] = useState<string>('');
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(10);
-  const [manualPageJump, setManualPageJump] = useState<string>('1');
+  const [uidSearchQuery, setUidSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [manualPageJump, setManualPageJump] = useState('1');
   const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reportMeta, setReportMeta] = useState<ReportMeta | null>(null);
   const [rowsByTab, setRowsByTab] = useState<Record<ActiveSectionTab, ReportRow[]>>({
@@ -152,53 +243,59 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
     extra: 0,
   });
   const [resolvedRunId, setResolvedRunId] = useState<string | null>(null);
-  const [useHistoryPagination, setUseHistoryPagination] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
+  const [runningMessage, setRunningMessage] = useState('Validating…');
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const applyResult = useCallback((
+    result: ValidateResult,
+    meta: ReportMeta,
+    runId: string | null,
+  ) => {
+    const counts = result.mismatch_counts;
+    const totalWrong = counts.missing_in_target + counts.extra_in_target + counts.value_mismatch;
+    setStatsOverview({
+      totalWrong,
+      mismatchedCount: counts.value_mismatch,
+      missingCount: counts.missing_in_target,
+      extraCount: counts.extra_in_target,
+    });
+    setTabTotals({
+      mismatches: counts.value_mismatch,
+      missing: counts.missing_in_target,
+      extra: counts.extra_in_target,
+    });
+    setActiveTab(pickInitialTab(counts));
+    setReportMeta(meta);
+    setResolvedRunId(runId);
+    setRowsByTab({ mismatches: [], missing: [], extra: [] });
+    setCurrentPage(1);
+    setIsRunning(false);
+    setError(null);
+  }, []);
 
   useEffect(() => {
-    if (!jobId && !runIdParam) return;
+    if (!jobId && !runIdParam && !initialResultProp) return;
 
     let cancelled = false;
-
-    const applyResult = (
-      result: ValidateResult,
-      meta: ReportMeta,
-      runId: string | null,
-      preferHistoryPagination: boolean,
-    ) => {
-      const counts = result.mismatch_counts;
-      const totalWrong = counts.missing_in_target + counts.extra_in_target + counts.value_mismatch;
-      setStatsOverview({
-        totalWrong,
-        mismatchedCount: counts.value_mismatch,
-        missingCount: counts.missing_in_target,
-        extraCount: counts.extra_in_target,
-      });
-      setTabTotals({
-        mismatches: counts.value_mismatch,
-        missing: counts.missing_in_target,
-        extra: counts.extra_in_target,
-      });
-      setReportMeta(meta);
-      setResolvedRunId(runId);
-      setUseHistoryPagination(preferHistoryPagination);
-      setRowsByTab({
-        mismatches: rowsFromSamples(result.mismatch_sample_groups.value_mismatch),
-        missing: rowsFromSamples(result.mismatch_sample_groups.missing_in_target),
-        extra: rowsFromSamples(result.mismatch_sample_groups.extra_in_target),
-      });
-    };
 
     const load = async () => {
       setLoading(true);
       setError(null);
       try {
-        let result: ValidateResult | null = null;
-        let meta: ReportMeta | null = null;
-        let runId: string | null = runIdParam;
+        let result: ValidateResult | null = initialResultProp ?? null;
+        let meta: ReportMeta | null = result && jobId
+          ? metaFromResult(result, jobId)
+          : null;
+        let runId: string | null = runIdParam ?? result?.run_id ?? null;
 
-        if (jobId) {
+        if (result && !meta && runId) {
+          meta = metaFromResult(result, jobId);
+        }
+
+        if (jobId && !result) {
           try {
-            const { data: job } = await Api.getValidationJob(jobId);
+            const { data: job } = await Api.getValidationJob(jobId, { summaryOnly: true });
             if (cancelled) return;
             if (job.status === 'completed' && job.result) {
               result = job.result;
@@ -209,12 +306,48 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
               setLoading(false);
               return;
             } else if (job.status !== 'completed') {
-              setError(job.error || 'Validation is still running');
+              const session = getActiveSession(jobId);
+              setIsRunning(true);
+              const progress = job.progress;
+              const queueReason = progress?.queue_reason ?? null;
+              const queuePosition = progress?.queue_position ?? null;
+              const statusLabel =
+                job.status === 'queued'
+                  ? (queueReason ||
+                    (queuePosition !== null
+                      ? `Accepted and queued (position ${queuePosition + 1}) — waiting for earlier jobs`
+                      : 'Accepted and queued — waiting for earlier jobs'))
+                  : null;
+              setRunningMessage(statusLabel || job.message || job.phase || 'Validation in progress…');
+              setReportMeta({
+                jobId,
+                runId: null,
+                sourceLabel: session?.sourcePath ?? null,
+                targetLabel: session?.targetPath ?? null,
+                uidColumn: session?.formSnapshot?.uidColumn ?? null,
+                delimiter: session?.formSnapshot?.delimiter ?? null,
+                isMatch: false,
+                sourceRowCount: 0,
+                targetRowCount: 0,
+                comparedColumnCount: session?.formSnapshot?.columnMappings.length ?? 0,
+                comparedColumns: [],
+              });
               setLoading(false);
               return;
             }
           } catch {
             // Job may have expired from disk; fall back to history via run id.
+          }
+
+          if (!result) {
+            try {
+              const { data: history } = await Api.getValidationHistoryRun(jobId);
+              if (cancelled) return;
+              result = historyToResult(history);
+              meta = metaFromHistory(history);
+              runId = history.run_id;
+            } catch {
+            }
           }
         }
 
@@ -240,6 +373,7 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
               sourceRowCount: meta.sourceRowCount || historyMeta.sourceRowCount,
               targetRowCount: meta.targetRowCount || historyMeta.targetRowCount,
               comparedColumnCount: meta.comparedColumnCount || historyMeta.comparedColumnCount,
+              comparedColumns: meta.comparedColumns.length ? meta.comparedColumns : historyMeta.comparedColumns,
             };
           } catch {
             // Job result alone is sufficient when history is unavailable.
@@ -252,7 +386,7 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
           return;
         }
 
-        applyResult(result, meta, runId, Boolean(runId));
+        applyResult(result, meta, runId);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load validation report');
@@ -264,37 +398,108 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
 
     void load();
     return () => { cancelled = true; };
-  }, [jobId, runIdParam]);
+  }, [jobId, runIdParam, initialResultProp, reloadToken, applyResult]);
 
   useEffect(() => {
-    if (!resolvedRunId || !useHistoryPagination) return;
+    if (!jobId || !isRunning) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      try {
+        const { data: job } = await Api.getValidationJob(jobId, { summaryOnly: true });
+        if (cancelled) return;
+        if (job.status === 'completed' && job.result) {
+          removeActiveSession(jobId);
+          dispatch(reportActions.fetchReportsRequest());
+          setReloadToken((t) => t + 1);
+          return;
+        }
+        if (job.status === 'failed') {
+          removeActiveSession(jobId);
+          setIsRunning(false);
+          setError(job.error || 'Validation failed');
+          dispatch(reportActions.fetchReportsRequest());
+          return;
+        }
+        const progress = job.progress;
+        const queueReason = progress?.queue_reason ?? null;
+        setRunningMessage(
+          queueReason || job.message || job.phase || 'Validation in progress…',
+        );
+        timer = setTimeout(() => { void poll(); }, 2000);
+      } catch {
+        timer = setTimeout(() => { void poll(); }, 3000);
+      }
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [jobId, isRunning, dispatch]);
+
+  useEffect(() => {
+    if (pendingReportJobId) {
+      navigate(`/validation/report/${pendingReportJobId}`);
+      dispatch(validationActions.clearPendingReportJob());
+    }
+  }, [pendingReportJobId, navigate, dispatch]);
+
+  useEffect(() => {
+    const tabCount = activeTab === 'mismatches'
+      ? statsOverview.mismatchedCount
+      : activeTab === 'missing'
+        ? statsOverview.missingCount
+        : statsOverview.extraCount;
+
+    if (!reportMeta || tabCount === 0) {
+      setRowsByTab((prev) => ({ ...prev, [activeTab]: [] }));
+      return;
+    }
 
     let cancelled = false;
 
     const loadPage = async () => {
+      setPageLoading(true);
       try {
-        const { data: page } = await Api.getValidationMismatches(resolvedRunId, {
-          limit: pageSize,
-          offset: (currentPage - 1) * pageSize,
-          mismatch_type: TAB_TO_TYPE[activeTab],
-        });
+        const { data: page } = await fetchMismatchPage(
+          resolvedRunId,
+          reportMeta.jobId,
+          {
+            limit: pageSize,
+            offset: (currentPage - 1) * pageSize,
+            mismatch_type: TAB_TO_TYPE[activeTab],
+          },
+        );
         if (cancelled) return;
         setRowsByTab((prev) => ({
           ...prev,
-          [activeTab]: page.items.map(mapRow),
+          [activeTab]: page.items.map((row, index) => mapRow(row, index, activeTab)),
         }));
-        setTabTotals((prev) => ({
-          ...prev,
-          [activeTab]: page.total,
-        }));
+        if (page.total > 0) {
+          setTabTotals((prev) => ({
+            ...prev,
+            [activeTab]: page.total,
+          }));
+        }
       } catch {
-        // Keep embedded sample rows when history pagination is unavailable.
+        if (!cancelled) {
+          setRowsByTab((prev) => ({ ...prev, [activeTab]: [] }));
+        }
+      } finally {
+        if (!cancelled) setPageLoading(false);
       }
     };
 
     void loadPage();
     return () => { cancelled = true; };
-  }, [resolvedRunId, useHistoryPagination, currentPage, pageSize, activeTab]);
+  }, [reportMeta, resolvedRunId, activeTab, currentPage, pageSize, statsOverview]);
+
+  useEffect(() => {
+    setManualPageJump(String(currentPage));
+  }, [currentPage]);
 
   const currentTabTotalRows = tabTotals[activeTab];
   const calculatedTotalPages = Math.max(1, Math.ceil(currentTabTotalRows / pageSize));
@@ -316,7 +521,13 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
     else navigate(-1);
   };
 
-  if (!jobId && !runIdParam) {
+  const handleRerun = () => {
+    const runId = resolvedRunId ?? reportMeta?.runId;
+    if (!runId) return;
+    dispatch(validationActions.runValidationFromHistoryRequest(runId));
+  };
+
+  if (!jobId && !runIdParam && !initialResultProp) {
     return (
       <div style={{ padding: '24px' }}>
         <p style={{ color: '#ba1a1a' }}>Missing job or run id in URL</p>
@@ -327,6 +538,32 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
 
   if (loading) {
     return <p style={{ padding: '24px' }}>Loading validation report…</p>;
+  }
+
+  if (isRunning && reportMeta) {
+    return (
+      <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <SyncOutlined spin style={{ fontSize: '24px', color: '#1677ff' }} />
+          <div>
+            <h2 style={{ margin: 0, fontSize: '20px' }}>
+              {runningMessage.toLowerCase().includes('queued') ? 'Queued for validation' : 'Validation in progress'}
+            </h2>
+            <p style={{ margin: '4px 0 0', color: '#64748b' }}>{runningMessage}</p>
+          </div>
+        </div>
+        {(reportMeta.sourceLabel || reportMeta.targetLabel) && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '16px' }}>
+            <FileLabel label="Source" path={reportMeta.sourceLabel} />
+            <FileLabel label="Target" path={reportMeta.targetLabel} />
+          </div>
+        )}
+        <p style={{ color: '#64748b', fontSize: '13px' }}>
+          This session stays in Reports → Active until validation finishes. You will be notified when the report is ready.
+        </p>
+        <button onClick={handleBack} type="button" style={{ alignSelf: 'flex-start', padding: '8px 16px' }}>Back</button>
+      </div>
+    );
   }
 
   if (error || !reportMeta) {
@@ -353,9 +590,20 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
             {reportMeta.runId ? `Run ${reportMeta.runId}` : ''}
           </p>
         </div>
-        <button onClick={handleBack} type="button" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 16px', backgroundColor: '#ffffff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
-          <ArrowLeftOutlined /> Back
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {(resolvedRunId ?? reportMeta.runId) && (
+            <button
+              type="button"
+              onClick={handleRerun}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 16px', backgroundColor: '#0057c2', border: 'none', color: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
+            >
+              <PlayCircleOutlined /> Run Again
+            </button>
+          )}
+          <button onClick={handleBack} type="button" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 16px', backgroundColor: '#ffffff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+            <ArrowLeftOutlined /> Back
+          </button>
+        </div>
       </div>
 
       {(reportMeta.sourceLabel || reportMeta.targetLabel) && (
@@ -406,87 +654,93 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
         <StatCard label="Extra in Target" value={statsOverview.extraCount.toLocaleString()} color="#1677ff" />
       </div>
 
-      <div style={{ backgroundColor: '#ffffff', border: '1px solid #d9d9d9', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <label style={{ fontSize: '13px', fontWeight: 700, color: '#1b1b1c' }}>Filter by UID</label>
-        <div style={{ position: 'relative' }}>
-          <input
-            type="text"
-            placeholder="Enter UID to search..."
-            value={uidSearchQuery}
-            onChange={(e) => setUidSearchQuery(e.target.value)}
-            style={{ width: '100%', height: '36px', padding: '0 12px 0 36px', borderRadius: '6px', border: '1px solid #d9d9d9', fontSize: '13px', outline: 'none' }}
-          />
-          <SearchOutlined style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
-        </div>
-      </div>
+      {currentTabTotalRows > 0 && (
+        <>
+          <div style={{ backgroundColor: '#ffffff', border: '1px solid #d9d9d9', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <label style={{ fontSize: '13px', fontWeight: 700, color: '#1b1b1c' }}>Filter by UID</label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                placeholder="Enter UID to search..."
+                value={uidSearchQuery}
+                onChange={(e) => setUidSearchQuery(e.target.value)}
+                style={{ width: '100%', height: '36px', padding: '0 12px 0 36px', borderRadius: '6px', border: '1px solid #d9d9d9', fontSize: '13px', outline: 'none' }}
+              />
+              <SearchOutlined style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+            </div>
+          </div>
 
-      <div style={{ display: 'flex', borderBottom: '1px solid #d9d9d9', gap: '4px' }}>
-        {(['mismatches', 'missing', 'extra'] as ActiveSectionTab[]).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => { setActiveTab(tab); setCurrentPage(1); }}
-            style={{ padding: '10px 24px', background: 'none', border: 'none', borderBottom: activeTab === tab ? '2px solid #1677ff' : '2px solid transparent', color: activeTab === tab ? '#1677ff' : '#727786', fontWeight: 600, cursor: 'pointer', fontSize: '13px' }}
-          >
-            {tab === 'mismatches' ? 'Mismatches' : tab === 'missing' ? 'Missing' : 'Extra'} ({tabTotals[tab]})
-          </button>
-        ))}
-      </div>
+          <div style={{ display: 'flex', borderBottom: '1px solid #d9d9d9', gap: '4px' }}>
+            {(['mismatches', 'missing', 'extra'] as ActiveSectionTab[]).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => { setActiveTab(tab); setCurrentPage(1); }}
+                style={{ padding: '10px 24px', background: 'none', border: 'none', borderBottom: activeTab === tab ? '2px solid #1677ff' : '2px solid transparent', color: activeTab === tab ? '#1677ff' : '#727786', fontWeight: 600, cursor: 'pointer', fontSize: '13px' }}
+              >
+                {tab === 'mismatches' ? 'Mismatches' : tab === 'missing' ? 'Missing' : 'Extra'} ({tabTotals[tab].toLocaleString()})
+              </button>
+            ))}
+          </div>
 
-      {filteredItems.length === 0 && (
-        <p style={{ margin: 0, fontSize: '13px', color: '#727786', padding: '8px 4px' }}>
-          No {activeTab === 'mismatches' ? 'value mismatches' : activeTab === 'missing' ? 'missing records' : 'extra records'} to display.
-        </p>
-      )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '16px' }}>
+            <StatCard label="Active Page" value={String(currentPage)} small />
+            <StatCard label="Page Size" value={String(pageSize)} small />
+            <StatCard label="Total Pages" value={String(calculatedTotalPages)} small />
+          </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '16px' }}>
-          <StatCard label="Active Page" value={String(currentPage)} small />
-          <StatCard label="Page Size" value={String(pageSize)} small />
-          <StatCard label="Total Pages" value={String(calculatedTotalPages)} small />
-        </div>
+          {pageLoading && (
+            <p style={{ margin: 0, fontSize: '13px', color: '#727786' }}>
+              Loading page {currentPage} of {calculatedTotalPages}…
+            </p>
+          )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {filteredItems.map((item) => (
-            <div key={item.id} style={{ backgroundColor: '#ffffff', border: '1px solid #fa8c16', borderRadius: '8px', padding: '16px', position: 'relative' }}>
-              <span style={{ position: 'absolute', right: '16px', top: '16px', fontSize: '11px', fontWeight: 700, backgroundColor: activeTab === 'extra' ? '#e6f4ff' : '#fff7e6', color: activeTab === 'extra' ? '#1677ff' : '#fa8c16', padding: '2px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>
-                {activeTab === 'mismatches' && <ExclamationCircleFilled />}
-                {activeTab === 'missing' && <MinusCircleFilled />}
-                {activeTab === 'extra' && <PlusCircleFilled />}
-                {' '}{activeTab}
-              </span>
-              <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#727786', fontWeight: 700 }}>Record</span>
-              <h4 style={{ fontSize: '16px', fontWeight: 700, margin: '2px 0 0 0' }}>{item.uid}</h4>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', border: '1px solid #d9d9d9', borderRadius: '6px', padding: '12px', backgroundColor: '#f8fafc', marginTop: '12px' }}>
-                <div>
-                  <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#727786', fontWeight: 700 }}>Column</span>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '13px', fontWeight: 600, color: '#ba1a1a' }}>{item.column}</p>
-                </div>
-                <div>
-                  <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#727786', fontWeight: 700 }}>Expected (Source)</span>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '13px', fontFamily: 'var(--font-mono)', color: '#52c41a' }}>{item.expected}</p>
-                </div>
-                <div>
-                  <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#727786', fontWeight: 700 }}>Actual (Target)</span>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '13px', fontFamily: 'var(--font-mono)', color: '#ba1a1a' }}>{item.actual}</p>
+          {!pageLoading && filteredItems.length === 0 && (
+            <p style={{ margin: 0, fontSize: '13px', color: '#727786', padding: '8px 4px' }}>
+              No {activeTab === 'mismatches' ? 'value mismatches' : activeTab === 'missing' ? 'missing records' : 'extra records'} on this page.
+            </p>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {filteredItems.map((item) => (
+              <div key={item.id} style={{ backgroundColor: '#ffffff', border: '1px solid #fa8c16', borderRadius: '8px', padding: '16px', position: 'relative' }}>
+                <span style={{ position: 'absolute', right: '16px', top: '16px', fontSize: '11px', fontWeight: 700, backgroundColor: activeTab === 'extra' ? '#e6f4ff' : '#fff7e6', color: activeTab === 'extra' ? '#1677ff' : '#fa8c16', padding: '2px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>
+                  {activeTab === 'mismatches' && <ExclamationCircleFilled />}
+                  {activeTab === 'missing' && <MinusCircleFilled />}
+                  {activeTab === 'extra' && <PlusCircleFilled />}
+                  {' '}{activeTab}
+                </span>
+                <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#727786', fontWeight: 700 }}>Record</span>
+                <h4 style={{ fontSize: '16px', fontWeight: 700, margin: '2px 0 0 0' }}>{item.uid}</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', border: '1px solid #d9d9d9', borderRadius: '6px', padding: '12px', backgroundColor: '#f8fafc', marginTop: '12px' }}>
+                  <div>
+                    <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#727786', fontWeight: 700 }}>Column</span>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '13px', fontWeight: 600, color: '#ba1a1a' }}>{item.column}</p>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#727786', fontWeight: 700 }}>Expected (Source)</span>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '13px', fontFamily: 'var(--font-mono)', color: '#52c41a' }}>{item.expected}</p>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#727786', fontWeight: 700 }}>Actual (Target)</span>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '13px', fontFamily: 'var(--font-mono)', color: '#ba1a1a' }}>{item.actual}</p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
 
-        {currentTabTotalRows > 0 && (
-          <div style={{ border: '1px solid #d9d9d9', borderRadius: '8px', padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', marginTop: '12px' }}>
+          <div style={{ border: '1px solid #d9d9d9', borderRadius: '8px', padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff' }}>
             <div style={{ fontSize: '13px', color: '#414755' }}>
-              Showing <strong>{filteredItems.length ? (currentPage - 1) * pageSize + 1 : 0}</strong> to <strong>{(currentPage - 1) * pageSize + filteredItems.length}</strong> of <strong>{currentTabTotalRows}</strong> rows
+              Showing <strong>{filteredItems.length ? (currentPage - 1) * pageSize + 1 : 0}</strong> to <strong>{(currentPage - 1) * pageSize + filteredItems.length}</strong> of <strong>{currentTabTotalRows.toLocaleString()}</strong> rows
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <button
                   type="button"
-                  disabled={currentPage === 1}
+                  disabled={currentPage === 1 || pageLoading}
                   onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                  style={{ height: '32px', padding: '0 12px', border: '1px solid #d9d9d9', borderRadius: '6px', backgroundColor: '#ffffff', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.5 : 1, fontSize: '12px', fontWeight: 500 }}
+                  style={{ height: '32px', padding: '0 12px', border: '1px solid #d9d9d9', borderRadius: '6px', backgroundColor: '#ffffff', cursor: currentPage === 1 || pageLoading ? 'not-allowed' : 'pointer', opacity: currentPage === 1 || pageLoading ? 0.5 : 1, fontSize: '12px', fontWeight: 500 }}
                 >
                   Previous
                 </button>
@@ -495,9 +749,9 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
                 </span>
                 <button
                   type="button"
-                  disabled={currentPage === calculatedTotalPages}
+                  disabled={currentPage === calculatedTotalPages || pageLoading}
                   onClick={() => setCurrentPage((prev) => Math.min(calculatedTotalPages, prev + 1))}
-                  style={{ height: '32px', padding: '0 12px', border: '1px solid #d9d9d9', borderRadius: '6px', backgroundColor: '#ffffff', cursor: currentPage === calculatedTotalPages ? 'not-allowed' : 'pointer', opacity: currentPage === calculatedTotalPages ? 0.5 : 1, fontSize: '12px', fontWeight: 500 }}
+                  style={{ height: '32px', padding: '0 12px', border: '1px solid #d9d9d9', borderRadius: '6px', backgroundColor: '#ffffff', cursor: currentPage === calculatedTotalPages || pageLoading ? 'not-allowed' : 'pointer', opacity: currentPage === calculatedTotalPages || pageLoading ? 0.5 : 1, fontSize: '12px', fontWeight: 500 }}
                 >
                   Next
                 </button>
@@ -526,8 +780,8 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({ onBack, jobI
               </div>
             </div>
           </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 };

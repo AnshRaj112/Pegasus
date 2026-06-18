@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T17:14:06+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Six-stage tabular reconciliation pipeline."""
@@ -25,6 +25,7 @@ from pegasus.validation.pipeline.fingerprint import (
     row_fingerprint_bytes,
     row_fingerprint_from_parts,
     _canonical_parts,
+    _identity_parts,
 )
 from pegasus.validation.lifecycle_profiler import lifecycle_span
 from pegasus.validation.pipeline.in_memory import (
@@ -203,9 +204,26 @@ class TabularReconciliationPipeline:
         self._config = config
 
     def _resolved_compare_columns(self, schema_names: list[str]) -> list[str]:
+        policy = self._config.compare_policy
+        if policy is not None and policy.fields:
+            return policy.compare_keys
         return filter_compare_columns(self._compare_columns, schema_names)
 
     def run(
+        self,
+        *,
+        workspace: Path | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> PipelineResult:
+        from pegasus.validation.comparators.policy import compare_policy_context
+
+        with compare_policy_context(self._config.compare_policy):
+            return self._run_impl(
+                workspace=workspace,
+                progress_callback=progress_callback,
+            )
+
+    def _run_impl(
         self,
         *,
         workspace: Path | None = None,
@@ -300,12 +318,23 @@ class TabularReconciliationPipeline:
             max(source_bytes, target_bytes),
             column_count=len(compare_columns) + len(self._identity_columns),
         )
+        from pegasus.validation.readers import native_multichar
+
+        native_disk_drilldown = (
+            native_multichar.native_extension_available()
+            and self._config.fingerprint_only_spill
+            and self._config.force_native_multichar_spill
+        )
         lazy_drilldown = enable_drilldown and (
             self._config.lazy_column_drilldown or self._config.fingerprint_only_spill
         )
-        if est_rows > 250_000:
+        if lazy_drilldown and not native_disk_drilldown and est_rows > 250_000:
             lazy_drilldown = False
-        drilldown_cache = DrilldownCache(compare_columns) if lazy_drilldown else None
+        drilldown_cache = (
+            DrilldownCache(compare_columns)
+            if lazy_drilldown and not native_disk_drilldown
+            else None
+        )
         spill_payload = (
             enable_drilldown
             and not lazy_drilldown
@@ -318,6 +347,25 @@ class TabularReconciliationPipeline:
         else:
             work = workspace
             work.mkdir(parents=True, exist_ok=True)
+
+        combined_bytes = source_bytes + target_bytes
+        from pegasus.services.resource_models import estimate_streaming_spill_disk_bytes
+
+        required_disk = estimate_streaming_spill_disk_bytes(
+            combined_bytes,
+            min_disk_per_job_bytes=50 * 1024**2,
+        )
+        try:
+            free_disk = shutil.disk_usage(work if work.exists() else work.parent).free
+        except OSError:
+            free_disk = 0
+        if free_disk < required_disk:
+            from pegasus.services.exceptions import InsufficientDiskError
+
+            raise InsufficientDiskError(
+                f"Insufficient disk for spill workspace: need ~{required_disk // 1024**2} MiB, "
+                f"only {free_disk // 1024**2} MiB free at {work}"
+            )
 
         try:
             return self._run_spill_path(
@@ -338,6 +386,8 @@ class TabularReconciliationPipeline:
                 drilldown_cache=drilldown_cache,
                 progress_callback=progress_callback,
                 est_rows=est_rows,
+                persist_drilldown=not owned_workspace,
+                native_disk_drilldown=native_disk_drilldown,
             )
         finally:
             if owned_workspace:
@@ -363,6 +413,8 @@ class TabularReconciliationPipeline:
         drilldown_cache: DrilldownCache | None,
         progress_callback: Callable[[dict[str, Any]], None] | None,
         est_rows: int,
+        persist_drilldown: bool = False,
+        native_disk_drilldown: bool = False,
     ) -> PipelineResult:
         from pegasus.validation.pipeline.partition_merkle import PartitionMerkleAccumulator
 
@@ -563,7 +615,13 @@ class TabularReconciliationPipeline:
             )
 
         use_spill_payload = spill_payload
-        reconcile_workers = resolved_reconcile_workers(self._config.partition_reconcile_workers)
+        from pegasus.core.config import get_settings
+
+        cpu_reserve = max(0, int(get_settings().validation_cpu_reserve_cores))
+        reconcile_workers = resolved_reconcile_workers(
+            self._config.partition_reconcile_workers,
+            cpu_reserve=cpu_reserve,
+        )
         if live_progress is not None:
             live_progress.begin_reconcile(
                 partitions_total=len(active_pids),
@@ -632,7 +690,9 @@ class TabularReconciliationPipeline:
         )
         publish_stage(reconcile_stage, progress_callback=progress_callback)
         spill_path = "spill_binary"
-        if self._config.use_arrow_ipc_spill and not spill_payload:
+        if lazy_drilldown and native_disk_drilldown:
+            spill_path = "spill_native_multichar_drilldown"
+        elif self._config.use_arrow_ipc_spill and not spill_payload:
             spill_path = "spill_arrow_ipc"
         elif lazy_drilldown:
             spill_path = "spill_binary_lazy_drilldown"
@@ -663,6 +723,8 @@ class TabularReconciliationPipeline:
         publish_final_stages(
             timings, io, progress_callback=progress_callback, include_report=False
         )
+        if persist_drilldown and drilldown_cache is not None:
+            drilldown_cache.persist(work)
         return PipelineResult(
             schema_valid=len(schema_diffs) == 0,
             schema_differences=schema_diffs,
@@ -707,6 +769,7 @@ class TabularReconciliationPipeline:
             "use_columnar_spill": self._config.use_columnar_spill,
             "use_arrow_ipc_spill": self._config.use_arrow_ipc_spill,
             "merkle": merkle,
+            "force_native_multichar_spill": self._config.force_native_multichar_spill,
         }
         polars_rows = try_partition_side_polars(
             adapter,
@@ -775,10 +838,11 @@ class TabularReconciliationPipeline:
                         chunk_index=chunk_index,
                         rows_in_chunk=len(chunk),
                     )
+                side_name = "source" if is_source else "target"
                 for record in chunk:
                     with StageTimer(timings, "canonicalization_seconds"):
-                        id_parts = _canonical_parts(record, id_cols)
-                        cmp_parts = _canonical_parts(record, cmp_cols)
+                        id_parts = _identity_parts(record, id_cols)
+                        cmp_parts = _canonical_parts(record, cmp_cols, side=side_name)
                     with StageTimer(timings, "identity_generation_seconds"):
                         identity = identity_key_from_parts(id_parts)
                     with StageTimer(timings, "fingerprint_generation_seconds"):

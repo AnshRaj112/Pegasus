@@ -1,12 +1,13 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T17:14:06+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Partition reconcile parallelism thresholds."""
 
 from __future__ import annotations
 
+from pegasus.core.resource_tuning import schedulable_cpu_cores
 from pegasus.validation.pipeline.partition_reconcile import (
     resolved_reconcile_workers,
     should_parallel_reconcile,
@@ -14,8 +15,9 @@ from pegasus.validation.pipeline.partition_reconcile import (
 
 
 def test_resolved_reconcile_workers_auto() -> None:
-    workers = resolved_reconcile_workers(0)
-    assert workers >= 2
+    schedulable = schedulable_cpu_cores(reserve=1)
+    workers = resolved_reconcile_workers(0, cpu_reserve=1)
+    assert 1 <= workers <= schedulable
 
 
 def test_should_parallel_reconcile_large_input_lower_bar() -> None:

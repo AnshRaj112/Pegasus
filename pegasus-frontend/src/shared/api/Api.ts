@@ -17,7 +17,15 @@ const MAX_POLL_BACKOFF_MS = 30_000;
 export interface ColumnMapping {
   source_column: string;
   target_column: string;
+  source_columns?: string[];
   target_columns?: string[];
+  compare_mode?: string;
+  structured_order_sensitive?: boolean;
+  is_sensitive?: boolean;
+  source_regex_pattern?: string;
+  source_regex_replacement?: string;
+  target_regex_pattern?: string;
+  target_regex_replacement?: string;
 }
 
 export interface GoogleCloudStorageConfig {
@@ -55,6 +63,10 @@ export interface CloudBrowseEntry {
   path: string;
   is_dir: boolean;
   size_bytes?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  owner?: string | null;
+  created_by?: string | null;
 }
 
 export interface CloudBrowseResponse {
@@ -91,6 +103,26 @@ export interface CloudConnection {
   bucket: string;
   project_id: string | null;
   active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CloudConnectionCreateRequest {
+  name: string;
+  provider?: string;
+  bucket?: string;
+  project_id?: string | null;
+  credentials_json: string;
+  active?: boolean;
+}
+
+export interface CloudConnectionUpdateRequest {
+  name?: string;
+  provider?: string;
+  bucket?: string;
+  project_id?: string | null;
+  credentials_json?: string;
+  active?: boolean;
 }
 
 export interface LocalColumnPreviewResponse {
@@ -101,8 +133,12 @@ export interface LocalColumnPreviewResponse {
   unmatched_source_columns: string[];
   unmatched_target_columns: string[];
   delimiter: string;
+  has_header?: boolean;
+  inferred_has_header?: boolean | null;
   source_samples: Record<string, string[]>;
   target_samples: Record<string, string[]>;
+  complex_columns?: string[];
+  needs_order_preference?: boolean;
 }
 
 export interface ValidationJobAcceptedResponse {
@@ -145,10 +181,24 @@ export interface ValidateResult {
   durations?: { validation_seconds?: number; total_seconds?: number };
 }
 
+export interface ValidationJobProgress {
+  queue_reason?: string | null;
+  queue_position?: number | null;
+  pending_ahead?: number | null;
+  running_jobs?: number | null;
+  estimated_wait_seconds?: number | null;
+  effective_max_concurrency?: number | null;
+  allocated_cpu_cores?: number | null;
+}
+
 export interface ValidationJobDetailResponse {
   status: string;
+  phase?: string | null;
+  message?: string | null;
   error?: string | null;
   result?: ValidateResult | null;
+  progress?: ValidationJobProgress;
+  resource_profile?: Record<string, unknown> | null;
 }
 
 export interface ValidationMismatchesResponse {
@@ -159,7 +209,7 @@ export interface ValidationMismatchesResponse {
   limit: number;
 }
 
-export interface ValidationHistoryDetail {
+export interface ValidationHistorySummary {
   run_id: string;
   status: string;
   source_path: string | null;
@@ -170,11 +220,24 @@ export interface ValidationHistoryDetail {
   delimiter: string;
   is_match: boolean | null;
   mismatch_counts: MismatchCounts;
-  source_row_count: number | null;
-  target_row_count: number | null;
+  mapping_count: number;
+  durations?: { upload_seconds?: number; validation_seconds?: number; total_seconds?: number };
+  created_at: string;
+  completed_at?: string | null;
+  source_row_count?: number | null;
+  target_row_count?: number | null;
+}
+
+export interface ValidationHistoryDetail extends ValidationHistorySummary {
+  column_mappings?: ColumnMapping[];
   compared_column_count: number | null;
   compared_columns: string[];
-  durations?: { validation_seconds?: number; total_seconds?: number };
+}
+
+export interface ValidationHistoryListResponse {
+  items: ValidationHistorySummary[];
+  total: number;
+  file_pair_key?: string | null;
 }
 
 export interface QueueJobSnapshot {
@@ -183,11 +246,29 @@ export interface QueueJobSnapshot {
   enqueued_at: number;
   started_at: number | null;
   finished_at: number | null;
+  position?: number | null;
+  queue_wait_reason?: string | null;
+  estimated_wait_seconds?: number | null;
+}
+
+export interface QueueResourceAdvisor {
+  recommended_max_concurrency?: number;
+  limits?: {
+    max_safe_by_ram?: number;
+    max_safe_by_disk?: number;
+    max_safe_by_cpu?: number;
+  };
+  warnings?: string[];
 }
 
 export interface QueueStatusResponse {
+  max_concurrency?: number;
+  effective_max_concurrency?: number;
+  utilization_slack?: number;
+  auto_tune_enabled?: boolean;
   running: number;
   pending: number;
+  resource_advisor?: QueueResourceAdvisor;
   jobs: QueueJobSnapshot[];
 }
 
@@ -241,10 +322,12 @@ const E = {
   validateCloudProfile: '/validate/cloud/profile',
   cloudConnections: '/admin/cloud-connections',
   validateJob: (jobId: string) => `/validate/jobs/${jobId}`,
+  validateJobMismatches: (jobId: string) => `/validate/jobs/${jobId}/mismatches`,
   validateDailyStats: '/validate/history/daily-stats',
   validateEntityInsights: '/validate/history/entities/insights',
   validateCreateEntity: '/validate/history/entities',
   validateHistoryDraft: '/validate/history/draft',
+  validateHistory: '/validate/history',
   validateHistoryRun: (runId: string) => `/validate/history/${runId}`,
   validateHistoryMismatches: (runId: string) => `/validate/history/${runId}/mismatches`,
 } as const;
@@ -275,6 +358,21 @@ export const Api = {
   listCloudConnections: (): Promise<AxiosResponse<CloudConnection[]>> =>
     httpClient.get(E.cloudConnections),
 
+  /** POST /admin/cloud-connections — create a saved GCS connection profile */
+  createCloudConnection: (body: CloudConnectionCreateRequest): Promise<AxiosResponse<CloudConnection>> =>
+    httpClient.post(E.cloudConnections, body),
+
+  /** PATCH /admin/cloud-connections/{id} — update a saved connection */
+  updateCloudConnection: (
+    connectionId: string,
+    body: CloudConnectionUpdateRequest,
+  ): Promise<AxiosResponse<CloudConnection>> =>
+    httpClient.patch(`${E.cloudConnections}/${connectionId}`, body),
+
+  /** DELETE /admin/cloud-connections/{id} */
+  deleteCloudConnection: (connectionId: string): Promise<AxiosResponse<void>> =>
+    httpClient.delete(`${E.cloudConnections}/${connectionId}`),
+
   /** POST /validate/cloud/browse — list GCS prefixes/objects under a bucket prefix */
   browseCloud: (body: CloudBrowseRequest): Promise<AxiosResponse<CloudBrowseResponse>> =>
     httpClient.post(E.validateCloudBrowse, body),
@@ -292,15 +390,28 @@ export const Api = {
     httpClient.post(E.validateLocal, body),
 
   /** GET /validate/jobs/{job_id} — poll job status/result */
-  getValidationJob: (jobId: string): Promise<AxiosResponse<ValidationJobDetailResponse>> =>
-    httpClient.get(E.validateJob(jobId), { timeout: JOB_POLL_TIMEOUT_MS }),
+  getValidationJob: (
+    jobId: string,
+    options: { summaryOnly?: boolean } = {},
+  ): Promise<AxiosResponse<ValidationJobDetailResponse>> =>
+    httpClient.get(E.validateJob(jobId), {
+      params: options.summaryOnly ? { summary_only: true } : undefined,
+      timeout: JOB_POLL_TIMEOUT_MS,
+    }),
+
+  /** GET /validate/jobs/{job_id}/mismatches — paginated rows from on-disk job artifact */
+  getValidationJobMismatches: (
+    jobId: string,
+    params: { limit: number; offset: number; mismatch_type?: string },
+  ): Promise<AxiosResponse<ValidationMismatchesResponse>> =>
+    httpClient.get(E.validateJobMismatches(jobId), { params }),
 
   /** Poll until completed or failed; retries transient network/gateway errors. */
   pollValidationUntilComplete: async (jobId: string): Promise<ValidateResult> => {
     let backoffMs = POLL_INTERVAL_MS;
     for (;;) {
       try {
-        const { data } = await Api.getValidationJob(jobId);
+        const { data } = await Api.getValidationJob(jobId, { summaryOnly: true });
         backoffMs = POLL_INTERVAL_MS;
         if (data.status === 'completed' && data.result) return data.result;
         if (data.status === 'failed') throw new Error(data.error || 'Validation failed');
@@ -312,6 +423,20 @@ export const Api = {
       }
     }
   },
+
+  /** GET /validate/history — paginated validation or mapping history */
+  listValidationHistory: (params: {
+    limit?: number;
+    offset?: number;
+    kind?: 'validation' | 'mapping';
+    source_path?: string;
+    target_path?: string;
+  } = {}): Promise<AxiosResponse<ValidationHistoryListResponse>> =>
+    httpClient.get(E.validateHistory, { params }),
+
+  /** DELETE /validate/history/{run_id} — remove one persisted run */
+  deleteValidationHistoryRun: (runId: string): Promise<AxiosResponse<void>> =>
+    httpClient.delete(E.validateHistoryRun(runId)),
 
   /** GET /validate/history/{run_id} — persisted run summary (fallback when job poll expires) */
   getValidationHistoryRun: (runId: string): Promise<AxiosResponse<ValidationHistoryDetail>> =>

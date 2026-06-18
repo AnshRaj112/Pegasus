@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T17:14:06+05:30
 # --- END GENERATED FILE METADATA ---
 
 """GCS streaming I/O — connection reuse, chunked reads, no full-object materialization."""
@@ -17,8 +17,24 @@ from typing import IO, Any, Iterator
 
 from pegasus.validation.gcs_object import GcsObjectRef
 
+from pegasus.validation.stream_limits import (
+    DEFAULT_MAX_READ_CHUNK_BYTES,
+    StreamLimitExceededError,
+    clamp_read_chunk_bytes,
+)
+
+def _configured_max_chunk_bytes() -> int:
+    try:
+        from pegasus.core.config import get_settings
+
+        return int(get_settings().validation_max_read_chunk_bytes)
+    except Exception:
+        return DEFAULT_MAX_READ_CHUNK_BYTES
+
+
 _DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024
 _DEFAULT_READAHEAD_CHUNKS = 2
+_MAX_LINE_BYTES = DEFAULT_MAX_READ_CHUNK_BYTES
 
 _CLIENT_LOCK = threading.Lock()
 _CLIENTS: dict[str, Any] = {}
@@ -56,11 +72,18 @@ def get_blob(ref: GcsObjectRef):
 class _ReadAheadBinaryIO:
     """Buffered reader over a GCS binary handle with chunked read-ahead."""
 
-    __slots__ = ("_raw", "_chunk_size", "_buffer", "_eof", "_bytes_read")
+    __slots__ = ("_raw", "_chunk_size", "_buffer", "_eof", "_bytes_read", "_max_line_bytes")
 
-    def __init__(self, raw: IO[bytes], *, chunk_size: int = _DEFAULT_CHUNK_BYTES) -> None:
+    def __init__(
+        self,
+        raw: IO[bytes],
+        *,
+        chunk_size: int = _DEFAULT_CHUNK_BYTES,
+        max_line_bytes: int = _MAX_LINE_BYTES,
+    ) -> None:
         self._raw = raw
-        self._chunk_size = max(4096, chunk_size)
+        self._chunk_size = clamp_read_chunk_bytes(chunk_size)
+        self._max_line_bytes = max(4096, int(max_line_bytes))
         self._buffer = bytearray()
         self._eof = False
         self._bytes_read = 0
@@ -96,6 +119,10 @@ class _ReadAheadBinaryIO:
 
     def readline(self, size: int = -1) -> bytes:
         while True:
+            if len(self._buffer) > self._max_line_bytes:
+                raise StreamLimitExceededError(
+                    f"Line exceeded {self._max_line_bytes} bytes without a newline"
+                )
             nl = self._buffer.find(b"\n")
             if nl >= 0:
                 line_end = nl + 1
@@ -129,6 +156,7 @@ class _ReadAheadBinaryIO:
         return bool(getattr(self._raw, "closed", False))
 
     def close(self) -> None:
+        self._buffer.clear()
         closer = getattr(self._raw, "close", None)
         if callable(closer):
             closer()
@@ -179,8 +207,9 @@ class GcsStreamSession:
         return self._cached_object_body
 
     def store_cached_object_body(self, data: bytes) -> None:
-        """Retain object bytes for reuse within this validation job."""
-        if data:
+        """Retain object bytes for reuse within this validation job (bounded)."""
+        cap = _configured_max_chunk_bytes()
+        if data and len(data) <= cap:
             self._cached_object_body = data
 
     @contextmanager
@@ -191,7 +220,11 @@ class GcsStreamSession:
         read_ahead: bool = True,
     ) -> Iterator[IO[bytes]]:
         """Open one sequential read on the object (connection reused via cached client)."""
+        safe_chunk = clamp_read_chunk_bytes(chunk_size, max_bytes=_configured_max_chunk_bytes())
+        max_line = _configured_max_chunk_bytes()
         if self._cached_object_body is not None:
+            if len(self._cached_object_body) > max_line:
+                raise StreamLimitExceededError("Cached GCS object body exceeds read chunk limit")
             yield BytesIO(self._cached_object_body)
             return
 
@@ -200,7 +233,11 @@ class GcsStreamSession:
         with self._ensure_blob().open("rb") as raw:
             self.network_transfer_seconds += time.perf_counter() - t0
             if read_ahead:
-                wrapper: IO[bytes] = _ReadAheadBinaryIO(raw, chunk_size=chunk_size)
+                wrapper: IO[bytes] = _ReadAheadBinaryIO(
+                    raw,
+                    chunk_size=safe_chunk,
+                    max_line_bytes=max_line,
+                )
             else:
                 wrapper = raw
             try:
@@ -208,6 +245,9 @@ class GcsStreamSession:
             finally:
                 if read_ahead and isinstance(wrapper, _ReadAheadBinaryIO):
                     self.bytes_read += wrapper.bytes_read
+                close = getattr(wrapper, "close", None)
+                if callable(close):
+                    close()
 
     def read_prefix(self, *, max_bytes: int) -> bytes:
         """Bounded prefix read for header / delimiter detection only."""

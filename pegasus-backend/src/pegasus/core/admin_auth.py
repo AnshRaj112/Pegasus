@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T07:02:42Z
 # --- END GENERATED FILE METADATA ---
 
 """Password and session helpers for admin authentication."""
@@ -52,5 +52,5 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def expires_at_from_now(hours: int) -> datetime:
-    return utc_now() + timedelta(hours=hours)
+def expires_at_from_now(minutes: int) -> datetime:
+    return utc_now() + timedelta(minutes=minutes)

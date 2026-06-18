@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T17:14:06+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Validation service — routes tabular full validation through Category-1 pipeline."""
@@ -8,12 +8,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 from pegasus.core.config import Settings
-from pegasus.core.resource_tuning import cap_partition_buckets
+from pegasus.core.resource_tuning import cap_partition_buckets, schedulable_cpu_cores
 from pegasus.core.workload_budget import plan_workload_budget
 from pegasus.schemas.validation import (
     CloudFileProfileResponse,
@@ -30,7 +31,8 @@ from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter, creat
 from pegasus.validation.comparators.models import MismatchReport, empty_mismatch_frame
 from pegasus.validation.delimiter_resolve import resolve_delimiter_for_adapters, resolve_delimiter_for_paths
 from pegasus.validation.pipeline.config import TabularPipelineConfig
-from pegasus.validation.pipeline.fingerprint import filter_compare_columns
+from pegasus.validation.comparators.policy import build_compare_policy
+from pegasus.validation.pipeline.fingerprint import filter_compare_columns, parse_identity_columns
 from pegasus.validation.pipeline.pipeline import TabularReconciliationPipeline
 from pegasus.validation.pipeline.reporting import write_validation_results
 from pegasus.validation.services.validation_run import pipeline_result_to_run_result
@@ -44,18 +46,17 @@ def _resolve_compare_columns(
     column_mappings: list[ColumnMapping] | None,
 ) -> list[str]:
     """Columns used for value comparison (never the UID / identity column)."""
-    uid = uid_column.strip()
-    default = [c for c in schema_names if c != uid]
+    uid_cols = set(parse_identity_columns(uid_column))
+    default = [c for c in schema_names if c not in uid_cols]
     if not column_mappings:
         return filter_compare_columns(default, schema_names)
     mapped = list(
         dict.fromkeys(
             m.source_column.strip()
             for m in column_mappings
-            if m.source_column and m.source_column.strip() and m.source_column.strip() != uid
+            if m.source_column and m.source_column.strip() and m.source_column.strip() not in uid_cols
         )
     )
-    mapped = filter_compare_columns(mapped, schema_names)
     return mapped if mapped else filter_compare_columns(default, schema_names)
 
 __all__ = ("ValidationRunDurations", "ValidationRunResult", "ValidationService")
@@ -78,7 +79,7 @@ class ValidationService:
         identity_column_count: int = 1,
         resource_policy: dict[str, Any] | None = None,
     ) -> TabularPipelineConfig:
-        import os
+        from pegasus.core.resource_tuning import schedulable_cpu_cores
 
         from pegasus.core.workload_budget import _estimated_row_bytes
         from pegasus.validation.readers import native_multichar
@@ -98,11 +99,15 @@ class ValidationService:
         dense_target_rows = max(1, target_bytes // min_row_bytes)
         source_row_estimate = max(1, source_bytes // row_width, dense_source_rows)
         target_row_estimate = max(1, target_bytes // row_width, dense_target_rows)
+        schedulable = schedulable_cpu_cores(
+            ncpu=os.cpu_count() or 1,
+            reserve=self._settings.validation_cpu_reserve_cores,
+        )
         budget = plan_workload_budget(
             source_bytes=source_bytes,
             target_bytes=target_bytes,
             compare_column_count=compare_column_count,
-            cpu_cores=os.cpu_count() or 1,
+            cpu_cores=schedulable,
             memory_budget_bytes=memory_budget,
             target_duration_seconds=self._settings.validation_target_duration_seconds,
             requested_chunk_rows=self._settings.validation_reconciliation_chunk_rows,
@@ -119,7 +124,13 @@ class ValidationService:
         )
         preset = self._settings.validation_tabular_partition_preset
         reconcile_workers = self._settings.validation_partition_reconcile_workers
-        if reconcile_workers <= 0:
+        stamped_workers = policy.get("partition_reconcile_workers")
+        if stamped_workers is not None:
+            try:
+                reconcile_workers = max(1, int(stamped_workers))
+            except (TypeError, ValueError):
+                pass
+        elif reconcile_workers <= 0:
             reconcile_workers = budget.max_parallel_workers
         return TabularPipelineConfig(
             chunk_rows=budget.chunk_rows,
@@ -137,6 +148,7 @@ class ValidationService:
             enable_content_digest_precheck=self._settings.validation_enable_content_digest_precheck,
             lazy_column_drilldown=True,
             fingerprint_only_spill=True,
+            force_native_multichar_spill=True,
             use_arrow_ipc_spill=True,
             partition_reconcile_workers=reconcile_workers,
             gcs_streaming_only=self._settings.validation_gcs_streaming_only,
@@ -204,6 +216,7 @@ class ValidationService:
         source_label: str,
         target_label: str,
         artifact_export_parent: Path | None = None,
+        reconciliation_workspace: Path | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         has_header: bool = True,
         header_leading_rows: int = 0,
@@ -244,14 +257,25 @@ class ValidationService:
         with lifecycle_span("Schema And Planning"):
             schema = source.get_schema()
         compare_columns = _resolve_compare_columns(schema.column_names, uid_column, column_mappings)
+        compare_policy = build_compare_policy(
+            source,
+            target,
+            compare_columns,
+            column_mappings,
+            schema_names=schema.column_names,
+            uid_column=uid_column,
+        )
+        compare_columns = compare_policy.compare_keys
+        identity_columns = parse_identity_columns(uid_column) or [uid_column.strip()]
 
         cfg = self._pipeline_config(
             source_bytes=source.get_size_bytes(),
             target_bytes=target.get_size_bytes(),
             compare_column_count=len(compare_columns),
-            identity_column_count=1,
+            identity_column_count=len(identity_columns),
             resource_policy=resource_policy,
         )
+        cfg.compare_policy = compare_policy
         combined_bytes = source.get_size_bytes() + target.get_size_bytes()
         logger.info(
             "reconciliation delimiter=%r source_bytes=%s target_bytes=%s in_memory=%s "
@@ -266,9 +290,8 @@ class ValidationService:
             cfg.partition_reconcile_workers,
         )
 
-        workspace = None
-        if artifact_export_parent is not None:
-            workspace = artifact_export_parent / "reconcile_workspace"
+        workspace = reconciliation_workspace
+        if workspace is not None:
             workspace.mkdir(parents=True, exist_ok=True)
 
         if progress_callback:
@@ -287,7 +310,7 @@ class ValidationService:
         pipeline = TabularReconciliationPipeline(
             source,
             target,
-            identity_columns=[uid_column],
+            identity_columns=identity_columns,
             compare_columns=compare_columns,
             config=cfg,
         )
@@ -354,6 +377,7 @@ class ValidationService:
         column_mappings: list[ColumnMapping] | None = None,
         *,
         artifact_export_parent: Path | None = None,
+        reconciliation_workspace: Path | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         has_header: bool = True,
         header_leading_rows: int = 0,
@@ -386,6 +410,7 @@ class ValidationService:
             source_label=str(source_path),
             target_label=str(target_path),
             artifact_export_parent=artifact_export_parent,
+            reconciliation_workspace=reconciliation_workspace,
             progress_callback=progress_callback,
             has_header=has_header,
             header_leading_rows=header_leading_rows,
@@ -455,27 +480,28 @@ class ValidationService:
         file_format: str,
         *,
         artifact_export_parent: Path | None = None,
+        reconciliation_workspace: Path | None = None,
         resource_policy: dict[str, Any] | None = None,
     ) -> ValidationRunResult:
         src_adapter = FileColumnarAdapter(source_path, file_format=file_format)
         tgt_adapter = FileColumnarAdapter(target_path, file_format=file_format)
         schema = src_adapter.get_schema()
-        compare_columns = [c for c in schema.column_names if c != uid_column]
+        identity_columns = parse_identity_columns(uid_column) or [uid_column.strip()]
+        compare_columns = [c for c in schema.column_names if c not in identity_columns]
         cfg = self._pipeline_config(
             source_bytes=source_path.stat().st_size,
             target_bytes=target_path.stat().st_size,
             compare_column_count=len(compare_columns),
-            identity_column_count=1,
+            identity_column_count=len(identity_columns),
             resource_policy=resource_policy,
         )
-        workspace = None
-        if artifact_export_parent is not None:
-            workspace = artifact_export_parent / "reconcile_workspace"
+        workspace = reconciliation_workspace
+        if workspace is not None:
             workspace.mkdir(parents=True, exist_ok=True)
         pipeline = TabularReconciliationPipeline(
             src_adapter,
             tgt_adapter,
-            identity_columns=[uid_column],
+            identity_columns=identity_columns,
             compare_columns=compare_columns,
             config=cfg,
         )

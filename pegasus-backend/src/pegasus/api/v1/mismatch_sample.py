@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T07:02:42Z
 # --- END GENERATED FILE METADATA ---
 
 """Stratified sampling of mismatch rows for API responses."""
@@ -309,6 +309,47 @@ def load_value_mismatch_sample_from_ndjson(
     )
     vm_partial = dedupe_value_mismatch_rows(vm_partial)
     return stratified_value_mismatch_sample(vm_partial, lv)
+
+
+def paginate_mismatch_rows_from_ndjson(
+    path: Path,
+    *,
+    limit: int,
+    offset: int,
+    mismatch_type: str | None = None,
+    totals_by_type: dict[str, int] | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """Return one page of mismatch rows from an NDJSON artifact without loading the full file."""
+    totals = normalize_mismatch_summary(totals_by_type)
+    if mismatch_type:
+        total = int(totals.get(mismatch_type, 0))
+    else:
+        total = int(sum(totals.values()))
+
+    if total <= 0 or offset >= total:
+        return [], total
+
+    items: list[dict[str, Any]] = []
+    skipped = 0
+    with path.open(encoding="utf-8") as fp:
+        for line in fp:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj: dict[str, Any] = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            mtype = str(obj.get("mismatch_type") or "")
+            if mismatch_type and mtype != mismatch_type:
+                continue
+            if skipped < offset:
+                skipped += 1
+                continue
+            items.append(obj)
+            if len(items) >= limit:
+                break
+    return items, total
 
 
 def stream_presence_mismatch_rows_from_ndjson(

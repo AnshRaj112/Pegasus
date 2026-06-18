@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T20:03:04+05:30
 # --- END GENERATED FILE METADATA ---
 
 import logging
@@ -37,8 +37,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await log_database_connection_status()
 
     settings = get_settings()
-    # Start the concurrency-limited validation job queue drain loop
     queue = get_validation_queue(settings)
+    queue.recover_from_disk()
     queue.start_drain_loop()
 
     pool_n = int(settings.validation_worker_pool_size or 0)

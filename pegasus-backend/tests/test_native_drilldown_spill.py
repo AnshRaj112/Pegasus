@@ -1,24 +1,35 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T07:02:42Z
 # --- END GENERATED FILE METADATA ---
 
 from __future__ import annotations
 
 import struct
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from pegasus.core.workload_budget import plan_workload_budget
+from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+from pegasus.validation.pipeline.config import TabularPipelineConfig
+from pegasus.validation.pipeline.drilldown_cache import load_drilldown_lookup
 from pegasus.validation.pipeline.fingerprint import (
     canonical,
     identity_key_from_parts,
     partition_id,
     row_fingerprint_from_parts,
 )
-from pegasus.validation.pipeline.native_spill import can_use_native_multichar_spill
+from pegasus.validation.pipeline.native_spill import native_drilldown_path
+from pegasus.validation.pipeline.pipeline import TabularReconciliationPipeline
+from pegasus.validation.pipeline.spill import PartitionWriter
+from pegasus.validation.pipeline.timing import PipelineTimings
 from pegasus.validation.readers.native_multichar import native_extension_available
+from pegasus.validation.pipeline.native_spill import (
+    can_use_native_multichar_spill,
+    partition_side_native_multichar,
+)
 
 _REPO = Path("/home/ansh.raj/Pegasus")
 _FIXTURE = _REPO / "test-data/generated-10k-8cols/source.csv"
@@ -29,9 +40,71 @@ def test_native_multichar_allowed_with_lazy_drilldown() -> None:
         pytest.skip("pegasus_native not built")
     assert can_use_native_multichar_spill(
         store_payload=False,
-        lazy_drilldown=True,
         use_arrow_ipc_spill=True,
     )
+
+
+@pytest.mark.skipif(not native_extension_available(), reason="pegasus_native not built")
+def test_native_spill_writes_drilldown_ddrill() -> None:
+    if not _FIXTURE.is_file():
+        pytest.skip("fixture missing")
+    headers = _FIXTURE.read_text(encoding="utf-8").splitlines()[0].split("||")
+    compare_cols = [c for c in headers if c != "id"]
+    adapter = FileDelimitedAdapter(_FIXTURE, delimiter="||")
+    timings = PipelineTimings()
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        writer = PartitionWriter(root, "source", store_payload=False, compare_columns=compare_cols)
+        rows = partition_side_native_multichar(
+            adapter,
+            writer,
+            identity_columns=["id"],
+            compare_columns=compare_cols,
+            num_partitions=64,
+            timings=timings,
+            chunk_rows=2500,
+            is_source=True,
+            lazy_drilldown=True,
+        )
+        dd_path = native_drilldown_path(root, "source")
+        assert rows == 10_000
+        assert dd_path.is_file()
+        assert dd_path.suffix == ".ddrill"
+        lookup = load_drilldown_lookup(root, "source", compare_cols)
+        assert len(lookup) == 10_000
+        sample_uid = next(iter(lookup))
+        assert len(lookup[sample_uid]) == len(compare_cols)
+        subset = load_drilldown_lookup(root, "source", compare_cols, keys={sample_uid})
+        assert sample_uid in subset
+
+
+@pytest.mark.skipif(not native_extension_available(), reason="pegasus_native not built")
+def test_pipeline_uses_native_drilldown_path() -> None:
+    src = _REPO / "test-data/generated-10k-8cols/source.csv"
+    tgt = _REPO / "test-data/generated-10k-8cols/target.csv"
+    if not src.is_file() or not tgt.is_file():
+        pytest.skip("fixture missing")
+    cols = [c for c in src.read_text(encoding="utf-8").splitlines()[0].split("||") if c != "id"]
+    cfg = TabularPipelineConfig(
+        enable_in_memory_reconcile=False,
+        auto_in_memory_max_bytes=0,
+        force_disk_spill=True,
+        enable_column_drilldown=True,
+        force_native_multichar_spill=True,
+        fingerprint_only_spill=True,
+    )
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td)
+        result = TabularReconciliationPipeline(
+            FileDelimitedAdapter(src, delimiter="||"),
+            FileDelimitedAdapter(tgt, delimiter="||"),
+            identity_columns=["id"],
+            compare_columns=cols,
+            config=cfg,
+        ).run(workspace=work)
+        assert result.extra_stats.get("path") == "spill_native_multichar_drilldown"
+        assert native_drilldown_path(work, "source").is_file()
+        assert native_drilldown_path(work, "target").is_file()
 
 
 @pytest.mark.skipif(not native_extension_available(), reason="pegasus_native not built")

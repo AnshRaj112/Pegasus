@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T17:14:06+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Service-layer errors mapped to HTTP responses by the API layer."""
@@ -16,6 +16,10 @@ class ValidationBadRequestError(ValidationServiceError):
 
 class ValidationUnprocessableError(ValidationServiceError):
     """Frames cannot be compared as requested (HTTP 422)."""
+
+
+class InsufficientDiskError(ValidationServiceError):
+    """Not enough free disk for spill workspace."""
 
 
 def format_validation_job_error(exc: BaseException) -> str:

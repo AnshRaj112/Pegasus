@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T07:02:42Z
 # --- END GENERATED FILE METADATA ---
 
 """Persistence helpers for validation runs and mismatch rows (async SQLAlchemy 2.0)."""
@@ -204,17 +204,25 @@ class ValidationRunRepository:
         return await session.get(ValidationRun, run_id)
 
     @staticmethod
+    def _apply_status_filter(stmt, statuses: list[ValidationRunStatus] | None):
+        if statuses:
+            stmt = stmt.where(ValidationRun.status.in_(statuses))
+        return stmt
+
+    @staticmethod
     async def list_recent(
         session: AsyncSession,
         *,
         limit: int = 20,
         offset: int = 0,
         file_pair_key: str | None = None,
+        statuses: list[ValidationRunStatus] | None = None,
     ) -> list[ValidationRun]:
         """Return latest runs by ``created_at`` (newest first)."""
         stmt = select(ValidationRun).order_by(ValidationRun.created_at.desc())
         if file_pair_key:
             stmt = stmt.where(ValidationRun.file_pair_key == file_pair_key)
+        stmt = ValidationRunRepository._apply_status_filter(stmt, statuses)
         stmt = stmt.offset(offset).limit(limit)
         result = await session.scalars(stmt)
         return list(result.all())
@@ -330,11 +338,13 @@ class ValidationRunRepository:
         session: AsyncSession,
         *,
         file_pair_key: str | None = None,
+        statuses: list[ValidationRunStatus] | None = None,
     ) -> int:
         """Count runs optionally filtered by file pair."""
         stmt = select(func.count()).select_from(ValidationRun)
         if file_pair_key:
             stmt = stmt.where(ValidationRun.file_pair_key == file_pair_key)
+        stmt = ValidationRunRepository._apply_status_filter(stmt, statuses)
         total = await session.scalar(stmt)
         return int(total or 0)
 

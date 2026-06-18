@@ -2,7 +2,7 @@
 
 // --- BEGIN GENERATED FILE METADATA ---
 // Authors: Ansh Raj
-// Last edited: 2026-06-11T09:32:43Z
+// Last edited: 2026-06-17T07:02:42Z
 // --- END GENERATED FILE METADATA ---
 
 use std::collections::HashMap;
@@ -20,6 +20,51 @@ use xxhash_rust::xxh64::Xxh64;
 const FIELD_SEP: u8 = 0x1f;
 const IO_BLOCK: usize = 16 * 1024 * 1024;
 const FLUSH_THRESHOLD: usize = 256 * 1024;
+const DRILLDOWN_BUF_BYTES: usize = 8 * 1024 * 1024;
+
+fn write_u16_be(writer: &mut impl Write, value: usize) -> io::Result<()> {
+    if value > 0xffff {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "drilldown field exceeds 65535 bytes",
+        ));
+    }
+    writer.write_all(&(value as u16).to_be_bytes())
+}
+
+struct DrilldownWriter {
+    writer: io::BufWriter<File>,
+}
+
+impl DrilldownWriter {
+    fn create(path: PathBuf) -> PyResult<Self> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        }
+        let file = File::create(&path).map_err(|e| {
+            PyValueError::new_err(format!("create drilldown file {path:?}: {e}"))
+        })?;
+        Ok(Self {
+            writer: io::BufWriter::with_capacity(DRILLDOWN_BUF_BYTES, file),
+        })
+    }
+
+    fn write_row(&mut self, identity: &str, values: &[String]) -> io::Result<()> {
+        let ident_b = identity.as_bytes();
+        write_u16_be(&mut self.writer, ident_b.len())?;
+        self.writer.write_all(ident_b)?;
+        for value in values {
+            let val_b = value.as_bytes();
+            write_u16_be(&mut self.writer, val_b.len())?;
+            self.writer.write_all(val_b)?;
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
+}
 
 #[pyfunction]
 fn extension_available() -> bool {
@@ -61,7 +106,7 @@ fn canonical_field_bytes(raw: &[u8]) -> String {
     trimmed.to_string()
 }
 
-fn fingerprint_xxh64(parts: &[String]) -> u64 {
+fn fingerprint_from_canon_parts(parts: &[String]) -> u64 {
     if parts.is_empty() {
         return 0;
     }
@@ -191,6 +236,7 @@ struct LineSpiller {
     partitions: HashMap<u32, (Vec<String>, Vec<u64>)>,
     identity_cols: Vec<String>,
     compare_cols: Vec<String>,
+    drilldown: Option<DrilldownWriter>,
     finished: bool,
 }
 
@@ -203,6 +249,7 @@ impl LineSpiller {
         num_partitions: u32,
         identity_cols: Vec<String>,
         compare_cols: Vec<String>,
+        drilldown: Option<DrilldownWriter>,
     ) -> Self {
         Self {
             delim,
@@ -217,6 +264,7 @@ impl LineSpiller {
             partitions: HashMap::new(),
             identity_cols,
             compare_cols,
+            drilldown,
             finished: false,
         }
     }
@@ -319,7 +367,17 @@ impl LineSpiller {
             let raw = fields.get(col_idx).copied().unwrap_or(b"");
             identity.push_str(&canonical_field_bytes(raw));
         }
-        let fp = fingerprint_fields(&fields, &columns.compare_idxs);
+        let mut compare_values: Vec<String> = Vec::with_capacity(columns.compare_idxs.len());
+        for &col_idx in &columns.compare_idxs {
+            let raw = fields.get(col_idx).copied().unwrap_or(b"");
+            compare_values.push(canonical_field_bytes(raw));
+        }
+        if let Some(writer) = self.drilldown.as_mut() {
+            writer
+                .write_row(&identity, &compare_values)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        }
+        let fp = fingerprint_from_canon_parts(&compare_values);
         let pid = partition_from_identity(&identity, self.num_partitions);
         let entry = self
             .partitions
@@ -450,6 +508,34 @@ struct SpillConfig {
     identity_cols: Vec<String>,
     compare_cols: Vec<String>,
     track_merkle: bool,
+    drilldown_path: Option<PathBuf>,
+}
+
+fn make_line_spiller(cfg: &SpillConfig) -> PyResult<LineSpiller> {
+    let drilldown = if let Some(path) = cfg.drilldown_path.clone() {
+        Some(DrilldownWriter::create(path)?)
+    } else {
+        None
+    };
+    Ok(LineSpiller::new(
+        cfg.delim.clone(),
+        cfg.has_header,
+        cfg.skip_rows,
+        cfg.chunk_rows,
+        cfg.num_partitions,
+        cfg.identity_cols.clone(),
+        cfg.compare_cols.clone(),
+        drilldown,
+    ))
+}
+
+fn finish_line_spiller(mut spiller: LineSpiller) -> PyResult<()> {
+    if let Some(mut writer) = spiller.drilldown.take() {
+        writer
+            .flush()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    }
+    Ok(())
 }
 
 fn spill_from_reader(
@@ -458,15 +544,7 @@ fn spill_from_reader(
     cfg: SpillConfig,
     block_size: usize,
 ) -> PyResult<(usize, HashMap<u32, u64>)> {
-    let mut spiller = LineSpiller::new(
-        cfg.delim,
-        cfg.has_header,
-        cfg.skip_rows,
-        cfg.chunk_rows,
-        cfg.num_partitions,
-        cfg.identity_cols,
-        cfg.compare_cols,
-    );
+    let mut spiller = make_line_spiller(&cfg)?;
     let mut writer = NativeSpillWriter::new(PathBuf::from(output_dir), cfg.track_merkle)?;
     loop {
         let data = read_block(block_size)?;
@@ -480,10 +558,16 @@ fn spill_from_reader(
     if let Some(chunk) = spiller.drain_pending()? {
         writer.absorb_chunk(chunk)?;
     }
+    finish_line_spiller(spiller)?;
     writer.close()
 }
 
-fn spill_result_to_py(py: Python<'_>, rows: usize, merkle_xor: HashMap<u32, u64>) -> PyResult<Py<PyDict>> {
+fn spill_result_to_py(
+    py: Python<'_>,
+    rows: usize,
+    merkle_xor: HashMap<u32, u64>,
+    drilldown_written: bool,
+) -> PyResult<Py<PyDict>> {
     let dict = PyDict::new_bound(py);
     dict.set_item("rows", rows)?;
     let merkle = PyDict::new_bound(py);
@@ -491,7 +575,19 @@ fn spill_result_to_py(py: Python<'_>, rows: usize, merkle_xor: HashMap<u32, u64>
         merkle.set_item(pid, xor)?;
     }
     dict.set_item("merkle_xor", merkle)?;
+    dict.set_item("drilldown_written", drilldown_written)?;
     Ok(dict.unbind())
+}
+
+fn parse_drilldown_path(drilldown_path: Option<&str>) -> Option<PathBuf> {
+    drilldown_path.and_then(|p| {
+        let trimmed = p.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(trimmed))
+        }
+    })
 }
 
 #[pyfunction]
@@ -507,9 +603,11 @@ fn spill_mmap_file(
     compare_columns: Vec<String>,
     num_partitions: u32,
     track_merkle: bool,
+    drilldown_path: Option<&str>,
 ) -> PyResult<Py<PyDict>> {
     let path_owned = path.to_string();
     let output_owned = output_dir.to_string();
+    let dd_path = parse_drilldown_path(drilldown_path);
     let cfg = SpillConfig {
         delim: delimiter.as_bytes().to_vec(),
         has_header,
@@ -519,19 +617,13 @@ fn spill_mmap_file(
         identity_cols: identity_columns,
         compare_cols: compare_columns,
         track_merkle,
+        drilldown_path: dd_path,
     };
+    let drilldown_written = cfg.drilldown_path.is_some();
     let (rows, merkle_xor) = py.allow_threads(move || -> PyResult<(usize, HashMap<u32, u64>)> {
         let file = File::open(&path_owned).map_err(|e| PyValueError::new_err(e.to_string()))?;
         let mmap = unsafe { Mmap::map(&file).map_err(|e| PyValueError::new_err(e.to_string()))? };
-        let mut spiller = LineSpiller::new(
-            cfg.delim,
-            cfg.has_header,
-            cfg.skip_rows,
-            cfg.chunk_rows,
-            cfg.num_partitions,
-            cfg.identity_cols,
-            cfg.compare_cols,
-        );
+        let mut spiller = make_line_spiller(&cfg)?;
         let mut writer = NativeSpillWriter::new(PathBuf::from(&output_owned), cfg.track_merkle)?;
         for chunk in spiller.scan_lines(&mmap)? {
             writer.absorb_chunk(chunk)?;
@@ -539,9 +631,10 @@ fn spill_mmap_file(
         if let Some(chunk) = spiller.drain_pending()? {
             writer.absorb_chunk(chunk)?;
         }
+        finish_line_spiller(spiller)?;
         writer.close()
     })?;
-    spill_result_to_py(py, rows, merkle_xor)
+    spill_result_to_py(py, rows, merkle_xor, drilldown_written)
 }
 
 #[pyfunction]
@@ -558,9 +651,12 @@ fn spill_stream_file(
     num_partitions: u32,
     track_merkle: bool,
     block_size: usize,
+    drilldown_path: Option<&str>,
 ) -> PyResult<Py<PyDict>> {
     let read = read_callable.unbind();
     let block = block_size.max(64 * 1024);
+    let dd_path = parse_drilldown_path(drilldown_path);
+    let drilldown_written = dd_path.is_some();
     let cfg = SpillConfig {
         delim: delimiter.as_bytes().to_vec(),
         has_header,
@@ -570,6 +666,7 @@ fn spill_stream_file(
         identity_cols: identity_columns,
         compare_cols: compare_columns,
         track_merkle,
+        drilldown_path: dd_path,
     };
     let (rows, merkle_xor) = spill_from_reader(
         |size| {
@@ -580,7 +677,7 @@ fn spill_stream_file(
         cfg,
         block,
     )?;
-    spill_result_to_py(py, rows, merkle_xor)
+    spill_result_to_py(py, rows, merkle_xor, drilldown_written)
 }
 
 // --- Legacy chunk iterators (used by unit tests) ---
@@ -669,6 +766,7 @@ fn iter_mmap_spill_chunks(
         num_partitions,
         identity_columns,
         compare_columns,
+        None,
     );
     Ok(MmapSpillIter {
         mmap: Some(mmap),
@@ -748,6 +846,7 @@ fn iter_stream_spill_chunks(
             num_partitions,
             identity_columns,
             compare_columns,
+            None,
         ),
         pending_chunks: Vec::new(),
         exhausted: false,

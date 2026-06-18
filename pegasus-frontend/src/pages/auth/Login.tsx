@@ -11,6 +11,8 @@ import styles from './Auth.module.scss';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch } from '../../redux/store';
 import { authActions } from './Auth.reducer';
+import { adminLogin } from '../../shared/api/adminAuth';
+import { getApiErrorMessage } from '../../shared/api/apiError';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate(); // ⚡ Initialize router
@@ -19,28 +21,35 @@ export const Login: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // ⚡ Simulate a successful API login response
-    dispatch(authActions.loginSuccess({ 
-      email: email, 
-      fullName: 'Enterprise User' 
-    }));
-    
-    // ⚡ Redirect them to the Dashboard
-    navigate('/');
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const user = await adminLogin(email.trim(), password);
+      dispatch(authActions.setSession({ email: user.email }));
+      navigate('/');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Sign-in failed.'));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <div className={`${styles.authWrapper} ${styles.glassBackground}`}>
-      <header style={{ width: '100%', height: '64px', borderBottom: '1px solid var(--outline-variant)', backgroundColor: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' }}>
+    <div 
+      className={`${styles.authWrapper} ${styles.glassBackground}`}
+      style={{ minHeight: '100vh', width: '100%', boxSizing: 'border-box', overflowX: 'hidden', display: 'flex', flexDirection: 'column' }}
+    >
+      <header style={{ width: '100%', height: '64px', flexShrink: 0, boxSizing: 'border-box', display: 'flex', borderBottom: '1px solid var(--outline-variant)', backgroundColor: 'var(--surface)', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' }}>
         <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--primary)' }}>Pegasus</div>
         <QuestionCircleOutlined style={{ fontSize: '20px', color: 'var(--on-surface-variant)', cursor: 'pointer' }} />
       </header>
 
-      <main className={styles.authMain}>
+      <main className={styles.authMain} style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
         <div className={styles.authCard}>
           <div style={{ marginBottom: '32px', textAlign: 'center' }}>
             <h1 style={{ fontSize: '30px', fontWeight: 600, color: 'var(--on-surface)', margin: '0 0 4px 0' }}>Welcome Back</h1>
@@ -58,7 +67,8 @@ export const Login: React.FC = () => {
                   onChange={(e) => setEmail(e.target.value)}
                   className={styles.authInput} 
                   placeholder="name@company.com" 
-                  required 
+                  required
+                  autoComplete="username"
                 />
               </div>
             </div>
@@ -77,7 +87,8 @@ export const Login: React.FC = () => {
                   className={styles.authInput} 
                   style={{ paddingRight: '40px' }}
                   placeholder="••••••••" 
-                  required 
+                  required
+                  autoComplete="current-password"
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)} className={styles.actionIcon}>
                   {showPassword ? <EyeOutlined /> : <EyeInvisibleOutlined />}
@@ -85,24 +96,13 @@ export const Login: React.FC = () => {
               </div>
             </div>
 
-            {/* <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" id="remember" style={{ accentColor: 'var(--primary)', cursor: 'pointer', width: '16px', height: '16px' }} />
-              <label htmlFor="remember" style={{ fontSize: '14px', color: 'var(--on-surface-variant)', cursor: 'pointer', userSelect: 'none' }}>Remember this device for 30 days</label>
-            </div> */}
+            {error && <p style={{ margin: 0, fontSize: '13px', color: '#ba1a1a' }}>{error}</p>}
 
-            <button type="submit" className={styles.submitBtn}>
-              Sign In <LoginOutlined style={{ fontSize: '18px' }} />
+            <button type="submit" className={styles.submitBtn} disabled={isSubmitting}>
+              {isSubmitting ? 'Signing in...' : <>Sign In <LoginOutlined style={{ fontSize: '18px' }} /></>}
             </button>
           </form>
         </div>
-{/* 
-        <div style={{ position: 'absolute', bottom: '100px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', opacity: 0.6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--on-surface)' }}>
-            <SafetyCertificateOutlined style={{ fontSize: '16px' }} />
-            <span style={{ fontSize: '12px' }}>Bank-grade data encryption</span>
-          </div>
-          <p style={{ fontSize: '12px', color: 'var(--on-surface)', margin: 0 }}>Trusted by 500+ data engineering teams worldwide.</p>
-        </div> */}
       </main>
     </div>
   );

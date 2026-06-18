@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T17:14:06+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Vectorized per-partition reconciliation from columnar spill files."""
@@ -15,7 +15,11 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from pegasus.core.resource_tuning import schedulable_cpu_cores
+
+from pegasus.validation.comparators.policy import active_compare_policy
 from pegasus.validation.pipeline.arrow_spill import partition_has_arrow, read_arrow_partition
+from pegasus.validation.pipeline.fingerprint import canonical
 from pegasus.validation.pipeline.result import ColumnDifference, MismatchSample
 from pegasus.validation.pipeline.spill import iter_partition
 from pegasus.validation.pipeline.timing import PipelineTimings, StageTimer
@@ -36,6 +40,25 @@ class PartitionReconcileResult:
     missing_keys: list[str]
     extra_keys: list[str]
     changed_keys: list[str]
+
+
+def _column_values_match(
+    col: str,
+    source: object,
+    target: object,
+    *,
+    source_record: dict[str, object] | None = None,
+    target_record: dict[str, object] | None = None,
+) -> bool:
+    pol = active_compare_policy()
+    if pol is not None and pol.fields and source_record is not None and target_record is not None:
+        fm = pol.field_for(col)
+        if fm is not None and not any(c in source_record for c in fm.source_columns):
+            return str(source_record.get(col, "")) == str(target_record.get(col, ""))
+        return pol.values_equal_mapped(col, source_record, target_record)
+    if pol is not None:
+        return pol.values_equal(col, source, target)
+    return canonical(source, column=col) == canonical(target, column=col)
 
 
 def _frame_from_legacy(
@@ -134,9 +157,19 @@ def _apply_drilldown_samples(
                 src_data = src_lookup.get(sk, {})
                 tgt_data = tgt_lookup.get(sk, {})
                 col_diffs = [
-                    ColumnDifference(col, src_data.get(col), tgt_data.get(col))
+                    ColumnDifference(
+                        col,
+                        src_data.get(col),
+                        tgt_data.get(col),
+                    )
                     for col in compare_columns
-                    if src_data.get(col) != tgt_data.get(col)
+                    if not _column_values_match(
+                        col,
+                        src_data.get(col),
+                        tgt_data.get(col),
+                        source_record=src_data,
+                        target_record=tgt_data,
+                    )
                 ]
                 samples.append(MismatchSample(sk, "changed", col_diffs))
         return
@@ -160,7 +193,13 @@ def _apply_drilldown_samples(
             col_diffs = [
                 ColumnDifference(col, src_data.get(col), tgt_data.get(col))
                 for col in compare_columns
-                if src_data.get(col) != tgt_data.get(col)
+                if not _column_values_match(
+                    col,
+                    src_data.get(col),
+                    tgt_data.get(col),
+                    source_record=src_data,
+                    target_record=tgt_data,
+                )
             ]
             samples.append(MismatchSample(sk, "changed", col_diffs))
 
@@ -281,14 +320,14 @@ def reconcile_partitions_parallel(
     return missing, extra, changed, matching, mismatched_partitions
 
 
-def resolved_reconcile_workers(requested: int) -> int:
-    """1 = sequential; 0 = auto (cpu-1 capped at 8); N>1 = explicit pool size."""
+def resolved_reconcile_workers(requested: int, *, cpu_reserve: int = 1) -> int:
+    """1 = sequential; 0 = auto; N>1 = explicit pool size. Leaves *cpu_reserve* cores for the host."""
     if requested == 1:
         return 1
+    schedulable = schedulable_cpu_cores(reserve=cpu_reserve)
     if requested <= 0:
-        cpus = os.cpu_count() or 1
-        return max(2, min(16, cpus))
-    return max(1, requested)
+        return max(1, min(16, schedulable))
+    return max(1, min(schedulable, requested))
 
 
 def should_parallel_reconcile(

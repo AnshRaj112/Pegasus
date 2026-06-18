@@ -1,12 +1,13 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T07:02:42Z
 # --- END GENERATED FILE METADATA ---
 
 """In-memory reconciliation for datasets that fit in RAM (fast path)."""
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -18,10 +19,11 @@ import polars as pl
 
 from pegasus.validation.adapters.base import TabularSourceAdapter
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+from pegasus.validation.comparators.models import MismatchType, empty_mismatch_frame
 
 _HEADERLESS_ADAPTER_TYPES = frozenset({"FileDelimitedAdapter", "GcsDelimitedAdapter"})
 from pegasus.validation.readers.clevercsv_io import clevercsv_to_polars, flat_file_to_polars
-from pegasus.validation.pipeline.fingerprint import filter_compare_columns
+from pegasus.validation.pipeline.fingerprint import canonical, filter_compare_columns
 from pegasus.validation.pipeline.result import ColumnDifference, MismatchSample, PipelineResult
 from pegasus.validation.pipeline.row_sanity import assert_reasonable_row_counts
 from pegasus.validation.pipeline.timing import PipelineIoStats, PipelineTimings, attach_stage_report
@@ -40,17 +42,159 @@ _DEFAULT_AUTO_IN_MEMORY_MAX_BYTES = 64 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
 
-def _canonical(value: Any) -> str:
-    if value is None:
-        return "__NULL__"
-    text = str(value).strip()
-    if text.lower() in ("", "null", "none", "na", "n/a"):
-        return "__NULL__"
-    return text
-
-
 def _identity_key_from_row(row: dict[str, Any], columns: list[str]) -> str:
-    return "|".join(_canonical(row.get(c)) for c in columns)
+    return "|".join(canonical(row.get(c)) for c in columns)
+
+
+def _serialize_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _record_payload(record_key: str, row: dict[str, Any], columns: list[str]) -> dict[str, Any]:
+    record: dict[str, Any] = {"uid": record_key}
+    for col in columns:
+        if col in row:
+            record[col] = _serialize_cell(row.get(col))
+    return record
+
+
+def _row_detail_json(
+    *,
+    source_record: dict[str, Any] | None = None,
+    target_record: dict[str, Any] | None = None,
+) -> str:
+    payload: dict[str, Any] = {}
+    if source_record:
+        payload["source_record"] = source_record
+    if target_record:
+        payload["target_record"] = target_record
+    return json.dumps(payload, ensure_ascii=False) if payload else ""
+
+
+def _column_diffs_for_row(
+    row: dict[str, Any],
+    *,
+    record_key: str,
+    compare_columns: list[str],
+    src_physical: list[str],
+    tgt_physical: list[str],
+    pol: Any,
+) -> list[ColumnDifference]:
+    col_diffs: list[ColumnDifference] = []
+    src_row = {k: row.get(k) for k in src_physical}
+    tgt_row = {k: row.get(f"{k}_tgt", row.get(k)) for k in tgt_physical}
+    for col in compare_columns:
+        if pol is not None and pol.fields:
+            if not pol.values_equal_mapped(col, src_row, tgt_row):
+                sv = pol.canonical_side_part(src_row, col, side="source")
+                tv = pol.canonical_side_part(tgt_row, col, side="target")
+                col_diffs.append(ColumnDifference(col, sv, tv))
+        else:
+            sv = canonical(row.get(col), column=col)
+            tv = canonical(row.get(f"{col}_tgt"), column=col)
+            if sv != tv:
+                col_diffs.append(ColumnDifference(col, sv, tv))
+    return col_diffs
+
+
+def build_in_memory_mismatch_frame(
+    *,
+    missing_df: pl.DataFrame,
+    extra_df: pl.DataFrame,
+    changed_df: pl.DataFrame,
+    src: pl.DataFrame,
+    tgt: pl.DataFrame,
+    identity_columns: list[str],
+    compare_columns: list[str],
+    src_physical: list[str],
+    tgt_physical: list[str],
+    enable_column_drilldown: bool,
+    pol: Any,
+) -> pl.DataFrame:
+    """Materialize every mismatch row for NDJSON export / persistence."""
+    rows: list[dict[str, Any]] = []
+    src_lookup = src.select(list(dict.fromkeys([*identity_columns, *compare_columns])))
+    tgt_lookup = tgt.select(list(dict.fromkeys([*identity_columns, *compare_columns])))
+
+    if missing_df.height > 0:
+        for row in missing_df.join(src_lookup, on=identity_columns, how="left").iter_rows(named=True):
+            key = _identity_key_from_row(row, identity_columns)
+            source_record = _record_payload(key, row, compare_columns)
+            rows.append({
+                "uid": key,
+                "mismatch_type": MismatchType.MISSING_IN_TARGET.value,
+                "column_name": None,
+                "source_value": None,
+                "target_value": None,
+                "row_detail": _row_detail_json(source_record=source_record, target_record=None),
+            })
+
+    if extra_df.height > 0:
+        for row in extra_df.join(tgt_lookup, on=identity_columns, how="left").iter_rows(named=True):
+            key = _identity_key_from_row(row, identity_columns)
+            target_record = _record_payload(key, row, compare_columns)
+            rows.append({
+                "uid": key,
+                "mismatch_type": MismatchType.EXTRA_IN_TARGET.value,
+                "column_name": None,
+                "source_value": None,
+                "target_value": None,
+                "row_detail": _row_detail_json(source_record=None, target_record=target_record),
+            })
+
+    if changed_df.height > 0 and enable_column_drilldown:
+        src_cols = list(dict.fromkeys([*identity_columns, *src_physical]))
+        tgt_cols = list(dict.fromkeys([*identity_columns, *tgt_physical]))
+        detail = (
+            changed_df.select(identity_columns)
+            .join(src.select([c for c in src_cols if c in src.columns]), on=identity_columns, how="left")
+            .join(
+                tgt.select([c for c in tgt_cols if c in tgt.columns]),
+                on=identity_columns,
+                how="left",
+                suffix="_tgt",
+            )
+        )
+        for row in detail.iter_rows(named=True):
+            key = _identity_key_from_row(row, identity_columns)
+            col_diffs = _column_diffs_for_row(
+                row,
+                record_key=key,
+                compare_columns=compare_columns,
+                src_physical=src_physical,
+                tgt_physical=tgt_physical,
+                pol=pol,
+            )
+            if not col_diffs:
+                continue
+            source_record = _record_payload(key, row, compare_columns)
+            target_record = {
+                "uid": key,
+                **{
+                    col: _serialize_cell(row.get(f"{col}_tgt", row.get(col)))
+                    for col in compare_columns
+                    if f"{col}_tgt" in row or col in row
+                },
+            }
+            row_detail = _row_detail_json(source_record=source_record, target_record=target_record)
+            for cd in col_diffs:
+                sv = _serialize_cell(cd.source_value)
+                tv = _serialize_cell(cd.target_value)
+                if pol is not None:
+                    sv = pol.mask_if_sensitive(cd.column, sv)
+                    tv = pol.mask_if_sensitive(cd.column, tv)
+                rows.append({
+                    "uid": key,
+                    "mismatch_type": MismatchType.VALUE_MISMATCH.value,
+                    "column_name": cd.column,
+                    "source_value": sv,
+                    "target_value": tv,
+                    "row_detail": row_detail,
+                })
+
+    return pl.DataFrame(rows) if rows else empty_mismatch_frame()
 
 
 def _adapter_size_bytes(adapter: TabularSourceAdapter) -> int | None:
@@ -148,8 +292,9 @@ def _project_columns(
     *,
     identity_columns: list[str],
     compare_columns: list[str],
+    physical_columns: list[str] | None = None,
 ) -> pl.DataFrame:
-    wanted = list(dict.fromkeys([*identity_columns, *compare_columns]))
+    wanted = list(dict.fromkeys([*identity_columns, *(physical_columns or compare_columns)]))
     existing = [name for name in wanted if name in frame.columns]
     if not existing:
         return frame
@@ -190,6 +335,7 @@ def _load_delimited_frame(
     *,
     identity_columns: list[str] | None = None,
     compare_columns: list[str] | None = None,
+    physical_columns: list[str] | None = None,
 ) -> pl.DataFrame:
     column_names = _headerless_column_names(adapter)
     if pyarrow_supports_delimiter(adapter._delimiter):
@@ -223,7 +369,12 @@ def _load_delimited_frame(
                 )
         frame = _align_frame_to_schema(frame, adapter)
     if identity_columns is not None and compare_columns is not None:
-        return _project_columns(frame, identity_columns=identity_columns, compare_columns=compare_columns)
+        return _project_columns(
+            frame,
+            identity_columns=identity_columns,
+            compare_columns=compare_columns,
+            physical_columns=physical_columns,
+        )
     return frame
 
 
@@ -232,6 +383,7 @@ def _load_gcs_delimited_frame(
     *,
     identity_columns: list[str] | None = None,
     compare_columns: list[str] | None = None,
+    physical_columns: list[str] | None = None,
 ) -> pl.DataFrame:
     from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
 
@@ -287,7 +439,12 @@ def _load_gcs_delimited_frame(
         session.network_transfer_seconds,
     )
     if identity_columns is not None and compare_columns is not None:
-        return _project_columns(frame, identity_columns=identity_columns, compare_columns=compare_columns)
+        return _project_columns(
+            frame,
+            identity_columns=identity_columns,
+            compare_columns=compare_columns,
+            physical_columns=physical_columns,
+        )
     return frame
 
 
@@ -296,12 +453,14 @@ def _load_frame(
     *,
     identity_columns: list[str] | None = None,
     compare_columns: list[str] | None = None,
+    physical_columns: list[str] | None = None,
 ) -> pl.DataFrame | None:
     if isinstance(adapter, FileDelimitedAdapter):
         return _load_delimited_frame(
             adapter,
             identity_columns=identity_columns,
             compare_columns=compare_columns,
+            physical_columns=physical_columns,
         )
 
     adapter_type = type(adapter).__name__
@@ -310,6 +469,7 @@ def _load_frame(
             adapter,
             identity_columns=identity_columns,
             compare_columns=compare_columns,
+            physical_columns=physical_columns,
         )
 
     path = Path(adapter.path)
@@ -323,14 +483,10 @@ def _load_frame(
     return None
 
 
-def _fingerprint_expr(columns: list[str], *, suffix: str = "") -> pl.Expr:
-    parts = [
-        pl.col(f"{column}{suffix}").cast(pl.Utf8).fill_null("__NULL__").str.strip_chars()
-        for column in columns
-    ]
-    if not parts:
-        return pl.lit("").alias("_fp")
-    return pl.concat_str(parts, separator="\x1f").alias("_fp")
+def _fingerprint_expr(columns: list[str], *, side: str = "source") -> pl.Expr:
+    from pegasus.validation.pipeline.polars_spill import _mapping_fingerprint_expr
+
+    return _mapping_fingerprint_expr(columns, side=side).alias("_fp")
 
 
 def try_in_memory_reconcile(
@@ -353,6 +509,13 @@ def try_in_memory_reconcile(
     ):
         return None
 
+    from pegasus.validation.comparators.policy import active_compare_policy
+
+    pol = active_compare_policy()
+    logical_keys = pol.compare_keys if pol and pol.fields else compare_columns
+    src_physical = pol.physical_columns("source") if pol and pol.fields else compare_columns
+    tgt_physical = pol.physical_columns("target") if pol and pol.fields else compare_columns
+
     t0 = time.perf_counter()
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -360,20 +523,22 @@ def try_in_memory_reconcile(
                 _load_frame,
                 source,
                 identity_columns=identity_columns,
-                compare_columns=compare_columns,
+                compare_columns=logical_keys,
+                physical_columns=src_physical,
             )
             tgt_fut = pool.submit(
                 _load_frame,
                 target,
                 identity_columns=identity_columns,
-                compare_columns=compare_columns,
+                compare_columns=logical_keys,
+                physical_columns=tgt_physical,
             )
             src = src_fut.result()
             tgt = tgt_fut.result()
         if src is None or tgt is None:
             return None
 
-        compare_columns = filter_compare_columns(compare_columns, src.columns)
+        compare_columns = logical_keys
         if not compare_columns:
             logger.warning("in_memory reconcile: no compare columns in loaded frame")
             return None
@@ -386,8 +551,8 @@ def try_in_memory_reconcile(
             compare_column_count=len(compare_columns),
         )
 
-        src = src.with_columns(_fingerprint_expr(compare_columns).alias("_fp"))
-        tgt = tgt.with_columns(_fingerprint_expr(compare_columns).alias("_fp"))
+        src = src.with_columns(_fingerprint_expr(compare_columns, side="source"))
+        tgt = tgt.with_columns(_fingerprint_expr(compare_columns, side="target"))
 
         src_id_fp = src.select([*identity_columns, "_fp"])
         tgt_id_fp = tgt.select([*identity_columns, "_fp"])
@@ -412,41 +577,77 @@ def try_in_memory_reconcile(
         changed_df = inner.filter(pl.col("_fp") != pl.col("_fp_tgt"))
         matching = inner.height - changed_df.height
 
-        samples: list[MismatchSample] = []
+        from pegasus.api.v1.mismatch_sample import allocate_category_sample_limits
 
-        def _append_samples(frame: pl.DataFrame, mtype: str, *, with_cols: bool = False) -> None:
-            nonlocal samples
-            if len(samples) >= sample_limit or frame.is_empty():
+        samples: list[MismatchSample] = []
+        miss_cap, ext_cap, val_cap = allocate_category_sample_limits(
+            missing_df.height,
+            extra_df.height,
+            changed_df.height,
+            sample_limit,
+        )
+
+        def _append_samples(
+            frame: pl.DataFrame,
+            mtype: str,
+            *,
+            with_cols: bool = False,
+            max_take: int = 0,
+        ) -> None:
+            if max_take <= 0 or frame.is_empty():
                 return
-            take = min(sample_limit - len(samples), frame.height)
+            take = min(max_take, frame.height)
             if mtype == "changed" and with_cols:
                 keys = frame.select(identity_columns).head(take)
+                src_cols = list(dict.fromkeys([*identity_columns, *src_physical]))
+                tgt_cols = list(dict.fromkeys([*identity_columns, *tgt_physical]))
                 detail = keys.join(
-                    src.select([*identity_columns, *compare_columns]),
+                    src.select([c for c in src_cols if c in src.columns]),
                     on=identity_columns,
                     how="left",
                 ).join(
-                    tgt.select([*identity_columns, *compare_columns]),
+                    tgt.select([c for c in tgt_cols if c in tgt.columns]),
                     on=identity_columns,
                     how="left",
                     suffix="_tgt",
                 )
                 for row in detail.iter_rows(named=True):
                     key = _identity_key_from_row(row, identity_columns)
-                    col_diffs: list[ColumnDifference] = []
-                    for col in compare_columns:
-                        sv = _canonical(row.get(col))
-                        tv = _canonical(row.get(f"{col}_tgt"))
-                        if sv != tv:
-                            col_diffs.append(ColumnDifference(col, sv, tv))
+                    col_diffs = _column_diffs_for_row(
+                        row,
+                        record_key=key,
+                        compare_columns=compare_columns,
+                        src_physical=src_physical,
+                        tgt_physical=tgt_physical,
+                        pol=pol,
+                    )
                     samples.append(MismatchSample(key, mtype, col_diffs))
             else:
                 for row in frame.head(take).iter_rows(named=True):
                     samples.append(MismatchSample(_identity_key_from_row(row, identity_columns), mtype))
 
-        _append_samples(missing_df, "missing")
-        _append_samples(extra_df, "extra")
-        _append_samples(changed_df, "changed", with_cols=enable_column_drilldown)
+        _append_samples(missing_df, "missing", max_take=miss_cap)
+        _append_samples(extra_df, "extra", max_take=ext_cap)
+        _append_samples(
+            changed_df,
+            "changed",
+            with_cols=enable_column_drilldown,
+            max_take=val_cap,
+        )
+
+        full_mismatches = build_in_memory_mismatch_frame(
+            missing_df=missing_df,
+            extra_df=extra_df,
+            changed_df=changed_df,
+            src=src,
+            tgt=tgt,
+            identity_columns=identity_columns,
+            compare_columns=compare_columns,
+            src_physical=src_physical,
+            tgt_physical=tgt_physical,
+            enable_column_drilldown=enable_column_drilldown,
+            pol=pol,
+        )
 
         elapsed = time.perf_counter() - t0
         extra_stats: dict[str, Any] = {"path": "in_memory_polars"}
@@ -468,6 +669,7 @@ def try_in_memory_reconcile(
             partitions_processed=0,
             mismatched_partitions=0,
             sample_mismatches=samples,
+            full_mismatches=full_mismatches,
             compared_columns=list(compare_columns),
             execution_seconds=elapsed,
             extra_stats=extra_stats,

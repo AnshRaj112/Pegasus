@@ -4,7 +4,7 @@ import { type AuthReducerState } from './Auth.interface';
 export const initialState: AuthReducerState = {
   isAuthenticated: false,
   user: null,
-  isLoading: false,
+  isLoading: true,
   error: null,
 };
 
@@ -27,6 +27,20 @@ const authSlice = createSlice({
       ...state,
       isLoading: false,
       error: action.payload,
+    }),
+    logoutSuccess: (state) => ({
+      ...state,
+      isLoading: false,
+      isAuthenticated: false,
+      user: null,
+      error: null,
+    }),
+    setSession: (state, action: PayloadAction<{ email: string } | null>) => ({
+      ...state,
+      isLoading: false,
+      isAuthenticated: Boolean(action.payload),
+      user: action.payload ? { email: action.payload.email, fullName: action.payload.email } : null,
+      error: null,
     }),
   },
 });

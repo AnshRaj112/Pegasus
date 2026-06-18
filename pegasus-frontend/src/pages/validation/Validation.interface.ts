@@ -32,6 +32,8 @@ export interface ValidationFormState {
   targetFileSize: number | null;
   uidColumn: string;
   delimiter: string;
+  hasHeader: boolean;
+  structuredOrderSensitive: boolean;
   columnMappings: import('../../shared/api/Api').ColumnMapping[];
 }
 
@@ -55,4 +57,6 @@ export interface ValidationReducerState {
     isFetching: boolean;
     error: string | null;
   };
+  /** Set when a long-running job is deferred to the report view. */
+  pendingReportJobId: string | null;
 }

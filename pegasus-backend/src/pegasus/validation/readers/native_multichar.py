@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T07:02:42Z
 # --- END GENERATED FILE METADATA ---
 
 """Rust-backed multichar splitter with inline hash → partition spill."""
@@ -39,6 +39,7 @@ def spill_mmap_file(
     compare_columns: list[str],
     num_partitions: int,
     track_merkle: bool = False,
+    drilldown_path: str | None = None,
 ) -> SpillResult:
     if not _AVAILABLE or _native is None:
         raise RuntimeError("pegasus_native extension is not installed")
@@ -53,6 +54,7 @@ def spill_mmap_file(
         compare_columns,
         num_partitions,
         track_merkle,
+        drilldown_path,
     )
 
 
@@ -69,6 +71,7 @@ def spill_stream_file(
     num_partitions: int,
     track_merkle: bool = False,
     block_size: int = 16 * 1024 * 1024,
+    drilldown_path: str | None = None,
 ) -> SpillResult:
     if not _AVAILABLE or _native is None:
         raise RuntimeError("pegasus_native extension is not installed")
@@ -84,6 +87,7 @@ def spill_stream_file(
         num_partitions,
         track_merkle,
         block_size,
+        drilldown_path,
     )
 
 

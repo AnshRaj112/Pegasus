@@ -1,0 +1,109 @@
+/* src/pages/validation/Validation.module.scss */
+
+.wizardHeaderShell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 40px;
+  background-color: var(--surface-container-lowest, #ffffff);
+  border-bottom: 1px solid var(--outline-variant, #e6ecf4);
+  border-radius: 12px 12px 0 0;
+}
+
+.wizardHeaderLogoGroup {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: #0c131d;
+}
+
+.wizardStepTabBanner {
+  background-color: var(--surface-container-lowest, #ffffff);
+  padding: 24px 40px 12px;
+  border-left: 1px solid var(--outline-variant, #d9d9d9);
+  border-right: 1px solid var(--outline-variant, #d9d9d9);
+  border-bottom: 1px solid var(--outline-variant, #e2e8f0);
+}
+
+.wizardStepRow {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.stepTabItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: -13px; /* Pulls the border down to overlap the container border */
+}
+
+.stepTabActive {
+  color: var(--primary, #1677ff);
+  border-bottom: 2px solid var(--primary, #1677ff);
+}
+
+.stepTabInactive {
+  color: #64748b;
+  border-bottom: 2px solid transparent;
+}
+
+.stepNumberBadge {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stepNumberActive {
+  background-color: var(--primary, #1677ff);
+  color: var(--on-primary, #ffffff);
+}
+
+.stepNumberInactive {
+  background-color: #f1f5f9;
+  color: #64748b;
+}
+
+.wizardWorkspaceArea {
+  flex: 1;
+  background-color: var(--surface-container-lowest, #ffffff);
+  padding: 32px 40px;
+  overflow-y: auto;
+  border-left: 1px solid var(--outline-variant, #d9d9d9);
+  border-right: 1px solid var(--outline-variant, #d9d9d9);
+}
+
+.wizardActionFooter {
+  display: flex;
+  align-items: center;
+  padding: 24px;
+  background-color: #f8fafc;
+  border-left: 1px solid var(--outline-variant, #d9d9d9);
+  border-right: 1px solid var(--outline-variant, #d9d9d9);
+  border-bottom: 1px solid var(--outline-variant, #d9d9d9);
+  border-radius: 0 0 12px 12px;
+}
+
+/* Reusable scrollbar for the internal tables */
+.customScrollbar {
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: #f1f1f1;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #c1c6d7;
+    border-radius: 10px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: #727786;
+  }
+}

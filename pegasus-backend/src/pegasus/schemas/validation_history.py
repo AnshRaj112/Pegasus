@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T07:02:42Z
 # --- END GENERATED FILE METADATA ---
 
 """API models for persisted validation history."""
@@ -38,6 +38,8 @@ class ValidationHistorySummary(BaseModel):
     durations: ValidationDurations = Field(default_factory=ValidationDurations)
     created_at: datetime
     completed_at: datetime | None = None
+    source_row_count: int | None = Field(default=None, ge=0)
+    target_row_count: int | None = Field(default=None, ge=0)
 
 
 class ValidationDailyStatRow(BaseModel):
@@ -80,8 +82,6 @@ class ValidationHistoryDetail(ValidationHistorySummary):
     footer_validation: FooterValidationResult | None = None
     validate_header_formats: bool = False
     validate_footers: bool = False
-    source_row_count: int | None = Field(default=None, ge=0)
-    target_row_count: int | None = Field(default=None, ge=0)
     compared_column_count: int | None = Field(default=None, ge=0)
     error_detail: str | None = None
 

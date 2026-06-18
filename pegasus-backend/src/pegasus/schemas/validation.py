@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T17:14:06+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Request/response models for the validation API."""
@@ -316,13 +316,20 @@ class LocalPathValidateRequest(BaseModel):
 
 
 class ColumnMapping(BaseModel):
-    """Pair one source column name with the corresponding target column name."""
+    """Map source column(s) to target column(s) for reconciliation."""
 
-    source_column: str = Field(description="Source column name to validate")
-    target_column: str = Field(description="Target column name to compare against the source column")
+    source_column: str = Field(description="Logical source column name (reporting key and primary source field)")
+    target_column: str = Field(
+        default="",
+        description="Primary target column name (defaults to source_column when empty)",
+    )
+    source_columns: list[str] | None = Field(
+        default=None,
+        description="Optional extra source columns for many-to-one mapping (N source -> 1 target)",
+    )
     target_columns: list[str] | None = Field(
         default=None,
-        description="Optional list of multiple target columns for 1-to-many mapping",
+        description="Optional extra target columns for one-to-many mapping (1 source -> N targets)",
     )
     compare_mode: str = Field(
         default="auto",
@@ -365,6 +372,10 @@ class ColumnMapping(BaseModel):
         description="Optional regex applied to target value before compare",
     )
     target_regex_replacement: str = Field(default="", description="Replacement for target_regex_pattern")
+    is_sensitive: bool = Field(
+        default=False,
+        description="When true, mismatch output values for this column are masked (e.g. ****) to protect PII.",
+    )
 
 
 class LocalBrowseEntry(BaseModel):
@@ -557,6 +568,14 @@ class LocalColumnPreviewResponse(BaseModel):
         ge=1,
         le=20,
         description="Number of data rows included in source_samples / target_samples",
+    )
+    complex_columns: list[str] = Field(
+        default_factory=list,
+        description="Compared columns whose sample cells contain list/dict/tuple literals",
+    )
+    needs_order_preference: bool = Field(
+        default=False,
+        description="True when complex_columns is non-empty; client may ask about order sensitivity",
     )
 
 
@@ -775,6 +794,22 @@ class CloudBrowseEntry(BaseModel):
         ge=0,
         description="Object size from GCS metadata (files only; omitted for prefixes)",
     )
+    created_at: str | None = Field(
+        default=None,
+        description="Object creation time from GCS metadata (files only)",
+    )
+    updated_at: str | None = Field(
+        default=None,
+        description="Object last-modified time from GCS metadata (files only)",
+    )
+    owner: str | None = Field(
+        default=None,
+        description="Object owner entity from GCS metadata or custom metadata",
+    )
+    created_by: str | None = Field(
+        default=None,
+        description="Creator from GCS custom object metadata when present",
+    )
 
 
 class CloudBrowseResponse(BaseModel):
@@ -962,6 +997,10 @@ class QueueStatusResponse(BaseModel):
             "Parallel slots the drain loop uses right now "
             "(resource recommendation when auto-tune is on and max_concurrency is 0)"
         ),
+    )
+    utilization_slack: float = Field(
+        default=0.70,
+        description="Fraction of computed safe capacity in use (e.g. 0.70 = 70%).",
     )
     cpu_cores_available: int = Field(description="Logical CPU cores detected on the server")
     auto_tune_enabled: bool = Field(description="Whether resource-based auto-tuning is active")

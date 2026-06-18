@@ -3,11 +3,15 @@ import { Routes, Route } from 'react-router-dom';
 import { BaseLayout } from '../layouts/BaseLayout';
 import { Dashboard } from '../pages/dashboard/Dashboard';
 import { ValidationWizardView } from '../pages/validation/ValidationWizardView';
-import { HistoryView } from '../views/history/HistoryView';
-import { AdminView } from '../views/admin/AdminView';
+import { HistoryView } from '../pages/history/HistoryView';
+import { Report } from '../pages/report/Report';
+import { AdminView } from '../pages/admin/AdminView';
 import { ValidationReport } from '../pages/validation/components/ValidationReport';
+import { MappingSchemaView } from '../pages/history/components/MappingSchemaView';
 import { Login } from '../pages/auth/Login';
 import { ProtectedRoute } from './ProtectedRoute';
+import { SnippetComparison } from '../pages/report/views/SnippetComparison';
+import { ExecutionHistory } from '../pages/report/views/ExecutionHistory';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -20,8 +24,12 @@ export const AppRoutes: React.FC = () => {
               <Route path="/" element={<Dashboard />} />
               <Route path="/validations" element={<ValidationWizardView />} />
               <Route path="/history" element={<HistoryView />} />
+              <Route path="/reports" element={<Report />} />
+              <Route path="/history/mapping/:runId/schema" element={<MappingSchemaView />} />
+              <Route path="/reports/:mappingId/history" element={<ExecutionHistory />} />
+              <Route path="/reports/:mappingId/history/:runId/snippet" element={<SnippetComparison />} />
               <Route path="/validation/report/:jobId" element={<ValidationReport onBack={() => window.history.back()} />} />
-              <Route path="/admin" element={<AdminView />} />              
+              <Route path="/admin" element={<AdminView />} />
               <Route path="*" element={<div style={{ color: 'var(--on-surface)', padding: 'var(--lg)' }}>404 Error: Section View Not Found</div>} />
             </Routes>
           </BaseLayout>

@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T07:02:42Z
 # --- END GENERATED FILE METADATA ---
 
 """Resolve GCS credentials from inline JSON or saved cloud connections."""
@@ -59,6 +59,7 @@ async def resolve_gcs_auth(
     project_id: str | None,
     credentials_json: str | None,
     connection_id: uuid.UUID | None,
+    allow_empty_bucket: bool = False,
 ) -> tuple[str, str | None, dict[str, object]]:
     """Return (bucket, project_id, credentials_info) for GCS API calls."""
     resolved_bucket = (bucket or "").strip()
@@ -68,13 +69,13 @@ async def resolve_gcs_auth(
     if connection_id is not None:
         saved = await load_cloud_connection_or_404(session, connection_id)
         if not resolved_bucket:
-            resolved_bucket = saved.bucket.strip()
+            resolved_bucket = (saved.bucket or "").strip()
         if not resolved_project:
             resolved_project = (saved.project_id or "").strip() or None
         if not resolved_json:
             resolved_json = saved.credentials_json
 
     info = resolve_cloud_credentials(resolved_json)
-    if not resolved_bucket:
+    if not resolved_bucket and not allow_empty_bucket:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Cloud bucket is required")
     return resolved_bucket, resolved_project, info

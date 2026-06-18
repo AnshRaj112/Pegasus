@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-11T09:32:43Z
+# Last edited: 2026-06-17T07:02:42Z
 # --- END GENERATED FILE METADATA ---
 
 """Schemas for admin-managed cloud connections."""
@@ -16,7 +16,10 @@ from pydantic import BaseModel, Field
 class CloudConnectionCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     provider: str = Field(default="google-cloud-storage")
-    bucket: str = Field(min_length=1)
+    bucket: str = Field(
+        default="",
+        description="Default GCS bucket; leave empty to browse any accessible bucket at validation time.",
+    )
     project_id: str | None = None
     credentials_json: str = Field(min_length=2)
     active: bool = True
@@ -25,7 +28,7 @@ class CloudConnectionCreateRequest(BaseModel):
 class CloudConnectionUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
     provider: str | None = None
-    bucket: str | None = Field(default=None, min_length=1)
+    bucket: str | None = None
     project_id: str | None = None
     credentials_json: str | None = Field(default=None, min_length=2)
     active: bool | None = None
