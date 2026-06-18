@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-17T18:00:00Z
+# Last edited: 2026-06-17T22:00:00Z
 # --- END GENERATED FILE METADATA ---
 
 """Per-job greedy admission checks for the validation job queue."""
@@ -9,14 +9,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pegasus.services.fair_cpu_scheduler import is_large_job, max_concurrent_by_cpu
 from pegasus.services.job_resource_meta import estimate_job_csv_bytes, job_column_count, read_job_meta
+from pegasus.services.queue_cpu import max_concurrent_by_cpu, min_cores_per_job, schedulable_cpu_cores
 from pegasus.services.resource_advisor import ResourceSnapshot
 from pegasus.services.resource_models import estimate_job_disk_bytes, estimate_job_ram_bytes
 
 if TYPE_CHECKING:
     from pegasus.core.config import Settings
     from pegasus.services.validation_job_queue import QueuedJob
+
+
+def is_large_job(job: QueuedJob, *, threshold_bytes: int) -> bool:
+    combined = estimate_job_csv_bytes(job.job_dir)
+    return combined >= max(1, int(threshold_bytes))
 
 
 def _job_costs(
@@ -98,7 +103,7 @@ def format_mib(value: int) -> str:
     return f"{value / 1024**2:.0f} MiB"
 
 
-def can_admit_multi(
+def can_admit_job(
     pending_job: QueuedJob,
     running_jobs: dict[Any, QueuedJob],
     snapshot: ResourceSnapshot,
@@ -111,19 +116,19 @@ def can_admit_multi(
     min_disk_per_job_bytes: int,
     ram_reserve_bytes: int,
     disk_reserve_bytes: int,
-    schedulable_cpu: float,
-    min_cpu_per_job: float,
-    large_job_threshold_bytes: int,
     streaming: bool | None = None,
     chunk_rows: int | None = None,
 ) -> tuple[bool, str]:
-    """Return whether *pending_job* may start alongside *running_jobs*."""
+    """Return whether the FCFS head job may start now (False = stay queued, not rejected)."""
     running_count = len(running_jobs)
     slot_cap = max(1, effective_max)
     cpu_cap = max_concurrent_by_cpu(settings, ncpu=snapshot.cpu_cores)
+    schedulable = schedulable_cpu_cores(settings, ncpu=snapshot.cpu_cores)
+    min_cpu = min_cores_per_job(settings)
+    large_threshold = int(settings.validation_large_job_subprocess_bytes)
 
-    pending_large = is_large_job(pending_job, threshold_bytes=large_job_threshold_bytes)
-    running_large = _count_large_jobs(running_jobs, threshold_bytes=large_job_threshold_bytes)
+    pending_large = is_large_job(pending_job, threshold_bytes=large_threshold)
+    running_large = _count_large_jobs(running_jobs, threshold_bytes=large_threshold)
     if pending_large and running_large >= 1:
         return False, (
             f"Queued — will start when the other large job finishes "
@@ -134,15 +139,14 @@ def can_admit_multi(
 
     if running_count >= max_parallel:
         return False, (
-            f"Queued — will start when a slot opens "
-            f"({running_count}/{max_parallel} jobs running)"
+            f"Queued — will start when a CPU slot opens "
+            f"({running_count}/{max_parallel} jobs running, {schedulable} worker cores available)"
         )
 
-    prospective = running_count + 1
-    if prospective * min_cpu_per_job > schedulable_cpu + 1e-6:
+    if (running_count + 1) * min_cpu > schedulable:
         return False, (
             f"Queued — will start when CPU is free "
-            f"({running_count} jobs running; need {min_cpu_per_job:.1f} cores per job)"
+            f"({running_count} jobs running; {schedulable} cores available for workers)"
         )
 
     use_streaming = streaming
@@ -189,10 +193,9 @@ def can_admit_multi(
 
     if pending_large and running_count >= 1:
         worker_budget = 0
-        if settings is not None:
-            from pegasus.services.host_memory import worker_memory_budget_bytes
+        from pegasus.services.host_memory import worker_memory_budget_bytes
 
-            worker_budget = worker_memory_budget_bytes(settings)
+        worker_budget = worker_memory_budget_bytes(settings)
         required = pending_ram + running_ram
         ceiling = ram_headroom + running_ram
         if worker_budget > 0:
@@ -204,60 +207,3 @@ def can_admit_multi(
             )
 
     return True, ""
-
-
-def can_admit_job(
-    pending_job: QueuedJob,
-    running_jobs: dict[Any, QueuedJob],
-    snapshot: ResourceSnapshot,
-    *,
-    settings: Settings,
-    effective_max: int,
-    disk_headroom_multiplier: float,
-    ram_multiplier: float,
-    min_ram_per_job_bytes: int,
-    min_disk_per_job_bytes: int,
-    ram_reserve_bytes: int,
-    disk_reserve_bytes: int,
-    streaming: bool | None = None,
-    chunk_rows: int | None = None,
-    schedulable_cpu: float | None = None,
-    min_cpu_per_job: float | None = None,
-    large_job_threshold_bytes: int | None = None,
-) -> tuple[bool, str]:
-    """Return whether a pending job may start now (False = stay queued, not rejected)."""
-    from pegasus.services.fair_cpu_scheduler import schedulable_cpu_cores
-
-    sched = (
-        schedulable_cpu
-        if schedulable_cpu is not None
-        else schedulable_cpu_cores(settings, ncpu=snapshot.cpu_cores)
-    )
-    min_cpu = (
-        min_cpu_per_job
-        if min_cpu_per_job is not None
-        else float(settings.validation_min_cpu_per_job)
-    )
-    large_threshold = (
-        large_job_threshold_bytes
-        if large_job_threshold_bytes is not None
-        else int(settings.validation_large_job_subprocess_bytes)
-    )
-    return can_admit_multi(
-        pending_job,
-        running_jobs,
-        snapshot,
-        settings=settings,
-        effective_max=effective_max,
-        disk_headroom_multiplier=disk_headroom_multiplier,
-        ram_multiplier=ram_multiplier,
-        min_ram_per_job_bytes=min_ram_per_job_bytes,
-        min_disk_per_job_bytes=min_disk_per_job_bytes,
-        ram_reserve_bytes=ram_reserve_bytes,
-        disk_reserve_bytes=disk_reserve_bytes,
-        schedulable_cpu=sched,
-        min_cpu_per_job=min_cpu,
-        large_job_threshold_bytes=large_threshold,
-        streaming=streaming,
-        chunk_rows=chunk_rows,
-    )

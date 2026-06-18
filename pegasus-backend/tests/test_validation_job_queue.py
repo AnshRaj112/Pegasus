@@ -100,12 +100,12 @@ def test_enqueue_does_not_deadlock_under_lock(monkeypatch, tmp_path: Path) -> No
         stats_future.result(timeout=5)
 
 
-def test_enqueue_starts_multiple_small_jobs_when_slots_allow(monkeypatch, tmp_path: Path) -> None:
+def test_enqueue_starts_multiple_jobs_fcfs_when_slots_allow(monkeypatch, tmp_path: Path) -> None:
     settings = Settings(
         validation_max_concurrency=3,
         validation_auto_tune_enabled=False,
-        validation_min_cpu_per_job=0.5,
-        validation_cpu_reserve_fraction=0.5,
+        validation_min_cpu_per_job=1,
+        validation_cpu_reserve_cores=1,
     )
     queue = ValidationJobQueue(settings, max_concurrency=3)
     queue._runner = _StubRunner()  # noqa: SLF001

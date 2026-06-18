@@ -455,19 +455,16 @@ class Settings(BaseSettings):
         description="CPU cores kept free for the OS, API, and other services (never given to workers).",
     )
     validation_cpu_reserve_fraction: float = Field(
-        default=0.5,
+        default=0.0,
         ge=0.0,
         le=32.0,
-        description=(
-            "Fractional CPU reserve for fair scheduler (e.g. 0.5 on a 4-core host → 3.5 schedulable). "
-            "When >0, overrides validation_cpu_reserve_cores for schedulable CPU math."
-        ),
+        description="Deprecated; use validation_cpu_reserve_cores (default 1 core free).",
     )
     validation_min_cpu_per_job: float = Field(
-        default=0.5,
-        ge=0.1,
+        default=1.0,
+        ge=1.0,
         le=32.0,
-        description="Minimum CPU share allocated to each running validation job.",
+        description="CPU cores allocated to each running validation job (FCFS queue).",
     )
     validation_max_concurrent_jobs: int = Field(
         default=0,

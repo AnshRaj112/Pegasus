@@ -311,23 +311,13 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
               const progress = job.progress;
               const queueReason = progress?.queue_reason ?? null;
               const queuePosition = progress?.queue_position ?? null;
-              const priorityScore = progress?.priority_score ?? null;
-              const allocatedCpu = progress?.allocated_cpu_cores ?? null;
-              const schedulerHint =
-                priorityScore !== null && allocatedCpu !== null
-                  ? ` (priority ${priorityScore.toFixed(2)}, ${allocatedCpu} CPU cores when running)`
-                  : priorityScore !== null
-                    ? ` (priority ${priorityScore.toFixed(2)})`
-                    : '';
               const statusLabel =
                 job.status === 'queued'
                   ? (queueReason ||
                     (queuePosition !== null
-                      ? `Accepted and queued (position ${queuePosition + 1}) — waiting for CPU/RAM${schedulerHint}`
-                      : `Accepted and queued — waiting for CPU/RAM${schedulerHint}`))
-                  : job.status === 'running' && allocatedCpu !== null
-                    ? `Validation running (${allocatedCpu} CPU cores allocated)…`
-                    : null;
+                      ? `Accepted and queued (position ${queuePosition + 1}) — waiting for earlier jobs`
+                      : 'Accepted and queued — waiting for earlier jobs'))
+                  : null;
               setRunningMessage(statusLabel || job.message || job.phase || 'Validation in progress…');
               setReportMeta({
                 jobId,
@@ -434,14 +424,8 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
         }
         const progress = job.progress;
         const queueReason = progress?.queue_reason ?? null;
-        const allocatedCpu = progress?.allocated_cpu_cores ?? null;
-        const runningCpuHint =
-          job.status === 'running' && allocatedCpu !== null
-            ? ` (${allocatedCpu} CPU cores allocated)`
-            : '';
         setRunningMessage(
-          queueReason
-            || `${job.message || job.phase || 'Validation in progress…'}${runningCpuHint}`,
+          queueReason || job.message || job.phase || 'Validation in progress…',
         );
         timer = setTimeout(() => { void poll(); }, 2000);
       } catch {

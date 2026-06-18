@@ -3,7 +3,7 @@
 # Last edited: 2026-06-17T07:01:32Z
 # --- END GENERATED FILE METADATA ---
 
-"""Concurrency-limited validation job queue with fair multi-slot scheduling."""
+"""Concurrency-limited FCFS validation job queue."""
 
 from __future__ import annotations
 
@@ -21,14 +21,9 @@ from typing import Any
 
 from pegasus.core.config import Settings
 from pegasus.core.json_util import dumps_bytes, loads_str
-from pegasus.services.fair_cpu_scheduler import (
-    allocate_cpu_shares,
-    estimate_runtime_seconds,
-    pick_next_pending,
-    priority_score,
-    schedulable_cpu_cores as fair_schedulable_cpu_cores,
-)
+from pegasus.services.queue_cpu import allocate_cores_per_job, schedulable_cpu_cores
 from pegasus.services.cpu_quota import update_cpu_limit
+from pegasus.services.resource_governor import can_admit_job
 from pegasus.services.background_validation_runner import (
     BackgroundValidationRunner,
     ValidationJobHandle,
@@ -100,15 +95,7 @@ class QueuedJob:
 
 
 class ValidationJobQueue:
-    """Fair multi-slot queue for validation jobs.
-
-    Parameters
-    ----------
-    settings : Settings
-        Application settings (reads ``validation_max_concurrency``).
-    max_concurrency : int | None
-        Override for the concurrency cap.  ``None`` reads from *settings*.
-    """
+    """FCFS queue for validation jobs with CPU/RAM admission control."""
 
     def __init__(
         self,
@@ -215,12 +202,8 @@ class ValidationJobQueue:
         return max(1, os.cpu_count() or 1)
 
     def schedulable_cpu_cores_available(self) -> int:
-        """CPUs workers may use (one or more cores reserved for OS/API)."""
-        sched = fair_schedulable_cpu_cores(
-            self._settings,
-            ncpu=self.cpu_cores_available(),
-        )
-        return max(1, int(sched))
+        """CPUs workers may use (one core reserved for OS/API by default)."""
+        return schedulable_cpu_cores(self._settings, ncpu=self.cpu_cores_available())
 
     def set_max_concurrency(self, value: int) -> int:
         """Update the concurrency cap at runtime.  Returns the clamped value actually set.
@@ -463,17 +446,13 @@ class ValidationJobQueue:
                 pass
 
     def _try_start_pending(self) -> None:
-        """Start as many pending jobs as CPU, RAM, and disk allow (priority order)."""
+        """Start FCFS head jobs while CPU, RAM, and disk slots are available."""
         effective_max, snapshot = self._drain_slot_cap()
         if snapshot is None:
             snapshot = self.resource_recommendation()
 
         policy = self._resource_policy
-        schedulable = fair_schedulable_cpu_cores(
-            self._settings,
-            ncpu=self.cpu_cores_available(),
-        )
-        min_cpu = float(self._settings.validation_min_cpu_per_job)
+        ncpu = self.cpu_cores_available()
 
         while True:
             with self._lock:
@@ -481,16 +460,15 @@ class ValidationJobQueue:
                     return
                 if len(self._running) >= effective_max:
                     return
-                pending_list = list(self._pending)
+                head = self._pending[0]
                 running_copy = dict(self._running)
 
-            next_job, reason = pick_next_pending(
-                pending_list,
+            admitted, reason = can_admit_job(
+                head,
                 running_copy,
+                snapshot,
                 settings=self._settings,
-                snapshot=snapshot,
                 effective_max=effective_max,
-                avg_runtime_seconds=self._avg_runtime_seconds,
                 disk_headroom_multiplier=policy.disk_headroom_multiplier,
                 ram_multiplier=self._settings.validation_queue_ram_multiplier,
                 min_ram_per_job_bytes=self._settings.validation_queue_min_ram_per_job_bytes,
@@ -498,38 +476,38 @@ class ValidationJobQueue:
                 ram_reserve_bytes=self._settings.validation_queue_ram_reserve_bytes,
                 disk_reserve_bytes=self._settings.validation_queue_disk_reserve_bytes,
             )
-            if next_job is None:
+            if not admitted:
                 with self._lock:
                     self._refresh_pending_statuses_locked(
                         effective_max=effective_max,
-                        queue_reason=reason,
+                        queue_reason=reason if head.position == 0 else None,
                     )
                 logger.debug(
-                    "No admissible pending job (pending=%d running=%d): %s",
-                    len(pending_list),
-                    len(running_copy),
+                    "Job %s queued (FCFS head blocked): %s (pending=%d running=%d)",
+                    head.job_id,
                     reason,
+                    len(self._pending),
+                    len(running_copy),
                 )
                 return
 
-            prospective = list(running_copy.values()) + [next_job]
-            shares = allocate_cpu_shares(
-                prospective,
-                schedulable,
-                min_cpu_per_job=min_cpu,
+            concurrent = len(running_copy) + 1
+            allocated = float(
+                allocate_cores_per_job(
+                    self._settings,
+                    concurrent_jobs=concurrent,
+                    ncpu=ncpu,
+                )
             )
-            allocated = shares.get(next_job.job_id, min_cpu)
             job_added_to_running = False
 
             with self._lock:
+                if not self._pending or self._pending[0].job_id != head.job_id:
+                    continue
                 if len(self._running) >= effective_max:
                     return
-                try:
-                    self._pending.remove(next_job)
-                except ValueError:
-                    continue
+                next_job = self._pending.popleft()
                 self._update_queue_positions()
-                concurrent = len(self._running) + 1
                 self._refresh_pending_statuses_locked(effective_max=effective_max)
                 try:
                     next_job.allocated_cpu_cores = allocated
@@ -550,7 +528,7 @@ class ValidationJobQueue:
                         self._running[next_job.job_id] = next_job
                         job_added_to_running = True
                         logger.info(
-                            "Job %s dispatched to external worker pending=%d allocated_cpu=%.2f",
+                            "Job %s dispatched to worker (FCFS) pending=%d allocated_cpu=%.0f",
                             next_job.job_id,
                             len(self._pending),
                             allocated,
@@ -569,7 +547,7 @@ class ValidationJobQueue:
                                 next_job.job_id,
                                 local_reason,
                             )
-                            continue
+                            return
                         handle = self._runner.start_job(
                             next_job.job_dir,
                             allocated_cpu_cores=allocated,
@@ -590,7 +568,7 @@ class ValidationJobQueue:
                             self._running[next_job.job_id] = next_job
                             job_added_to_running = True
                             logger.info(
-                                "Job %s started pending=%d running=%d allocated_cpu=%.2f",
+                                "Job %s started (FCFS) pending=%d running=%d allocated_cpu=%.0f",
                                 next_job.job_id,
                                 len(self._pending),
                                 len(self._running),
@@ -609,18 +587,16 @@ class ValidationJobQueue:
     def _rebalance_running_cpu_shares_unlocked(self, running_jobs: list[QueuedJob]) -> None:
         if not running_jobs:
             return
-        schedulable = fair_schedulable_cpu_cores(
-            self._settings,
-            ncpu=self.cpu_cores_available(),
-        )
-        min_cpu = float(self._settings.validation_min_cpu_per_job)
-        shares = allocate_cpu_shares(
-            running_jobs,
-            schedulable,
-            min_cpu_per_job=min_cpu,
+        ncpu = self.cpu_cores_available()
+        concurrent = len(running_jobs)
+        alloc = float(
+            allocate_cores_per_job(
+                self._settings,
+                concurrent_jobs=concurrent,
+                ncpu=ncpu,
+            )
         )
         for job in running_jobs:
-            alloc = shares.get(job.job_id, min_cpu)
             job.allocated_cpu_cores = alloc
             handle = job.handle
             if handle is not None and not job.external:
@@ -779,10 +755,12 @@ class ValidationJobQueue:
             schedulable = self.schedulable_cpu_cores_available()
             per_job_cpu = allocated_cpu_cores
             if per_job_cpu is None:
-                per_job_cpu = max(
-                    float(self._settings.validation_min_cpu_per_job),
-                    fair_schedulable_cpu_cores(self._settings, ncpu=self.cpu_cores_available())
-                    / concurrent,
+                per_job_cpu = float(
+                    allocate_cores_per_job(
+                        self._settings,
+                        concurrent_jobs=concurrent,
+                        ncpu=self.cpu_cores_available(),
+                    )
                 )
             per_job_cpu_int = max(1, int(per_job_cpu))
             avail_ram = available_worker_memory_bytes(
@@ -859,16 +837,6 @@ class ValidationJobQueue:
             effective_max=eff,
             running_jobs=running,
         )
-        est_runtime = estimate_runtime_seconds(
-            job,
-            avg_runtime_seconds=self._avg_runtime_seconds,
-            settings=self._settings,
-        )
-        prio = priority_score(
-            job,
-            avg_runtime_seconds=self._avg_runtime_seconds,
-            settings=self._settings,
-        )
         try:
             resource_profile = None
             if status_path.is_file():
@@ -894,7 +862,7 @@ class ValidationJobQueue:
                     if queue_reason
                     else (
                         f"Accepted and queued (position {job.position + 1} of {pend}, "
-                        f"starts when CPU/RAM slots are available)"
+                        f"starts when earlier jobs finish and resources are free)"
                     )
                 ),
                 "progress": {
@@ -907,9 +875,7 @@ class ValidationJobQueue:
                     "estimated_start_epoch_s": time.time() + wait_s,
                     "enqueued_at_epoch_s": job.enqueued_at,
                     "queue_reason": queue_reason,
-                    "priority_score": round(prio, 4),
                     "allocated_cpu_cores": job.allocated_cpu_cores,
-                    "estimated_runtime_seconds": round(est_runtime, 1),
                 },
             }
             if resource_profile is not None:

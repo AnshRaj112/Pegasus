@@ -188,9 +188,7 @@ export interface ValidationJobProgress {
   running_jobs?: number | null;
   estimated_wait_seconds?: number | null;
   effective_max_concurrency?: number | null;
-  priority_score?: number | null;
   allocated_cpu_cores?: number | null;
-  estimated_runtime_seconds?: number | null;
 }
 
 export interface ValidationJobDetailResponse {
