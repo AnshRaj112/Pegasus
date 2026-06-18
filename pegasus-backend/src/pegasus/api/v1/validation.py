@@ -577,15 +577,28 @@ async def validate_csv_local_paths(
         require_local_path_access(settings)
         resolved_source = resolve_local_path_on_disk(source_path, settings, must_be_file=True)
         resolved_target = resolve_local_path_on_disk(target_path, settings, must_be_file=True)
-        try:
-            file_format, detection_warnings = coerce_local_validate_fields_with_detection(
-                resolved_source,
-                resolved_target,
-                body.file_format,
-                settings=settings,
-            )
-        except ValueError as exc:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        detect_limit = int(settings.validation_skip_file_detect_above_bytes or 0)
+        skip_detect = detect_limit > 0 and (
+            local_path_size_bytes(resolved_source) > detect_limit
+            or local_path_size_bytes(resolved_target) > detect_limit
+        )
+        if skip_detect or not settings.validation_auto_detect_format:
+            file_format = infer_file_format_from_path(resolved_source, body.file_format)
+            detection_warnings: list[str] = []
+            if skip_detect and settings.validation_auto_detect_format:
+                detection_warnings.append(
+                    "File detection skipped on API submit for large inputs; using path/extension format."
+                )
+        else:
+            try:
+                file_format, detection_warnings = coerce_local_validate_fields_with_detection(
+                    resolved_source,
+                    resolved_target,
+                    body.file_format,
+                    settings=settings,
+                )
+            except ValueError as exc:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         if detection_warnings:
             logger.info(
                 "file detection warnings job paths source=%s target=%s warnings=%s",
@@ -703,7 +716,7 @@ async def validate_csv_local_paths(
     queue = get_validation_queue(settings)
     queued_job = queue.enqueue(job_id, job_dir)
     poll = f"{settings.api_v1_prefix.rstrip('/')}/validate/jobs/{job_id}"
-    queue_stats = queue.stats
+    counts = queue.queue_counts()
     from pegasus.services.validation_job_queue import JobState
 
     accepted_status = (
@@ -714,9 +727,9 @@ async def validate_csv_local_paths(
         status=accepted_status,
         poll_url=poll,
         queue_position=queued_job.position if accepted_status == "queued" else None,
-        queue_pending=queue_stats["pending"],
-        queue_running=queue_stats["running"],
-        max_concurrency=queue_stats["max_concurrency"],
+        queue_pending=counts["pending"],
+        queue_running=counts["running"],
+        max_concurrency=counts["max_concurrency"],
     )
 
 

@@ -138,16 +138,17 @@ class ValidationJobQueue:
         )
 
     def _uses_external_workers(self) -> bool:
-        url = (self._settings.validation_distributed_queue_url or "").strip()
-        if not url:
-            return False
-        if self._settings.validation_spawn_local_workers:
-            logger.warning(
-                "validation_spawn_local_workers=true prevents dispatch to validation-worker; "
-                "large jobs may OOM the API process. Set PEGASUS_VALIDATION_SPAWN_LOCAL_WORKERS=false."
-            )
-            return False
-        return True
+        """When Redis is configured, jobs always go to validation-worker (never API subprocess)."""
+        return bool((self._settings.validation_distributed_queue_url or "").strip())
+
+    def queue_counts(self) -> dict[str, int]:
+        """Lightweight pending/running counts (no resource probes)."""
+        with self._lock:
+            return {
+                "pending": len(self._pending),
+                "running": len(self._running),
+                "max_concurrency": self._max_concurrency,
+            }
 
     def _safe_to_spawn_local_worker(self, job: QueuedJob) -> tuple[bool, str]:
         """Block large jobs from starting inside a small API/container cgroup."""
@@ -339,29 +340,27 @@ class ValidationJobQueue:
             if existing is not None and existing.state in (JobState.QUEUED, JobState.RUNNING):
                 return existing
         job = QueuedJob(job_id=job_id, job_dir=job_dir.resolve())
-        effective, _snapshot = self._drain_slot_cap()
         with self._lock:
             job.position = len(self._pending)
             self._pending.append(job)
             self._active_jobs[job_id] = job
             self._update_queue_positions()
-            self._refresh_pending_statuses_locked(effective_max=effective)
+            effective = max(1, self._max_concurrency)
+            self._write_queued_status(job, effective_max=effective)
             logger.info(
-                "Job %s enqueued position=%d pending=%d running=%d effective_cap=%d user_cap=%d",
+                "Job %s enqueued position=%d pending=%d running=%d user_cap=%d",
                 job_id,
                 job.position,
                 len(self._pending),
                 len(self._running),
-                effective,
                 self._max_concurrency,
             )
 
-        # Start immediately when capacity allows (do not wait for the drain-loop tick).
-        self._try_start_pending()
-        with self._lock:
-            if job.state == JobState.QUEUED:
-                self._write_queued_status(job)
-        self._drain_event.set()
+        # Never start workers synchronously on the HTTP thread — drain loop handles it.
+        if self._drain_task is None:
+            self._try_start_pending()
+        else:
+            self._drain_event.set()
         return job
 
     def get_job(self, job_id: uuid.UUID) -> QueuedJob | None:
@@ -534,6 +533,13 @@ class ValidationJobQueue:
                             allocated,
                         )
                     else:
+                        if self._uses_external_workers():
+                            logger.error(
+                                "Internal error: external worker mode but local branch taken for %s",
+                                next_job.job_id,
+                            )
+                            self._pending.appendleft(next_job)
+                            return
                         ok_local, local_reason = self._safe_to_spawn_local_worker(next_job)
                         if not ok_local:
                             self._pending.appendleft(next_job)

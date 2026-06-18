@@ -326,6 +326,14 @@ class Settings(BaseSettings):
             "file_format=auto and to warn when declared format disagrees with content."
         ),
     )
+    validation_skip_file_detect_above_bytes: int = Field(
+        default=100 * 1024 * 1024,
+        ge=0,
+        description=(
+            "Skip multi-layer file detection on the API submit path when source or target "
+            "exceeds this size (uses extension/path inference only; avoids API work on huge files)."
+        ),
+    )
     validation_auto_extract_archives: bool = Field(
         default=True,
         description=(
