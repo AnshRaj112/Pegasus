@@ -98,8 +98,9 @@ services:
     env_file:
       - ./pegasus-backend/.env.backend
     command: ["python", "-m", "pegasus.validation.distributed_worker_main"]
-    # cgroup v2 cpu.max for per-job CPU shares requires a writable unified cgroup hierarchy.
-    cgroupns_mode: host
+    # Per-job CPU shares use cgroup v2 cpu.max when /sys/fs/cgroup is writable, else CPU affinity.
+    # Optional (Docker Compose v2.15+): add cgroupns_mode: host in docker-compose.override.yml
+    # for strict cgroup quotas inside the worker container.
     volumes:
       - ${PEGASUS_HOST_HOME:-${HOME}}:${PEGASUS_HOST_HOME:-${HOME}}:ro
       - pegasus_spill:/tmp/pegasus_job_workspace
