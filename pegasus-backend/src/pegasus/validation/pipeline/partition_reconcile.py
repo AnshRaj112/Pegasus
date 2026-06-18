@@ -15,8 +15,6 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from pegasus.core.resource_tuning import schedulable_cpu_cores
-
 from pegasus.validation.comparators.policy import active_compare_policy
 from pegasus.validation.pipeline.arrow_spill import partition_has_arrow, read_arrow_partition
 from pegasus.validation.pipeline.fingerprint import canonical
@@ -320,14 +318,14 @@ def reconcile_partitions_parallel(
     return missing, extra, changed, matching, mismatched_partitions
 
 
-def resolved_reconcile_workers(requested: int, *, cpu_reserve: int = 1) -> int:
-    """1 = sequential; 0 = auto; N>1 = explicit pool size. Leaves *cpu_reserve* cores for the host."""
+def resolved_reconcile_workers(requested: int) -> int:
+    """1 = sequential; 0 = auto (cpu-1 capped at 8); N>1 = explicit pool size."""
     if requested == 1:
         return 1
-    schedulable = schedulable_cpu_cores(reserve=cpu_reserve)
     if requested <= 0:
-        return max(1, min(16, schedulable))
-    return max(1, min(schedulable, requested))
+        cpus = os.cpu_count() or 1
+        return max(2, min(16, cpus))
+    return max(1, requested)
 
 
 def should_parallel_reconcile(

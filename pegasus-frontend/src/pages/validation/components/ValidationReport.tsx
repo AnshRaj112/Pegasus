@@ -308,17 +308,7 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
             } else if (job.status !== 'completed') {
               const session = getActiveSession(jobId);
               setIsRunning(true);
-              const progress = job.progress;
-              const queueReason = progress?.queue_reason ?? null;
-              const queuePosition = progress?.queue_position ?? null;
-              const statusLabel =
-                job.status === 'queued'
-                  ? (queueReason ||
-                    (queuePosition !== null
-                      ? `Accepted and queued (position ${queuePosition + 1}) — waiting for earlier jobs`
-                      : 'Accepted and queued — waiting for earlier jobs'))
-                  : null;
-              setRunningMessage(statusLabel || job.message || job.phase || 'Validation in progress…');
+              setRunningMessage(job.message || job.phase || 'Validation in progress…');
               setReportMeta({
                 jobId,
                 runId: null,
@@ -422,11 +412,7 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
           dispatch(reportActions.fetchReportsRequest());
           return;
         }
-        const progress = job.progress;
-        const queueReason = progress?.queue_reason ?? null;
-        setRunningMessage(
-          queueReason || job.message || job.phase || 'Validation in progress…',
-        );
+        setRunningMessage(job.message || job.phase || 'Validation in progress…');
         timer = setTimeout(() => { void poll(); }, 2000);
       } catch {
         timer = setTimeout(() => { void poll(); }, 3000);
@@ -546,9 +532,7 @@ export const ValidationReport: React.FC<ValidationReportProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <SyncOutlined spin style={{ fontSize: '24px', color: '#1677ff' }} />
           <div>
-            <h2 style={{ margin: 0, fontSize: '20px' }}>
-              {runningMessage.toLowerCase().includes('queued') ? 'Queued for validation' : 'Validation in progress'}
-            </h2>
+            <h2 style={{ margin: 0, fontSize: '20px' }}>Validation in progress</h2>
             <p style={{ margin: '4px 0 0', color: '#64748b' }}>{runningMessage}</p>
           </div>
         </div>

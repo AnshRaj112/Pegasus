@@ -78,14 +78,13 @@ def _job_workspace_bytes(job_dir: Path | None) -> int:
 def capture_resource_snapshot(
     *,
     job_dir: Path | None = None,
-    workspace_dir: Path | None = None,
     label: str = "snapshot",
     prev_system_cpu: tuple[int, int] | None = None,
     prev_process_cpu: tuple[int, int] | None = None,
     elapsed_wall_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Capture a point-in-time resource snapshot for API / status.json."""
-    workspace = (workspace_dir or job_dir).resolve() if (workspace_dir or job_dir) is not None else None
+    workspace = job_dir.resolve() if job_dir is not None else None
     total_ram = _total_ram_bytes()
     available_ram = _available_ram_bytes()
     total_disk = _total_disk_bytes(workspace)
@@ -168,7 +167,6 @@ class JobResourceProfiler:
     """Tracks before / during / after resource footprints for one validation job."""
 
     job_dir: Path
-    workspace_dir: Path | None = None
     sample_interval_seconds: float = 5.0
     max_during_samples: int = 120
     before: dict[str, Any] | None = None
@@ -183,7 +181,7 @@ class JobResourceProfiler:
     _last_process_cpu: tuple[int, int] | None = None
 
     def capture_before(self) -> dict[str, Any]:
-        snap = capture_resource_snapshot(job_dir=self.job_dir, workspace_dir=self.workspace_dir, label="before")
+        snap = capture_resource_snapshot(job_dir=self.job_dir, label="before")
         self.before = _public_snapshot(snap)
         self._baseline_system_cpu = snap.get("_system_cpu_sample")
         self._baseline_process_cpu = snap.get("_process_cpu_sample")
@@ -200,7 +198,6 @@ class JobResourceProfiler:
         elapsed = max(0.001, now - self._last_sample_at if self._last_sample_at else now - self._started_at)
         snap = capture_resource_snapshot(
             job_dir=self.job_dir,
-            workspace_dir=self.workspace_dir,
             label="during",
             prev_system_cpu=self._last_system_cpu,
             prev_process_cpu=self._last_process_cpu,
@@ -220,7 +217,6 @@ class JobResourceProfiler:
         elapsed = max(0.001, time.time() - (self._last_sample_at or self._started_at))
         snap = capture_resource_snapshot(
             job_dir=self.job_dir,
-            workspace_dir=self.workspace_dir,
             label="after",
             prev_system_cpu=self._last_system_cpu,
             prev_process_cpu=self._last_process_cpu,

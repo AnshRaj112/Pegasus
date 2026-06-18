@@ -8,13 +8,12 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 from pegasus.core.config import Settings
-from pegasus.core.resource_tuning import cap_partition_buckets, schedulable_cpu_cores
+from pegasus.core.resource_tuning import cap_partition_buckets
 from pegasus.core.workload_budget import plan_workload_budget
 from pegasus.schemas.validation import (
     CloudFileProfileResponse,
@@ -79,7 +78,7 @@ class ValidationService:
         identity_column_count: int = 1,
         resource_policy: dict[str, Any] | None = None,
     ) -> TabularPipelineConfig:
-        from pegasus.core.resource_tuning import schedulable_cpu_cores
+        import os
 
         from pegasus.core.workload_budget import _estimated_row_bytes
         from pegasus.validation.readers import native_multichar
@@ -99,15 +98,11 @@ class ValidationService:
         dense_target_rows = max(1, target_bytes // min_row_bytes)
         source_row_estimate = max(1, source_bytes // row_width, dense_source_rows)
         target_row_estimate = max(1, target_bytes // row_width, dense_target_rows)
-        schedulable = schedulable_cpu_cores(
-            ncpu=os.cpu_count() or 1,
-            reserve=self._settings.validation_cpu_reserve_cores,
-        )
         budget = plan_workload_budget(
             source_bytes=source_bytes,
             target_bytes=target_bytes,
             compare_column_count=compare_column_count,
-            cpu_cores=schedulable,
+            cpu_cores=os.cpu_count() or 1,
             memory_budget_bytes=memory_budget,
             target_duration_seconds=self._settings.validation_target_duration_seconds,
             requested_chunk_rows=self._settings.validation_reconciliation_chunk_rows,
@@ -124,13 +119,7 @@ class ValidationService:
         )
         preset = self._settings.validation_tabular_partition_preset
         reconcile_workers = self._settings.validation_partition_reconcile_workers
-        stamped_workers = policy.get("partition_reconcile_workers")
-        if stamped_workers is not None:
-            try:
-                reconcile_workers = max(1, int(stamped_workers))
-            except (TypeError, ValueError):
-                pass
-        elif reconcile_workers <= 0:
+        if reconcile_workers <= 0:
             reconcile_workers = budget.max_parallel_workers
         return TabularPipelineConfig(
             chunk_rows=budget.chunk_rows,
@@ -216,7 +205,6 @@ class ValidationService:
         source_label: str,
         target_label: str,
         artifact_export_parent: Path | None = None,
-        reconciliation_workspace: Path | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         has_header: bool = True,
         header_leading_rows: int = 0,
@@ -290,8 +278,9 @@ class ValidationService:
             cfg.partition_reconcile_workers,
         )
 
-        workspace = reconciliation_workspace
-        if workspace is not None:
+        workspace = None
+        if artifact_export_parent is not None:
+            workspace = artifact_export_parent / "reconcile_workspace"
             workspace.mkdir(parents=True, exist_ok=True)
 
         if progress_callback:
@@ -377,7 +366,6 @@ class ValidationService:
         column_mappings: list[ColumnMapping] | None = None,
         *,
         artifact_export_parent: Path | None = None,
-        reconciliation_workspace: Path | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         has_header: bool = True,
         header_leading_rows: int = 0,
@@ -410,7 +398,6 @@ class ValidationService:
             source_label=str(source_path),
             target_label=str(target_path),
             artifact_export_parent=artifact_export_parent,
-            reconciliation_workspace=reconciliation_workspace,
             progress_callback=progress_callback,
             has_header=has_header,
             header_leading_rows=header_leading_rows,
@@ -480,7 +467,6 @@ class ValidationService:
         file_format: str,
         *,
         artifact_export_parent: Path | None = None,
-        reconciliation_workspace: Path | None = None,
         resource_policy: dict[str, Any] | None = None,
     ) -> ValidationRunResult:
         src_adapter = FileColumnarAdapter(source_path, file_format=file_format)
@@ -495,8 +481,9 @@ class ValidationService:
             identity_column_count=len(identity_columns),
             resource_policy=resource_policy,
         )
-        workspace = reconciliation_workspace
-        if workspace is not None:
+        workspace = None
+        if artifact_export_parent is not None:
+            workspace = artifact_export_parent / "reconcile_workspace"
             workspace.mkdir(parents=True, exist_ok=True)
         pipeline = TabularReconciliationPipeline(
             src_adapter,

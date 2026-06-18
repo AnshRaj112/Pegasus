@@ -16,15 +16,13 @@ spec:
       containers:
         - name: worker
           image: pegasus-backend:latest
-          command: ["python", "-m", "pegasus.validation.distributed_worker_main"]
+          command: ["python", "-m", "category1.workers.partition_worker"]
           envFrom:
             - configMapRef:
                 name: pegasus-config
           volumeMounts:
             - name: work-data
               mountPath: /data/category1
-            - name: validation-jobs
-              mountPath: /data/validation_jobs
           resources:
             requests:
               cpu: 2
@@ -38,6 +36,3 @@ spec:
         - name: work-data
           persistentVolumeClaim:
             claimName: pegasus-work-data
-        - name: validation-jobs
-          emptyDir:
-            sizeLimit: 200Gi

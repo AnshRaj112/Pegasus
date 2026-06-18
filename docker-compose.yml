@@ -7,16 +7,6 @@
 # Copy docker-compose.override.example.yml → docker-compose.override.yml for extra volume mounts.
 
 services:
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
-    networks:
-      - pegasus
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-
   backend:
     build:
       context: ./pegasus-backend
@@ -28,45 +18,21 @@ services:
     volumes:
       # Bind-mount the real host home (not snap Docker's rewritten $HOME). Set PEGASUS_HOST_HOME in .env.
       - ${PEGASUS_HOST_HOME:-${HOME}}:${PEGASUS_HOST_HOME:-${HOME}}:ro
-      - pegasus_spill:/tmp/pegasus_job_workspace
-      - pegasus_jobs:/tmp/pegasus_validation_jobs
     environment:
       PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS: "true"
       PEGASUS_VALIDATION_LOCAL_PATH_HOST_PREFIX: ""
       PEGASUS_VALIDATION_LOCAL_PATH_CONTAINER_PREFIX: ""
-      PEGASUS_VALIDATION_JOBS_DIRECTORY: "/tmp/pegasus_validation_jobs"
-      PEGASUS_VALIDATION_RECONCILIATION_TEMP_DIR: "/tmp/pegasus_job_workspace"
-      # API-only: dispatch jobs to validation-worker via Redis (no in-container subprocess)
-      PEGASUS_VALIDATION_DISTRIBUTED_QUEUE_URL: "redis://redis:6379/0"
-      PEGASUS_VALIDATION_SPAWN_LOCAL_WORKERS: "false"
-      PEGASUS_VALIDATION_SKIP_FILE_DETECT_ABOVE_BYTES: "104857600"
+      # GCS: stream-only chunked spill (no full-object download); warm worker pool
       PEGASUS_VALIDATION_ENABLE_IN_MEMORY_RECONCILE: "false"
       PEGASUS_VALIDATION_GCS_STREAMING_ONLY: "true"
-      PEGASUS_VALIDATION_WORKER_POOL_SIZE: "0"
-      PEGASUS_VALIDATION_MAX_CONCURRENCY: "3"
-      PEGASUS_VALIDATION_MAX_CONCURRENT_JOBS: "3"
-      PEGASUS_VALIDATION_MIN_CPU_PER_JOB: "1"
-      PEGASUS_VALIDATION_CPU_RESERVE_CORES: "1"
-      PEGASUS_VALIDATION_JOB_TIMEOUT_SECONDS: "0"
-      PEGASUS_VALIDATION_MAX_READ_CHUNK_BYTES: "52428800"
-      PEGASUS_VALIDATION_AUTO_TUNE_ENABLED: "true"
-      PEGASUS_VALIDATION_UTILIZATION_SLACK: "0.70"
-      PEGASUS_VALIDATION_CLEANUP_WORKSPACE_ON_COMPLETE: "true"
-      PEGASUS_VALIDATION_GLOBAL_MEMORY_BUDGET_BYTES: "7516192768"
-      PEGASUS_VALIDATION_MEMORY_BUDGET_BYTES: "7516192768"
-      PEGASUS_VALIDATION_API_MEMORY_RESERVE_BYTES: "2147483648"
-      PEGASUS_VALIDATION_LARGE_JOB_SUBPROCESS_BYTES: "10737418240"
-      PEGASUS_VALIDATION_QUEUE_RAM_RESERVE_BYTES: "2147483648"
+      PEGASUS_VALIDATION_WORKER_POOL_SIZE: "2"
       PEGASUS_VALIDATION_SKIP_ARTIFACT_REPORT: "true"
       PEGASUS_VALIDATION_ENABLE_CONTENT_DIGEST_PRECHECK: "true"
-      PEGASUS_VALIDATION_RECONCILIATION_PARTITION_BUCKETS: "1024"
-      PEGASUS_VALIDATION_RECONCILIATION_CHUNK_ROWS: "500000"
-      PEGASUS_VALIDATION_PARTITION_RECONCILE_WORKERS: "1"
+      PEGASUS_VALIDATION_RECONCILIATION_PARTITION_BUCKETS: "512"
+      PEGASUS_VALIDATION_PARTITION_RECONCILE_WORKERS: "0"
       PEGASUS_VALIDATION_QUEUE_RAM_MULTIPLIER: "1.5"
       PEGASUS_VALIDATION_TARGET_DURATION_SECONDS: "300"
       PEGASUS_VALIDATION_PROGRESS_STATUS_INTERVAL_SECONDS: "5"
-    depends_on:
-      - redis
     healthcheck:
       test:
         [
@@ -79,64 +45,6 @@ services:
       timeout: 5s
       start_period: 15s
       retries: 3
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: "2"
-        reservations:
-          memory: 512M
-    networks:
-      - pegasus
-
-  validation-worker:
-    build:
-      context: ./pegasus-backend
-      dockerfile: Dockerfile
-    env_file:
-      - ./pegasus-backend/.env.backend
-    command: ["python", "-m", "pegasus.validation.distributed_worker_main"]
-    # Per-job CPU shares use cgroup v2 cpu.max when /sys/fs/cgroup is writable, else CPU affinity.
-    # Optional (Docker Compose v2.15+): add cgroupns_mode: host in docker-compose.override.yml
-    # for strict cgroup quotas inside the worker container.
-    volumes:
-      - ${PEGASUS_HOST_HOME:-${HOME}}:${PEGASUS_HOST_HOME:-${HOME}}:ro
-      - pegasus_spill:/tmp/pegasus_job_workspace
-      - pegasus_jobs:/tmp/pegasus_validation_jobs
-    environment:
-      PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS: "true"
-      PEGASUS_VALIDATION_LOCAL_PATH_HOST_PREFIX: ""
-      PEGASUS_VALIDATION_LOCAL_PATH_CONTAINER_PREFIX: ""
-      PEGASUS_VALIDATION_JOBS_DIRECTORY: "/tmp/pegasus_validation_jobs"
-      PEGASUS_VALIDATION_RECONCILIATION_TEMP_DIR: "/tmp/pegasus_job_workspace"
-      PEGASUS_VALIDATION_DISTRIBUTED_QUEUE_URL: "redis://redis:6379/0"
-      PEGASUS_VALIDATION_SPAWN_LOCAL_WORKERS: "false"
-      PEGASUS_VALIDATION_SKIP_FILE_DETECT_ABOVE_BYTES: "104857600"
-      PEGASUS_VALIDATION_ENABLE_IN_MEMORY_RECONCILE: "false"
-      PEGASUS_VALIDATION_GCS_STREAMING_ONLY: "true"
-      PEGASUS_VALIDATION_WORKER_POOL_SIZE: "0"
-      PEGASUS_VALIDATION_GLOBAL_MEMORY_BUDGET_BYTES: "7516192768"
-      PEGASUS_VALIDATION_MEMORY_BUDGET_BYTES: "7516192768"
-      PEGASUS_VALIDATION_API_MEMORY_RESERVE_BYTES: "2147483648"
-      PEGASUS_VALIDATION_RECONCILIATION_PARTITION_BUCKETS: "1024"
-      PEGASUS_VALIDATION_RECONCILIATION_CHUNK_ROWS: "500000"
-      PEGASUS_VALIDATION_PARTITION_RECONCILE_WORKERS: "1"
-      PEGASUS_VALIDATION_SKIP_ARTIFACT_REPORT: "true"
-      PEGASUS_VALIDATION_ENABLE_CONTENT_DIGEST_PRECHECK: "true"
-      PEGASUS_VALIDATION_TARGET_DURATION_SECONDS: "300"
-      PEGASUS_VALIDATION_MAX_CONCURRENT_JOBS: "3"
-      PEGASUS_VALIDATION_MIN_CPU_PER_JOB: "1"
-      PEGASUS_VALIDATION_CPU_RESERVE_CORES: "1"
-    depends_on:
-      - redis
-      - backend
-    deploy:
-      resources:
-        limits:
-          memory: 11G
-          cpus: "4"
-        reservations:
-          memory: 2G
     networks:
       - pegasus
 
@@ -145,8 +53,10 @@ services:
       context: ./pegasus-frontend
       dockerfile: Dockerfile
       args:
+        # Empty → browser calls same-origin /api/... through nginx (no CORS setup required).
         VITE_API_BASE: ""
     ports:
+      # Default 8080 avoids clashing with local Vite on 5173. Set PEGASUS_UI_PORT=5173 if Vite is stopped.
       - "${PEGASUS_UI_PORT:-8080}:80"
     depends_on:
       backend:
@@ -157,7 +67,3 @@ services:
 networks:
   pegasus:
     driver: bridge
-
-volumes:
-  pegasus_spill:
-  pegasus_jobs:

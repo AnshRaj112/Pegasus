@@ -188,27 +188,70 @@ def _swap_pressure() -> float | None:
 
 # ── Job workload estimation ───────────────────────────────────────
 
-from pegasus.core.resource_tuning import schedulable_cpu_cores
-from pegasus.services.job_resource_meta import (
-    estimate_job_csv_bytes as _estimate_job_csv_bytes,
-    job_column_count,
-    read_job_meta,
-)
-from pegasus.services.resource_models import (
-    apply_utilization_slack,
-    effective_cpu_cost_per_job,
-    estimate_job_disk_bytes,
-    estimate_job_ram_bytes,
-    estimate_streaming_job_ram_bytes,
-)
+def estimate_streaming_job_ram_bytes(
+    csv_bytes: int,
+    *,
+    min_ram_per_job_bytes: int,
+    chunk_rows: int = 500_000,
+    compare_column_count: int = 8,
+) -> int:
+    """Bounded RAM estimate for streaming spill (not O(file size))."""
+    row_bytes = max(64, min(2048, 32 * max(1, compare_column_count + 1)))
+    chunk_buffers = 2
+    chunk_ram = chunk_rows * row_bytes * chunk_buffers
+    overhead = 384 * 1024 * 1024
+    return max(min_ram_per_job_bytes, chunk_ram + overhead)
 
-# Re-export for tests and callers.
-__all__ = [
-    "estimate_streaming_job_ram_bytes",
-    "estimate_job_ram_bytes",
-    "compute_resource_recommendation",
-    "ResourceSnapshot",
-]
+
+def estimate_job_ram_bytes(
+    csv_bytes: int,
+    *,
+    ram_multiplier: float,
+    min_ram_per_job_bytes: int,
+    streaming: bool = False,
+    chunk_rows: int = 500_000,
+    compare_column_count: int = 8,
+) -> int:
+    """Per-job RAM estimate — streaming model for large GCS/local spill jobs."""
+    if streaming or csv_bytes >= 64 * 1024 * 1024:
+        return estimate_streaming_job_ram_bytes(
+            csv_bytes,
+            min_ram_per_job_bytes=min_ram_per_job_bytes,
+            chunk_rows=chunk_rows,
+            compare_column_count=compare_column_count,
+        )
+    return max(min_ram_per_job_bytes, int(csv_bytes * ram_multiplier))
+
+
+def _estimate_job_csv_bytes(job_dir: Path) -> int:
+    """Estimate combined source + target CSV size for a job.
+
+    Reads from the filesystem (source.csv / target.csv in job_dir) or
+    falls back to meta.json if files aren't present yet.
+    """
+    total = 0
+    for name in ("source.csv", "target.csv"):
+        p = job_dir / name
+        if p.is_file():
+            try:
+                total += p.stat().st_size
+            except OSError:
+                pass
+            continue
+        # Fallback: check meta.json for source_path / target_path
+        # (used by /validate/local where CSVs are external)
+        meta_path = job_dir / "meta.json"
+        if meta_path.is_file():
+            try:
+                from pegasus.core.json_util import loads_str
+
+                meta = loads_str(meta_path.read_text(encoding="utf-8"))
+                ext_path = meta.get("source_path" if name == "source.csv" else "target_path")
+                if ext_path:
+                    total += Path(ext_path).stat().st_size
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+    return total
 
 
 def _running_jobs_estimated_ram(
@@ -218,40 +261,17 @@ def _running_jobs_estimated_ram(
     min_ram_per_job_bytes: int,
     streaming: bool = False,
     chunk_rows: int = 500_000,
-    disk_headroom_multiplier: float = DEFAULT_DISK_HEADROOM_MULTIPLIER,
-    min_disk_per_job_bytes: int = MIN_DISK_PER_JOB_BYTES,
 ) -> int:
     """Estimate total RAM consumed by currently running jobs."""
     total = 0
     for job in running_jobs.values():
         csv_bytes = _estimate_job_csv_bytes(job.job_dir)
-        columns = job_column_count(read_job_meta(job.job_dir))
         total += estimate_job_ram_bytes(
             csv_bytes,
             ram_multiplier=ram_multiplier,
             min_ram_per_job_bytes=min_ram_per_job_bytes,
             streaming=streaming,
             chunk_rows=chunk_rows,
-            compare_column_count=columns,
-        )
-    return total
-
-
-def _running_jobs_estimated_disk(
-    running_jobs: dict,
-    *,
-    disk_headroom_multiplier: float,
-    min_disk_per_job_bytes: int,
-    streaming: bool = False,
-) -> int:
-    total = 0
-    for job in running_jobs.values():
-        csv_bytes = _estimate_job_csv_bytes(job.job_dir)
-        total += estimate_job_disk_bytes(
-            csv_bytes,
-            disk_headroom_multiplier=disk_headroom_multiplier,
-            min_disk_per_job_bytes=min_disk_per_job_bytes,
-            streaming=streaming,
         )
     return total
 
@@ -335,8 +355,6 @@ def compute_resource_recommendation(
     threads_per_job: int | None = None,
     streaming_jobs: bool | None = None,
     chunk_rows: int | None = None,
-    utilization_slack: float | None = None,
-    partition_reconcile_workers: int | None = None,
 ) -> ResourceSnapshot:
     """Compute a resource-aware concurrency recommendation.
 
@@ -408,16 +426,8 @@ def compute_resource_recommendation(
 
     # ── Probe system resources ────────────────────────────────────
     cpu_cores = max(1, os.cpu_count() or 1)
-    cpu_reserve = 0
-    if settings is not None:
-        cpu_reserve = max(0, int(settings.validation_cpu_reserve_cores))
-    schedulable = schedulable_cpu_cores(ncpu=cpu_cores, reserve=cpu_reserve)
     total_ram = _total_ram_bytes()
     available_ram = _available_ram_bytes()
-    if settings is not None:
-        from pegasus.services.host_memory import admission_available_ram_bytes
-
-        available_ram = admission_available_ram_bytes(settings)
     total_disk = _total_disk_bytes(workspace_path)
     available_disk = _available_disk_bytes(workspace_path)
     swap = _swap_pressure()
@@ -447,27 +457,14 @@ def compute_resource_recommendation(
     if job_chunk_rows is None:
         job_chunk_rows = 500_000
 
-    sample_columns = 8
-    if pending_jobs:
-        sample_columns = job_column_count(read_job_meta(pending_jobs[0].job_dir))
-    elif running_jobs:
-        first = next(iter(running_jobs.values()))
-        sample_columns = job_column_count(read_job_meta(first.job_dir))
-
     estimated_ram_per_job = estimate_job_ram_bytes(
         sample_csv_bytes,
         ram_multiplier=ram_multiplier,
         min_ram_per_job_bytes=min_ram_per_job_bytes,
         streaming=use_streaming_ram,
         chunk_rows=job_chunk_rows,
-        compare_column_count=sample_columns,
     )
-    estimated_disk_per_job = estimate_job_disk_bytes(
-        sample_csv_bytes,
-        disk_headroom_multiplier=disk_headroom_multiplier,
-        min_disk_per_job_bytes=min_disk_per_job_bytes,
-        streaming=use_streaming_ram,
-    )
+    estimated_disk_per_job = max(min_disk_per_job_bytes, int(sample_csv_bytes * disk_headroom_multiplier))
 
     # ── What running jobs already consume ─────────────────────────
     running_estimated_ram = _running_jobs_estimated_ram(
@@ -476,8 +473,6 @@ def compute_resource_recommendation(
         min_ram_per_job_bytes=min_ram_per_job_bytes,
         streaming=use_streaming_ram,
         chunk_rows=job_chunk_rows,
-        disk_headroom_multiplier=disk_headroom_multiplier,
-        min_disk_per_job_bytes=min_disk_per_job_bytes,
     )
 
     # ── Compute safe limits ───────────────────────────────────────
@@ -493,32 +488,13 @@ def compute_resource_recommendation(
     new_slots_by_disk = max(0, usable_disk // max(1, estimated_disk_per_job))
     max_safe_by_disk = max(1, len(running_jobs) + new_slots_by_disk)
 
-    # CPU: each job uses partition reconcile workers (not just threads_per_job).
-    reconcile_workers = partition_reconcile_workers
-    if reconcile_workers is None and settings is not None:
-        reconcile_workers = settings.validation_partition_reconcile_workers
-    if reconcile_workers is None or reconcile_workers <= 0:
-        reconcile_workers = max(1, min(16, schedulable))
+    # CPU: cap parallel jobs so threads_per_job × jobs does not exceed core count (roughly)
     tpp = max(0, int(threads_per_job)) if threads_per_job is not None else 0
-    if tpp == 0 and settings is not None:
-        tpp = settings.validation_queue_threads_per_job
-    cpu_cost = effective_cpu_cost_per_job(
-        cpu_cores=cpu_cores,
-        threads_per_job=tpp,
-        partition_reconcile_workers=int(reconcile_workers),
-        combined_bytes=sample_csv_bytes,
-        cpu_reserve_cores=cpu_reserve,
-    )
-    max_safe_by_cpu = max(1, schedulable // cpu_cost)
+    slots_per_core = tpp if tpp > 0 else 1
+    max_safe_by_cpu = max(1, cpu_cores // slots_per_core)
 
-    slack = utilization_slack
-    if slack is None and settings is not None:
-        slack = settings.validation_utilization_slack
-    if slack is None:
-        slack = 0.70
-
-    raw_recommended = max(1, min(max_safe_by_ram, max_safe_by_disk, max_safe_by_cpu))
-    recommended = apply_utilization_slack(raw_recommended, slack)
+      # ── Final recommendation: minimum of all constraints ──────────
+    recommended = max(1, min(max_safe_by_ram, max_safe_by_disk, max_safe_by_cpu))
 
     # ── Generate warnings ─────────────────────────────────────────
     if swap is not None and swap > 0.15:

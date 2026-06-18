@@ -57,11 +57,6 @@ from pegasus.validation.file_detection.coerce import coerce_local_validate_field
 from pegasus.validation.file_format import infer_file_format_from_path, normalize_file_format
 from pegasus.validation.file_pairing import auto_match_files_by_name, list_files_in_directory
 from pegasus.services.exceptions import ValidationBadRequestError
-from pegasus.services.job_resource_meta import (
-    adapter_size_bytes,
-    local_path_size_bytes,
-    stamp_resource_sizes,
-)
 from pegasus.services.validation_job_queue import get_validation_queue
 from pegasus.validation.cloud_credentials import resolve_gcs_auth
 from pegasus.validation.cloud_input import (
@@ -577,28 +572,15 @@ async def validate_csv_local_paths(
         require_local_path_access(settings)
         resolved_source = resolve_local_path_on_disk(source_path, settings, must_be_file=True)
         resolved_target = resolve_local_path_on_disk(target_path, settings, must_be_file=True)
-        detect_limit = int(settings.validation_skip_file_detect_above_bytes or 0)
-        skip_detect = detect_limit > 0 and (
-            local_path_size_bytes(resolved_source) > detect_limit
-            or local_path_size_bytes(resolved_target) > detect_limit
-        )
-        if skip_detect or not settings.validation_auto_detect_format:
-            file_format = infer_file_format_from_path(resolved_source, body.file_format)
-            detection_warnings: list[str] = []
-            if skip_detect and settings.validation_auto_detect_format:
-                detection_warnings.append(
-                    "File detection skipped on API submit for large inputs; using path/extension format."
-                )
-        else:
-            try:
-                file_format, detection_warnings = coerce_local_validate_fields_with_detection(
-                    resolved_source,
-                    resolved_target,
-                    body.file_format,
-                    settings=settings,
-                )
-            except ValueError as exc:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        try:
+            file_format, detection_warnings = coerce_local_validate_fields_with_detection(
+                resolved_source,
+                resolved_target,
+                body.file_format,
+                settings=settings,
+            )
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         if detection_warnings:
             logger.info(
                 "file detection warnings job paths source=%s target=%s warnings=%s",
@@ -683,22 +665,6 @@ async def validate_csv_local_paths(
         meta["target_cloud"] = cloud_config_to_meta(target_cloud)  # type: ignore[arg-type]
     else:
         meta["target_path"] = str(resolved_target)
-
-    if source_input is not None:
-        src_bytes = adapter_size_bytes(source_input.adapter)
-    else:
-        src_bytes = local_path_size_bytes(resolved_source)
-    if target_input is not None:
-        tgt_bytes = adapter_size_bytes(target_input.adapter)
-    else:
-        tgt_bytes = local_path_size_bytes(resolved_target)
-    stamp_resource_sizes(
-        meta,
-        source_bytes=src_bytes,
-        target_bytes=tgt_bytes,
-        column_count=len(body.column_mappings),
-    )
-
     (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
 
     (job_dir / "status.json").write_bytes(
@@ -706,7 +672,7 @@ async def validate_csv_local_paths(
             {
                 "status": "queued",
                 "phase": "queued",
-                "message": "Job accepted and queued — will start when resources are free",
+                "message": "Job accepted, waiting for worker slot",
                 "progress": {"enqueued_at_epoch_s": time.time()},
             },
             indent=True,
@@ -716,7 +682,7 @@ async def validate_csv_local_paths(
     queue = get_validation_queue(settings)
     queued_job = queue.enqueue(job_id, job_dir)
     poll = f"{settings.api_v1_prefix.rstrip('/')}/validate/jobs/{job_id}"
-    counts = queue.queue_counts()
+    queue_stats = queue.stats
     from pegasus.services.validation_job_queue import JobState
 
     accepted_status = (
@@ -727,9 +693,9 @@ async def validate_csv_local_paths(
         status=accepted_status,
         poll_url=poll,
         queue_position=queued_job.position if accepted_status == "queued" else None,
-        queue_pending=counts["pending"],
-        queue_running=counts["running"],
-        max_concurrency=counts["max_concurrency"],
+        queue_pending=queue_stats["pending"],
+        queue_running=queue_stats["running"],
+        max_concurrency=queue_stats["max_concurrency"],
     )
 
 
@@ -776,21 +742,14 @@ async def get_validation_job(
                 progress["pending_ahead"] = pos
                 progress["running_jobs"] = queue.running_count
                 progress["max_concurrency"] = queue.max_concurrency
-                counts = queue.queue_counts()
-                progress["effective_max_concurrency"] = counts["max_concurrency"]
-                queue_reason = progress.get("queue_reason")
-                if isinstance(queue_reason, str) and queue_reason.strip():
-                    message = queue_reason.strip()
-                elif pos == 0 and queue.running_count == 0:
+                eta = progress.get("estimated_wait_seconds")
+                if isinstance(eta, (int, float)):
                     message = (
-                        "Queued — waiting for worker CPU, RAM, or disk "
-                        "(no other jobs ahead; resources not yet available)"
+                        f"Waiting in queue (position {pos + 1} of {queue.pending_count}, "
+                        f"estimated wait {int(eta)}s)"
                     )
-                elif pos is not None:
-                    message = (
-                        f"Accepted and queued (position {pos + 1}) — "
-                        "starts when earlier jobs finish"
-                    )
+                else:
+                    message = f"Waiting in queue (position {pos + 1} of {queue.pending_count})"
         return ValidationJobDetailResponse(
             status=status_val,
             phase=phase,

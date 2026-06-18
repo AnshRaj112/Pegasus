@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-from pegasus.core.resource_tuning import schedulable_cpu_cores
 from pegasus.validation.pipeline.partition_reconcile import (
     resolved_reconcile_workers,
     should_parallel_reconcile,
@@ -15,9 +14,8 @@ from pegasus.validation.pipeline.partition_reconcile import (
 
 
 def test_resolved_reconcile_workers_auto() -> None:
-    schedulable = schedulable_cpu_cores(reserve=1)
-    workers = resolved_reconcile_workers(0, cpu_reserve=1)
-    assert 1 <= workers <= schedulable
+    workers = resolved_reconcile_workers(0)
+    assert workers >= 2
 
 
 def test_should_parallel_reconcile_large_input_lower_bar() -> None:

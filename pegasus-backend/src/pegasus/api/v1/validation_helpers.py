@@ -54,7 +54,11 @@ _COMPLETED_JOB_CACHE_MAX = 256
 _COMPLETED_JOB_TTL_SEC = 3600.0
 
 
-from pegasus.services.validation_paths import validation_jobs_root
+def validation_jobs_root(settings: Settings) -> Path:
+    raw = (settings.validation_jobs_directory or "").strip()
+    base = Path(raw).expanduser() if raw else Path(tempfile.gettempdir()) / "pegasus_validation_jobs"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
 
 
 def completed_job_cache_get(job_id: uuid.UUID) -> ValidationJobDetailResponse | None:
