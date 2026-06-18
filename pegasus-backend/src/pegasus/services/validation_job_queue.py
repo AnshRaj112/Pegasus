@@ -268,6 +268,8 @@ class ValidationJobQueue:
         temp_dir = self._settings.validation_reconciliation_temp_dir
         if temp_dir:
             workspace = Path(temp_dir)
+        elif self._uses_external_workers():
+            workspace = Path("/tmp/pegasus_job_workspace")
 
         with self._lock:
             running = dict(self._running)
@@ -481,7 +483,7 @@ class ValidationJobQueue:
                         effective_max=effective_max,
                         queue_reason=reason if head.position == 0 else None,
                     )
-                logger.debug(
+                logger.info(
                     "Job %s queued (FCFS head blocked): %s (pending=%d running=%d)",
                     head.job_id,
                     reason,
@@ -525,6 +527,10 @@ class ValidationJobQueue:
                         next_job.handle = None
                         next_job.external = True
                         self._running[next_job.job_id] = next_job
+                        self._write_running_status(
+                            next_job,
+                            message=f"Dispatched to validation worker ({allocated:.0f} CPU cores allocated)",
+                        )
                         job_added_to_running = True
                         logger.info(
                             "Job %s dispatched to worker (FCFS) pending=%d allocated_cpu=%.0f",
@@ -572,6 +578,10 @@ class ValidationJobQueue:
                             next_job.started_at = time.time()
                             next_job.handle = handle
                             self._running[next_job.job_id] = next_job
+                            self._write_running_status(
+                                next_job,
+                                message=f"Validation running ({allocated:.0f} CPU cores allocated)",
+                            )
                             job_added_to_running = True
                             logger.info(
                                 "Job %s started (FCFS) pending=%d running=%d allocated_cpu=%.0f",
@@ -858,19 +868,22 @@ class ValidationJobQueue:
                     and prog.get("pending_ahead") == job.position
                     and prog.get("running_jobs") == running
                     and prog.get("effective_max_concurrency") == eff
+                    and prog.get("queue_reason") == queue_reason
                 ):
                     return
+            head_waiting = job.position == 0 and running == 0
+            default_msg = (
+                f"Queued — waiting for worker CPU, RAM, or disk (position {job.position + 1} of {pend})"
+                if head_waiting
+                else (
+                    f"Accepted and queued (position {job.position + 1} of {pend}, "
+                    f"starts when earlier jobs finish and resources are free)"
+                )
+            )
             payload: dict[str, Any] = {
                 "status": "queued",
                 "phase": "queued",
-                "message": (
-                    queue_reason
-                    if queue_reason
-                    else (
-                        f"Accepted and queued (position {job.position + 1} of {pend}, "
-                        f"starts when earlier jobs finish and resources are free)"
-                    )
-                ),
+                "message": queue_reason if queue_reason else default_msg,
                 "progress": {
                     "queue_position": job.position,
                     "pending_ahead": job.position,
@@ -882,6 +895,30 @@ class ValidationJobQueue:
                     "enqueued_at_epoch_s": job.enqueued_at,
                     "queue_reason": queue_reason,
                     "allocated_cpu_cores": job.allocated_cpu_cores,
+                },
+            }
+            if resource_profile is not None:
+                payload["resource_profile"] = resource_profile
+            _atomic_write_json(status_path, payload)
+        except OSError:
+            pass
+
+    def _write_running_status(self, job: QueuedJob, *, message: str) -> None:
+        status_path = job.job_dir / "status.json"
+        try:
+            resource_profile = None
+            if status_path.is_file():
+                existing = loads_str(status_path.read_text(encoding="utf-8"))
+                if isinstance(existing, dict) and isinstance(existing.get("resource_profile"), dict):
+                    resource_profile = existing.get("resource_profile")
+            payload: dict[str, Any] = {
+                "status": "running",
+                "phase": "running",
+                "message": message,
+                "progress": {
+                    "running_jobs": len(self._running),
+                    "allocated_cpu_cores": job.allocated_cpu_cores,
+                    "started_at_epoch_s": job.started_at or time.time(),
                 },
             }
             if resource_profile is not None:

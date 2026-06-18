@@ -776,23 +776,21 @@ async def get_validation_job(
                 progress["pending_ahead"] = pos
                 progress["running_jobs"] = queue.running_count
                 progress["max_concurrency"] = queue.max_concurrency
-                progress["effective_max_concurrency"] = queue.stats.get("effective_max_concurrency")
+                counts = queue.queue_counts()
+                progress["effective_max_concurrency"] = counts["max_concurrency"]
                 queue_reason = progress.get("queue_reason")
                 if isinstance(queue_reason, str) and queue_reason.strip():
-                    message = queue_reason
+                    message = queue_reason.strip()
+                elif pos == 0 and queue.running_count == 0:
+                    message = (
+                        "Queued — waiting for worker CPU, RAM, or disk "
+                        "(no other jobs ahead; resources not yet available)"
+                    )
                 elif pos is not None:
                     message = (
                         f"Accepted and queued (position {pos + 1}) — "
-                        "starts after the jobs ahead finish"
+                        "starts when earlier jobs finish"
                     )
-                eta = progress.get("estimated_wait_seconds")
-                if isinstance(eta, (int, float)):
-                    message = (
-                        f"Waiting in queue (position {pos + 1} of {queue.pending_count}, "
-                        f"estimated wait {int(eta)}s)"
-                    )
-                else:
-                    message = f"Waiting in queue (position {pos + 1} of {queue.pending_count})"
         return ValidationJobDetailResponse(
             status=status_val,
             phase=phase,
