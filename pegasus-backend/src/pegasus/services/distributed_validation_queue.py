@@ -28,6 +28,8 @@ class DistributedQueueBackend(Protocol):
 
     def ack(self, job_id: uuid.UUID) -> None: ...
 
+    def requeue(self, job_id: uuid.UUID, job_dir: Path) -> None: ...
+
 
 class InProcessDistributedQueue:
     """No-op backend: jobs stay on the local ValidationJobQueue."""
@@ -39,6 +41,9 @@ class InProcessDistributedQueue:
         return None
 
     def ack(self, job_id: uuid.UUID) -> None:
+        return
+
+    def requeue(self, job_id: uuid.UUID, job_dir: Path) -> None:
         return
 
 
@@ -66,6 +71,11 @@ class RedisDistributedQueue:
 
     def ack(self, job_id: uuid.UUID) -> None:
         self._client.hdel(_INFLIGHT_KEY, str(job_id))
+
+    def requeue(self, job_id: uuid.UUID, job_dir: Path) -> None:
+        """Put a dequeued job back at the head of the line (worker deferred it)."""
+        self._client.hdel(_INFLIGHT_KEY, str(job_id))
+        self._client.lpush(_QUEUE_KEY, f"{job_id}|{job_dir.resolve()}")
 
 
 _backend: DistributedQueueBackend | None = None

@@ -49,10 +49,9 @@ def estimate_streaming_job_ram_bytes(
 
     combined = max(0, int(combined_bytes))
     if combined >= 10 * 1024**3:
-        # Scale toward observed ~1.48 GiB for 40 GiB inputs.
         scale = combined / _GOLDEN_COMBINED_BYTES
-        calibrated = int(_GOLDEN_PEAK_RSS_BYTES * max(0.75, min(1.25, scale)))
-        return max(min_ram_per_job_bytes, base, calibrated)
+        conservative = int(_GOLDEN_PEAK_RSS_BYTES * max(1.0, min(2.5, scale * 1.35)))
+        return max(min_ram_per_job_bytes, base, conservative)
     if combined >= 1 * 1024**3:
         return max(min_ram_per_job_bytes, base, 768 * 1024**2)
     return max(min_ram_per_job_bytes, base)

@@ -121,6 +121,15 @@ def can_admit_multi(
     running_count = len(running_jobs)
     slot_cap = max(1, effective_max)
     cpu_cap = max_concurrent_by_cpu(settings, ncpu=snapshot.cpu_cores)
+
+    pending_large = is_large_job(pending_job, threshold_bytes=large_job_threshold_bytes)
+    running_large = _count_large_jobs(running_jobs, threshold_bytes=large_job_threshold_bytes)
+    if pending_large and running_large >= 1:
+        return False, (
+            f"Queued — will start when the other large job finishes "
+            f"({running_large} large job(s) running)"
+        )
+
     max_parallel = max(1, min(slot_cap, cpu_cap, snapshot.max_safe_by_cpu))
 
     if running_count >= max_parallel:
@@ -178,19 +187,20 @@ def can_admit_multi(
             f"{format_mib(disk_headroom)} available after reservations)"
         )
 
-    pending_large = is_large_job(pending_job, threshold_bytes=large_job_threshold_bytes)
-    running_large = _count_large_jobs(running_jobs, threshold_bytes=large_job_threshold_bytes)
-    if pending_large and running_large >= 1:
-        combined_ram = running_ram + pending_ram
-        if combined_ram > ram_headroom + running_ram:
+    if pending_large and running_count >= 1:
+        worker_budget = 0
+        if settings is not None:
+            from pegasus.services.host_memory import worker_memory_budget_bytes
+
+            worker_budget = worker_memory_budget_bytes(settings)
+        required = pending_ram + running_ram
+        ceiling = ram_headroom + running_ram
+        if worker_budget > 0:
+            ceiling = min(ceiling, max(0, worker_budget - ram_reserve_bytes))
+        if required > ceiling:
             return False, (
-                f"Queued — will start when RAM is free for another large job "
-                f"({running_large} large job(s) running)"
-            )
-        if pending_ram > ram_headroom:
-            return False, (
-                "Queued — will start when RAM is free "
-                f"(large job needs ~{format_mib(pending_ram)})"
+                f"Queued — will start when RAM is free for this large job "
+                f"(needs ~{format_mib(pending_ram)} with {running_count} running)"
             )
 
     return True, ""

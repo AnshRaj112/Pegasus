@@ -519,10 +519,11 @@ class Settings(BaseSettings):
         ),
     )
     validation_spawn_local_workers: bool = Field(
-        default=True,
+        default=False,
         description=(
             "When false and validation_distributed_queue_url is set, the API queue dispatches "
-            "to Redis instead of spawning job_worker subprocesses in-process."
+            "to Redis instead of spawning job_worker subprocesses in-process. "
+            "Keep false for Docker/API containers; large jobs must run in validation-worker."
         ),
     )
     validation_api_memory_reserve_bytes: int = Field(

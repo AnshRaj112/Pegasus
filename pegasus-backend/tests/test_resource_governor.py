@@ -89,3 +89,18 @@ def test_admission_rejects_second_large_job_on_small_host(monkeypatch, tmp_path:
     )
     assert not admitted
     assert reason
+    assert "large job" in reason.lower()
+
+
+def test_admission_uses_worker_budget_not_host_ram(monkeypatch) -> None:
+    settings = Settings(
+        validation_global_memory_budget_bytes=11 * 1024**3,
+        validation_distributed_queue_url="redis://localhost:6379/0",
+    )
+    monkeypatch.setattr(
+        "pegasus.services.resource_advisor._available_ram_bytes",
+        lambda: 64 * 1024**3,
+    )
+    from pegasus.services.host_memory import admission_available_ram_bytes
+
+    assert admission_available_ram_bytes(settings) == 11 * 1024**3

@@ -414,6 +414,10 @@ def compute_resource_recommendation(
     schedulable = schedulable_cpu_cores(ncpu=cpu_cores, reserve=cpu_reserve)
     total_ram = _total_ram_bytes()
     available_ram = _available_ram_bytes()
+    if settings is not None:
+        from pegasus.services.host_memory import admission_available_ram_bytes
+
+        available_ram = admission_available_ram_bytes(settings)
     total_disk = _total_disk_bytes(workspace_path)
     available_disk = _available_disk_bytes(workspace_path)
     swap = _swap_pressure()

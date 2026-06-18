@@ -151,9 +151,35 @@ class ValidationJobQueue:
         )
 
     def _uses_external_workers(self) -> bool:
-        if self._settings.validation_spawn_local_workers:
+        url = (self._settings.validation_distributed_queue_url or "").strip()
+        if not url:
             return False
-        return bool((self._settings.validation_distributed_queue_url or "").strip())
+        if self._settings.validation_spawn_local_workers:
+            logger.warning(
+                "validation_spawn_local_workers=true prevents dispatch to validation-worker; "
+                "large jobs may OOM the API process. Set PEGASUS_VALIDATION_SPAWN_LOCAL_WORKERS=false."
+            )
+            return False
+        return True
+
+    def _safe_to_spawn_local_worker(self, job: QueuedJob) -> tuple[bool, str]:
+        """Block large jobs from starting inside a small API/container cgroup."""
+        from pegasus.services.host_memory import cgroup_memory_limit_bytes, worker_memory_budget_bytes
+        from pegasus.services.job_resource_meta import estimate_job_csv_bytes
+
+        threshold = int(self._settings.validation_large_job_subprocess_bytes)
+        combined = estimate_job_csv_bytes(job.job_dir)
+        if combined < max(1, threshold):
+            return True, ""
+        cgroup = cgroup_memory_limit_bytes()
+        budget = worker_memory_budget_bytes(self._settings)
+        cap = budget or cgroup or 0
+        if cap > 0 and cap < 6 * 1024**3:
+            return False, (
+                "Queued — large job must run in validation-worker "
+                "(set PEGASUS_VALIDATION_SPAWN_LOCAL_WORKERS=false and Redis worker URL)"
+            )
+        return True, ""
 
     def recover_from_disk(self) -> None:
         """On API startup: fail stale running jobs and re-enqueue orphaned queued jobs."""
@@ -530,6 +556,20 @@ class ValidationJobQueue:
                             allocated,
                         )
                     else:
+                        ok_local, local_reason = self._safe_to_spawn_local_worker(next_job)
+                        if not ok_local:
+                            self._pending.appendleft(next_job)
+                            self._update_queue_positions()
+                            self._refresh_pending_statuses_locked(
+                                effective_max=effective_max,
+                                queue_reason=local_reason,
+                            )
+                            logger.warning(
+                                "Refusing local worker for job %s: %s",
+                                next_job.job_id,
+                                local_reason,
+                            )
+                            continue
                         handle = self._runner.start_job(
                             next_job.job_dir,
                             allocated_cpu_cores=allocated,
