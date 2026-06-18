@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-18T05:25:31Z
+# --- END GENERATED FILE METADATA ---
+
 """Standalone validation worker for Kubernetes (BRPOP from Redis distributed queue)."""
 
 from __future__ import annotations
