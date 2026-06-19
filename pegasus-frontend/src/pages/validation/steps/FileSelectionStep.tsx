@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
@@ -27,6 +27,7 @@ export interface FileExplorerItem {
   createdBy: string;
   bucket?: string;
   connectionId?: string;
+  rawModifiedAt: number; // ⚡ Added for sorting Date Modified accurately
 }
 
 type BrowseContext = {
@@ -67,9 +68,12 @@ const toExplorerItem = (entry: CloudBrowseEntry): FileExplorerItem => ({
   size: entry.is_dir ? '—' : formatBytes(entry.size_bytes),
   sizeBytes: entry.size_bytes ?? null,
   createdAt: formatDate(entry.created_at),
-  modifiedAt: formatDate(entry.updated_at),
+  // ⚡ Added (entry as any) to bypass the TypeScript strict type check
+  modifiedAt: formatDate(entry.updated_at || (entry as any).modified_at),
   owner: entry.owner?.trim() || '—',
   createdBy: entry.created_by?.trim() || '—',
+  // ⚡ Added (entry as any) here as well
+  rawModifiedAt: new Date(entry.updated_at || (entry as any).modified_at || 0).getTime(), 
 });
 
 const envFallbackConnection = (): CloudConnection | null => {
@@ -121,6 +125,7 @@ const fileFromValidationCloud = (
   modifiedAt: '—',
   owner: '—',
   createdBy: '—',
+  rawModifiedAt: 0,
 });
 
 const SkeletonCell: React.FC<{ width?: string }> = ({ width = '100%' }) => (
@@ -143,17 +148,45 @@ const BrowseSkeletonRows: React.FC<{ rows?: number }> = ({ rows = 8 }) => (
   </>
 );
 
+// ⚡ Custom component for long file names in the display cards
+const TruncatableName: React.FC<{ text: string }> = ({ text }) => {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <span
+      title={text}
+      onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+      style={{
+        fontSize: '13px',
+        fontWeight: 600,
+        maxWidth: '180px',
+        display: 'inline-block',
+        whiteSpace: expanded ? 'normal' : 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        wordBreak: expanded ? 'break-all' : 'normal',
+        verticalAlign: 'bottom',
+        cursor: 'pointer'
+      }}
+    >
+      {text}
+    </span>
+  );
+};
+
 export const FileSelectionStep: React.FC = () => {
   const dispatch = useAppDispatch();
   const validationForm = useAppSelector((s) => s.validation.validationForm);
 
   const [validationMode, setValidationMode] = useState('Single to Single (Default)');
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // ⚡ New Sort State
+  const [sortConfig, setSortConfig] = useState<{ key: 'name' | 'size' | 'modifiedAt'; direction: 'asc' | 'desc' } | null>(null);
+
   const [connections, setConnections] = useState<CloudConnection[]>([]);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
 
   const [browse, setBrowse] = useState<BrowseContext>(emptyBrowseContext);
-
   const [parentPrefix, setParentPrefix] = useState<string | null>(null);
   const [browseEntries, setBrowseEntries] = useState<FileExplorerItem[]>([]);
   const [browseError, setBrowseError] = useState<string | null>(null);
@@ -162,13 +195,17 @@ export const FileSelectionStep: React.FC = () => {
   const wizardHydratedRef = useRef(false);
 
   const [selectingFor, setSelectingFor] = useState<'source' | 'target' | 'none'>('source');
-
   const [sourceFile, setSourceFile] = useState<FileExplorerItem | null>(null);
-
   const [targetFile, setTargetFile] = useState<FileExplorerItem | null>(null);
 
   const currentBrowsePathId = browsePathId(browse);
   const isBrowsing = loadingBrowseKey != null && loadingBrowseKey === currentBrowsePathId;
+
+  // ⚡ Helper to wipe filters when changing environments
+  const resetFilters = () => {
+    setSearchQuery('');
+    setSortConfig(null);
+  };
 
   const readCachedSnapshot = useCallback((ctx: BrowseContext): BrowseCacheEntry | null => {
     if (!ctx.connectionId || ctx.bucket == null) return null;
@@ -368,18 +405,13 @@ export const FileSelectionStep: React.FC = () => {
         const active = res.data.filter((c) => c.active && c.provider === 'google-cloud-storage');
         setConnections(active);
         setConnectionsError(null);
-        if (active[0]) {
-          setBrowse((prev) =>
-            prev.connectionId ? prev : browseContextFromConnection(active[0]),
-          );
-        }
+        // ⚡ Intentionally removed logic that auto-selects the first bucket
       })
       .catch(() => {
         const fallback = envFallbackConnection();
         if (fallback) {
-          const ctx = browseContextFromConnection(fallback);
           setConnections([fallback]);
-          setBrowse((prev) => (prev.connectionId ? prev : ctx));
+          // ⚡ Intentionally removed fallback auto-select logic
           setConnectionsError(null);
         } else {
           setConnectionsError('Sign in via Admin to load GCS connections, or set VITE_GCS_CONNECTION_ID.');
@@ -408,6 +440,7 @@ export const FileSelectionStep: React.FC = () => {
   }, [sourceFile, targetFile, dispatch]);
 
   const handleConnectionSelect = (conn: CloudConnection) => {
+    resetFilters(); // ⚡ Wipe filters on connection change
     cancelInFlightBrowse();
     const next = browseContextFromConnection(conn);
     const nextPathId = browsePathId(next);
@@ -430,10 +463,11 @@ export const FileSelectionStep: React.FC = () => {
 
   const handleRowClick = (file: FileExplorerItem) => {
     if (isFileTableLocked) return;
-
+    
     if (file.type === 'folder') {
       cancelInFlightBrowse();
       if (!browse.bucket) {
+        resetFilters(); // ⚡ Wipe filters when stepping into a new bucket
         setActiveBrowse({ bucket: file.objectName, prefix: '' });
         return;
       }
@@ -446,7 +480,6 @@ export const FileSelectionStep: React.FC = () => {
     const isSource = sourceFile?.id === file.id;
     const isTarget = targetFile?.id === file.id;
 
-    // ⚡ 1. Deselection Logic directly on table rows
     if (isSource && isTarget) {
       setTargetFile(null);
       setSelectingFor('target');
@@ -461,12 +494,10 @@ export const FileSelectionStep: React.FC = () => {
       return;
     }
 
-    // ⚡ 2. Lockout logic: Ignore clicks on unselected files if both slots are full
     if (sourceFile && targetFile) {
       return;
     }
 
-    // ⚡ 3. Normal selection logic
     const isMultiMode = validationMode === 'Many to Many' || validationMode === 'Batch Comparison';
     if (selectingFor === 'source') {
       if (isMultiMode) return;
@@ -481,9 +512,46 @@ export const FileSelectionStep: React.FC = () => {
     }
   };
 
-  const filteredFiles = browseEntries.filter((f) =>
-    f.name.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
+  const handleSort = (key: 'name' | 'size' | 'modifiedAt') => {
+    setSortConfig(prev => {
+      if (prev && prev.key === key && prev.direction === 'asc') return { key, direction: 'desc' };
+      return { key, direction: 'asc' };
+    });
+  };
+
+  const SortIcon = ({ columnKey }: { columnKey: string }) => {
+    if (sortConfig?.key !== columnKey) return <span style={{ color: '#c1c6d7', marginLeft: '4px', fontSize: '10px' }}>↕</span>;
+    return <span style={{ color: '#1677ff', marginLeft: '4px', fontSize: '10px' }}>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>;
+  };
+
+  // ⚡ Integrated Search + Dynamic Sort applied sequentially
+  const sortedAndFilteredFiles = useMemo(() => {
+    let result = browseEntries.filter((f) =>
+      f.name.toLowerCase().includes(searchQuery.toLowerCase()),
+    );
+
+    if (sortConfig) {
+      result.sort((a, b) => {
+        // Keep folders at the top regardless of sort direction
+        if (a.type === 'folder' && b.type === 'file') return -1;
+        if (a.type === 'file' && b.type === 'folder') return 1;
+
+        if (sortConfig.key === 'name') {
+          return sortConfig.direction === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+        }
+        if (sortConfig.key === 'size') {
+          const sizeA = a.sizeBytes ?? -1;
+          const sizeB = b.sizeBytes ?? -1;
+          return sortConfig.direction === 'asc' ? sizeA - sizeB : sizeB - sizeA;
+        }
+        if (sortConfig.key === 'modifiedAt') {
+          return sortConfig.direction === 'asc' ? a.rawModifiedAt - b.rawModifiedAt : b.rawModifiedAt - a.rawModifiedAt;
+        }
+        return 0;
+      });
+    }
+    return result;
+  }, [browseEntries, searchQuery, sortConfig]);
 
   const breadcrumb = !browse.bucket
     ? (isMultiBucketConnection ? 'Select a bucket' : 'Select a connection')
@@ -515,7 +583,8 @@ export const FileSelectionStep: React.FC = () => {
             <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <CheckOutlined style={{ color: '#1677ff' }} />
-                <span style={{ fontSize: '13px', fontWeight: 600 }}>{sourceFile.name}</span>
+                {/* ⚡ Replaced plain name with truncatable component */}
+                <TruncatableName text={sourceFile.name} />
                 <button type="button" onClick={(e) => { e.stopPropagation(); setSourceFile(null); setSelectingFor('source'); }} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ba1a1a' }}><DeleteOutlined /></button>
               </div>
               <span style={{ fontSize: '11px', color: '#64748b', paddingLeft: '22px' }}>
@@ -538,7 +607,8 @@ export const FileSelectionStep: React.FC = () => {
             <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <CheckOutlined style={{ color: '#16a34a' }} />
-                <span style={{ fontSize: '13px', fontWeight: 600 }}>{targetFile.name}</span>
+                {/* ⚡ Replaced plain name with truncatable component */}
+                <TruncatableName text={targetFile.name} />
                 <button type="button" onClick={(e) => { e.stopPropagation(); setTargetFile(null); setSelectingFor('target'); }} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ba1a1a' }}><DeleteOutlined /></button>
               </div>
               <span style={{ fontSize: '11px', color: '#64748b', paddingLeft: '22px' }}>
@@ -637,9 +707,16 @@ export const FileSelectionStep: React.FC = () => {
               <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', fontSize: '11px', textTransform: 'uppercase', color: '#727786' }}>
                 <tr>
                   <th style={{ padding: '12px', width: 40, borderBottom: '1px solid #d9d9d9' }} />
-                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9' }}>Name</th>
-                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9' }}>Size</th>
-                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9' }}>Date Modified</th>
+                  {/* ⚡ Added Sortable Column Headers */}
+                  <th onClick={() => handleSort('name')} style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9', cursor: 'pointer' }}>
+                    Name <SortIcon columnKey="name" />
+                  </th>
+                  <th onClick={() => handleSort('size')} style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9', cursor: 'pointer' }}>
+                    Size <SortIcon columnKey="size" />
+                  </th>
+                  <th onClick={() => handleSort('modifiedAt')} style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9', cursor: 'pointer' }}>
+                    Date Modified <SortIcon columnKey="modifiedAt" />
+                  </th>
                   <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9' }}>Created At</th>
                   <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9' }}>Created By</th>
                   <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9' }}>Owner</th>
@@ -650,18 +727,22 @@ export const FileSelectionStep: React.FC = () => {
                   <BrowseSkeletonRows />
                 ) : (
                   <>
-                    {filteredFiles.map((file) => {
+                    {/* ⚡ Changed mapping to use the sorted array */}
+                    {sortedAndFilteredFiles.map((file) => {
                       const isSource = sourceFile?.id === file.id && sourceFile?.connectionId === file.connectionId;
                       const isTarget = targetFile?.id === file.id && targetFile?.connectionId === file.connectionId;
+                      const isSelected = isSource || isTarget;
+                      const isDisabledFile = Boolean(sourceFile && targetFile && !isSelected && file.type === 'file');
+
                       return (
                         <tr
                           key={`${file.connectionId}-${file.id}`}
                           onClick={() => handleRowClick(file)}
-                          style={{ borderBottom: '1px solid #f1f5f9', backgroundColor: isSource || isTarget ? '#f0f8ff' : 'transparent', cursor: isFileTableLocked ? 'not-allowed' : 'pointer', transition: 'background-color 0.2s', opacity: isFileTableLocked ? 0.5 : 1 }}
-                          onMouseEnter={(e) => { if (!isSource && !isTarget && !isFileTableLocked) e.currentTarget.style.backgroundColor = '#f8fafc'; }}
-                          onMouseLeave={(e) => { if (!isSource && !isTarget) e.currentTarget.style.backgroundColor = 'transparent'; }}
+                          style={{ borderBottom: '1px solid #f1f5f9', backgroundColor: isSelected ? '#f0f8ff' : 'transparent', cursor: isDisabledFile ? 'not-allowed' : 'pointer', transition: 'background-color 0.2s', opacity: isDisabledFile ? 0.5 : 1 }}
+                          onMouseEnter={(e) => { if (!isSelected && !isDisabledFile) e.currentTarget.style.backgroundColor = '#f8fafc'; }}
+                          onMouseLeave={(e) => { if (!isSelected && !isDisabledFile) e.currentTarget.style.backgroundColor = 'transparent'; }}
                         >
-                          <td style={{ padding: '12px' }}>{file.type === 'file' && <input type="checkbox" readOnly checked={isSource || isTarget} />}</td>
+                          <td style={{ padding: '12px' }}>{file.type === 'file' && <input type="checkbox" readOnly checked={isSelected} disabled={isDisabledFile} />}</td>
                           <td style={{ padding: '12px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1b1b1c', fontWeight: 500 }}>
                               {file.type === 'folder' ? <FolderFilled style={{ color: '#faad14', fontSize: '16px' }} /> : <FileTextOutlined style={{ color: '#64748b', fontSize: '16px' }} />}
@@ -678,7 +759,7 @@ export const FileSelectionStep: React.FC = () => {
                         </tr>
                       );
                     })}
-                    {filteredFiles.length === 0 && !browseError && (
+                    {sortedAndFilteredFiles.length === 0 && !browseError && (
                       <tr>
                         <td colSpan={7} style={{ padding: '32px', textAlign: 'center', color: '#727786', fontStyle: 'italic', fontSize: '13px' }}>
                           No files or folders found in this directory.
