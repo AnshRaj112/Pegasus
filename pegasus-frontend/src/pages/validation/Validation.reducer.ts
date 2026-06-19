@@ -48,7 +48,7 @@ export const initialState: ValidationReducerState = {
   },
   overviewProfileCache: null,
   validationDataState: initializeNullState,
-  pendingReportJobId: null,
+  pendingHistoryNavigation: null,
 };
 
 const validationSlice = createSlice({
@@ -94,14 +94,17 @@ const validationSlice = createSlice({
       ...state,
       validationDataState: { ...initializeNullState, error: action.payload },
     }),
-    validationDeferredToReport: (state, action: PayloadAction<{ jobId: string }>) => ({
+    navigateToPairHistory: (
+      state,
+      action: PayloadAction<{ sourcePath: string; targetPath: string }>,
+    ) => ({
       ...state,
-      pendingReportJobId: action.payload.jobId,
+      pendingHistoryNavigation: action.payload,
       validationDataState: { ...initializeNullState, isFetching: false },
     }),
-    clearPendingReportJob: (state) => ({
+    clearPendingHistoryNavigation: (state) => ({
       ...state,
-      pendingReportJobId: null,
+      pendingHistoryNavigation: null,
     }),
     runValidationFromHistoryRequest: (state, _action: PayloadAction<string>) => ({
       ...state,

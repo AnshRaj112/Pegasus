@@ -1,6 +1,7 @@
 # Kubernetes — tabular partition workers (optional scale-out)
 
-Manifests for horizontally scaling **partition-level** reconciliation workers. They target the reference engine under `pegasus-backend/reference/category1_engine/` until that code is integrated into `src/pegasus/validation/`.
+Manifests for horizontally scaling **partition-level** reconciliation workers using
+`pegasus.validation.workers.partition_worker` and Redis task queues.
 
 ## Product stack (default)
 
@@ -19,6 +20,13 @@ docker compose up --build
 kubectl apply -f pegasus-backend/deploy/k8s-tabular-workers/
 ```
 
-See [docs/enterprise-tabular/KUBERNETES_GUIDE.md](../../../docs/enterprise-tabular/KUBERNETES_GUIDE.md).
+Workers consume partition tasks from Redis (`pegasus:partition_tasks`) and write
+results to `pegasus:partition_results:{job_id}`. Spill files must be available on
+the shared volume mounted at `PEGASUS_VALIDATION_WORK_DIR`.
 
-**Note:** `worker-deployment.yaml` still invokes the reference `category1` Python package. Build a custom image that includes `reference/category1_engine` or port workers into Pegasus before production use.
+Set on the API/coordinator pod when enabling distributed mode:
+
+- `PEGASUS_VALIDATION_DISTRIBUTED_ENABLED=true`
+- `PEGASUS_VALIDATION_REDIS_URL=redis://pegasus-redis:6379/0`
+
+See [docs/enterprise-tabular/KUBERNETES_GUIDE.md](../../../docs/enterprise-tabular/KUBERNETES_GUIDE.md).

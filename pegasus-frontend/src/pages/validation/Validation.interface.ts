@@ -57,6 +57,6 @@ export interface ValidationReducerState {
     isFetching: boolean;
     error: string | null;
   };
-  /** Set when a long-running job is deferred to the report view. */
-  pendingReportJobId: string | null;
+  /** Navigate to execution history for this file pair after validation starts or completes. */
+  pendingHistoryNavigation: { sourcePath: string; targetPath: string } | null;
 }

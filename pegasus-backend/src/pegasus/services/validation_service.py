@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-18T06:13:44Z
+# Last edited: 2026-06-19T14:52:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Validation service — routes tabular full validation through Category-1 pipeline."""
@@ -141,6 +141,12 @@ class ValidationService:
             use_arrow_ipc_spill=True,
             partition_reconcile_workers=reconcile_workers,
             gcs_streaming_only=self._settings.validation_gcs_streaming_only,
+            partition_wave_size=self._settings.validation_reconciliation_partition_wave_size,
+            wave_min_bytes=self._settings.validation_reconciliation_wave_min_bytes,
+            partition_reconcile_use_processes=self._settings.validation_partition_reconcile_use_processes,
+            distributed_enabled=self._settings.validation_distributed_enabled,
+            distributed_redis_url=self._settings.validation_redis_url,
+            distributed_min_bytes=self._settings.validation_distributed_min_bytes,
         )
 
     def _resolve_delimiter(
@@ -264,6 +270,8 @@ class ValidationService:
             resource_policy=resource_policy,
         )
         cfg.compare_policy = compare_policy
+        if artifact_export_parent is not None:
+            cfg.distributed_job_id = str(artifact_export_parent.name)
         combined_bytes = source.get_size_bytes() + target.get_size_bytes()
         logger.info(
             "reconciliation delimiter=%r source_bytes=%s target_bytes=%s in_memory=%s "

@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-18T06:13:44Z
+# Last edited: 2026-06-19T14:52:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """CSV validation endpoints (local paths, browse, job polling)."""
@@ -40,6 +40,7 @@ from pegasus.schemas.validation import (
     LocalBrowseResponse,
     LocalColumnPreviewResponse,
     LocalPathBrowseConfigResponse,
+    LocalBatchValidateRequest,
     LocalPathValidateRequest,
     MatchFilePairsRequest,
     MatchFilePairsResponse,
@@ -57,6 +58,7 @@ from pegasus.validation.file_detection.coerce import coerce_local_validate_field
 from pegasus.validation.file_format import infer_file_format_from_path, normalize_file_format
 from pegasus.validation.file_pairing import auto_match_files_by_name, list_files_in_directory
 from pegasus.services.exceptions import ValidationBadRequestError
+from pegasus.services.job_size_estimate import enrich_meta_file_sizes
 from pegasus.services.validation_job_queue import get_validation_queue
 from pegasus.validation.cloud_credentials import resolve_gcs_auth
 from pegasus.validation.cloud_input import (
@@ -665,6 +667,20 @@ async def validate_csv_local_paths(
         meta["target_cloud"] = cloud_config_to_meta(target_cloud)  # type: ignore[arg-type]
     else:
         meta["target_path"] = str(resolved_target)
+    try:
+        src_sz = (
+            int(source_input.adapter.get_size_bytes())
+            if source_input is not None
+            else resolved_source.stat().st_size
+        )
+        tgt_sz = (
+            int(target_input.adapter.get_size_bytes())
+            if target_input is not None
+            else resolved_target.stat().st_size
+        )
+        enrich_meta_file_sizes(meta, source_bytes=src_sz, target_bytes=tgt_sz)
+    except OSError:
+        enrich_meta_file_sizes(meta)
     (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
 
     (job_dir / "status.json").write_bytes(
@@ -688,6 +704,95 @@ async def validate_csv_local_paths(
     accepted_status = (
         "running" if queued_job.state == JobState.RUNNING else "queued"
     )
+    return ValidationJobAcceptedResponse(
+        job_id=job_id,
+        status=accepted_status,
+        poll_url=poll,
+        queue_position=queued_job.position if accepted_status == "queued" else None,
+        queue_pending=queue_stats["pending"],
+        queue_running=queue_stats["running"],
+        max_concurrency=queue_stats["max_concurrency"],
+    )
+
+
+@router.post(
+    "/validate/local/batch",
+    response_model=ValidationJobAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue batch comparison of multiple local file pairs",
+)
+async def validate_csv_local_batch(
+    settings: AppSettings,
+    body: Annotated[LocalBatchValidateRequest, Body()],
+) -> ValidationJobAcceptedResponse:
+    require_local_path_access(settings)
+    if body.cloud_bucket:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Cloud batch is not implemented on this endpoint; use local paths only",
+        )
+
+    batch_units: list[dict[str, object]] = []
+    total_bytes = 0
+    for unit in body.units:
+        src = resolve_local_path_on_disk(Path(unit.source_paths[0]), settings, must_be_file=True)
+        tgt = resolve_local_path_on_disk(Path(unit.target_paths[0]), settings, must_be_file=True)
+        try:
+            total_bytes += src.stat().st_size + tgt.stat().st_size
+        except OSError:
+            pass
+        batch_units.append(
+            {
+                "unit_id": unit.unit_id,
+                "source_path": str(src.resolve()),
+                "target_path": str(tgt.resolve()),
+                "source_paths": [str(src.resolve())],
+                "target_paths": [str(tgt.resolve())],
+                "uid_column": unit.uid_column,
+                "column_mappings": [m.model_dump() for m in unit.column_mappings],
+            }
+        )
+
+    job_id = uuid.uuid4()
+    job_dir = validation_jobs_root(settings) / str(job_id)
+    job_dir.mkdir(parents=True, exist_ok=False)
+
+    meta: dict[str, object] = {
+        "batch": True,
+        "batch_units": batch_units,
+        "on_unit_failure": body.on_unit_failure.value,
+        "delimiter": body.delimiter,
+        "has_header": body.has_header,
+        "header_leading_rows": body.header_leading_rows,
+        "validate_header_formats": body.validate_header_formats,
+        "validate_footers": body.validate_footers,
+        "footer_trailing_rows": body.footer_trailing_rows,
+        "file_format": normalize_file_format(body.file_format),
+        "test_mode": body.test_mode.value,
+        "source_bytes": total_bytes // 2,
+        "target_bytes": total_bytes // 2,
+    }
+    enrich_meta_file_sizes(meta, source_bytes=total_bytes // 2, target_bytes=total_bytes // 2)
+    (job_dir / "meta.json").write_bytes(dumps_bytes(meta, indent=True))
+    (job_dir / "status.json").write_bytes(
+        dumps_bytes(
+            {
+                "status": "queued",
+                "phase": "queued",
+                "message": f"Batch job accepted ({len(batch_units)} units)",
+                "progress": {"total_units": len(batch_units), "enqueued_at_epoch_s": time.time()},
+            },
+            indent=True,
+        )
+    )
+
+    queue = get_validation_queue(settings)
+    queued_job = queue.enqueue(job_id, job_dir)
+    poll = f"{settings.api_v1_prefix.rstrip('/')}/validate/jobs/{job_id}"
+    queue_stats = queue.stats
+    from pegasus.services.validation_job_queue import JobState
+
+    accepted_status = "running" if queued_job.state == JobState.RUNNING else "queued"
     return ValidationJobAcceptedResponse(
         job_id=job_id,
         status=accepted_status,
@@ -786,6 +891,27 @@ async def get_validation_job(
             message=message,
             progress=progress,
             error="completed but result.json missing",
+        )
+
+    try:
+        raw_result = loads_str(result_path.read_text(encoding="utf-8"))
+    except (UnicodeError, ValueError, TypeError, OSError):
+        raw_result = {}
+    if isinstance(raw_result, dict) and raw_result.get("batch"):
+        from pegasus.schemas.validation import BatchValidateResponse
+
+        batch_payload = {
+            k: raw_result[k]
+            for k in ("summary", "units", "on_unit_failure", "durations")
+            if k in raw_result
+        }
+        return ValidationJobDetailResponse(
+            status="completed",
+            phase=phase,
+            message=message,
+            progress=progress,
+            batch_result=BatchValidateResponse.model_validate(batch_payload),
+            resource_profile=resource_profile,
         )
 
     cached = completed_job_cache_get(job_id)

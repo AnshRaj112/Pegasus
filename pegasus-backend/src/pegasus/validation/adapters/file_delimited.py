@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-18T06:13:44Z
+# Last edited: 2026-06-19T14:52:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Delimited file adapter (CSV, TSV, PSV) with chunked streaming."""
@@ -10,6 +10,8 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 from typing import Any, Iterator
+
+import xxhash
 
 from pegasus.validation.adapters.base import TabularColumn, TabularSchema
 from pegasus.validation.csv_header import count_fields_first_row, read_first_row_fields, synthetic_column_names
@@ -29,6 +31,7 @@ class FileDelimitedAdapter:
         "_encoding",
         "_column_names",
         "_data_row_count",
+        "_content_digest_hex",
     )
 
     def __init__(
@@ -47,6 +50,28 @@ class FileDelimitedAdapter:
         self._encoding = encoding
         self._column_names: list[str] | None = None
         self._data_row_count: int | None = None
+        self._content_digest_hex: str | None = None
+
+    _DIGEST_BLOCK_BYTES = 4 * 1024 * 1024
+
+    def content_digest_hex(self) -> str | None:
+        """Lazy xxhash64 of raw file bytes for content-digest precheck."""
+        if self._content_digest_hex is not None:
+            return self._content_digest_hex
+        if not self.path.is_file():
+            return None
+        hasher = xxhash.xxh64()
+        try:
+            with open(self.path, "rb") as f:
+                while True:
+                    block = f.read(self._DIGEST_BLOCK_BYTES)
+                    if not block:
+                        break
+                    hasher.update(block)
+        except OSError:
+            return None
+        self._content_digest_hex = f"xxh64:{hasher.hexdigest()}"
+        return self._content_digest_hex
 
     def get_size_bytes(self) -> int:
         return self.path.stat().st_size

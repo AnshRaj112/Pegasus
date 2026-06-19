@@ -16,22 +16,27 @@ spec:
       containers:
         - name: worker
           image: pegasus-backend:latest
-          command: ["python", "-m", "category1.workers.partition_worker"]
+          command: ["python", "-m", "pegasus.validation.workers.partition_worker"]
           envFrom:
             - configMapRef:
                 name: pegasus-config
+          env:
+            - name: PEGASUS_VALIDATION_DISTRIBUTED_ENABLED
+              value: "true"
+            - name: PEGASUS_VALIDATION_WORK_DIR
+              value: "/data/pegasus/work"
           volumeMounts:
             - name: work-data
-              mountPath: /data/category1
+              mountPath: /data/pegasus/work
           resources:
             requests:
               cpu: 2
               memory: 4Gi
-              ephemeral-storage: 50Gi
+              ephemeral-storage: 10Gi
             limits:
               cpu: 4
               memory: 10Gi
-              ephemeral-storage: 200Gi
+              ephemeral-storage: 50Gi
       volumes:
         - name: work-data
           persistentVolumeClaim:

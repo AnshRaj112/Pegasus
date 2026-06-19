@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-18T06:13:44Z
+# Last edited: 2026-06-19T14:52:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Stratified sampling of mismatch rows for API responses."""
@@ -325,6 +325,13 @@ def paginate_mismatch_rows_from_ndjson(
         total = int(totals.get(mismatch_type, 0))
     else:
         total = int(sum(totals.values()))
+
+    if total <= 0 and path.is_file():
+        from_file = count_mismatch_types_ndjson(path)
+        if mismatch_type:
+            total = int(from_file.get(mismatch_type, 0))
+        else:
+            total = int(sum(from_file.values()))
 
     if total <= 0 or offset >= total:
         return [], total

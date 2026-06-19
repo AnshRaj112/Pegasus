@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-18T06:13:44Z
+# Last edited: 2026-06-19T14:52:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Concurrency-limited validation job queue.
@@ -41,6 +41,9 @@ from pegasus.services.resource_advisor import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+from pegasus.services.job_size_estimate import estimate_job_combined_bytes
 
 
 class JobState(StrEnum):
@@ -225,12 +228,30 @@ class ValidationJobQueue:
                 logger.warning("Resource advisor failed, using user-set max_concurrency", exc_info=True)
         return max(1, self._max_concurrency)
 
+    def _large_job_concurrency_cap(self) -> int | None:
+        """Force serial execution when any tracked job exceeds the large-job threshold."""
+        threshold = int(self._settings.validation_large_job_bytes or 0)
+        if threshold <= 0:
+            return None
+        with self._lock:
+            jobs = list(self._running.values()) + list(self._pending)
+        for job in jobs:
+            if estimate_job_combined_bytes(job.job_dir) >= threshold:
+                return 1
+        return None
+
     def _drain_slot_cap(self) -> tuple[int, ResourceSnapshot | None]:
         """Effective parallel slots for enqueue/drain (skips resource probes when auto-tune is off)."""
         if self._auto_tune_enabled:
             snapshot = self.resource_recommendation()
-            return self.effective_max_concurrency(snapshot=snapshot), snapshot
-        return max(1, self._max_concurrency), None
+            effective = self.effective_max_concurrency(snapshot=snapshot)
+        else:
+            snapshot = None
+            effective = max(1, self._max_concurrency)
+        large_cap = self._large_job_concurrency_cap()
+        if large_cap is not None:
+            effective = min(effective, large_cap)
+        return max(1, effective), snapshot
 
     @property
     def stats(self) -> dict[str, Any]:

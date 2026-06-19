@@ -22,7 +22,7 @@ export const isTransientPollError = (error: unknown): boolean => {
 
 export const pollRecoveryHint = (jobId: string): string =>
   ` The job may still be running on the server, but this browser lost contact with the API. `
-  + `Try /validation/report/${jobId} or History once the run finishes.`;
+  + `Check Reports → execution history once the run finishes (job ${jobId}).`;
 
 export const getApiErrorMessage = (error: unknown, fallback: string): string => {
   if (error instanceof AxiosError) {

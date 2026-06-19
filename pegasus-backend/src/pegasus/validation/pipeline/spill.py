@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-18T06:13:44Z
+# Last edited: 2026-06-19T14:52:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Binary partition spill format — avoids JSON in hot paths."""
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import struct
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 from pegasus.core.json_util import dumps_bytes, loads_bytes
 
@@ -297,3 +297,55 @@ def list_partition_ids(work: Path, side: str) -> set[int]:
         except (IndexError, ValueError):
             continue
     return ids
+
+
+def partition_waves(pids: list[int], wave_size: int) -> list[list[int]]:
+    """Split sorted partition ids into fixed-size waves."""
+    if wave_size <= 0 or not pids:
+        return [list(pids)] if pids else []
+    ordered = sorted(pids)
+    return [ordered[i : i + wave_size] for i in range(0, len(ordered), wave_size)]
+
+
+def delete_partition_files(work: Path, pids: Iterable[int]) -> int:
+    """Remove spill files for the given partition ids; return bytes freed."""
+    freed = 0
+    for pid in pids:
+        for side in ("source", "target"):
+            path = work / side / f"part_{pid:05d}.bin"
+            if path.is_file():
+                try:
+                    freed += path.stat().st_size
+                    path.unlink()
+                except OSError:
+                    pass
+    return freed
+
+
+def workspace_spill_bytes(work: Path) -> int:
+    """Total bytes of all spill partition files under source/ and target/."""
+    total = 0
+    for side in ("source", "target"):
+        side_dir = work / side
+        if not side_dir.is_dir():
+            continue
+        for path in side_dir.glob("part_*.bin"):
+            try:
+                total += path.stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def read_wave_checkpoint(work: Path) -> int:
+    """Return last completed wave index, or -1 when no checkpoint exists."""
+    path = work / "wave_checkpoint.json"
+    if not path.is_file():
+        return -1
+    try:
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return int(data.get("completed_wave", -1))
+    except (OSError, ValueError, TypeError):
+        return -1

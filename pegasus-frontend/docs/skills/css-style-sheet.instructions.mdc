@@ -1,0 +1,75 @@
+---
+description: SCSS CSS Modules and styling conventions for Pelican UI
+applyTo: pelican-ui-v2/**/*.scss,pelican-ui-v2/**/*.css
+---
+# Pelican UI — Styling Conventions
+
+
+## General Rules
+- For layouting, use Ant Design's grid layout components like `<Row>`, `<Col>`, `Flex`.
+- Avoid inline styles.
+- Avoid adding too much of css code.
+- Use CSS modules. Each feature mapped to a certain route to have single .module.scss file.
+- Use bootstrap ultility css classes instead of adding inline css or creating new classes.
+
+### File naming conventions
+- Styles: `PascalCase.module.scss` (or existing feature SCSS file when already established)
+
+## CSS Modules (`.module.scss`)
+- Every component with custom styles MUST use a co-located `.module.scss` file:
+
+```tsx
+import styles from './FeatureName.module.scss'
+
+const Feature = () => (
+  <div className={styles.container}>
+    <h1 className={styles.title}>Title</h1>
+  </div>
+)
+```
+- Import as `styles`: `import styles from './Component.module.scss'`
+- Use camelCase for class names in SCSS: `.contentWrapper`, `.glossaryCard`, `.headerTitle`
+- Apply via `className={styles.className}`
+- Combine with Bootstrap utilities using template literals: `` className={`fw-bold ps-2 ${styles.myClass}`} ``
+- Use BEM naming convention for class names in SCSS files, e.g. `.card`, `.card__header`, `.card__body`, `.card--active`
+- Avoid defining values in `px`; prefer relative units like `rem` for better scalability and accessibility
+
+## SCSS Conventions
+
+- Use nesting for component-scoped styles
+- Leverage shared variables from `src/assets/styles/variables.scss`
+- Use mixins from `src/assets/styles/mixins.scss` where applicable
+- Ant Design theme overrides go in `src/assets/styles/core.scss`, not in module files
+- Any common styles that are shared across multiple components should be placed in `src/assets/styles/core.scss` and imported into the relevant module files
+- Use `@use` to import shared styles and variables into module SCSS files:
+- Use scss related functions and features (e.g. variables, mixins, nesting, extends) to keep styles organized and maintainable, but avoid over-nesting which can lead to specificity issues.
+
+```scss
+@use 'src/assets/styles/variables' as vars;
+```
+
+## Bootstrap utilities
+- The project uses Bootstrap 5 utility classes alongside CSS modules
+- Common utilities: `fw-bold`, `text-primary`, `text-white`, `d-inline-block`, `float-start`, `ps-*`, `pe-*`, `mb-*`, `mt-*`, `m-0`, `p-0`, `col-md-*`, `row`, `text-break`, `text-capitalize`, `text-end`, `bg-primary`, `cursor-pointer`
+- Spacing: `m-3`, `p-0`, `mt-5`, `me-3`, `mb-2`
+- Grid: `col-md-12`, `row`
+- Cards: `card`, `card-body`
+- Display: `d-flex`, `d-none`
+
+### Class name composition
+- Use template literals for combining static classes with module classes
+
+```tsx
+<div className={`m-3 ${styles.container}`} />
+```
+
+
+## Anti-patterns (Do NOT)
+
+- No inline styles (`style={{...}}`) — use CSS Modules or Bootstrap utility clases
+- No Tailwind CSS
+- No styled-components or CSS-in-JS
+- No global class names in `.module.scss` files (they are auto-scoped)
+- No new plain `.css` files — always use `.module.scss`
+- Style files are always co-located with their `.tsx` component (not `.jsx`)
+- No new colors to be defined in SCSS files; use existing variables from `variables.scss` or add new ones there if needed

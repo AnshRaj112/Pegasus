@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-18T06:13:44Z
+# Last edited: 2026-06-19T14:52:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Persisted validation history (mappings, reports, durations)."""
@@ -25,13 +25,24 @@ from pegasus.core.local_paths import (
 from pegasus.models import ValidationEntity
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
+from pegasus.api.v1.validation_helpers import (
+    mismatch_totals_from_run,
+    resolve_history_mismatch_artifact,
+)
+from pegasus.api.v1.mismatch_sample import paginate_mismatch_rows_from_ndjson
 from pegasus.services.entity_inference_service import (
     EntityDefinition,
     infer_entity_from_filenames,
     normalize_entity_name,
 )
 from pegasus.core.delimiter_tokens import normalize_delimiter_for_storage
-from pegasus.schemas.validation import ColumnMapping, ColumnMappingFormatCheck, FooterValidationResult, MismatchCounts
+from pegasus.schemas.validation import (
+    ColumnMapping,
+    ColumnMappingFormatCheck,
+    MismatchPersistenceNote,
+    MismatchCounts,
+    parse_stored_footer_blob,
+)
 from pegasus.schemas.validation_history import (
     SaveDraftRequest,
     ValidationEntityCreateRequest,
@@ -145,12 +156,14 @@ def _detail_from_run(run, settings: AppSettings) -> ValidationHistoryDetail:
     compared = run.compared_columns if isinstance(run.compared_columns, list) else []
     format_checks_raw = run.mapping_format_checks if isinstance(run.mapping_format_checks, list) else []
     footer_raw = run.footer_validation if isinstance(run.footer_validation, dict) else None
+    footer_val, persistence_val = parse_stored_footer_blob(footer_raw)
     return ValidationHistoryDetail(
         **base.model_dump(),
         column_mappings=[ColumnMapping.model_validate(m) for m in raw_mappings],
         compared_columns=[str(c) for c in compared],
         mapping_format_checks=[ColumnMappingFormatCheck.model_validate(c) for c in format_checks_raw],
-        footer_validation=FooterValidationResult.model_validate(footer_raw) if footer_raw else None,
+        footer_validation=footer_val,
+        mismatch_persistence=persistence_val,
         validate_header_formats=bool(run.validate_header_formats),
         validate_footers=bool(run.validate_footers),
         compared_column_count=run.compared_column_count,
@@ -344,6 +357,35 @@ async def list_validation_history_mismatches(
                 offset=offset,
                 mismatch_type=mismatch_type,
             )
+            expected_total = int(run.total_mismatch_records or 0)
+            use_artifact = expected_total > 0 and (total < expected_total or total == 0)
+            if use_artifact:
+                artifact = resolve_history_mismatch_artifact(settings, run)
+                if artifact is not None:
+                    raw_items, total = paginate_mismatch_rows_from_ndjson(
+                        artifact,
+                        limit=limit,
+                        offset=offset,
+                        mismatch_type=mismatch_type,
+                        totals_by_type=mismatch_totals_from_run(run),
+                    )
+                    return ValidationHistoryMismatchesResponse(
+                        run_id=run_id,
+                        items=[
+                            ValidationHistoryMismatchRow(
+                                uid=str(item.get("uid") or ""),
+                                mismatch_type=str(item.get("mismatch_type") or ""),
+                                column_name=item.get("column_name"),
+                                source_value=item.get("source_value"),
+                                target_value=item.get("target_value"),
+                                row_detail=item.get("row_detail"),
+                            )
+                            for item in raw_items
+                        ],
+                        total=total,
+                        offset=offset,
+                        limit=limit,
+                    )
     except HTTPException:
         raise
     except Exception as exc:

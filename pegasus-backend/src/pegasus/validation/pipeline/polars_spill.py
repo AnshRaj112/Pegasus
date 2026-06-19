@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-18T06:13:44Z
+# Last edited: 2026-06-19T14:52:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Vectorized Polars spill path for delimited files."""
@@ -851,6 +851,30 @@ def try_partition_side_polars(
     )
 
     if isinstance(adapter, FileDelimitedAdapter):
+        from pegasus.validation.pipeline.native_spill import (
+            can_use_native_single_char_spill,
+            partition_side_native_multichar,
+        )
+
+        if force_native_multichar_spill and can_use_native_single_char_spill(
+            store_payload=store_payload,
+            use_arrow_ipc_spill=use_arrow_ipc_spill,
+            delimiter=adapter._delimiter,
+            file_bytes=adapter.get_size_bytes(),
+            streaming_spill_min_bytes=streaming_spill_min_bytes,
+        ):
+            return partition_side_native_multichar(
+                adapter,
+                writer,
+                identity_columns=identity_columns,
+                compare_columns=compare_columns,
+                num_partitions=num_partitions,
+                timings=timings,
+                chunk_rows=chunk_rows,
+                is_source=is_source,
+                merkle=merkle,
+                lazy_drilldown=lazy_drilldown,
+            )
         if force_native_multichar_spill and can_use_fast_multichar_load(
             adapter.path, adapter._delimiter
         ):

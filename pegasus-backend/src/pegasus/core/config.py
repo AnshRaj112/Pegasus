@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-18T06:13:44Z
+# Last edited: 2026-06-19T14:52:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 from functools import lru_cache
@@ -123,6 +123,14 @@ class Settings(BaseSettings):
         default=False,
         description="Persist validation runs and mismatch rows to PostgreSQL",
     )
+    validation_persistence_max_mismatch_rows: int = Field(
+        default=50_000,
+        ge=0,
+        description=(
+            "Max mismatch rows inserted into PostgreSQL per run (0 = unlimited). "
+            "Run aggregates are always persisted; large jobs keep NDJSON artifacts only."
+        ),
+    )
 
     validation_reconciliation_strategy: str = Field(
         default="auto",
@@ -220,6 +228,25 @@ class Settings(BaseSettings):
         le=10.0,
         description="Require free disk >= multiplier × (source+target bytes) before spill/sort",
     )
+    validation_reconciliation_partition_wave_size: int = Field(
+        default=64,
+        ge=0,
+        le=4096,
+        description=(
+            "Reconcile/delete spill partitions in waves of this many buckets (0 = all at once). "
+            "Reduces peak disk for large file pairs."
+        ),
+    )
+    validation_reconciliation_wave_min_bytes: int = Field(
+        default=512 * 1024 * 1024,
+        ge=0,
+        description="Enable partition waves only when combined source+target size exceeds this.",
+    )
+    validation_large_job_bytes: int = Field(
+        default=8 * 1024 * 1024 * 1024,
+        ge=0,
+        description="Jobs above this combined size force queue concurrency to 1.",
+    )
     validation_reconciliation_mismatch_ndjson_mirror: bool = Field(
         default=False,
         description="Append mismatch rows to mismatch_mirror.ndjson under the temp workspace (hash runs)",
@@ -276,6 +303,10 @@ class Settings(BaseSettings):
         description=(
             "Process pool size for partition reconcile (0=auto up to cpu-1, 1=sequential)."
         ),
+    )
+    validation_partition_reconcile_use_processes: bool = Field(
+        default=True,
+        description="Use ProcessPoolExecutor for partition reconcile (falls back to threads when false).",
     )
     validation_skip_artifact_report: bool = Field(
         default=True,
@@ -437,6 +468,23 @@ class Settings(BaseSettings):
             "Global RAM budget for all concurrent validation jobs combined. "
             "Queue admission splits this across running slots."
         ),
+    )
+    validation_distributed_enabled: bool = Field(
+        default=False,
+        description="Delegate large jobs to Redis-backed partition workers when configured.",
+    )
+    validation_redis_url: str | None = Field(
+        default=None,
+        description="Redis URL for distributed partition task queue (redis://host:6379/0).",
+    )
+    validation_distributed_spill_backend: str = Field(
+        default="local",
+        description="Spill storage for distributed workers: local | gcs",
+    )
+    validation_distributed_min_bytes: int = Field(
+        default=10 * 1024 * 1024 * 1024,
+        ge=0,
+        description="Minimum combined file size before attempting distributed reconciliation.",
     )
 
     def cors_origin_list(self) -> list[str]:

@@ -186,7 +186,48 @@ export interface ValidationJobDetailResponse {
   phase?: string | null;
   message?: string | null;
   error?: string | null;
+  progress?: Record<string, unknown>;
   result?: ValidateResult | null;
+  batch_result?: BatchValidateResponse | null;
+}
+
+export interface BatchUnitSpec {
+  unit_id: string;
+  source_paths: string[];
+  target_paths: string[];
+  uid_column?: string;
+  column_mappings?: ColumnMapping[];
+}
+
+export interface BatchValidateRequest {
+  file_format?: string;
+  units: BatchUnitSpec[];
+  on_unit_failure?: 'stop' | 'continue';
+  delimiter?: string;
+  has_header?: boolean;
+  header_leading_rows?: number;
+}
+
+export interface BatchUnitResult {
+  unit_id: string;
+  source_paths?: string[];
+  target_paths?: string[];
+  status: string;
+  error?: string | null;
+  result?: ValidateResult | null;
+}
+
+export interface BatchValidateResponse {
+  summary: {
+    total_units: number;
+    completed_units: number;
+    failed_units: number;
+    skipped_units: number;
+    passed_units: number;
+    is_match: boolean;
+  };
+  units: BatchUnitResult[];
+  on_unit_failure?: string;
 }
 
 export interface ValidationMismatchesResponse {
@@ -287,6 +328,7 @@ const E = {
   health: '/health',
   validateQueue: '/validate/queue',
   validateLocal: '/validate/local',
+  validateLocalBatch: '/validate/local/batch',
   validateLocalColumns: '/validate/local/columns',
   validateCloudBrowse: '/validate/cloud/browse',
   validateCloudProfile: '/validate/cloud/profile',
@@ -358,6 +400,12 @@ export const Api = {
   /** POST /validate/local — queue validation job (202); use source_cloud + target_cloud for GCS */
   submitValidation: (body: ValidateRequest): Promise<AxiosResponse<ValidationJobAcceptedResponse>> =>
     httpClient.post(E.validateLocal, body),
+
+  /** POST /validate/local/batch — queue multi-pair batch validation */
+  submitBatchValidation: (
+    body: BatchValidateRequest,
+  ): Promise<AxiosResponse<ValidationJobAcceptedResponse>> =>
+    httpClient.post(E.validateLocalBatch, body),
 
   /** GET /validate/jobs/{job_id} — poll job status/result */
   getValidationJob: (
