@@ -20,7 +20,7 @@ from pegasus.validation.pipeline.fingerprint import row_fingerprint_bytes
 try:
     import blake3 as _blake3
 
-    _HAS_BLAKE3 = True
+    _HAS_BLAKE3 = True`
 except ImportError:
     _HAS_BLAKE3 = False
 

@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-17T07:02:42Z
+# Last edited: 2026-06-18T06:13:44Z
 # --- END GENERATED FILE METADATA ---
 
 """Streaming delimited file readers (CSV, TSV, PSV)."""
