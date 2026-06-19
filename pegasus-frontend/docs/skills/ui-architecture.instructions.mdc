@@ -1,0 +1,125 @@
+---
+description: React UI architecture, guidelines and folder conventions for Pelican UI v2
+applyTo: pelican-ui-v2/src/**/*.tsx,pelican-ui-v2/src/**/*.ts
+---
+# Pelican UI v2 - Architecture and Folder Structure
+
+## Project Overview
+- Stack: React 18 + TypeScript + Vite + Ant Design v5 + Redux Toolkit + Redux Saga + React Router v6.
+- Router style: `createHashRouter` with route-level lazy loading.
+- State: central Redux store in `src/redux/store.ts`, feature slices under `src/pages/**`.
+- API client: `axios` with app-wide interceptors configured in `src/axios-interceptor.ts`.
+- Styling: SCSS Modules with Bootstrap utility classes where useful.
+- Path alias: `~/` maps to `src/`.
+
+## Core Runtime Composition
+- App bootstrap: `src/main.tsx`.
+- Global wrappers order:
+	1. `ConfigProvider` (Ant Design theme)
+	2. `Provider` (Redux store)
+	3. `ModalProvider` (shared modal context)
+	4. `App`
+- App shell: `src/App.tsx` uses `HeaderProvider`, `Suspense`, and `RouterProvider`.
+
+## Where to Find Things
+- Route definitions: `src/router/router.tsx`.
+- Route constants: `src/router/router.constants.ts`.
+- Root reducer registration: `src/redux/reducer.ts`.
+- Root saga registration: `src/redux/saga.ts`.
+- Store and typed hooks: `src/redux/store.ts`.
+- Shared helpers/utilities: `src/shared/common-utils.tsx`, `src/shared/constants/*`, `src/shared/contexts/*`.
+- Common reusable UI: `src/components/*`.
+- Feature modules: `src/pages/*`.
+- Service endpoint constants: `src/shared/constants/service-endpoints.constants.ts`.
+- Global axios behavior (auth, csrf, request id, dedupe): `src/axios-interceptor.ts`.
+
+## Feature-First Module Structure
+
+Each feature is organized under `src/pages/<feature>/` and commonly includes:
+
+```text
+src/pages/<feature>/
+|- Feature.tsx
+|- Feature.reducer.ts
+|- Feature.saga.ts
+|- Feature.service.ts
+|- Feature.interface.ts
+|- Feature.constants.ts (or Feature.constant.ts)
+|- Feature.helper.ts (or .tsx when JSX is needed)
+|- Feature.module.scss (or existing feature-level SCSS pattern)
+|- components/
+|  |- SubFeatureA.tsx
+|  |- SubFeatureB.tsx
+|- tests/
+|  |- Feature.test.tsx
+|  |- Feature.saga.test.ts
+|  |- Feature.mockData.ts
+|  |- components/
+|     |- SubFeatureA.test.tsx
+```
+
+Reference modules:
+- `src/pages/bulk-actions/`
+- `src/pages/mapping/`
+- `src/pages/data-view/`
+
+### Constants vs helpers
+- Keep static module-level values (arrays, objects, string/number literals, option lists) in the feature `*.constant.ts` (or `*.constants.ts`) file. Use `*.helper.ts` for functions and transformations, not for exported constant declarations.
+
+## State and Side-Effect Architecture
+- Reducer implementation standard: `createSlice` in `*.reducer.ts`.
+- Async orchestration standard: `redux-saga` in `*.saga.ts`.
+- API calls live in `*.service.ts` files and are invoked from sagas.
+- Typical async triplet per domain: `*Request`, `*Success`, `*Error`.
+- Shared state shape is typically `{ data, isFetching, error }`, often seeded with `initializeNullState`, `initializeEmptyState`.
+- Every new feature reducer must be registered in `src/redux/reducer.ts`.
+- Every new feature saga must be registered in `src/redux/saga.ts`.
+- In components, when two or more `useState` pieces are always updated together, prefer a single state object so updates stay atomic and intermediate mismatched renders are less likely.
+
+## Routing and Access Control
+- Route tree is centralized in `src/router/router.tsx`.
+- Prefer lazy imports for top-level route features.
+- Protect sensitive screens/actions with `AuthGuard` and access-control helpers.
+- Keep route paths in constants (`PATHS`) instead of hardcoding path strings in components.
+
+## API and Service Layer Conventions
+- Use `axios` for API calls.
+- Build endpoint URLs using:
+	- `PELICAN_BASE_PATH`
+	- `SERVICE_ENDPOINT`
+- Keep endpoint-specific response parsing in services (for example pagination header normalization).
+- Do not call APIs directly from presentation components.
+
+## Shared Module Usage
+- Internal imports should use alias form, for example `~/pages/...` and `~/shared/...`.
+- Project also integrates shared packages such as `security-commons-ui` and `dove-ui` where required.
+- Reuse common infrastructure before creating duplicates:
+	- Access control helpers/components
+	- Shared constants
+	- Common utility functions
+	- Shared contexts
+
+## File Extensions and Language Rules
+- All new code should be TypeScript:
+	- Components: `.tsx`
+	- Reducers/Sagas/Services/Helpers/Interfaces: `.ts` (or `.tsx` only when JSX is needed)
+- Legacy patterns may exist; match local conventions when editing existing files.
+
+## Testing Layout
+- Test stack: Vitest + Testing Library.
+- Keep tests near features in `tests/` folders.
+- Prefer feature-level mock data files (`*.mockData.ts`) and shared render helpers for Redux-connected components.
+
+## Decision Rules for New Work
+- Add code to an existing feature module when behavior belongs to that domain.
+- Create new shared utilities only when at least two features need the same logic.
+- Prefer extending existing constants/interfaces/service files over introducing parallel abstractions.
+- Keep container/page components orchestration-focused; move heavy logic into helpers/services.
+- Always keep human in loop for installing new dependencies/packages.
+
+## Anti-patterns (Do NOT)
+- Do not create ad-hoc API calls inside UI components.
+- Do not add reducers or sagas without registering them in root Redux files.
+- Do not bypass `PATHS` and hardcode route strings across the app.
+- Do not introduce new global state mechanisms for problems already solved by Redux + Saga.
+- Do not duplicate shared utilities/components that already exist under `src/shared` or `src/components`.

@@ -1,0 +1,148 @@
+---
+description: React and UI coding guidelines for Pelican UI v2
+applyTo: pelican-ui-v2/src/**/*.tsx,pelican-ui-v2/src/**/*.ts
+---
+# Pelican UI v2 - React Coding Guidelines
+
+## Your Role
+- You are an expert senior Frontend Developer.
+- You are proficient in ReactJS, TypeScript, Redux Toolkit, Redux Saga, Ant Design, Bootstrap, and enterprise UI architecture.
+- The code you write must follow clean code practices and remain readable and maintainable.
+- Favor consistency with nearby code over personal style preferences.
+
+## General Rules
+- For layout, prefer Ant Design layout components (`Layout`, `Row`, `Col`, `Flex`, `Card`) with Bootstrap utility classes when needed.
+- Use the project alias `~/` for internal imports.
+- If a date library is needed, use `dayjs` for parsing, formatting, and arithmetic.
+- Do not introduce `moment`.
+- Use `notification` and `message` from `antd` for user feedback and use `NOTIFICATION_SERVICE_TYPES` for notification titles.
+- Keep API calls in `*.service.ts` files and trigger flows from sagas/reducers, not directly from UI components.
+- Run formatting through Prettier and do not mass-reformat unrelated code.
+- Preserve local file style (quotes/semicolons) when editing existing files.
+
+## Component Conventions
+
+### File naming conventions
+- Folders: `kebab-case` for folders, for example `bulk-actions`, `data-view`
+- Components: `PascalCase.tsx`
+- Reducers: `PascalCase.reducer.ts`
+- Sagas: `PascalCase.saga.ts`
+- Interfaces: `PascalCase.interface.ts`
+- Services: `PascalCase.service.ts`
+- Constants: `PascalCase.constants.ts` or existing adjacent pattern (`*.constant.ts`)
+- Styles: `PascalCase.module.scss` (or existing feature SCSS file when already established)
+- Tests: `PascalCase.test.tsx` or `PascalCase.saga.test.ts`
+- Mock data: `PascalCase.mockData.ts` / `PascalCase.mockdata.ts` based on local feature convention
+
+### Separation of concerns
+- Keep page/container components focused on orchestration.
+- Move heavy transformation logic to `*.helper.ts` and API logic to `*.service.ts`.
+- Break very large components into feature sub-components when possible.
+- Extract non-trivial conditional JSX into named render functions (e.g., `renderConflictAlert`, `renderRulesSection`) instead of large ternaries or multi-line `&&` blocks in the main return. Simple one-liners like `{flag && <Tag />}` can stay inline.
+
+### Component type
+- Use functional components for all new UI code.
+- Prefer default export for route-level and feature components.
+- Prefer typed props via interfaces from `*.interface.ts`.
+
+```tsx
+interface ExampleProps {
+	title: string
+}
+
+const Example = ({ title }: ExampleProps) => {
+	return <div>{title}</div>
+}
+
+export default Example
+```
+
+## Redux and State Management
+- Use Redux Toolkit `createSlice` for reducer state and actions.
+- Use Redux Saga for async side effects and orchestration.
+- Prefer typed hooks from `~/redux/store`:
+	- `useAppDispatch`
+	- `useAppSelector`
+- Follow existing state shape patterns (`data`, `isFetching`, `error`) and shared initializers from `~/shared/constants/common.constants`.
+
+## Routing and Access Control
+- Use `createHashRouter` patterns from `src/router/router.tsx`.
+- Lazy-load route features where appropriate.
+- Wrap protected routes/pages with `AuthGuard`.
+- Use role/permission helpers in `components/access-control` for feature-level gating.
+
+## Import Order Convention
+
+Follow this grouping order with blank lines between groups:
+
+1. React and hooks
+2. Third-party libraries (`antd`, `react-router-dom`, `react-redux`, etc.)
+3. Internal shared modules (`~/shared/*`, `~/redux/*`, `~/router/*`, `~/components/*`)
+4. Feature-local imports (`./Feature.constants`, `./Feature.interface`, `./Feature.reducer`, child components)
+5. Styles (`.module.scss`, `.scss`)
+
+```tsx
+import { useEffect, useMemo } from 'react'
+import { Card, notification } from 'antd'
+
+import { useAppDispatch, useAppSelector } from '~/redux/store'
+import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants'
+
+import { FeatureItem } from './Feature.interface'
+import { featureActions } from './Feature.reducer'
+import styles from './Feature.module.scss'
+```
+
+## TypeScript and Interfaces
+- Co-locate interfaces with feature files in `*.interface.ts`.
+- Export interfaces/types as named exports.
+- Use `interface` for object contracts and `type` for unions/mapped types where it improves readability.
+- Avoid `any` for new code unless absolutely necessary.
+- Prefix internal event handlers and local callbacks with `handle` (e.g., `handleSave`, `handleDelete`, `handleModalClose`). Reserve `on*` for props that expose an event contract to a parent (e.g., `onClose`, `onChange`).
+- Use optional chaining (`?.`) when reading properties or calling array methods (`.map`, `.some`, `.filter`, etc.) on values that may be `null` or `undefined` at runtime — especially API response fields and optional inputs.
+- Prefer concrete defaults (`[]`, `{}`) in callers over accepting `null | undefined` in function parameters when the callee would only normalize to those defaults anyway.
+- When the same string literals act as discriminants or domain values in several places, define a union type or derive it from a constants object (e.g., `keyof typeof SOME_CONSTANT`) and use it in `*.interface.ts` and function signatures.
+
+## Styling Guidelines
+- Follow the styling rules from `.github/instructions/css-style-sheet.instructions.md`.
+- Prefer CSS Modules for component-level styles.
+- Use Bootstrap utility classes for minor spacing/layout adjustments.
+- Avoid inline styles except when required for dynamic runtime styles or third-party component APIs.
+- Reuse design tokens from shared style/theme files instead of hardcoded values.
+
+## Element Attribute Order
+- Follow this order for JSX element attributes:
+	1. `className`
+	2. Other props (e.g., `disabled`, `type`, `href`)
+	3. Event handlers (`onClick`, `onChange`, etc.)
+	4. `data-testid`
+
+## Component Hook Order
+- Follow this order for hooks in functional components:
+	1. Library import built-in Hooks (`useNavigate`)
+	1. Custom hooks (e.g., `useAppSelector`, `useAppDispatch`)
+	2. `useState`
+	3. Custom constants (Not functions)
+	3. `useEffect`
+	4. `useMemo` / `useCallback`
+	5. Custom Functions
+
+
+## Testing
+- Co-locate tests under `tests/` folders within each feature.
+- Add `data-testid` on interactive elements (buttons, inputs, selects, form fields) and on major structural regions whose visibility or state you assert in tests, so selection stays stable.
+- Prefer using the assigned `data-testid` for queries in tests, but use semantic queries (`getByRole`, `getByText`) when validating user-visible content or accessibility features.
+- Use `userEvent` for simulating user interactions and `vi.clearAllMocks()` in `beforeEach` or `afterEach` to reset mocks.
+- Test both success and error flows for async operations, especially in sagas.
+- Use mock data from `*.mockData.ts` files to keep tests clean and maintainable.
+- Use Vitest + Testing Library for component/unit tests.
+- Co-locate tests under feature test folders and keep naming consistent with existing patterns.
+- Use helpers like `renderWithProviders` for Redux-connected component tests.
+
+## Anti-patterns (Do NOT)
+- No new class components.
+- No direct network calls in presentation components.
+- No bypassing existing access-control checks for protected actions.
+- No introducing `moment` or parallel date libraries when `dayjs` covers the requirement.
+- No large, unrelated formatting changes in the same PR.
+- Avoid `any` for new code.

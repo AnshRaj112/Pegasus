@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-18T11:43:22+05:30
+# Last edited: 2026-06-19T09:22:58Z
 # --- END GENERATED FILE METADATA ---
 
 """Service-layer errors mapped to HTTP responses by the API layer."""

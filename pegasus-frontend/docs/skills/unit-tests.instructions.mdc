@@ -1,0 +1,118 @@
+---
+description: Unit testing guidelines and patterns for Pelican UI v2
+applyTo: pelican-ui-v2/src/**/*.test.ts,pelican-ui-v2/src/**/*.test.tsx
+---
+# Pelican UI v2 - Unit Testing Guidelines
+
+Gold standard references:
+- `src/pages/bulk-actions/tests/BulkActions.test.tsx`
+- `src/pages/bulk-actions/tests/BulkActions.reducer.test.ts`
+- `src/pages/bulk-actions/tests/BulkActions.saga.test.ts`
+
+## Stack
+- **Framework**: Vitest + Happy DOM
+- **UI**: `@testing-library/react`, `@testing-library/user-event`
+- **Custom render**: `renderWithProviders` from `~/services/utils/test-utils/renderWithProvider`
+- **Mock helpers**: `createAxiosResponse` from `~/shared/common-utils`
+
+## File Structure
+
+Tests live in a `tests/` folder co-located with the feature:
+
+```text
+src/pages/<feature>/
+├── Feature.tsx
+├── Feature.mockData.ts        ← OUTSIDE tests/, shared across all test files
+└── tests/
+    ├── Feature.test.tsx
+    ├── Feature.reducer.test.ts
+    ├── Feature.saga.test.ts
+    └── components/
+        └── SubComponent.test.tsx
+```
+
+## Component Tests (`*.test.tsx`)
+
+Reference implementation:
+- `src/pages/bulk-actions/tests/BulkActions.test.tsx`
+- `src/pages/bulk-actions/tests/bulk-actions-components/CreateMappingModal.test.tsx`
+- `src/pages/bulk-actions/tests/bulk-actions-components/ConfigureBulkMapping.test.tsx`
+
+Minimum expected structure:
+- Use `renderWithProviders` with feature `preloadedState`.
+- Use `beforeEach(() => vi.clearAllMocks())`.
+- Use `userEvent.setup()` + `await` for interactions.
+- Assert with `getByTestId` / `queryByTestId` first.
+
+### Required test groups per component
+- Basic rendering
+- Loading state(s)
+- Error state(s)
+- Data population (one per data variant)
+- User interactions (clicks, form input, dispatch checks)
+- Conditional rendering (when relevant)
+
+## Reducer Tests (`*.reducer.test.ts`)
+
+Reference implementation:
+- `src/pages/bulk-actions/tests/BulkActions.reducer.test.ts`
+
+Minimum expected structure:
+- Include unknown action test for initial state.
+- Include `*Request`, `*Success`, `*Error` cases for each async slice.
+- Assert state shape using `initializeNullState` / `initializeEmptyState` helpers.
+
+### Rules
+- Always test initial state with unknown action.
+- Write `*Request`, `*Success`, `*Error` tests for every async state slice.
+- Test side effects (e.g. a delete success that resets a sibling slice).
+
+## Saga Tests (`*.saga.test.ts`)
+
+Reference implementation:
+- `src/pages/bulk-actions/tests/BulkActions.saga.test.ts`
+
+Minimum expected structure:
+- Mock service API module.
+- Use `afterEach(() => vi.clearAllMocks())`.
+- Test both success and error generator flows.
+- Validate root saga `all([takeLatest(...)])` wiring.
+
+### Rules
+- Test success and error flows for every worker saga.
+- Use `generator.throw(axiosError)` to simulate errors.
+- `afterEach(() => vi.clearAllMocks())` is mandatory.
+- Test the root saga's `all([takeLatest(...)])` structure separately.
+
+## Mock Data (`Feature.mockData.ts`)
+
+Reference implementation:
+- `src/pages/bulk-actions/BulkActions.mockData.ts`
+
+Minimum expected structure:
+- Export typed entity fixtures.
+- Export typed `AxiosError` fixture for saga error tests.
+- Export shared state slices (`Loading`, `Success`, `Error`) based on `initializeNullState` or `initializeEmptyState`.
+
+### Rules
+- Keep mock data **outside** the `tests/` folder so all test files can import it.
+- Provide a typed `AxiosError` mock for every saga test suite.
+- Export pre-built state slices (`Loading`, `Success`, `Error`) using `initializeNullState` or `initializeEmptyState` — never inline `{ data: null, isFetching: false, error: null }` objects.
+- Use `initializeNullState` for state that holds a single object or `null`; use `initializeEmptyState` for state that holds an array or `[]`.
+- Include multiple entity variants when the component renders type-specific UI.
+
+## General Rules
+- Use `userEvent.setup()` + `await` for all user interactions.
+- Use `vi.clearAllMocks()` in `beforeEach` (component tests) / `afterEach` (saga tests).
+- In this codebase, prefer `getByTestId` / `queryByTestId` first for element selection because components expose stable `data-testid` attributes. Production UI should assign `data-testid` on interactive controls (buttons, inputs, selects, form fields) and on major regions you assert in tests so queries stay reliable.
+- Use semantic queries (`getByRole`, `getByLabelText`, `getByText`) when validating accessibility behavior, user-visible labels, or when `data-testid` is unavailable.
+- Do not test implementation details — assert only what the user or store can observe.
+- Avoid `any` types in mock data; use proper interfaces from `*.interface.ts`.
+
+## Running Tests
+```bash
+yarn test                        # run all
+yarn test --watch                # watch mode
+yarn test Feature.test.tsx       # single file
+yarn test --coverage             # with coverage
+```

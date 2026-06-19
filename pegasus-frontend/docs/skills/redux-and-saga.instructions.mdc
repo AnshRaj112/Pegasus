@@ -1,0 +1,170 @@
+---
+description: Redux Toolkit and Redux Saga implementation guidelines for Pelican UI v2
+applyTo: pelican-ui-v2/src/**/*.reducer.ts,pelican-ui-v2/src/**/*.saga.ts,pelican-ui-v2/src/**/*.service.ts,pelican-ui-v2/src/redux/reducer.ts,pelican-ui-v2/src/redux/saga.ts
+---
+# Pelican UI v2 - State Management (Redux + Saga)
+
+Gold standard reference:
+- `src/pages/bulk-actions/BulkActions.reducer.ts`
+- `src/pages/bulk-actions/BulkActions.saga.ts`
+- `src/pages/bulk-actions/BulkActions.service.ts`
+
+## Reducer Pattern (createSlice)
+
+```ts
+import { PayloadAction, createSlice } from '@reduxjs/toolkit'
+import { initializeNullState } from '~/shared/constants/common.constants'
+import { FeatureReducerState, FeatureResponse } from './Feature.interface'
+
+export const initialState: FeatureReducerState = {
+	fetchFeatureState: initializeNullState,
+}
+
+const featureSlice = createSlice({
+	name: 'feature',
+	initialState,
+	reducers: {
+		fetchFeatureStateRequest: (state, action: PayloadAction<string>) => ({
+			...state,
+			fetchFeatureState: {
+				...initializeNullState,
+				isFetching: true,
+			},
+		}),
+		fetchFeatureStateSuccess: (state, action: PayloadAction<FeatureResponse>) => ({
+			...state,
+			fetchFeatureState: {
+				...initializeNullState,
+				data: action.payload,
+			},
+		}),
+		fetchFeatureStateError: (state, action: PayloadAction<string>) => ({
+			...state,
+			fetchFeatureState: {
+				...initializeNullState,
+				error: action.payload,
+			},
+		}),
+	},
+})
+
+export const featureActions = {
+	...featureSlice.actions,
+}
+
+export default featureSlice.reducer
+```
+
+### Reducer Rules
+- For new reducer files, use `createSlice` from `@reduxjs/toolkit`.
+- Keep `initialState` typed with a reducer-state interface from `*.interface.ts`.
+- Follow the common state contract: `{ data, isFetching, error }`.
+- Use `initializeNullState` and `initializeEmptyState` from `~/shared/constants/common.constants` for predictable reset behavior.
+- For async flows, define `*Request`, `*Success`, `*Error` reducers.
+- Export a feature actions object (commonly `featureActions`) and include all slice actions.
+- Default export the reducer (`export default featureSlice.reducer`).
+- Register new reducers in `src/redux/reducer.ts` under `combineReducer`.
+
+### Trigger Action Convention
+- In this codebase, saga triggers are usually slice `*Request` actions.
+- Do not create separate `createAction` trigger actions unless a feature has a clear, existing reason.
+
+## Saga Pattern
+
+```ts
+import { PayloadAction } from '@reduxjs/toolkit'
+import { notification } from 'antd'
+import { AxiosError, AxiosResponse } from 'axios'
+import { all, call, put, takeLatest } from 'redux-saga/effects'
+import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants'
+import { featureActions } from './Feature.reducer'
+import { FeatureResponse } from './Feature.interface'
+import { FeatureServiceApi } from './Feature.service'
+
+export function* fetchFeatureSaga(action: PayloadAction<string>) {
+	try {
+		const response: AxiosResponse<FeatureResponse> = yield call(FeatureServiceApi.fetchFeature, action.payload)
+		yield put(featureActions.fetchFeatureStateSuccess(response.data))
+	} catch (error) {
+		if (error instanceof AxiosError) {
+			yield put(featureActions.fetchFeatureStateError(error.response?.data?.message))
+			notification.error({
+				message: NOTIFICATION_SERVICE_TYPES.ERROR,
+				description: error.response?.data?.message,
+			})
+		}
+	}
+}
+
+export function* featureSaga() {
+	yield all([
+		takeLatest(featureActions.fetchFeatureStateRequest.type, fetchFeatureSaga),
+	])
+}
+```
+
+### Saga Rules
+- Import actions from the feature reducer file.
+- Use `takeLatest` with `featureActions.someRequest.type`.
+- Keep worker sagas in `try/catch` and branch Axios failures via `error instanceof AxiosError`.
+- Dispatch `*Success` on success and `*Error` on failure.
+- Show user-facing errors via `notification.error` using `NOTIFICATION_SERVICE_TYPES.ERROR`.
+- Keep generators named and exported for testability.
+- Register the feature saga in `src/redux/saga.ts` and include it in the `all([...])` root array.
+
+## Service Layer Pattern (`*.service.ts`)
+
+```ts
+import axios, { AxiosResponse } from 'axios'
+import { PELICAN_BASE_PATH, SERVICE_ENDPOINT } from '~/shared/constants/service-endpoints.constants'
+import { FeatureResponse, FeatureRequest } from './Feature.interface'
+
+export const FeatureServiceApi = {
+	fetchFeature: (payload: FeatureRequest) => {
+		return axios.get<FeatureResponse>(`${PELICAN_BASE_PATH}${SERVICE_ENDPOINT.FEATURE}`, {
+			params: {
+				q: payload.query,
+			},
+		})
+	},
+
+	fetchFeatureWithPagination: (payload: FeatureRequest) => {
+		return axios
+			.get<FeatureResponse[]>(`${PELICAN_BASE_PATH}${SERVICE_ENDPOINT.FEATURE}`, {
+				headers: {
+					pagesize: payload.pageSize.toString(),
+					pageindex: payload.pageIndex.toString(),
+				},
+			})
+			.then((response: AxiosResponse<FeatureResponse[]>) => ({
+				response: response.data,
+				paginationParams: {
+					totalCount: parseInt(response.headers['totalcount'], 10),
+					pageSize: parseInt(response.headers['pagesize'], 10),
+					pageIndex: parseInt(response.headers['pageindex'], 10),
+				},
+			}))
+	},
+}
+```
+
+### Service Rules
+- Put API integration in `*.service.ts`, not in components/sagas.
+- Use `axios` with typed request/response contracts.
+- Build URLs with `PELICAN_BASE_PATH` + `SERVICE_ENDPOINT` constants.
+- For paginated endpoints, normalize payload + header pagination metadata in the service layer.
+- Return parsed domain objects to sagas so sagas remain orchestration-focused.
+
+## Integration Checklist (Required)
+- Add reducer in `src/redux/reducer.ts` and include a stable state key.
+- Add saga in `src/redux/saga.ts` root `all([...])` list.
+- Ensure reducer, saga, service, and interface filenames follow project naming conventions.
+- Ensure request/success/error action triplets are complete for every async flow.
+
+## Anti-patterns (Do NOT)
+- No switch/case reducers for new features.
+- No `createAsyncThunk` for async flows (use sagas).
+- No direct API calls in React components.
+- No untyped `axios` responses in new code.
+- No missing `*Error` paths for API failures.
+- No registration gaps (feature reducer/saga must be wired into root Redux files).
