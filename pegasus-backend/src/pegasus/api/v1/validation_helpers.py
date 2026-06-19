@@ -30,6 +30,7 @@ from pegasus.schemas.validation import (
     ValidationSummary,
     ValidationTestMode,
     build_mismatch_counts,
+    parse_stored_footer_blob,
 )
 from pegasus.services.validation_results import ValidationRunDurations, ValidationRunResult
 from pegasus.validation.comparators.models import MismatchReport, MismatchType, empty_mismatch_frame
@@ -59,6 +60,38 @@ def validation_jobs_root(settings: Settings) -> Path:
     base = Path(raw).expanduser() if raw else Path(tempfile.gettempdir()) / "pegasus_validation_jobs"
     base.mkdir(parents=True, exist_ok=True)
     return base
+
+
+def resolve_history_mismatch_artifact(settings: Settings, run) -> Path | None:
+    """Locate on-disk mismatch NDJSON for a persisted run (DB may be empty or capped)."""
+    from pegasus.schemas.validation import parse_stored_footer_blob
+
+    footer_raw = run.footer_validation if isinstance(run.footer_validation, dict) else None
+    _, persistence = parse_stored_footer_blob(footer_raw)
+    if persistence and persistence.mismatch_artifact_path:
+        artifact = Path(str(persistence.mismatch_artifact_path)).expanduser()
+        if artifact.is_file():
+            return artifact
+
+    job_dir = validation_jobs_root(settings) / str(run.id)
+    if job_dir.is_dir():
+        resolved = resolve_job_mismatch_artifact(job_dir, {})
+        if resolved is not None and resolved.is_file():
+            return resolved
+        fallback = job_dir / "mismatches.ndjson"
+        if fallback.is_file():
+            return fallback
+
+    return None
+
+
+def mismatch_totals_from_run(run) -> dict[str, int]:
+    """Aggregate mismatch counts stored on a validation run row."""
+    return {
+        MismatchType.MISSING_IN_TARGET.value: int(run.missing_in_target_count or 0),
+        MismatchType.EXTRA_IN_TARGET.value: int(run.extra_in_target_count or 0),
+        MismatchType.VALUE_MISMATCH.value: int(run.value_mismatch_count or 0),
+    }
 
 
 def completed_job_cache_get(job_id: uuid.UUID) -> ValidationJobDetailResponse | None:
@@ -159,11 +192,7 @@ def build_validate_response_summary_only(
         ColumnMappingFormatCheck.model_validate(c)
         for c in (run_result.mapping_format_checks or [])
     ]
-    footer_val = (
-        FooterValidationResult.model_validate(run_result.footer_validation)
-        if run_result.footer_validation
-        else None
-    )
+    footer_val, _ = parse_stored_footer_blob(run_result.footer_validation)
 
     api_durations = None
     if run_result.durations is not None:
@@ -381,11 +410,7 @@ def build_validate_response(
         ColumnMappingFormatCheck.model_validate(c)
         for c in (run_result.mapping_format_checks or [])
     ]
-    footer_val = (
-        FooterValidationResult.model_validate(run_result.footer_validation)
-        if run_result.footer_validation
-        else None
-    )
+    footer_val, _ = parse_stored_footer_blob(run_result.footer_validation)
 
     api_durations = None
     if run_result.durations is not None:
@@ -495,6 +520,7 @@ async def maybe_persist_completed_job(
             run_id,
             run_result,
             column_mappings=column_mappings or None,
+            max_mismatch_rows=settings.validation_persistence_max_mismatch_rows,
         )
         await session.commit()
     return time.perf_counter() - t0

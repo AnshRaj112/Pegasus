@@ -1,4 +1,3 @@
-import { type AxiosResponse } from 'axios';
 import { call, delay, fork, put, select, takeLatest } from 'redux-saga/effects';
 import { notification } from 'antd';
 
@@ -15,12 +14,19 @@ import {
 } from './validationSessionStorage';
 import { formFromHistory, enrichFormWithConnections, validateRequestFromForm } from './validationRerun';
 
-const DEFER_TO_REPORT_MS = 10_000;
+const DEFER_TO_HISTORY_MS = 10_000;
 const POLL_INTERVAL_MS = 2_000;
+
+function* navigateToPairHistory(sourcePath: string, targetPath: string) {
+  if (!sourcePath || !targetPath) return;
+  yield put(validationActions.navigateToPairHistory({ sourcePath, targetPath }));
+}
 
 function* submitValidationSuccess(
   jobId: string,
   result: import('../../shared/api/Api').ValidateResult,
+  sourcePath: string,
+  targetPath: string,
 ) {
   removeActiveSession(jobId);
   const payload: ValidationDataResponse = {
@@ -31,9 +37,10 @@ function* submitValidationSuccess(
   };
   yield put(validationActions.submitValidationSuccess(payload));
   yield put(reportActions.fetchReportsRequest());
+  yield* navigateToPairHistory(sourcePath, targetPath);
 }
 
-function* backgroundPollSaga(jobId: string) {
+function* backgroundPollSaga(jobId: string, sourcePath: string, targetPath: string) {
   try {
     const result: import('../../shared/api/Api').ValidateResult = yield call(
       Api.pollValidationUntilComplete,
@@ -42,21 +49,26 @@ function* backgroundPollSaga(jobId: string) {
     removeActiveSession(jobId);
     notification.success({
       message: 'Validation complete',
-      description: result.summary.is_match ? 'All checks passed.' : 'Report is ready to review.',
+      description: result.summary.is_match ? 'All checks passed.' : 'View results in execution history.',
     });
     yield put(reportActions.fetchReportsRequest());
+    yield* navigateToPairHistory(sourcePath, targetPath);
   } catch {
     removeActiveSession(jobId);
     yield put(reportActions.fetchReportsRequest());
   }
 }
 
-function* pollUntilCompleteOrDefer(jobId: string) {
+function* pollUntilCompleteOrDefer(
+  jobId: string,
+  sourcePath: string,
+  targetPath: string,
+) {
   const started = Date.now();
   let deferred = false;
 
   for (;;) {
-    let job: AxiosResponse<import('../../shared/api/Api').ValidationJobDetailResponse>;
+    let job: import('axios').AxiosResponse<import('../../shared/api/Api').ValidationJobDetailResponse>;
     try {
       job = yield call(Api.getValidationJob, jobId, { summaryOnly: true });
     } catch (error: unknown) {
@@ -72,10 +84,10 @@ function* pollUntilCompleteOrDefer(jobId: string) {
       throw new Error(job.data.error || 'Validation failed');
     }
 
-    if (!deferred && Date.now() - started >= DEFER_TO_REPORT_MS) {
+    if (!deferred && Date.now() - started >= DEFER_TO_HISTORY_MS) {
       deferred = true;
-      yield put(validationActions.validationDeferredToReport({ jobId }));
-      yield fork(backgroundPollSaga, jobId);
+      yield* navigateToPairHistory(sourcePath, targetPath);
+      yield fork(backgroundPollSaga, jobId, sourcePath, targetPath);
       return null;
     }
 
@@ -85,6 +97,8 @@ function* pollUntilCompleteOrDefer(jobId: string) {
 
 function* submitValidationSaga() {
   let jobId: string | null = null;
+  let sourcePath = '';
+  let targetPath = '';
   try {
     const { validationForm }: ValidationReducerState = yield select(
       (state: { validation: ValidationReducerState }) => state.validation,
@@ -93,7 +107,10 @@ function* submitValidationSaga() {
       throw new Error('Select source and target GCS objects before running validation');
     }
 
-    const accepted: AxiosResponse<ValidationJobAcceptedResponse> = yield call(Api.submitValidation, {
+    sourcePath = gcsUri(validationForm.sourceCloud);
+    targetPath = gcsUri(validationForm.targetCloud);
+
+    const accepted: import('axios').AxiosResponse<ValidationJobAcceptedResponse> = yield call(Api.submitValidation, {
       source_cloud: validationForm.sourceCloud,
       target_cloud: validationForm.targetCloud,
       uid_column: validationForm.uidColumn,
@@ -105,8 +122,8 @@ function* submitValidationSaga() {
 
     upsertActiveSession({
       jobId,
-      sourcePath: gcsUri(validationForm.sourceCloud),
-      targetPath: gcsUri(validationForm.targetCloud),
+      sourcePath,
+      targetPath,
       startedAt: Date.now(),
       formSnapshot: {
         sourceCloud: validationForm.sourceCloud,
@@ -122,20 +139,22 @@ function* submitValidationSaga() {
     const result: import('../../shared/api/Api').ValidateResult | null = yield call(
       pollUntilCompleteOrDefer,
       jobId,
+      sourcePath,
+      targetPath,
     );
     if (result) {
-      yield* submitValidationSuccess(jobId, result);
+      yield* submitValidationSuccess(jobId, result, sourcePath, targetPath);
     }
   } catch (error: unknown) {
     if (jobId) {
       try {
-        const recovered: AxiosResponse<import('../../shared/api/Api').ValidationJobDetailResponse> = yield call(
+        const recovered: import('axios').AxiosResponse<import('../../shared/api/Api').ValidationJobDetailResponse> = yield call(
           Api.getValidationJob,
           jobId,
           { summaryOnly: true },
         );
         if (recovered.data.status === 'completed' && recovered.data.result) {
-          yield* submitValidationSuccess(jobId, recovered.data.result);
+          yield* submitValidationSuccess(jobId, recovered.data.result, sourcePath, targetPath);
           return;
         }
       } catch {
@@ -155,6 +174,8 @@ function* submitValidationSaga() {
 function* runFromHistorySaga(action: ReturnType<typeof validationActions.runValidationFromHistoryRequest>) {
   const runId = action.payload;
   let jobId: string | null = null;
+  let sourcePath = '';
+  let targetPath = '';
   try {
     const { data: detail } = yield call(Api.getValidationHistoryRun, runId);
     const { data: connections } = yield call(Api.listCloudConnections);
@@ -168,7 +189,14 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
       throw new Error('Saved mapping is missing cloud file paths');
     }
 
-    const accepted: AxiosResponse<ValidationJobAcceptedResponse> = yield call(
+    sourcePath = validationForm.sourceCloud
+      ? gcsUri(validationForm.sourceCloud)
+      : (detail.source_path ?? '');
+    targetPath = validationForm.targetCloud
+      ? gcsUri(validationForm.targetCloud)
+      : (detail.target_path ?? '');
+
+    const accepted: import('axios').AxiosResponse<ValidationJobAcceptedResponse> = yield call(
       Api.submitValidation,
       validateRequestFromForm(validationForm, {
         source_path: detail.source_path,
@@ -177,12 +205,10 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
     );
     jobId = accepted.data.job_id;
 
-    const src = validationForm.sourceCloud ? gcsUri(validationForm.sourceCloud) : (detail.source_path ?? '');
-    const tgt = validationForm.targetCloud ? gcsUri(validationForm.targetCloud) : (detail.target_path ?? '');
     upsertActiveSession({
       jobId,
-      sourcePath: src,
-      targetPath: tgt,
+      sourcePath,
+      targetPath,
       startedAt: Date.now(),
       formSnapshot: {
         sourceCloud: validationForm.sourceCloud,
@@ -194,8 +220,8 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
       },
     });
     yield put(reportActions.fetchReportsRequest());
-    yield put(validationActions.validationDeferredToReport({ jobId }));
-    yield fork(backgroundPollSaga, jobId);
+    yield* navigateToPairHistory(sourcePath, targetPath);
+    yield fork(backgroundPollSaga, jobId, sourcePath, targetPath);
   } catch (error: unknown) {
     if (jobId) removeActiveSession(jobId);
     notification.error({

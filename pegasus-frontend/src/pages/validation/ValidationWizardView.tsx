@@ -1,7 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowRightOutlined } from '@ant-design/icons';
 import { notification } from 'antd';
-import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
 import { validationActions } from './Validation.reducer';
 import { reportActions } from '../report/Report.reducer';
@@ -9,81 +8,39 @@ import { reportActions } from '../report/Report.reducer';
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
 import { ConfigureMappingStep } from './steps/ConfigureMappingStep';
-import { ReportService } from '../report/Report.service';
-import { gcsUri } from '../report/reportPairId';
 import { Api } from '../../shared/api/Api';
 
-// ⚡ Import the newly created CSS module
 import styles from './Validation.module.scss';
 
-// ⚡ Helper to calculate if Step 2 is still fetching
 const cloudObjectKey = (cloud: any): string =>
   cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';
 
 export const ValidationWizardView: React.FC = () => {
   const dispatch = useAppDispatch();
-  const navigate = useNavigate();
   const currentStep = useAppSelector((state) => state.validation.currentStep);
   const isStep1Valid = useAppSelector((state) => state.validation.isStep1Valid);
   const { isFetching, data } = useAppSelector((state) => state.validation.validationDataState);
   const validationForm = useAppSelector((state) => state.validation.validationForm);
-  
-  // ⚡ Pull the Step 2 cache from Redux
   const overviewCache = useAppSelector((state) => state.validation.overviewProfileCache);
-  
-  const pendingReportJobId = useAppSelector((state) => state.validation.pendingReportJobId);
-  const wasFetchingRef = useRef(false);
   const [savingDraft, setSavingDraft] = useState(false);
 
-  // Opening the wizard tab after a finished run should start fresh, not reopen the report.
   useEffect(() => {
     if (data?.status === 'Complete' || data?.status === 'Failed') {
       dispatch(validationActions.clearValidationRun());
     }
-    // Only when the wizard view is mounted (user navigated to /validations).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (pendingReportJobId) {
-      navigate(`/validation/report/${pendingReportJobId}`);
-      dispatch(validationActions.clearPendingReportJob());
-    }
-  }, [pendingReportJobId, navigate, dispatch]);
-
-  // Redirect to reports history for this file pair after a fast run finishes in-wizard.
-  useEffect(() => {
-    if (
-      wasFetchingRef.current
-      && !isFetching
-      && data?.status === 'Complete'
-      && validationForm.sourceCloud
-      && validationForm.targetCloud
-    ) {
-      const src = gcsUri(validationForm.sourceCloud);
-      const tgt = gcsUri(validationForm.targetCloud);
-      void ReportService.getMappingIdForPaths(src, tgt).then((mappingId) => {
-        navigate(`/reports/${mappingId}/history`);
-      });
-    }
-    wasFetchingRef.current = isFetching;
-  }, [isFetching, data, navigate, validationForm.sourceCloud, validationForm.targetCloud]);
-
-  // ⚡ Calculate if Step 2 is actively loading its profiles
   const isStep2Loading = currentStep === 2 && (
     overviewCache?.sourceKey !== cloudObjectKey(validationForm.sourceCloud) ||
     overviewCache?.targetKey !== cloudObjectKey(validationForm.targetCloud)
   );
 
-  // ⚡ Calculate if Step 3 is actively loading its columns
   const isStep3Loading = currentStep === 3 && (
     !validationForm.columnMappings || validationForm.columnMappings.length === 0
   );
 
-  // ⚡ Master loading variable
   const isActuallyLoading = isFetching || isStep2Loading || isStep3Loading;
-
-  // ⚡ Master disabled variable
   const isNextButtonDisabled = isActuallyLoading || (currentStep === 1 && !isStep1Valid);
 
   const handleProceed = () => {
@@ -110,8 +67,8 @@ export const ValidationWizardView: React.FC = () => {
     setSavingDraft(true);
     try {
       await Api.saveValidationDraft({
-        source_path: gcsUri(validationForm.sourceCloud),
-        target_path: gcsUri(validationForm.targetCloud),
+        source_path: `gs://${validationForm.sourceCloud.bucket}/${validationForm.sourceCloud.object_name}`,
+        target_path: `gs://${validationForm.targetCloud.bucket}/${validationForm.targetCloud.object_name}`,
         uid_column: validationForm.uidColumn,
         delimiter: validationForm.delimiter || 'auto',
         column_mappings: validationForm.columnMappings,
@@ -139,8 +96,6 @@ export const ValidationWizardView: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '24px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
-      
-      {/* ⚡ Swapped to styles.wizardHeaderShell */}
       <header className={styles.wizardHeaderShell}>
         <div className={styles.wizardHeaderLogoGroup}>
           <div style={{ width: '24px', height: '24px', color: 'var(--primary, #1677ff)' }}>
@@ -154,47 +109,39 @@ export const ValidationWizardView: React.FC = () => {
         </div>
       </header>
 
-      {/* ⚡ Swapped tab banner classes to use dynamic module styles */}
       <div className={styles.wizardStepTabBanner}>
         <div className={styles.wizardStepRow}>
-          
           <div className={`${styles.stepTabItem} ${currentStep === 1 ? styles.stepTabActive : styles.stepTabInactive}`} style={{ cursor: 'default' }}>
             <span className={`${styles.stepNumberBadge} ${currentStep === 1 ? styles.stepNumberActive : styles.stepNumberInactive}`}>1</span>
             <span style={{ fontSize: '14px', fontWeight: 600 }}>File Selection</span>
           </div>
-          
           <div className={`${styles.stepTabItem} ${currentStep === 2 ? styles.stepTabActive : styles.stepTabInactive}`} style={{ cursor: 'default' }}>
             <span className={`${styles.stepNumberBadge} ${currentStep === 2 ? styles.stepNumberActive : styles.stepNumberInactive}`}>2</span>
             <span style={{ fontSize: '14px', fontWeight: 600 }}>File Overview</span>
           </div>
-          
           <div className={`${styles.stepTabItem} ${currentStep === 3 ? styles.stepTabActive : styles.stepTabInactive}`} style={{ cursor: 'default' }}>
             <span className={`${styles.stepNumberBadge} ${currentStep === 3 ? styles.stepNumberActive : styles.stepNumberInactive}`}>3</span>
             <span style={{ fontSize: '14px', fontWeight: 600 }}>File Mapping</span>
           </div>
-
         </div>
       </div>
 
-      {/* ⚡ Swapped to styles.wizardWorkspaceArea */}
       <main className={styles.wizardWorkspaceArea}>
         {renderStepContent()}
       </main>
 
-      {/* ⚡ Swapped to styles.wizardActionFooter */}
       <footer className={styles.wizardActionFooter} style={{ justifyContent: 'space-between' }}>
         <div>
           {currentStep > 1 && (
-            <button 
+            <button
               onClick={handleBack}
-              disabled={isActuallyLoading} // ⚡ Disabled while loading
+              disabled={isActuallyLoading}
               style={{ padding: '0 24px', height: '40px', borderRadius: '8px', border: '1px solid #d9d9d9', background: '#ffffff', color: '#414755', fontSize: '14px', fontWeight: 600, cursor: isActuallyLoading ? 'not-allowed' : 'pointer', opacity: isActuallyLoading ? 0.6 : 1 }}
             >
               Back
             </button>
           )}
         </div>
-        
         <div style={{ display: 'flex', gap: '16px' }}>
           <button
             type="button"
@@ -205,15 +152,15 @@ export const ValidationWizardView: React.FC = () => {
           >
             {savingDraft ? 'Saving…' : 'Save Draft'}
           </button>
-          <button 
+          <button
             onClick={handleProceed}
-            disabled={isNextButtonDisabled} // ⚡ Disables based on new master loading state
-            style={{ 
-              padding: '0 32px', height: '40px', borderRadius: '8px', border: 'none', 
-              background: isNextButtonDisabled ? '#e5e2e1' : '#1677ff', 
-              color: isNextButtonDisabled ? '#727786' : '#ffffff', 
-              fontSize: '14px', fontWeight: 700, cursor: isNextButtonDisabled ? 'not-allowed' : 'pointer', 
-              display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s'
+            disabled={isNextButtonDisabled}
+            style={{
+              padding: '0 32px', height: '40px', borderRadius: '8px', border: 'none',
+              background: isNextButtonDisabled ? '#e5e2e1' : '#1677ff',
+              color: isNextButtonDisabled ? '#727786' : '#ffffff',
+              fontSize: '14px', fontWeight: 700, cursor: isNextButtonDisabled ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s',
             }}
           >
             {isActuallyLoading ? 'Processing...' : (currentStep === 3 ? 'Run Validation' : 'Proceed to Mapping')}

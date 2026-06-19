@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 import time
@@ -27,7 +28,9 @@ from pegasus.validation.pipeline.fingerprint import (
     _canonical_parts,
     _identity_parts,
 )
+from pegasus.validation.disk_guard import assert_disk_headroom, estimate_wave_disk_bytes
 from pegasus.validation.lifecycle_profiler import lifecycle_span
+from pegasus.validation.pipeline.mismatch_export import export_partitions_to_ndjson
 from pegasus.validation.pipeline.in_memory import (
     should_try_in_memory_reconcile,
     try_in_memory_reconcile,
@@ -55,7 +58,10 @@ from pegasus.validation.pipeline.partition_reconcile import (
 )
 from pegasus.validation.pipeline.spill import (
     PartitionWriter,
+    delete_partition_files,
     list_partition_ids,
+    partition_waves,
+    workspace_spill_bytes,
 )
 from pegasus.validation.pipeline.timing import (
     PipelineIoStats,
@@ -484,6 +490,21 @@ class TabularReconciliationPipeline:
                     publish_side_stages(
                         timings, io, is_source=False, progress_callback=progress_callback
                     )
+            try:
+                assert_disk_headroom(
+                    work,
+                    required_bytes=max(
+                        workspace_spill_bytes(work),
+                        estimate_wave_disk_bytes(
+                            combined_input_bytes=source_bytes + target_bytes,
+                            num_partitions=num_partitions,
+                            wave_size=num_partitions,
+                            disk_multiplier=self._config.disk_headroom_multiplier,
+                        ),
+                    ),
+                )
+            except OSError as exc:
+                raise RuntimeError(str(exc)) from exc
         src_rows = counts.get("source", 0)
         tgt_rows = counts.get("target", 0)
 
@@ -597,6 +618,30 @@ class TabularReconciliationPipeline:
 
         use_spill_payload = spill_payload
         reconcile_workers = resolved_reconcile_workers(self._config.partition_reconcile_workers)
+        combined_bytes = source_bytes + target_bytes
+        wave_size = self._config.partition_wave_size
+        use_waves = (
+            wave_size > 0
+            and combined_bytes >= self._config.wave_min_bytes
+            and len(active_pids) > wave_size
+        )
+        sorted_pids = sorted(active_pids)
+        waves = partition_waves(sorted_pids, wave_size) if use_waves else [sorted_pids]
+        mismatch_export_path = work / "mismatches_partial.ndjson" if use_waves else None
+
+        try:
+            assert_disk_headroom(
+                work,
+                required_bytes=estimate_wave_disk_bytes(
+                    combined_input_bytes=combined_bytes,
+                    num_partitions=num_partitions,
+                    wave_size=wave_size if use_waves else len(sorted_pids),
+                    disk_multiplier=self._config.disk_headroom_multiplier,
+                ),
+            )
+        except OSError as exc:
+            raise RuntimeError(str(exc)) from exc
+
         if live_progress is not None:
             live_progress.begin_reconcile(
                 partitions_total=len(active_pids),
@@ -606,32 +651,91 @@ class TabularReconciliationPipeline:
             progress_callback(
                 {"phase": "reconciling", "message": "Reconciling partitions"}
             )
-        if should_parallel_reconcile(
-            num_partitions=len(active_pids),
-            workers=reconcile_workers,
-            input_bytes=source_bytes + target_bytes,
-        ):
-            missing, extra, changed, matching, mismatched_partitions = reconcile_partitions_parallel(
-                work,
-                active_pids,
-                compare_columns=compare_columns,
-                enable_drilldown=self._config.enable_column_drilldown,
-                drilldown_cache=drilldown_cache,
-                sample_limit=sample_limit,
-                samples=samples,
-                timings=timings,
-                use_spill_payload=use_spill_payload,
-                max_workers=reconcile_workers,
-                live_progress=live_progress,
-            )
-        else:
-            done = 0
-            for pid in sorted(active_pids):
-                src_path = work / "source" / f"part_{pid:05d}.bin"
-                tgt_path = work / "target" / f"part_{pid:05d}.bin"
-                part_missing, part_extra, part_changed, part_matching = reconcile_partition_vectorized(
-                    src_path,
-                    tgt_path,
+
+        reconcile_bytes_read = 0
+        partitions_done = 0
+        start_wave = 0
+        if use_waves:
+            ck_path = work / "wave_checkpoint.json"
+            if ck_path.is_file():
+                try:
+                    ck = json.loads(ck_path.read_text(encoding="utf-8"))
+                    start_wave = int(ck.get("completed_wave", -1)) + 1
+                    if start_wave > 0:
+                        missing = int(ck.get("missing", missing))
+                        extra = int(ck.get("extra", extra))
+                        changed = int(ck.get("changed", changed))
+                        matching = int(ck.get("matching", matching))
+                        mismatched_partitions = int(
+                            ck.get("mismatched_partitions", mismatched_partitions)
+                        )
+                        partitions_done = int(ck.get("partitions_done", 0))
+                        if progress_callback:
+                            progress_callback(
+                                {
+                                    "phase": "reconciling",
+                                    "message": f"Resuming from wave {start_wave + 1}/{len(waves)}",
+                                    "wave_index": start_wave,
+                                    "wave_total": len(waves),
+                                }
+                            )
+                except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                    start_wave = 0
+        from pegasus.validation.workers.coordinator import DistributedReconciliationCoordinator
+
+        use_distributed = DistributedReconciliationCoordinator.should_use(
+            enabled=self._config.distributed_enabled,
+            redis_url=self._config.distributed_redis_url,
+            combined_bytes=combined_bytes,
+            min_bytes=self._config.distributed_min_bytes,
+        )
+        distributed_job_id = self._config.distributed_job_id or "pegasus-local"
+
+        for wave_idx, wave_pids in enumerate(waves):
+            if wave_idx < start_wave:
+                continue
+            if use_waves:
+                assert_disk_headroom(
+                    work,
+                    required_bytes=estimate_wave_disk_bytes(
+                        combined_input_bytes=combined_bytes,
+                        num_partitions=num_partitions,
+                        wave_size=len(wave_pids),
+                        disk_multiplier=self._config.disk_headroom_multiplier,
+                    ),
+                )
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "phase": "reconciling",
+                            "message": f"Reconciling wave {wave_idx + 1}/{len(waves)}",
+                            "wave_index": wave_idx,
+                            "wave_total": len(waves),
+                        }
+                    )
+            wave_set = set(wave_pids)
+            distributed_result = None
+            if use_distributed:
+                coordinator = DistributedReconciliationCoordinator(
+                    redis_url=str(self._config.distributed_redis_url),
+                    work_dir=work,
+                )
+                distributed_result = coordinator.reconcile_partitions(
+                    distributed_job_id,
+                    wave_pids,
+                    timeout_seconds=max(300, int(self._config.memory_budget_bytes // (1024**2))),
+                )
+
+            if distributed_result is not None:
+                w_missing, w_extra, w_changed, w_matching, w_mismatched = distributed_result
+            elif should_parallel_reconcile(
+                num_partitions=len(wave_set),
+                workers=reconcile_workers,
+                input_bytes=source_bytes + target_bytes,
+            ):
+                w_missing, w_extra, w_changed, w_matching, w_mismatched = reconcile_partitions_parallel(
+                    work,
+                    wave_set,
                     compare_columns=compare_columns,
                     enable_drilldown=self._config.enable_column_drilldown,
                     drilldown_cache=drilldown_cache,
@@ -639,23 +743,78 @@ class TabularReconciliationPipeline:
                     samples=samples,
                     timings=timings,
                     use_spill_payload=use_spill_payload,
+                    max_workers=reconcile_workers,
+                    live_progress=live_progress,
+                    use_processes=self._config.partition_reconcile_use_processes,
                 )
-                missing += part_missing
-                extra += part_extra
-                changed += part_changed
-                matching += part_matching
-                if part_missing or part_extra or part_changed:
-                    mismatched_partitions += 1
-                done += 1
-                if live_progress is not None:
-                    live_progress.on_reconcile_done(partitions_done=done)
+            else:
+                w_missing = w_extra = w_changed = w_matching = w_mismatched = 0
+                for pid in wave_pids:
+                    src_path = work / "source" / f"part_{pid:05d}.bin"
+                    tgt_path = work / "target" / f"part_{pid:05d}.bin"
+                    part_missing, part_extra, part_changed, part_matching = reconcile_partition_vectorized(
+                        src_path,
+                        tgt_path,
+                        compare_columns=compare_columns,
+                        enable_drilldown=self._config.enable_column_drilldown,
+                        drilldown_cache=drilldown_cache,
+                        sample_limit=sample_limit,
+                        samples=samples,
+                        timings=timings,
+                        use_spill_payload=use_spill_payload,
+                    )
+                    w_missing += part_missing
+                    w_extra += part_extra
+                    w_changed += part_changed
+                    w_matching += part_matching
+                    if part_missing or part_extra or part_changed:
+                        w_mismatched += 1
+
+            missing += w_missing
+            extra += w_extra
+            changed += w_changed
+            matching += w_matching
+            mismatched_partitions += w_mismatched
+            reconcile_bytes_read += reconcile_spill_bytes_read(work, wave_set)
+            partitions_done += len(wave_pids)
+            if live_progress is not None:
+                live_progress.on_reconcile_done(partitions_done=partitions_done)
+
+            if use_waves and mismatch_export_path is not None:
+                export_partitions_to_ndjson(
+                    work,
+                    mismatch_export_path,
+                    compare_columns=compare_columns,
+                    pids=wave_pids,
+                    append=wave_idx > 0,
+                )
+                delete_partition_files(work, wave_pids)
+                checkpoint = {
+                    "completed_wave": wave_idx,
+                    "total_waves": len(waves),
+                    "partitions_done": partitions_done,
+                    "missing": missing,
+                    "extra": extra,
+                    "changed": changed,
+                    "matching": matching,
+                    "mismatched_partitions": mismatched_partitions,
+                }
+                (work / "wave_checkpoint.json").write_text(
+                    json.dumps(checkpoint),
+                    encoding="utf-8",
+                )
+
+        if not use_waves and live_progress is not None and partitions_done == 0:
+            live_progress.on_reconcile_done(partitions_done=len(active_pids))
 
         timings.total_seconds = time.perf_counter() - t0
         timings.total_cpu_seconds = time.process_time() - process_cpu_start
         timings.network_transfer_seconds = (
             _adapter_network_seconds(self._source) + _adapter_network_seconds(self._target)
         )
-        io.reconcile_spill_bytes_read = reconcile_spill_bytes_read(work, active_pids)
+        io.reconcile_spill_bytes_read = (
+            reconcile_bytes_read if use_waves else reconcile_spill_bytes_read(work, active_pids)
+        )
         io.source_input_bytes = adapter_input_bytes(self._source)
         io.target_input_bytes = adapter_input_bytes(self._target)
         reconcile_stage = next(
@@ -687,6 +846,13 @@ class TabularReconciliationPipeline:
             chunk_rows=chunk_rows,
             reconcile_workers=reconcile_workers,
         )
+        if use_waves:
+            extra_stats["partition_waves"] = len(waves)
+            extra_stats["partition_wave_size"] = wave_size
+            if mismatch_export_path is not None and mismatch_export_path.is_file():
+                extra_stats["mismatch_export_path"] = str(mismatch_export_path)
+        if use_distributed:
+            extra_stats["distributed_reconcile"] = True
         assert_reasonable_row_counts(
             self._source,
             self._target,

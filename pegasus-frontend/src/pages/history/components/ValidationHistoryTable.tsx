@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../../../redux/store';
+import { ReportService } from '../../report/Report.service';
 import { historyActions } from '../History.reducer';
 import styles from '../History.module.scss';
 
@@ -84,12 +85,16 @@ export const ValidationHistoryTable: React.FC = () => {
               </td>
               <td style={{ textAlign: 'right' }}>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '16px' }}>
-                  <button 
-                    type="button" 
-                    onClick={() => navigate(`/validation/report/${row.id}`)}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void ReportService.getMappingIdForPaths(row.sourceUri, row.targetUri).then((mappingId) => {
+                        navigate(`/reports/${mappingId}/history`);
+                      });
+                    }}
                     style={{ color: '#0057c2', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 500 }}
                   >
-                    {row.status === 'Fail' ? 'View Errors' : 'View Report'}
+                    {row.status === 'Fail' ? 'View History' : 'View History'}
                   </button>
                   
                   <div style={{ position: 'relative', display: 'inline-block' }}>

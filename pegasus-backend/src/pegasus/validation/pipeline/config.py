@@ -34,7 +34,7 @@ class TabularPipelineConfig:
     enable_in_memory_reconcile: bool = False
     auto_in_memory_max_bytes: int = 256 * 1024 * 1024
     memory_budget_bytes: int = 1_073_741_824
-    disk_headroom_multiplier: float = 2.5
+    disk_headroom_multiplier: float = 1.5
     fingerprint_algorithm: str = "xxhash64"
     polars_spill_max_bytes: int = 256 * 1024 * 1024
     force_disk_spill: bool = False
@@ -43,6 +43,13 @@ class TabularPipelineConfig:
     spill_merkle_max_bytes: int = 32 * 1024 * 1024
     partition_reconcile_workers: int = 1
     streaming_spill_min_bytes: int = 64 * 1024 * 1024
+    partition_wave_size: int = 0
+    wave_min_bytes: int = 512 * 1024 * 1024
+    partition_reconcile_use_processes: bool = True
+    distributed_enabled: bool = False
+    distributed_redis_url: str | None = None
+    distributed_job_id: str | None = None
+    distributed_min_bytes: int = 10 * 1024 * 1024 * 1024
     compare_policy: ComparePolicy | None = None
 
     def resolved_partition_count(self) -> int:

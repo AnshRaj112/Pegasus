@@ -14,11 +14,10 @@ users and optionally auto-cap concurrency.
 
 Design notes
 ------------
-*  RAM per job is estimated as ``RAM_MULTIPLIER × (source_bytes + target_bytes)``.
-   Polars reads the full file into memory, and reconciliation uses hash maps,
-   partition buffers, and comparison DataFrames — typically 3–5× the raw CSV size.
+*  Small jobs (<64 MiB combined, non-streaming): ``ram_multiplier × combined_csv_bytes``.
+*  Large/streaming jobs (≥64 MiB or ``gcs_streaming_only``): chunk-buffer estimate via
+   ``estimate_streaming_job_ram_bytes`` (fingerprint-only spill, not O(file size)).
 *  Disk per job is estimated as ``disk_headroom_multiplier × (source_bytes + target_bytes)``.
-   The spill workspace writes NDJSON partitions roughly 1.5× the combined CSV size.
 *  A safety reserve of ``RAM_RESERVE_BYTES`` (default 1 GiB) is always kept free
    for the OS and other processes.
 """
@@ -39,9 +38,8 @@ logger = logging.getLogger(__name__)
 
 # ── Tunable constants ─────────────────────────────────────────────
 
-#: RAM multiplier per job: estimated_ram = multiplier × combined_csv_bytes.
-#: Polars read + hash maps + comparison buffers ≈ 3–5× raw CSV size.
-RAM_MULTIPLIER: float = 4.0
+#: Fallback RAM multiplier for small in-memory jobs when settings are unavailable.
+RAM_MULTIPLIER: float = 1.5
 
 #: Minimum RAM to keep free for OS / Python runtime / other services.
 RAM_RESERVE_BYTES: int = 1 * 1024**3  # 1 GiB

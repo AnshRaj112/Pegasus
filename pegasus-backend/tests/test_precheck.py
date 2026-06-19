@@ -64,3 +64,25 @@ def test_metadata_precheck_different_size_skips() -> None:
         enable_metadata=True,
         enable_content_digest=False,
     ) is None
+
+
+def test_local_file_content_digest_precheck() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        src = root / "a.csv"
+        tgt = root / "b.csv"
+        content = "id||val\n1||x\n"
+        src.write_text(content, encoding="utf-8")
+        tgt.write_text(content, encoding="utf-8")
+        source = FileDelimitedAdapter(src, delimiter="||")
+        target = FileDelimitedAdapter(tgt, delimiter="||")
+        result = try_identical_precheck(
+            source,
+            target,
+            compare_columns=["val"],
+            enable_metadata=False,
+            enable_content_digest=True,
+        )
+        assert result is not None
+        assert result.extra_stats.get("precheck_method") == "content_digest"
+        assert result.changed_count == 0

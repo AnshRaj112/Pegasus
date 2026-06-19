@@ -1,22 +1,22 @@
 {
-  "100m-12cols": {
-    "label": "100m-12cols",
+  "10m": {
+    "label": "10m",
     "skipped": false,
     "native_extension": true,
-    "seconds": 539.05,
-    "budget_minutes": 10.0,
-    "under_budget": true,
-    "mb_per_s": 71.84,
-    "source_rows": 100000000,
-    "target_rows": 97000000,
+    "seconds": 327.37,
+    "budget_minutes": 2.0,
+    "under_budget": false,
+    "mb_per_s": 2.54,
+    "source_rows": 10000000,
+    "target_rows": 10400000,
     "path": "spill_arrow_ipc",
-    "partition_buckets": 1024,
-    "chunk_rows": 2000000,
+    "partition_buckets": 512,
+    "chunk_rows": 1000000,
     "reconcile_workers": 4,
     "timings": {
-      "partition_reconciliation_seconds": 23.8976,
-      "total_seconds": 538.9536
+      "partition_reconciliation_seconds": 39.1045,
+      "total_seconds": 327.3568
     },
-    "mismatches": 4000000
+    "mismatches": 2000000
   }
 }

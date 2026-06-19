@@ -17,7 +17,9 @@ from pegasus.schemas.validation import (
     ColumnMappingFormatCheck,
     FooterValidationResult,
     MismatchCounts,
+    MismatchPersistenceNote,
     ValidationDurations,
+    parse_stored_footer_blob,
 )
 
 
@@ -80,6 +82,7 @@ class ValidationHistoryDetail(ValidationHistorySummary):
     compared_columns: list[str] = Field(default_factory=list)
     mapping_format_checks: list[ColumnMappingFormatCheck] = Field(default_factory=list)
     footer_validation: FooterValidationResult | None = None
+    mismatch_persistence: MismatchPersistenceNote | None = None
     validate_header_formats: bool = False
     validate_footers: bool = False
     compared_column_count: int | None = Field(default=None, ge=0)

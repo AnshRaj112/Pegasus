@@ -122,7 +122,8 @@ def try_identical_precheck(
 ) -> PipelineResult | None:
     """Skip full reconcile when blobs are byte-identical.
 
-    Never hashes full file contents here — only compares sizes and GCS metadata digests.
+    Never hashes full file contents during reconcile — compares precomputed digests
+    (GCS metadata or local xxhash64) and cloud object metadata when available.
     """
     src_size = _adapter_size_bytes(source)
     tgt_size = _adapter_size_bytes(target)

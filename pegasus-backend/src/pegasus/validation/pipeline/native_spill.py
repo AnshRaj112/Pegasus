@@ -25,6 +25,25 @@ def native_drilldown_path(workspace: Path, side: str) -> Path:
     return Path(workspace) / f"drilldown_{side}{DRILLDOWN_SUFFIX}"
 
 
+def can_use_native_single_char_spill(
+    *,
+    store_payload: bool,
+    use_arrow_ipc_spill: bool,
+    delimiter: str,
+    file_bytes: int,
+    streaming_spill_min_bytes: int,
+) -> bool:
+    """Prefer Rust native spill for large single-char delimiter files."""
+    if file_bytes < streaming_spill_min_bytes:
+        return False
+    if len(delimiter) != 1:
+        return False
+    return can_use_native_multichar_spill(
+        store_payload=store_payload,
+        use_arrow_ipc_spill=use_arrow_ipc_spill,
+    )
+
+
 def can_use_native_multichar_spill(
     *,
     store_payload: bool,

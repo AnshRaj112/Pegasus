@@ -96,8 +96,9 @@ class ValidationRunRepository:
         result: ValidationRunResult,
         *,
         column_mappings: list[dict[str, Any]] | None = None,
+        max_mismatch_rows: int = 0,
     ) -> None:
-        """Update aggregates and insert all mismatch rows from the Polars report."""
+        """Update aggregates and optionally insert mismatch rows from the Polars report."""
         run = await session.get(ValidationRun, run_id)
         if run is None:
             logger.warning("complete_success: validation run %s not found", run_id)
@@ -139,7 +140,29 @@ class ValidationRunRepository:
             run.validation_duration_seconds = result.durations.validation_seconds
             run.total_duration_seconds = result.durations.total_seconds
 
-        if total_mismatch > 0 and artifact is not None and artifact.is_file():
+        persist_rows = total_mismatch > 0
+        if max_mismatch_rows > 0 and total_mismatch > max_mismatch_rows:
+            logger.info(
+                "Skipping mismatch row persistence for run %s: %d rows exceeds cap %d",
+                run_id,
+                total_mismatch,
+                max_mismatch_rows,
+            )
+            persist_rows = False
+            if artifact is not None and artifact.is_file():
+                existing_footer = dict(run.footer_validation or {})
+                persistence = dict(existing_footer.get("_persistence") or {})
+                persistence.update(
+                    {
+                        "mismatch_rows_persisted": False,
+                        "mismatch_artifact_path": str(artifact),
+                        "mismatch_row_cap": max_mismatch_rows,
+                    }
+                )
+                existing_footer["_persistence"] = persistence
+                run.footer_validation = existing_footer
+
+        if persist_rows and artifact is not None and artifact.is_file():
             p = Path(artifact)
             batch_orm: list[MismatchReport] = []
             batch_size = 2_000
@@ -170,7 +193,7 @@ class ValidationRunRepository:
             if batch_orm:
                 session.add_all(batch_orm)
                 await session.flush()
-        elif mismatches.height > 0:
+        elif persist_rows and mismatches.height > 0:
             rows = mismatches.to_dicts()
             batch_size = 2_000
             for i in range(0, len(rows), batch_size):

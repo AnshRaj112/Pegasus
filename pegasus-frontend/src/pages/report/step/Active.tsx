@@ -23,7 +23,7 @@ export const Active: React.FC = () => {
     <>
       {/* ⚡ FIX: Added (report: ReportItem, index: number) */}
       {filtered.map((report: ReportItem, index: number) => (
-        <div key={report.id} onClick={() => navigate(report.jobId ? `/validation/report/${report.jobId}` : `/reports/${report.id}/history`)} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px 24px', borderBottom: index !== filtered.length - 1 ? '1px solid #f1f5f9' : 'none', backgroundColor: '#fff', transition: 'background-color 0.2s', cursor: 'pointer' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}>
+        <div key={report.id} onClick={() => navigate(`/reports/${report.id}/history`)} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px 24px', borderBottom: index !== filtered.length - 1 ? '1px solid #f1f5f9' : 'none', backgroundColor: '#fff', transition: 'background-color 0.2s', cursor: 'pointer' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}>
           <div style={{ color: '#94a3b8', fontSize: '14px', width: '16px' }}>-</div>
 
           <div style={{ flex: 1, minWidth: '200px' }}>

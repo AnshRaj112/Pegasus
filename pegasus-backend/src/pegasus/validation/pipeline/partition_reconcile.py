@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+import multiprocessing as mp
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -260,8 +261,9 @@ def reconcile_partitions_parallel(
     use_spill_payload: bool,
     max_workers: int,
     live_progress: LiveProgressTracker | None = None,
+    use_processes: bool = True,
 ) -> tuple[int, int, int, int, int]:
-    """Reconcile partitions in a process pool; drilldown runs in the parent."""
+    """Reconcile partitions in a worker pool; drilldown runs in the parent."""
     tasks = [
         (
             str(work / "source" / f"part_{pid:05d}.bin"),
@@ -275,7 +277,13 @@ def reconcile_partitions_parallel(
 
     with StageTimer(timings, "partition_reconciliation_seconds"):
         done = 0
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        pool_kwargs: dict[str, object] = {}
+        if use_processes and max_workers > 1 and len(tasks) >= 2:
+            pool_cls: type = ProcessPoolExecutor
+            pool_kwargs["mp_context"] = mp.get_context("spawn")
+        else:
+            pool_cls = ThreadPoolExecutor
+        with pool_cls(max_workers=max_workers, **pool_kwargs) as pool:
             futures = {pool.submit(_worker_reconcile, t): i for i, t in enumerate(tasks)}
             ordered: list[PartitionReconcileResult | None] = [None] * len(tasks)
             for fut in as_completed(futures):
@@ -324,7 +332,7 @@ def resolved_reconcile_workers(requested: int) -> int:
         return 1
     if requested <= 0:
         cpus = os.cpu_count() or 1
-        return max(2, min(16, cpus))
+        return max(1, min(8, cpus - 1 if cpus > 1 else 1))
     return max(1, requested)
 
 

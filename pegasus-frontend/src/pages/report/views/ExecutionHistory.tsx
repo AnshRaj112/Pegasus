@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { PlayCircleOutlined, BranchesOutlined, ClockCircleOutlined, CalendarOutlined, FileTextOutlined, RightOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useAppDispatch, useAppSelector } from '../../../redux/store';
+import { useAppDispatch } from '../../../redux/store';
 import { ReportService } from '../Report.service';
 import type { ValidationHistorySummary } from '../../../shared/api/Api';
 import { validationActions } from '../../validation/Validation.reducer';
@@ -24,7 +24,6 @@ const formatDuration = (sec: number | null | undefined) => {
 export const ExecutionHistory: React.FC = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const pendingReportJobId = useAppSelector((s) => s.validation.pendingReportJobId);
   const { mappingId } = useParams<{ mappingId: string }>();
   const [runs, setRuns] = useState<ValidationHistorySummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,13 +51,6 @@ export const ExecutionHistory: React.FC = () => {
     })();
     return () => { cancelled = true; };
   }, [mappingId]);
-
-  useEffect(() => {
-    if (pendingReportJobId) {
-      navigate(`/validation/report/${pendingReportJobId}`);
-      dispatch(validationActions.clearPendingReportJob());
-    }
-  }, [pendingReportJobId, navigate, dispatch]);
 
   const MAPPING_NAME = pairLabel || mappingId || 'Report';
 

@@ -118,7 +118,9 @@ export const ReportService = {
   getMappingIdForPaths: async (sourcePath: string, targetPath: string): Promise<string> => {
     const groups = await getValidationPairGroups();
     const map = idMapForGroups(groups);
-    return map.get(`${sourcePath}\0${targetPath}`) ?? '1';
+    const hit = map.get(`${sourcePath}\0${targetPath}`);
+    if (hit) return hit;
+    return pairIdToPathSegment(encodeReportPairId(sourcePath, targetPath));
   },
 
   fetchActive: async (): Promise<ReportItem[]> => {
@@ -135,6 +137,9 @@ export const ReportService = {
       const session = sessions.find((s) => s.jobId === job.job_id);
       const sourcePath = session?.sourcePath ?? '';
       const targetPath = session?.targetPath ?? '';
+      const mappingId = sourcePath && targetPath
+        ? pairIdToPathSegment(encodeReportPairId(sourcePath, targetPath))
+        : job.job_id;
       const latest = {
         run_id: job.job_id,
         status: job.state,
@@ -151,7 +156,7 @@ export const ReportService = {
         is_match: null,
       } as ValidationHistorySummary;
       items.push({
-        ...toReportItem([latest], job.job_id),
+        ...toReportItem([latest], mappingId),
         jobId: job.job_id,
         jobSubtitle: job.state === 'queued' ? 'Queued…' : 'Validating…',
         badges: [
@@ -163,6 +168,9 @@ export const ReportService = {
 
     for (const session of sessions) {
       if (seen.has(session.jobId)) continue;
+      const mappingId = pairIdToPathSegment(
+        encodeReportPairId(session.sourcePath, session.targetPath),
+      );
       const latest = {
         run_id: session.jobId,
         status: 'running',
@@ -179,7 +187,7 @@ export const ReportService = {
         is_match: null,
       } as ValidationHistorySummary;
       items.push({
-        ...toReportItem([latest], session.jobId),
+        ...toReportItem([latest], mappingId),
         jobId: session.jobId,
         jobSubtitle: 'Validating…',
         badges: [

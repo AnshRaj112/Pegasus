@@ -429,6 +429,43 @@ class FooterValidationResult(BaseModel):
     message: str | None = None
 
 
+class MismatchPersistenceNote(BaseModel):
+    """Recorded when mismatch rows exceed the DB persistence cap."""
+
+    mismatch_rows_persisted: bool
+    mismatch_artifact_path: str | None = None
+    mismatch_row_cap: int | None = Field(default=None, ge=0)
+
+
+_FOOTER_PERSISTENCE_KEYS = frozenset(
+    {"mismatch_rows_persisted", "mismatch_artifact_path", "mismatch_row_cap"},
+)
+
+
+def parse_stored_footer_blob(
+    raw: dict[str, Any] | None,
+) -> tuple[FooterValidationResult | None, MismatchPersistenceNote | None]:
+    """Split persisted footer JSON into footer check vs mismatch persistence metadata."""
+    if not raw or not isinstance(raw, dict):
+        return None, None
+
+    data = dict(raw)
+    persistence_raw: dict[str, Any] = {}
+    nested = data.pop("_persistence", None)
+    if isinstance(nested, dict):
+        persistence_raw.update(nested)
+
+    for key in list(_FOOTER_PERSISTENCE_KEYS):
+        if key in data:
+            persistence_raw[key] = data.pop(key)
+
+    footer_val = FooterValidationResult.model_validate(data) if "match" in data else None
+    persistence_val = (
+        MismatchPersistenceNote.model_validate(persistence_raw) if persistence_raw else None
+    )
+    return footer_val, persistence_val
+
+
 class MappingAnalyzeRequest(BaseModel):
     """JSON body for POST /validate/local/analyze (mapping wizard pre-checks)."""
 

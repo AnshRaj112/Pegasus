@@ -186,6 +186,18 @@ def run_job_directory(job_dir: Path) -> int:
         return _fail("job_dir missing meta.json")
 
     meta = _load_json(meta_path)
+    if meta.get("batch"):
+        settings = get_settings()
+        from pegasus.validation.batch_runner import run_batch_job
+
+        return run_batch_job(
+            job_dir=job_dir,
+            meta=meta,
+            settings=settings,
+            status_path=status_path,
+            write_status=_write_json,
+        )
+
     uid_column = str(meta.get("uid_column") or "")
     delimiter = str(meta.get("delimiter") or "auto")
     column_mappings = [ColumnMapping.model_validate(m) for m in list(meta.get("column_mappings") or [])]
@@ -471,7 +483,21 @@ def _run_job_body(
             artifact = result.mismatch_artifact_path or result.report.mismatch_artifact_path
             workspace = job_dir / "reconcile_workspace"
             export_path = job_dir / "mismatches.ndjson"
-            if workspace.is_dir() and result.compared_columns:
+            wave_export = workspace / "mismatches_partial.ndjson"
+            extra_stats = (getattr(result, "extra_stats", None) or {}) if hasattr(result, "extra_stats") else {}
+            if not extra_stats and getattr(result, "pipeline_metadata", None):
+                extra_stats = result.pipeline_metadata or {}
+            pipeline_path = extra_stats.get("path") if isinstance(extra_stats, dict) else None
+            if pipeline_path is None:
+                pipeline_path = (getattr(result, "pipeline_metadata", None) or {}).get("path")
+            if wave_export.is_file():
+                try:
+                    export_path.write_bytes(wave_export.read_bytes())
+                    artifact = export_path
+                    logger.info("Using wave-exported mismatches from %s", wave_export)
+                except OSError:
+                    logger.exception("Failed to copy wave mismatch export")
+            elif workspace.is_dir() and result.compared_columns:
                 try:
                     from pegasus.validation.comparators.policy import compare_policy_context
                     from pegasus.validation.pipeline.mismatch_export import export_workspace_mismatches_ndjson
@@ -550,7 +576,7 @@ def _run_job_body(
                 "total_seconds": validation_duration,
             },
         }
-        reconcile_path = (getattr(result, "pipeline_metadata", None) or {}).get("path")
+        reconcile_path = pipeline_path or (getattr(result, "pipeline_metadata", None) or {}).get("path")
         logger.info(
             "validation completed in %.2fs path=%s (source_rows=%d target_rows=%d mismatches=%d)",
             validation_duration,
