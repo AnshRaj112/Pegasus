@@ -36,12 +36,13 @@
   align-items: center;
   gap: 8px;
   padding-bottom: 12px;
-  margin-bottom: -13px; /* Pulls the border down to overlap the container border */
+  margin-bottom: -13px;
+  /* Pulls the border down to overlap the container border */
 }
 
 .stepTabActive {
-  color: var(--primary, #1677ff);
-  border-bottom: 2px solid var(--primary, #1677ff);
+  color: var(--primary, #234B5F);
+  border-bottom: 2px solid var(--primary, #234B5F);
 }
 
 .stepTabInactive {
@@ -61,7 +62,7 @@
 }
 
 .stepNumberActive {
-  background-color: var(--primary, #1677ff);
+  background-color: var(--primary, #234B5F);
   color: var(--on-primary, #ffffff);
 }
 
@@ -96,13 +97,16 @@
     width: 6px;
     height: 6px;
   }
+
   &::-webkit-scrollbar-track {
     background: #f1f1f1;
   }
+
   &::-webkit-scrollbar-thumb {
     background: #c1c6d7;
     border-radius: 10px;
   }
+
   &::-webkit-scrollbar-thumb:hover {
     background: #727786;
   }

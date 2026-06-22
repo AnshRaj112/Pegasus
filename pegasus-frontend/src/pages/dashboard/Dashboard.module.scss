@@ -29,6 +29,7 @@
   .leftMetricsCol {
     grid-column: span 8 / span 8;
   }
+
   .rightChartCol {
     grid-column: span 16 / span 16;
   }
@@ -267,15 +268,18 @@
   justify-content: center;
   gap: var(--xs);
 }
+
 .customizerCard * {
   box-sizing: border-box;
 }
 
-.textInput, .selectInput {
+.textInput,
+.selectInput {
   width: 100% !important;
   max-width: 100% !important;
   box-sizing: border-box !important;
 }
+
 .workspaceScrollContainer {
   overflow-y: auto;
   flex-grow: 1;
@@ -284,6 +288,7 @@
   gap: var(--md);
   padding: var(--md);
 }
+
 .avatar-stack {
   display: flex;
   align-items: center;
@@ -297,6 +302,7 @@
   object-fit: cover;
   display: block;
 }
+
 .badge-system-highlight {
   display: inline-flex;
   align-items: center;
@@ -305,11 +311,12 @@
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  background: #D9E2FF;
-  color: var(--on-primary-fixed-variant);
-  border: 1px solid var(--outline-variant);
+  background: var(--color-midnight-green-light);
+  color: var(--color-midnight-green);
+  border: 1px solid var(--color-midnight-green);
   text-transform: uppercase;
 }
+
 .customizerCardFlex {
   display: flex;
   flex-direction: column;
@@ -318,32 +325,42 @@
 
 .customizerFooterSpacer {
   margin-top: auto;
-  padding-bottom: var(--base); /* Provides a clean padding offset from the container edge */
+  padding-bottom: var(--base);
+  /* Provides a clean padding offset from the container edge */
 }
-.panelCard, .customizerCard {
+
+.panelCard,
+.customizerCard {
   background: var(--surface);
   border: 1px solid var(--surface-variant);
   border-radius: var(--lg);
   display: flex;
   flex-direction: column;
-  height: 500px !important;       /* Forces all 3 boxes to share an identical 500px height profile */
-  max-height: 500px !important;   /* Prevents the customizer from ballooning past adjacent boxes */
-  overflow: hidden;               /* Locks the outer boundary box template tightly in place */
+  height: 500px !important;
+  /* Forces all 3 boxes to share an identical 500px height profile */
+  max-height: 500px !important;
+  /* Prevents the customizer from ballooning past adjacent boxes */
+  overflow: hidden;
+  /* Locks the outer boundary box template tightly in place */
   box-sizing: border-box;
 }
 
 .customizerCard {
-  padding: var(--lg);             /* Standardises internal container box alignment padding */
+  padding: var(--lg);
+  /* Standardises internal container box alignment padding */
   gap: var(--md);
 }
 
 .customizerFooterSpacer {
-  margin-top: auto;               /* Grounds the action button layout to the absolute bottom matrix */
-  padding-bottom: var(--xs);      /* Adds clean cushioning buffer from the card border edge */
+  margin-top: auto;
+  /* Grounds the action button layout to the absolute bottom matrix */
+  padding-bottom: var(--xs);
+  /* Adds clean cushioning buffer from the card border edge */
 }
+
 .secondaryBtn {
   background-color: var(--surface-variant);
-  color: var(--primary);
+  color: var(--color-midnight-green);
   border: none;
   border-radius: 6px;
   padding: 6px 12px;
@@ -353,7 +370,7 @@
   transition: all 0.2s ease;
 
   &:hover {
-    background-color: var(--primary);
+    background-color: var(--color-midnight-green);
     color: var(--on-primary);
   }
 }

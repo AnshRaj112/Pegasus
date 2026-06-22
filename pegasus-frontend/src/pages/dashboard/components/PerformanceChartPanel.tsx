@@ -46,11 +46,11 @@ export const PerformanceChartPanel: React.FC<PerformanceChartPanelProps> = ({ da
         </div>
         <div className={styles.chartLegend}>
           <div className={styles.legendItem}>
-            <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: 'var(--primary)' }} />
+            <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: 'var(--color-midnight-green)' }} />
             Pass
           </div>
           <div className={styles.legendItem}>
-            <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: 'var(--error)' }} />
+            <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: 'var(--status-fail)' }} />
             Fail
           </div>
         </div>
@@ -65,8 +65,8 @@ export const PerformanceChartPanel: React.FC<PerformanceChartPanelProps> = ({ da
           <svg style={{ width: '100%', height: '100%' }} viewBox="0 0 800 200" preserveAspectRatio="none">
             <defs>
               <linearGradient id="grad-pass" x1="0%" x2="0%" y1="0%" y2="100%">
-                <stop offset="0%" style={{ stopColor: 'var(--primary)', stopOpacity: 0.2 }} />
-                <stop offset="100%" style={{ stopColor: 'var(--primary)', stopOpacity: 0 }} />
+                <stop offset="0%" style={{ stopColor: 'var(--color-midnight-green)', stopOpacity: 0.2 }} />
+                <stop offset="100%" style={{ stopColor: 'var(--color-midnight-green)', stopOpacity: 0 }} />
               </linearGradient>
             </defs>
             {chartLinesY.map((y) => (
@@ -81,7 +81,7 @@ export const PerformanceChartPanel: React.FC<PerformanceChartPanelProps> = ({ da
                 <path
                   d={toPath(passPoints)}
                   fill="none"
-                  stroke="#0057c2"
+                  stroke="#234B5F"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth="3"

@@ -24,23 +24,23 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
       <div className={styles.metricsSubGrid}>
         <MetricCard
           Icon={CheckCircle}
-          iconColor="#16a34a"
+          iconColor="var(--status-pass)"
           label="Pass"
           value={isLoading ? '…' : passed.toLocaleString()}
           subtext="Last 7 days"
-          subtextColor="#16a34a"
+          subtextColor="var(--status-pass)"
         />
         <MetricCard
           Icon={XCircle}
-          iconColor="var(--error)"
+          iconColor="var(--status-fail)"
           label="Fail"
           value={isLoading ? '…' : failed.toLocaleString()}
           subtext="Last 7 days"
-          subtextColor="var(--error)"
+          subtextColor="var(--status-fail)"
         />
         <MetricCard
           Icon={Database}
-          iconColor="var(--primary)"
+          iconColor="var(--color-midnight-green)"
           label="Total Validated"
           value={isLoading ? '…' : totalValidated.toLocaleString()}
           subtext="Completed runs"

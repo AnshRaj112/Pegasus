@@ -90,7 +90,7 @@ export const AdminLoginPanel: React.FC<AdminLoginPanelProps> = ({ onSuccess }) =
         <button
           type="button"
           onClick={() => { setIsSignup((v) => !v); setError(null); }}
-          style={{ marginTop: 16, width: '100%', background: 'none', border: 'none', color: '#1677ff', fontSize: 13, cursor: 'pointer' }}
+          style={{ marginTop: 16, width: '100%', background: 'none', border: 'none', color: '#234B5F', fontSize: 13, cursor: 'pointer' }}
         >
           {isSignup ? 'Already have an admin account? Sign in' : 'First-time setup? Create admin account'}
         </button>

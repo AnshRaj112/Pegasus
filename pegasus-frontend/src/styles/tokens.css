@@ -13,11 +13,36 @@
   --surface-container-low: #f6f3f2;
   --surface-container-lowest: #ffffff;
   
-  --primary: #0057c2;
+  /* ── Palette: Midnight Green (Primary Color 1) ── */
+  /* Used for: general UI elements, standard buttons, structural components */
+  --color-midnight-green: #234B5F;
+  --color-midnight-green-accent: #239CD9;
+  --color-midnight-green-light: rgba(35, 75, 95, 0.1);
+
+  /* ── Palette: Onyx Red (Primary Color 2) ── */
+  /* Used for: Header branding, active nav underlines/text */
+  --color-onyx-red: #E06B67;
+  --color-onyx-red-deep: #952622;
+  --color-onyx-red-light: rgba(224, 107, 103, 0.1);
+
+  /* ── Primary tokens ── */
+  /* Primary maps to Midnight Green for general structural UI */
+  --primary: #234B5F;
   --on-primary: #ffffff;
-  --primary-container: #006ef2;
-  --secondary: #2752ca;
-  
+  --primary-container: #239CD9;
+  --primary-fixed: rgba(35, 75, 95, 0.12);
+  --on-primary-fixed: #234B5F;
+  --on-primary-fixed-variant: #1a3a4a;
+  --secondary: #239CD9;
+
+  /* ── Status / Result Colors ── */
+  /* Pass and Fail metrics must use these specific colors — NOT Onyx Red */
+  --status-pass: #16a34a;
+  --status-pass-bg: #dcfce7;
+  --status-fail: #ba1a1a;
+  --status-fail-bg: #ffdad6;
+
+  /* Legacy error tokens (kept for structural compat) */
   --error: #ba1a1a;
   --error-container: #ffdad6;
   --on-error-container: #93000a;

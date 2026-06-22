@@ -60,7 +60,7 @@ const formatDate = (dateString?: string | null): string => {
   return new Date(dateString).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
-const toExplorerItem = (entry: CloudBrowseEntry): FileExplorerItem => ({ 
+const toExplorerItem = (entry: CloudBrowseEntry): FileExplorerItem => ({
   id: entry.path,
   name: entry.name,
   objectName: entry.path,
@@ -73,7 +73,7 @@ const toExplorerItem = (entry: CloudBrowseEntry): FileExplorerItem => ({
   owner: entry.owner?.trim() || '—',
   createdBy: entry.created_by?.trim() || '—',
   // ⚡ Added (entry as any) here as well
-  rawModifiedAt: new Date(entry.updated_at || (entry as any).modified_at || 0).getTime(), 
+  rawModifiedAt: new Date(entry.updated_at || (entry as any).modified_at || 0).getTime(),
 });
 
 const envFallbackConnection = (): CloudConnection | null => {
@@ -179,7 +179,7 @@ export const FileSelectionStep: React.FC = () => {
 
   const [validationMode, setValidationMode] = useState('Single to Single (Default)');
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   // ⚡ New Sort State
   const [sortConfig, setSortConfig] = useState<{ key: 'name' | 'size' | 'modifiedAt'; direction: 'asc' | 'desc' } | null>(null);
 
@@ -463,7 +463,7 @@ export const FileSelectionStep: React.FC = () => {
 
   const handleRowClick = (file: FileExplorerItem) => {
     if (isFileTableLocked) return;
-    
+
     if (file.type === 'folder') {
       cancelInFlightBrowse();
       if (!browse.bucket) {
@@ -521,7 +521,7 @@ export const FileSelectionStep: React.FC = () => {
 
   const SortIcon = ({ columnKey }: { columnKey: string }) => {
     if (sortConfig?.key !== columnKey) return <span style={{ color: '#c1c6d7', marginLeft: '4px', fontSize: '10px' }}>↕</span>;
-    return <span style={{ color: '#1677ff', marginLeft: '4px', fontSize: '10px' }}>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>;
+    return <span style={{ color: '#234B5F', marginLeft: '4px', fontSize: '10px' }}>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>;
   };
 
   // ⚡ Integrated Search + Dynamic Sort applied sequentially
@@ -558,7 +558,7 @@ export const FileSelectionStep: React.FC = () => {
     : `gs://${browse.bucket}/${browse.prefix}`;
 
   const browsingForLabel = selectingFor === 'target' ? 'Target' : 'Source';
-  const browsingForColor = selectingFor === 'target' ? '#16a34a' : '#1677ff';
+  const browsingForColor = selectingFor === 'target' ? '#234B5F' : '#234B5F';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '24px' }}>
@@ -577,12 +577,12 @@ export const FileSelectionStep: React.FC = () => {
       </div>
 
       <div style={{ display: 'flex', gap: '24px', backgroundColor: '#ffffff', padding: '16px', borderRadius: '12px', border: '1px solid #d9d9d9' }}>
-        <div onClick={() => handleSelectingFor('source')} style={{ flex: 1, padding: '16px', borderRadius: '8px', border: selectingFor === 'source' ? '2px solid #1677ff' : '1px dashed #727786', cursor: 'pointer' }}>
-          <span style={{ fontSize: '12px', fontWeight: 700, color: '#1677ff' }}>1. Source ({sourceFile ? 1 : 0})</span>
+        <div onClick={() => handleSelectingFor('source')} style={{ flex: 1, padding: '16px', borderRadius: '8px', border: selectingFor === 'source' ? '2px solid #234B5F' : '1px dashed #727786', cursor: 'pointer' }}>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: '#234B5F' }}>1. Source ({sourceFile ? 1 : 0})</span>
           {sourceFile ? (
             <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckOutlined style={{ color: '#1677ff' }} />
+                <CheckOutlined style={{ color: '#234B5F' }} />
                 {/* ⚡ Replaced plain name with truncatable component */}
                 <TruncatableName text={sourceFile.name} />
                 <button type="button" onClick={(e) => { e.stopPropagation(); setSourceFile(null); setSelectingFor('source'); }} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ba1a1a' }}><DeleteOutlined /></button>
@@ -598,15 +598,15 @@ export const FileSelectionStep: React.FC = () => {
             <p style={{ margin: '8px 0 0', fontSize: '14px', color: '#727786', fontStyle: 'italic' }}>Pick a GCS object from any connection…</p>
           )}
         </div>
-        
+
         <ArrowRightOutlined style={{ fontSize: '24px', color: '#727786', alignSelf: 'center' }} />
-        
-        <div onClick={() => handleSelectingFor('target')} style={{ flex: 1, padding: '16px', borderRadius: '8px', border: selectingFor === 'target' ? '2px solid #16a34a' : '1px dashed #727786', cursor: 'pointer' }}>
-          <span style={{ fontSize: '12px', fontWeight: 700, color: '#16a34a' }}>2. Target ({targetFile ? 1 : 0})</span>
+
+        <div onClick={() => handleSelectingFor('target')} style={{ flex: 1, padding: '16px', borderRadius: '8px', border: selectingFor === 'target' ? '2px solid #234B5F' : '1px dashed #727786', cursor: 'pointer' }}>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: '#234B5F' }}>2. Target ({targetFile ? 1 : 0})</span>
           {targetFile ? (
             <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckOutlined style={{ color: '#16a34a' }} />
+                <CheckOutlined style={{ color: '#234B5F' }} />
                 {/* ⚡ Replaced plain name with truncatable component */}
                 <TruncatableName text={targetFile.name} />
                 <button type="button" onClick={(e) => { e.stopPropagation(); setTargetFile(null); setSelectingFor('target'); }} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ba1a1a' }}><DeleteOutlined /></button>
@@ -637,7 +637,7 @@ export const FileSelectionStep: React.FC = () => {
           </div>
           {connectionsError && (
             <p style={{ fontSize: '12px', color: '#ba1a1a', padding: '0 12px' }}>
-              {connectionsError} <Link to="/admin" style={{ color: '#1677ff' }}>Sign in as admin</Link>
+              {connectionsError} <Link to="/admin" style={{ color: '#234B5F' }}>Sign in as admin</Link>
             </p>
           )}
           {connections.map((conn) => {
@@ -656,7 +656,7 @@ export const FileSelectionStep: React.FC = () => {
                   borderRadius: '6px',
                   cursor: 'pointer',
                   backgroundColor: isActive ? '#e6f4ff' : 'transparent',
-                  color: isActive ? '#1677ff' : '#414755',
+                  color: isActive ? '#234B5F' : '#414755',
                   border: isActive ? '1px solid #91caff' : '1px solid transparent',
                 }}
               >
@@ -672,8 +672,8 @@ export const FileSelectionStep: React.FC = () => {
                   </div>
                   {(isSourceConn || isTargetConn) && (
                     <div style={{ display: 'flex', gap: '4px', marginTop: '2px' }}>
-                      {isSourceConn && <span style={{ fontSize: '9px', backgroundColor: '#1677ff', color: '#fff', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>SRC</span>}
-                      {isTargetConn && <span style={{ fontSize: '9px', backgroundColor: '#16a34a', color: '#fff', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>TGT</span>}
+                      {isSourceConn && <span style={{ fontSize: '9px', backgroundColor: '#234B5F', color: '#fff', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>SRC</span>}
+                      {isTargetConn && <span style={{ fontSize: '9px', backgroundColor: '#234B5F', color: '#fff', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>TGT</span>}
                     </div>
                   )}
                 </div>
@@ -747,8 +747,8 @@ export const FileSelectionStep: React.FC = () => {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1b1b1c', fontWeight: 500 }}>
                               {file.type === 'folder' ? <FolderFilled style={{ color: '#faad14', fontSize: '16px' }} /> : <FileTextOutlined style={{ color: '#64748b', fontSize: '16px' }} />}
                               {file.name}
-                              {isSource && <span style={{ fontSize: '10px', backgroundColor: '#1677ff', color: '#fff', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>SOURCE</span>}
-                              {isTarget && <span style={{ fontSize: '10px', backgroundColor: '#16a34a', color: '#fff', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>TARGET</span>}
+                              {isSource && <span style={{ fontSize: '10px', backgroundColor: '#234B5F', color: '#fff', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>SOURCE</span>}
+                              {isTarget && <span style={{ fontSize: '10px', backgroundColor: '#234B5F', color: '#fff', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>TARGET</span>}
                             </div>
                           </td>
                           <td style={{ padding: '12px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#414755' }}>{file.size}</td>
