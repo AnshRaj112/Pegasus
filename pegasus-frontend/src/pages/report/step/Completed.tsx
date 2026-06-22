@@ -1,5 +1,5 @@
 import React from 'react';
-import { TableOutlined, HistoryOutlined } from '@ant-design/icons';
+import { HistoryOutlined, FileOutlined } from '@ant-design/icons';
 import { useAppSelector } from '../../../redux/store';
 // ⚡ FIX: Import the types from your interface file
 import { type ReportItem, type ReportBadge } from '../Report.interface';
@@ -12,7 +12,9 @@ export const Completed: React.FC = () => {
   // ⚡ FIX: Added (r: ReportItem)
   const filtered = completedReports.filter((r: ReportItem) =>
     r.jobTitle.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    r.sourceTitle.toLowerCase().includes(searchQuery.toLowerCase())
+    r.sourceTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    r.sourcePath.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    r.targetPath.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   if (isLoading) return <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>Loading completed reports...</div>;
@@ -27,10 +29,10 @@ export const Completed: React.FC = () => {
 
           <div style={{ flex: 1, minWidth: '200px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              <TableOutlined style={{ color: '#64748b', fontSize: '16px' }} />
+              <FileOutlined style={{ color: '#64748b', fontSize: '16px' }} />
               <span style={{ fontWeight: 600, color: '#1b1b1c', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.02em' }}>{report.sourceTitle}</span>
             </div>
-            <div style={{ color: '#64748b', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{report.sourceSubtitle}</div>
+            <div style={{ color: '#64748b', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{report.sourcePath}</div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', height: '40px', padding: '0 16px' }}>
@@ -39,8 +41,11 @@ export const Completed: React.FC = () => {
           </div>
 
           <div style={{ flex: 1, minWidth: '200px' }}>
-            <div style={{ color: '#1b1b1c', fontSize: '13px', fontWeight: 500, marginBottom: '4px' }}>{report.jobTitle}</div>
-            <div style={{ color: '#64748b', fontSize: '12px' }}>{report.jobSubtitle}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <FileOutlined style={{ color: '#64748b', fontSize: '16px' }} />
+              <span style={{ fontWeight: 600, color: '#1b1b1c', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.02em' }}>{report.jobTitle}</span>
+            </div>
+            <div style={{ color: '#64748b', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{report.targetPath}</div>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: '280px' }}>
@@ -49,7 +54,7 @@ export const Completed: React.FC = () => {
               {report.badges.map((badge: ReportBadge, bIdx: number) => (
                 <React.Fragment key={bIdx}>
                   {bIdx > 0 && <span style={{ margin: '0 6px', opacity: 0.4 }}>|</span>}
-                  {badge.type === 'box' ? <span style={{ border: '1px solid rgba(0, 87, 194, 0.4)', borderRadius: '4px', padding: '0 4px', fontWeight: 700 }}>{badge.content}</span> : <span style={{ display: 'flex', alignItems: 'center' }}>{badge.content}</span>}
+                  {badge.type === 'box' ? <span style={{ border: '1px solid rgba(0, 87, 194, 0.4)', borderRadius: '4px', padding: '0 4px', fontWeight: 700 }}>{report.jobSubtitle ? report.jobSubtitle.split('·').pop()?.trim() : ''}</span> : <span style={{ display: 'flex', alignItems: 'center' }}>{badge.content}</span>}
                 </React.Fragment>
               ))}
             </div>

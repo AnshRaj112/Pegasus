@@ -69,7 +69,7 @@ export const MappingOverviewStep: React.FC = () => {
     ])
       .then(([sourceRes, targetRes]) => { nextCache.source = sourceRes.data; nextCache.target = targetRes.data; commit(); })
       .catch(() => { nextCache.sourceError = true; nextCache.targetError = true; commit(); });
-      
+
     return () => { cancelled = true; };
   }, [form.sourceCloud, form.targetCloud, sourceKey, targetKey, cacheHit, dispatch, form.delimiter, form.hasHeader]);
 
@@ -107,7 +107,7 @@ export const MappingOverviewStep: React.FC = () => {
     const sizeDiff = sourceStats.sizeBytes && targetStats.sizeBytes ? Math.abs(sourceStats.sizeBytes - targetStats.sizeBytes) / sourceStats.sizeBytes : 0;
     const columnMismatch = sourceStats.columnCount != null && targetStats.columnCount != null && sourceStats.columnCount !== targetStats.columnCount;
     const rowDiff = sourceStats.rowCount != null && targetStats.rowCount != null ? Math.abs(sourceStats.rowCount - targetStats.rowCount) / Math.max(sourceStats.rowCount, targetStats.rowCount) : 0;
-    
+
     const rowMismatch = rowDiff > 0.05;
     const mismatches = { size: sizeDiff > 0.2, columns: columnMismatch, rows: rowMismatch };
 
@@ -133,11 +133,11 @@ export const MappingOverviewStep: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
       <style>{`@keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
-      
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px' }}>
-        <FileCard label="Source" color="#1677ff" stats={sourceStats} warn={alert.mismatches} loading={isFetching} />
+        <FileCard label="Source" color="#234B5F" stats={sourceStats} warn={alert.mismatches} loading={isFetching} />
         <ArrowRightOutlined style={{ fontSize: '20px', color: '#727786' }} />
-        <FileCard label="Target" color="#16a34a" icon={<DatabaseOutlined />} stats={targetStats} warn={alert.mismatches} loading={isFetching} />
+        <FileCard label="Target" color="#234B5F" icon={<DatabaseOutlined />} stats={targetStats} warn={alert.mismatches} loading={isFetching} />
       </div>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '16px 20px', borderRadius: '8px', backgroundColor: alert.status === 'success' ? '#f0fdf4' : '#fffbeb', border: `1px solid ${alert.status === 'success' ? '#bbf7d0' : '#fde68a'}` }}>
@@ -157,14 +157,14 @@ const FileCard: React.FC<{ label: string; color: string; stats: any; warn: any; 
       {icon ?? <FileTextOutlined />}
       <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase' }}>{label}</span>
     </div>
-    
+
     <h4 style={{ margin: '0 0 4px 0', fontSize: '18px', minHeight: '24px' }}>
       {loading ? <SkeletonBlock width="60%" height="24px" /> : stats.name}
     </h4>
     <div style={{ fontSize: '12px', color: '#727786', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', minHeight: '16px' }}>
       {loading ? <SkeletonBlock width="90%" height="16px" /> : stats.path}
     </div>
-    
+
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
       <Row icon={<ProfileOutlined />} label="Format" value={stats.format} loading={loading} />
       <Row icon={<HddOutlined />} label="Size" value={formatBytes(stats.sizeBytes)} warn={warn.size} loading={loading} />

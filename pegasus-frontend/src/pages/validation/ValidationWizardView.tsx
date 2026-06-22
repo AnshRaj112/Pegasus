@@ -98,7 +98,7 @@ export const ValidationWizardView: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '24px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
       <header className={styles.wizardHeaderShell}>
         <div className={styles.wizardHeaderLogoGroup}>
-          <div style={{ width: '24px', height: '24px', color: 'var(--primary, #1677ff)' }}>
+          <div style={{ width: '24px', height: '24px', color: 'var(--primary, #234B5F)' }}>
             <svg fill="none" viewBox="0 0 48 48" xmlns="http://w3.org">
               <path d="M44 4H30.6666V17.3334H17.3334V30.6666H4V44H44V4Z" fill="currentColor" />
             </svg>
@@ -157,7 +157,7 @@ export const ValidationWizardView: React.FC = () => {
             disabled={isNextButtonDisabled}
             style={{
               padding: '0 32px', height: '40px', borderRadius: '8px', border: 'none',
-              background: isNextButtonDisabled ? '#e5e2e1' : '#1677ff',
+              background: isNextButtonDisabled ? '#e5e2e1' : '#234B5F',
               color: isNextButtonDisabled ? '#727786' : '#ffffff',
               fontSize: '14px', fontWeight: 700, cursor: isNextButtonDisabled ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s',

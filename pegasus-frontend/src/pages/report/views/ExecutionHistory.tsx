@@ -1,5 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { PlayCircleOutlined, BranchesOutlined, ClockCircleOutlined, CalendarOutlined, FileTextOutlined, RightOutlined } from '@ant-design/icons';
+import { 
+  PlayCircleOutlined, 
+  BranchesOutlined, 
+  ClockCircleOutlined, 
+  CalendarOutlined, 
+  FileTextOutlined, 
+  RightOutlined,
+  FileOutlined, 
+} from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppDispatch } from '../../../redux/store';
 import { ReportService } from '../Report.service';
@@ -21,14 +29,26 @@ const formatDuration = (sec: number | null | undefined) => {
   return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
 };
 
+const MetricItem: React.FC<{ label: string; value: string; color?: string }> = ({ label, value, color = '#1b1b1c' }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', minWidth: '120px' }}>
+    <span style={{ fontSize: '10px', fontWeight: 700, color: '#727786', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>{label}</span>
+    <span style={{ fontSize: '20px', fontWeight: 600, color }}>{value}</span>
+  </div>
+);
+
 export const ExecutionHistory: React.FC = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const { mappingId } = useParams<{ mappingId: string }>();
+  
   const [runs, setRuns] = useState<ValidationHistorySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pairLabel, setPairLabel] = useState('');
+  
+  // New states to hold source and target file info
+  const [sourceFileInfo, setSourceFileInfo] = useState<{ name: string; path: string } | null>(null);
+  const [targetFileInfo, setTargetFileInfo] = useState<{ name: string; path: string } | null>(null);
 
   useEffect(() => {
     if (!mappingId) return;
@@ -40,9 +60,17 @@ export const ExecutionHistory: React.FC = () => {
         const { sourcePath, targetPath } = await ReportService.resolvePairByMappingId(mappingId);
         const items = await ReportService.fetchRunsForPair(sourcePath, targetPath);
         if (cancelled) return;
+        
         setRuns(items);
-        const short = sourcePath.replace(/\\/g, '/').split('/').pop() ?? sourcePath;
-        setPairLabel(short);
+        
+        // Extract names and paths
+        const shortSource = sourcePath.replace(/\\/g, '/').split('/').pop() ?? sourcePath;
+        const shortTarget = targetPath.replace(/\\/g, '/').split('/').pop() ?? targetPath;
+        
+        setPairLabel(shortSource);
+        setSourceFileInfo({ name: shortSource, path: sourcePath });
+        setTargetFileInfo({ name: shortTarget, path: targetPath });
+
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load history');
       } finally {
@@ -52,7 +80,7 @@ export const ExecutionHistory: React.FC = () => {
     return () => { cancelled = true; };
   }, [mappingId]);
 
-  const MAPPING_NAME = pairLabel || mappingId || 'Report';
+  const MAPPING_NAME = pairLabel;
 
   if (loading) {
     return <div style={{ padding: '32px', color: '#64748b' }}>Loading execution history…</div>;
@@ -64,6 +92,7 @@ export const ExecutionHistory: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
+      {/* Header & Controls */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#64748b', fontSize: '12px' }}>
@@ -97,6 +126,36 @@ export const ExecutionHistory: React.FC = () => {
         </div>
       </div>
 
+      {/* File Information Section */}
+      {sourceFileInfo && targetFileInfo && (
+        <div style={{ backgroundColor: '#fff', border: '1px solid #e5e2e1', borderRadius: '8px', padding: '16px 24px', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+          {/* Source File */}
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <FileOutlined style={{ color: '#64748b', fontSize: '16px' }} />
+              <span style={{ textTransform: "capitalize", fontWeight: 600, color: '#1b1b1c', fontSize: '13px' }}>{sourceFileInfo.name}</span>
+              <span style={{ fontSize: '10px', fontWeight: 700, color: '#727786', textTransform: 'uppercase', letterSpacing: '0.05em', marginLeft: '4px' }}>(Source)</span>
+            </div>
+            <div style={{ color: '#64748b', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{sourceFileInfo.path}</div>
+          </div>
+
+          {/* <div style={{ display: 'flex', alignItems: 'center', height: '40px', padding: '0 8px' }}>
+            <RightOutlined style={{ color: '#94a3b8' }} />
+          </div> */}
+
+          {/* Target File */}
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <FileOutlined style={{ color: '#64748b', fontSize: '16px' }} />
+              <span style={{ textTransform: "capitalize", fontWeight: 600, color: '#1b1b1c', fontSize: '13px' }}>{targetFileInfo.name}</span>
+              <span style={{ fontSize: '10px', fontWeight: 700, color: '#727786', textTransform: 'uppercase', letterSpacing: '0.05em', marginLeft: '4px' }}>(Target)</span>
+            </div>
+            <div style={{ color: '#64748b', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{targetFileInfo.path}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Runs List */}
       {runs.length === 0 ? (
         <div style={{ padding: '32px', color: '#64748b', textAlign: 'center' }}>No validation runs for this file pair yet.</div>
       ) : (
@@ -108,7 +167,7 @@ export const ExecutionHistory: React.FC = () => {
               <div key={run.run_id} style={{ backgroundColor: '#fff', border: '1px solid #e5e2e1', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', opacity: idx > 0 ? 0.85 : 1 }}>
                 <div style={{ backgroundColor: '#fcf9f8', borderBottom: '1px solid #e5e2e1', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-                    <span style={{ fontSize: '18px', fontWeight: 600, color: '#1b1b1c', fontFamily: 'var(--font-mono)' }}>{run.run_id}</span>
+                    <span style={{ textTransform: 'uppercase', fontSize: '18px', fontWeight: 600, color: '#1b1b1c', fontFamily: 'var(--font-mono)' }}>{MAPPING_NAME}</span>
                     <span style={{ fontWeight: 700, color: run.is_match ? '#16a34a' : '#ba1a1a' }}>{run.is_match ? 'P' : 'F'}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px', color: '#64748b', fontSize: '12px' }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><ClockCircleOutlined /> {formatDuration(run.durations?.validation_seconds ?? run.durations?.total_seconds)}</span>
@@ -134,7 +193,7 @@ export const ExecutionHistory: React.FC = () => {
                   <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
                   <MetricItem label="Missing Rows" value={String(mc.missing_in_target)} />
                   <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
-                  <MetricItem label="Total Mismatched" value={String(totalMis)} />
+                  <MetricItem label="Total Row Mismatched" value={String(totalMis)} />
                   <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
                   <MetricItem label="Mapped Cols" value={String(run.mapping_count)} />
                 </div>
@@ -146,10 +205,3 @@ export const ExecutionHistory: React.FC = () => {
     </div>
   );
 };
-
-const MetricItem: React.FC<{ label: string; value: string; color?: string }> = ({ label, value, color = '#1b1b1c' }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', minWidth: '120px' }}>
-    <span style={{ fontSize: '10px', fontWeight: 700, color: '#727786', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>{label}</span>
-    <span style={{ fontSize: '20px', fontWeight: 600, color }}>{value}</span>
-  </div>
-);

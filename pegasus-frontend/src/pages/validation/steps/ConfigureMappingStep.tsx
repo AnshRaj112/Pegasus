@@ -107,11 +107,11 @@ const TargetMappingField: React.FC<{
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-start' }}>
       {targets.map((tc, idx) => (
         <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <span style={{ 
-            backgroundColor: '#f6f3f2', border: '1px solid #c1c6d7', color: '#1b1b1c', 
-            padding: '4px 8px', borderRadius: '4px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' 
+          <span style={{
+            backgroundColor: '#f6f3f2', border: '1px solid #c1c6d7', color: '#1b1b1c',
+            padding: '4px 8px', borderRadius: '4px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px'
           }}>
-            {tc.name} 
+            {tc.name}
             <CloseOutlined onClick={() => onRemove(idx)} style={{ fontSize: '10px', cursor: 'pointer', color: '#727786' }} />
           </span>
           <span style={{ backgroundColor: '#f0eded', border: '1px solid #c1c6d7', padding: '2px 4px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, color: '#727786', alignSelf: 'flex-start' }}>
@@ -122,23 +122,23 @@ const TargetMappingField: React.FC<{
 
       <div style={{ position: 'relative', marginTop: '6px' }} ref={dropdownRef}>
         {availableColumns.length > 0 && (
-          <button 
+          <button
             onClick={() => setOpen(!open)}
             style={{ background: 'none', border: 'none', color: '#0057c2', fontSize: '12px', fontWeight: 500, cursor: 'pointer', padding: 0 }}
           >
             + Add target
           </button>
         )}
-        
+
         {open && availableColumns.length > 0 && (
-          <div style={{ 
+          <div style={{
             position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 50,
-            backgroundColor: '#fff', border: '1px solid #c1c6d7', borderRadius: '4px', 
+            backgroundColor: '#fff', border: '1px solid #c1c6d7', borderRadius: '4px',
             boxShadow: '0 4px 12px rgba(0,0,0,0.1)', maxHeight: '200px', overflowY: 'auto', minWidth: '160px'
           }}>
             {availableColumns.map(col => (
-              <div 
-                key={col} 
+              <div
+                key={col}
                 onClick={() => { onAdd(col); setOpen(false); }}
                 style={{ padding: '8px 12px', fontSize: '12px', cursor: 'pointer', borderBottom: '1px solid #f0eded' }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f6f3f2')}
@@ -159,10 +159,10 @@ export const ConfigureMappingStep: React.FC = () => {
   const validationForm = useAppSelector((s) => s.validation.validationForm);
 
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   const [showUnmappedOnly, setShowUnmappedOnly] = useState(false);
   const [showConfiguredOnly, setShowConfiguredOnly] = useState(false);
-  
+
   const [actionFilters, setActionFilters] = useState({
     pk: false,
     ignored: false,
@@ -172,7 +172,7 @@ export const ConfigureMappingStep: React.FC = () => {
 
   const [page, setPage] = useState(1);
   const [columnsMatrix, setColumnsMatrix] = useState<ComplexMappingRow[]>([]);
-  const [targetColumnsList, setTargetColumnsList] = useState<string[]>([]); 
+  const [targetColumnsList, setTargetColumnsList] = useState<string[]>([]);
   const [targetSamplesRecord, setTargetSamplesRecord] = useState<Record<string, string>>({});
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [complexColumns, setComplexColumns] = useState<string[]>([]);
@@ -195,7 +195,7 @@ export const ConfigureMappingStep: React.FC = () => {
   ) => {
     const activePks = matrix.filter(m => m.isPk).map(m => m.sourceCol);
     const activePkString = activePks.length > 0 ? activePks.join(',') : validationForm.uidColumn;
-    
+
     dispatch(validationActions.setValidationForm({
       uidColumn: activePkString,
       columnMappings: matrixToColumnMappings(matrix, complexColumns, structuredOrderSensitive),
@@ -225,13 +225,13 @@ export const ConfigureMappingStep: React.FC = () => {
         const savedUids = validationForm.uidColumn?.split(',') || [];
         const defaultUid = preview.source_columns.includes('column_1') ? 'column_1' : preview.source_columns[0] ?? 'id';
         const isUidMatch = (col: string) => savedUids.includes(col) || (savedUids.length === 0 && col === defaultUid);
-        
+
         const autoMappings = preview.auto_mappings ?? [];
         const complex = preview.complex_columns ?? [];
-        
+
         const tSamples: Record<string, string> = {};
         Object.entries(preview.target_samples ?? {}).forEach(([k, v]) => {
-           tSamples[k] = (v as string[])[0] ?? '';
+          tSamples[k] = (v as string[])[0] ?? '';
         });
 
         const mappings: ComplexMappingRow[] = preview.source_columns.map((col) => {
@@ -239,7 +239,7 @@ export const ConfigureMappingStep: React.FC = () => {
           const isUid = isUidMatch(col);
           const uidTarget = isUid && preview.target_columns.includes(col) ? col : null;
           const targets = auto ? [auto.target_column] : uidTarget ? [uidTarget] : [];
-          
+
           const sample = preview.source_samples?.[col]?.[0] ?? '';
           const inferredType = inferType(sample, complex.includes(col));
 
@@ -267,7 +267,7 @@ export const ConfigureMappingStep: React.FC = () => {
         setComplexColumns(complex);
         setColumnsMatrix(mappings);
         setPage(1);
-        
+
         const initialPks = mappings.filter(m => m.isPk).map(m => m.sourceCol).join(',');
         dispatch(validationActions.setValidationForm({
           uidColumn: initialPks || defaultUid,
@@ -337,12 +337,12 @@ export const ConfigureMappingStep: React.FC = () => {
 
   const filteredColumns = useMemo(() => {
     let rows = columnsMatrix;
-    
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       rows = rows.filter((col) => col.sourceCol.toLowerCase().includes(q));
     }
-    
+
     if (showUnmappedOnly) {
       rows = rows.filter((col) => col.targetCols.length === 0 && !col.isIgnored);
     }
@@ -365,7 +365,7 @@ export const ConfigureMappingStep: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1440px', margin: '0 auto', width: '100%', height: '100%', position: 'relative' }}>
-      
+
       <style>{`
         @keyframes skeleton-pulse {
           0%, 100% { opacity: 1; }
@@ -373,7 +373,7 @@ export const ConfigureMappingStep: React.FC = () => {
         }
       `}</style>
 
-      <div style={{ display: 'flex', gap: '16px', alignItems: 'center', fontSize: '13px', color: '#64748b' }}>
+      <div style={{ display: 'flex', gap: '16px', alignItems: 'center', fontSize: '13px', color: '#234B5F' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           Delimiter
           <input
@@ -425,7 +425,7 @@ export const ConfigureMappingStep: React.FC = () => {
             disabled={loadingPreview}
           />
         </div>
-        
+
         <button
           type="button"
           onClick={() => { setShowUnmappedOnly(!showUnmappedOnly); setShowConfiguredOnly(false); setPage(1); }}
@@ -452,7 +452,7 @@ export const ConfigureMappingStep: React.FC = () => {
               <tr>
                 <th style={{ padding: '8px 16px', borderRight: '1px solid #c1c6d7', width: '200px' }}>
                   <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-                    
+
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                       <div onClick={() => toggleActionFilter('pk')} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: actionFilters.pk ? '#4f46e5' : '#727786' }} title="Filter by Primary Key">
                         <KeyOutlined style={{ fontSize: '14px' }} />
@@ -534,11 +534,11 @@ export const ConfigureMappingStep: React.FC = () => {
                           <button onClick={() => toggleProperty(row.id, 'isIgnored')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isIgnored ? '#414755' : 'transparent', color: row.isIgnored ? '#fff' : '#727786', cursor: 'pointer' }} title="Ignore"><StopOutlined /></button>
                           <button onClick={() => toggleProperty(row.id, 'isSensitive')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isSensitive ? 'rgba(186, 26, 26, 0.1)' : 'transparent', color: row.isSensitive ? '#ba1a1a' : '#727786', cursor: 'pointer' }} title="Sensitive">{row.isSensitive ? <EyeInvisibleOutlined /> : <EyeOutlined />}</button>
                           <button onClick={() => toggleProperty(row.id, 'isExpanded')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isExpanded ? '#0057c2' : 'transparent', color: row.isExpanded ? '#fff' : '#727786', cursor: 'pointer' }} title="Expression"><CodeOutlined /></button>
-                          
+
                           {row.sourceType === 'Structured' && (
-                            <button 
-                              onClick={() => toggleProperty(row.id, 'isOrderSensitive')} 
-                              style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isOrderSensitive ? 'rgba(0, 87, 194, 0.1)' : 'transparent', color: row.isOrderSensitive ? '#0057c2' : '#727786', cursor: 'pointer' }} 
+                            <button
+                              onClick={() => toggleProperty(row.id, 'isOrderSensitive')}
+                              style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isOrderSensitive ? 'rgba(0, 87, 194, 0.1)' : 'transparent', color: row.isOrderSensitive ? '#0057c2' : '#727786', cursor: 'pointer' }}
                               title="Enforce strict array/object order"
                             >
                               <SortAscendingOutlined />
@@ -558,11 +558,11 @@ export const ConfigureMappingStep: React.FC = () => {
                       <td style={{ padding: '12px 8px', textAlign: 'center', color: '#c1c6d7', verticalAlign: 'top' }}><ArrowRightOutlined /></td>
                       <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
                         {row.isIgnored ? <span style={{ fontStyle: 'italic', color: '#727786' }}>Dropped</span> : (
-                          <TargetMappingField 
-                            targets={row.targetCols} 
-                            availableColumns={globalAvailableTargets} 
-                            onAdd={(col) => addTargetCol(row.id, col)} 
-                            onRemove={(idx) => removeTargetCol(row.id, idx)} 
+                          <TargetMappingField
+                            targets={row.targetCols}
+                            availableColumns={globalAvailableTargets}
+                            onAdd={(col) => addTargetCol(row.id, col)}
+                            onRemove={(idx) => removeTargetCol(row.id, idx)}
                           />
                         )}
                       </td>
@@ -578,7 +578,7 @@ export const ConfigureMappingStep: React.FC = () => {
                         )}
                       </td>
                     </tr>
-                    
+
                     {row.isExpanded && !row.isIgnored && (
                       <tr style={{ backgroundColor: '#fcf9f8', borderBottom: '1px solid #c1c6d7' }}>
                         <td colSpan={6} style={{ padding: '16px 24px 24px 176px' }}>

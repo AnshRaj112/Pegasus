@@ -197,7 +197,7 @@ export const ConfigureStoreSubView: React.FC = () => {
           type="button"
           onClick={handleOpenCreate}
           style={{
-            backgroundColor: '#1677ff',
+            backgroundColor: '#234B5F',
             color: '#ffffff',
             padding: '8px 24px',
             borderRadius: '8px',

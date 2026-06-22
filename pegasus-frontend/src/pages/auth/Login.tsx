@@ -40,25 +40,22 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div 
-      className={`${styles.authWrapper} ${styles.glassBackground}`}
-      style={{ minHeight: '100vh', width: '100%', boxSizing: 'border-box', overflowX: 'hidden', display: 'flex', flexDirection: 'column' }}
-    >
-      <header style={{ width: '100%', height: '64px', flexShrink: 0, boxSizing: 'border-box', display: 'flex', borderBottom: '1px solid var(--outline-variant)', backgroundColor: 'var(--surface)', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' }}>
-        <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--primary)' }}>Pegasus</div>
-        <QuestionCircleOutlined style={{ fontSize: '20px', color: 'var(--on-surface-variant)', cursor: 'pointer' }} />
+    <div className={`${styles.authWrapper} ${styles.glassBackground}`}>
+      <header className={styles.authHeader}>
+        <div className={styles.authLogo}>Pegasus</div>
+        <QuestionCircleOutlined className={styles.authHelpIcon} />
       </header>
 
-      <main className={styles.authMain} style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+      <main className={styles.authMain}>
         <div className={styles.authCard}>
-          <div style={{ marginBottom: '32px', textAlign: 'center' }}>
-            <h1 style={{ fontSize: '30px', fontWeight: 600, color: 'var(--on-surface)', margin: '0 0 4px 0' }}>Welcome Back</h1>
-            <p style={{ fontSize: '14px', color: 'var(--on-surface-variant)', margin: 0 }}>Enter your credentials to access your data audits</p>
+          <div className={styles.authCardHeader}>
+            <h1 className={styles.authCardTitle}>Welcome Back</h1>
+            <p className={styles.authCardSubtitle}>Enter your credentials to access your data audits</p>
           </div>
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <form onSubmit={handleSubmit} className={styles.authForm}>
             <div>
-              <label style={{ fontSize: '14px', fontWeight: 500, color: 'var(--on-surface)' }}>Email Address</label>
+              <label className={styles.authFormLabel}>Email Address</label>
               <div className={styles.inputWrapper}>
                 <MailOutlined className={styles.inputIcon} />
                 <input 
@@ -75,8 +72,8 @@ export const Login: React.FC = () => {
 
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label style={{ fontSize: '14px', fontWeight: 500, color: 'var(--on-surface)' }}>Password</label>
-                <a href="#" style={{ fontSize: '12px', color: 'var(--primary)', textDecoration: 'none' }}>Forgot password?</a>
+                <label className={styles.authFormLabel}>Password</label>
+                <a href="#" className={styles.authFormForgotLink}>Forgot password?</a>
               </div>
               <div className={styles.inputWrapper}>
                 <LockOutlined className={styles.inputIcon} />
@@ -96,7 +93,7 @@ export const Login: React.FC = () => {
               </div>
             </div>
 
-            {error && <p style={{ margin: 0, fontSize: '13px', color: '#ba1a1a' }}>{error}</p>}
+            {error && <p className={styles.authFormError}>{error}</p>}
 
             <button type="submit" className={styles.submitBtn} disabled={isSubmitting}>
               {isSubmitting ? 'Signing in...' : <>Sign In <LoginOutlined style={{ fontSize: '18px' }} /></>}

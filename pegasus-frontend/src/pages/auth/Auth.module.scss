@@ -1,5 +1,8 @@
 .authWrapper {
   min-height: 100vh;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   background-color: var(--surface-bright, #fcf9f8);
@@ -9,8 +12,33 @@
 
 .glassBackground {
   background-image: 
-    radial-gradient(at 0% 0%, rgba(0, 87, 194, 0.03) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(39, 82, 202, 0.03) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(224, 107, 103, 0.04) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(149, 38, 34, 0.04) 0px, transparent 50%);
+}
+
+.authHeader {
+  width: 100%;
+  height: 64px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  border-bottom: 1px solid var(--outline-variant, #c1c6d7);
+  background-color: var(--surface, #fcf9f8);
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+}
+
+.authLogo {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-onyx-red-deep);
+}
+
+.authHelpIcon {
+  font-size: 20px;
+  color: var(--on-surface-variant, #414755);
+  cursor: pointer;
 }
 
 .authMain {
@@ -19,6 +47,7 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
+  flex-direction: column;
 }
 
 .authCard {
@@ -29,6 +58,52 @@
   border-radius: 12px;
   padding: 32px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.authCardHeader {
+  margin-bottom: 32px;
+  text-align: center;
+}
+
+.authCardTitle {
+  font-size: 30px;
+  font-weight: 600;
+  color: var(--on-surface, #1b1b1c);
+  margin: 0 0 4px 0;
+}
+
+.authCardSubtitle {
+  font-size: 14px;
+  color: var(--on-surface-variant, #414755);
+  margin: 0;
+}
+
+.authForm {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.authFormLabel {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--on-surface, #1b1b1c);
+}
+
+.authFormForgotLink {
+  font-size: 12px;
+  color: var(--color-onyx-red-deep);
+  text-decoration: none;
+  &:hover {
+    color: var(--color-onyx-red);
+    text-decoration: underline;
+  }
+}
+
+.authFormError {
+  margin: 0;
+  font-size: 13px;
+  color: var(--status-fail, #ba1a1a);
 }
 
 .signupCard {
@@ -71,14 +146,14 @@
   transition: all 0.2s;
 
   &:focus {
-    border-color: var(--primary, #0057c2);
-    box-shadow: 0 0 0 2px rgba(0, 87, 194, 0.1);
+    border-color: var(--color-onyx-red, #E06B67);
+    box-shadow: 0 0 0 2px var(--color-onyx-red-light);
   }
 }
 
 .submitBtn {
   width: 100%;
-  background-color: var(--primary, #0057c2);
+  background-color: var(--color-onyx-red-deep, #952622);
   color: var(--on-primary, #ffffff);
   padding: 12px;
   border-radius: 8px;
@@ -93,7 +168,7 @@
   transition: all 0.2s;
 
   &:hover {
-    background-color: var(--secondary, #2752ca);
+    background-color: var(--color-onyx-red, #E06B67);
   }
   &:active {
     transform: scale(0.98);

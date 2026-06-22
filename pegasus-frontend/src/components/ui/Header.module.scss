@@ -1,0 +1,102 @@
+/* Header.module.scss — Onyx Red branding per color palette (docs/color/29.svg) */
+
+.header {
+  background: #ffffff;
+  border-bottom: 1px solid var(--surface-variant);
+  position: sticky;
+  top: 0;
+  z-index: 999;
+  width: 100%;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 0 var(--gutter);
+  max-width: var(--container-max);
+  margin: 0 auto;
+  height: 64px;
+  box-sizing: border-box;
+}
+
+.brandGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--xl);
+}
+
+/* Branding title uses Onyx Red (Primary Color 2) */
+.brandTitle {
+  font-family: var(--font-h2);
+  font-size: var(--h2);
+  font-weight: 900;
+  color: var(--color-onyx-red-deep);
+  letter-spacing: -0.5px;
+  text-decoration: none;
+}
+
+.navLinks {
+  display: flex;
+  gap: var(--lg);
+  align-items: center;
+}
+
+/* Default (inactive) nav links */
+.navLink {
+  color: var(--on-surface-variant);
+  font-family: var(--font-label-md);
+  font-size: var(--label-md);
+  text-decoration: none;
+  font-weight: 500;
+  padding-bottom: 4px;
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
+
+  &:hover {
+    color: var(--color-onyx-red);
+  }
+}
+
+/* Active nav link uses Onyx Red (Primary Color 2) */
+.navLinkActive {
+  composes: navLink;
+  color: var(--color-onyx-red-deep);
+  border-bottom: 2px solid var(--color-onyx-red-deep);
+}
+
+.quickActions {
+  display: flex;
+  align-items: center;
+  gap: var(--md);
+}
+
+.iconButton {
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  padding: var(--xs);
+  border-radius: 50%;
+  transition: color 0.2s, background-color 0.2s;
+
+  &:hover {
+    color: var(--color-midnight-green);
+    background-color: var(--color-midnight-green-light);
+  }
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--surface-variant);
+  object-fit: cover;
+  cursor: pointer;
+  transition: border-color 0.2s;
+
+  &:hover {
+    border-color: var(--color-midnight-green);
+  }
+}
