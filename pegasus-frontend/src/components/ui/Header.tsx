@@ -6,8 +6,12 @@ export const Header: React.FC = () => {
   const location = useLocation();
   const currentPath = location.pathname;
 
-  const getLinkClass = (path: string): string =>
-    currentPath === path ? styles.navLinkActive : styles.navLink;
+  const getLinkClass = (path: string): string => {
+    const active = path === '/validations'
+      ? currentPath === '/validations' || currentPath.startsWith('/validations/')
+      : currentPath === path;
+    return active ? styles.navLinkActive : styles.navLink;
+  };
 
   return (
     <nav className={styles.header}>

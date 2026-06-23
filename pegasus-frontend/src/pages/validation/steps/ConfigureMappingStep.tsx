@@ -81,6 +81,43 @@ const matrixToColumnMappings = (
       return base;
     });
 
+const matrixFromColumnMappings = (
+  mappings: ColumnMapping[],
+  uidColumn: string,
+): ComplexMappingRow[] => {
+  const uidSet = new Set(uidColumn.split(',').map((s) => s.trim()).filter(Boolean));
+  const sourceColumns = new Set<string>();
+  mappings.forEach((mapping) => {
+    sourceColumns.add(mapping.source_column);
+    (mapping.source_columns ?? []).forEach((col) => sourceColumns.add(col));
+  });
+
+  return Array.from(sourceColumns).map((col) => {
+    const mapping = mappings.find(
+      (m) => m.source_column === col || (m.source_columns ?? []).includes(col),
+    );
+    const targets = mapping
+      ? [mapping.target_column, ...(mapping.target_columns ?? [])].filter(Boolean)
+      : [];
+    const isStructured = mapping?.compare_mode === 'structured';
+
+    return {
+      id: col,
+      sourceCol: col,
+      sourceType: isStructured ? 'Structured' : 'String',
+      targetCols: targets.map((name) => ({ name, type: 'String', sample: '' })),
+      isPk: uidSet.has(col),
+      isIgnored: !mapping,
+      isSensitive: Boolean(mapping?.is_sensitive),
+      isExpanded: false,
+      isOrderSensitive: mapping?.structured_order_sensitive ?? false,
+      sourceExpr: '',
+      targetExpr: '',
+      previewValue: '',
+    };
+  });
+};
+
 const SkeletonBlock: React.FC<{ width?: string; height?: string; borderRadius?: string }> = ({ width = '100%', height = '16px', borderRadius = '4px' }) => (
   <div style={{ width, height, backgroundColor: '#e2e8f0', borderRadius, animation: 'skeleton-pulse 1.5s ease-in-out infinite' }} />
 );
@@ -176,6 +213,7 @@ export const ConfigureMappingStep: React.FC = () => {
   const [targetSamplesRecord, setTargetSamplesRecord] = useState<Record<string, string>>({});
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [complexColumns, setComplexColumns] = useState<string[]>([]);
+  const hydratedMappingsRef = useRef(false);
 
   const [itemsPerPage, setItemsPerPage] = useState(PAGE_SIZE);
 
@@ -203,7 +241,36 @@ export const ConfigureMappingStep: React.FC = () => {
   };
 
   useEffect(() => {
+    hydratedMappingsRef.current = false;
+  }, [validationForm.sourceCloud, validationForm.targetCloud]);
+
+  useEffect(() => {
     if (!validationForm.sourceCloud || !validationForm.targetCloud) return;
+    if (hydratedMappingsRef.current) return;
+
+    if (validationForm.columnMappings.length > 0) {
+      const restored = matrixFromColumnMappings(
+        validationForm.columnMappings,
+        validationForm.uidColumn,
+      );
+      const targetNames = new Set<string>();
+      validationForm.columnMappings.forEach((mapping) => {
+        targetNames.add(mapping.target_column);
+        (mapping.target_columns ?? []).forEach((col) => targetNames.add(col));
+      });
+      setTargetColumnsList(Array.from(targetNames));
+      setComplexColumns(
+        validationForm.columnMappings
+          .filter((m) => m.compare_mode === 'structured')
+          .map((m) => m.source_column),
+      );
+      setColumnsMatrix(restored);
+      setPreviewError(null);
+      setPage(1);
+      hydratedMappingsRef.current = true;
+      return;
+    }
+
     let cancelled = false;
 
     Api.previewValidationColumns({
@@ -275,6 +342,7 @@ export const ConfigureMappingStep: React.FC = () => {
           hasHeader: preview.has_header ?? validationForm.hasHeader,
           columnMappings: matrixToColumnMappings(mappings, complex, validationForm.structuredOrderSensitive),
         }));
+        hydratedMappingsRef.current = true;
       })
       .catch((err: { response?: { data?: { detail?: unknown } } }) => {
         if (cancelled) return;
@@ -289,7 +357,7 @@ export const ConfigureMappingStep: React.FC = () => {
       });
 
     return () => { cancelled = true; };
-  }, [validationForm.sourceCloud, validationForm.targetCloud, validationForm.uidColumn, validationForm.delimiter, validationForm.hasHeader, dispatch]);
+  }, [validationForm.sourceCloud, validationForm.targetCloud, validationForm.uidColumn, validationForm.delimiter, validationForm.hasHeader, validationForm.columnMappings.length, dispatch]);
 
   const toggleProperty = (id: string, prop: keyof ComplexMappingRow) => {
     const next = columnsMatrix.map(row => row.id === id ? { ...row, [prop]: !row[prop] } : row);

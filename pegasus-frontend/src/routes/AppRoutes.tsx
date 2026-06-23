@@ -21,7 +21,7 @@ export const AppRoutes: React.FC = () => {
             <ValidationHistoryNavigation />
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/validations" element={<ValidationWizardView />} />
+              <Route path="/validations/*" element={<ValidationWizardView />} />
               <Route path="/reports" element={<Report />} />
               <Route path="/reports/:mappingId/history" element={<ExecutionHistory />} />
               <Route path="/reports/:mappingId/history/:runId/snippet" element={<SnippetComparison />} />

@@ -468,6 +468,6 @@ export const Api = {
     httpClient.get(E.validateHistoryMismatches(runId), { params }),
 
   /** POST /validate/history/draft — save mapping without running */
-  saveValidationDraft: (body: SaveDraftRequest): Promise<AxiosResponse<unknown>> =>
+  saveValidationDraft: (body: SaveDraftRequest): Promise<AxiosResponse<ValidationHistoryDetail>> =>
     httpClient.post(E.validateHistoryDraft, body),
 };

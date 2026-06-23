@@ -418,6 +418,11 @@ export const FileSelectionStep: React.FC = () => {
 
     const nextSourceCloud = makeCloudRef(sourceFile);
     const nextTargetCloud = makeCloudRef(targetFile);
+
+    // Wait until local state reflects a Redux-restored session before syncing outward.
+    if (!sourceFile && validationForm.sourceCloud) return;
+    if (!targetFile && validationForm.targetCloud) return;
+
     const nextSourceFileName = sourceFile?.name ?? null;
     const nextTargetFileName = targetFile?.name ?? null;
     const nextSourceFileSize = sourceFile?.sizeBytes ?? null;

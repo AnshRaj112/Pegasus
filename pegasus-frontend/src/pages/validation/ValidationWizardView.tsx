@@ -1,10 +1,21 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowRightOutlined } from '@ant-design/icons';
 import { notification } from 'antd';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
 import { validationActions } from './Validation.reducer';
 import { reportActions } from '../report/Report.reducer';
-import { saveValidationWizardSession } from './validationWizardStorage';
+import { loadValidationRunForm } from './validationRerun';
+import {
+  VALIDATIONS_BASE,
+  parseValidationRoute,
+  validationMappingPath,
+  validationOverviewPath,
+} from './validationRoutes';
+import {
+  loadValidationTabSession,
+  saveValidationTabSession,
+} from './validationTabStorage';
 
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
@@ -18,46 +29,141 @@ const cloudObjectKey = (cloud: any): string =>
 
 export const ValidationWizardView: React.FC = () => {
   const dispatch = useAppDispatch();
-  const currentStep = useAppSelector((state) => state.validation.currentStep);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { step: currentStep, runId } = parseValidationRoute(location.pathname);
+
   const isStep1Valid = useAppSelector((state) => state.validation.isStep1Valid);
   const { isFetching } = useAppSelector((state) => state.validation.validationDataState);
   const validationForm = useAppSelector((state) => state.validation.validationForm);
   const overviewCache = useAppSelector((state) => state.validation.overviewProfileCache);
-  const [savingDraft, setSavingDraft] = React.useState(false);
+  const wizardRunId = useAppSelector((state) => state.validation.wizardRunId);
+
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
+  const [loadingRun, setLoadingRun] = useState(false);
+  const loadedRunIdRef = useRef<string | null>(null);
+  const sessionSaveReadyRef = useRef(false);
+
+  // Align loaded-run tracking with store bootstrap (see redux/store.ts).
+  useLayoutEffect(() => {
+    const saved = loadValidationTabSession();
+    if (saved?.wizardRunId) {
+      loadedRunIdRef.current = saved.wizardRunId;
+    }
+    sessionSaveReadyRef.current = true;
+  }, []);
 
   useEffect(() => {
-    saveValidationWizardSession({
-      currentStep,
-      isStep1Valid,
+    if (!sessionSaveReadyRef.current) return;
+    saveValidationTabSession({
       validationForm,
+      isStep1Valid,
+      wizardRunId,
       overviewProfileCache: overviewCache,
     });
-  }, [currentStep, isStep1Valid, validationForm, overviewCache]);
+  }, [validationForm, isStep1Valid, wizardRunId, overviewCache]);
+
+  useEffect(() => {
+    dispatch(validationActions.setWizardStep(currentStep));
+  }, [currentStep, dispatch]);
+
+  useEffect(() => {
+    if (!runId) {
+      if (!validationForm.sourceCloud && !validationForm.targetCloud) {
+        loadedRunIdRef.current = null;
+        dispatch(validationActions.setWizardRunId(null));
+      }
+      return;
+    }
+
+    if (loadedRunIdRef.current === runId) return;
+
+    let cancelled = false;
+    setLoadingRun(true);
+
+    loadValidationRunForm(runId)
+      .then((formPatch) => {
+        if (cancelled) return;
+        loadedRunIdRef.current = runId;
+        dispatch(validationActions.setValidationForm(formPatch));
+        dispatch(validationActions.setStep1Valid(Boolean(formPatch.sourceCloud && formPatch.targetCloud)));
+        dispatch(validationActions.setWizardRunId(runId));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        notification.error({
+          message: 'Could not open validation run',
+          description: error instanceof Error ? error.message : 'Unknown run or load failed',
+        });
+        navigate(VALIDATIONS_BASE, { replace: true });
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingRun(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, dispatch, navigate]);
 
   const isStep2Loading = currentStep === 2 && (
-    overviewCache?.sourceKey !== cloudObjectKey(validationForm.sourceCloud) ||
-    overviewCache?.targetKey !== cloudObjectKey(validationForm.targetCloud)
+    loadingRun
+    || overviewCache?.sourceKey !== cloudObjectKey(validationForm.sourceCloud)
+    || overviewCache?.targetKey !== cloudObjectKey(validationForm.targetCloud)
   );
 
   const isStep3Loading = currentStep === 3 && (
-    !validationForm.columnMappings || validationForm.columnMappings.length === 0
+    loadingRun
+    || !validationForm.columnMappings
+    || validationForm.columnMappings.length === 0
   );
 
-  const isActuallyLoading = isFetching || isStep2Loading || isStep3Loading;
+  const isActuallyLoading = isFetching || advancing || isStep2Loading || isStep3Loading;
   const isNextButtonDisabled = isActuallyLoading || (currentStep === 1 && !isStep1Valid);
 
-  const handleProceed = () => {
-    if (currentStep === 1 && !isStep1Valid) return;
-    if (currentStep < 3) {
-      dispatch(validationActions.setWizardStep(currentStep + 1));
-    } else {
-      dispatch(validationActions.submitValidationRequest());
+  const handleProceed = async () => {
+    if (currentStep === 1) {
+      if (!isStep1Valid || !validationForm.sourceCloud || !validationForm.targetCloud) return;
+      setAdvancing(true);
+      try {
+        const { data } = await Api.saveValidationDraft({
+          source_path: `gs://${validationForm.sourceCloud.bucket}/${validationForm.sourceCloud.object_name}`,
+          target_path: `gs://${validationForm.targetCloud.bucket}/${validationForm.targetCloud.object_name}`,
+          uid_column: validationForm.uidColumn,
+          delimiter: validationForm.delimiter || 'auto',
+          column_mappings: validationForm.columnMappings,
+        });
+        loadedRunIdRef.current = data.run_id;
+        dispatch(validationActions.setWizardRunId(data.run_id));
+        navigate(validationOverviewPath(data.run_id));
+      } catch (e) {
+        notification.error({
+          message: 'Could not start file overview',
+          description: e instanceof Error ? e.message : 'Failed to create validation run',
+        });
+      } finally {
+        setAdvancing(false);
+      }
+      return;
     }
+
+    if (currentStep === 2) {
+      if (!runId) return;
+      navigate(validationMappingPath(runId));
+      return;
+    }
+
+    dispatch(validationActions.submitValidationRequest());
   };
 
   const handleBack = () => {
-    if (currentStep > 1) {
-      dispatch(validationActions.setWizardStep(currentStep - 1));
+    if (currentStep === 2) {
+      navigate(VALIDATIONS_BASE);
+      return;
+    }
+    if (currentStep === 3 && runId) {
+      navigate(validationOverviewPath(runId));
     }
   };
 
@@ -69,14 +175,24 @@ export const ValidationWizardView: React.FC = () => {
     if (!canSaveDraft || !validationForm.sourceCloud || !validationForm.targetCloud) return;
     setSavingDraft(true);
     try {
-      await Api.saveValidationDraft({
+      const { data } = await Api.saveValidationDraft({
         source_path: `gs://${validationForm.sourceCloud.bucket}/${validationForm.sourceCloud.object_name}`,
         target_path: `gs://${validationForm.targetCloud.bucket}/${validationForm.targetCloud.object_name}`,
         uid_column: validationForm.uidColumn,
         delimiter: validationForm.delimiter || 'auto',
         column_mappings: validationForm.columnMappings,
       });
-      notification.success({ message: 'Draft saved', description: 'Find it under Reports → Saved.' });
+      notification.success({
+        message: 'Draft saved',
+        description: 'Find it under Reports → Saved.',
+      });
+      loadedRunIdRef.current = data.run_id;
+      dispatch(validationActions.setWizardRunId(data.run_id));
+      if (currentStep === 2) {
+        navigate(validationOverviewPath(data.run_id), { replace: true });
+      } else if (currentStep === 3) {
+        navigate(validationMappingPath(data.run_id), { replace: true });
+      }
       dispatch(reportActions.fetchReportsRequest());
     } catch (e) {
       notification.error({
@@ -89,6 +205,14 @@ export const ValidationWizardView: React.FC = () => {
   };
 
   const renderStepContent = () => {
+    if (loadingRun && runId) {
+      return (
+        <div style={{ padding: '48px', textAlign: 'center', color: '#727786' }}>
+          Loading validation run…
+        </div>
+      );
+    }
+
     switch (currentStep) {
       case 1: return <FileSelectionStep />;
       case 2: return <MappingOverviewStep />;
@@ -96,6 +220,12 @@ export const ValidationWizardView: React.FC = () => {
       default: return <FileSelectionStep />;
     }
   };
+
+  const proceedLabel = currentStep === 3
+    ? 'Run Validation'
+    : currentStep === 2
+      ? 'Proceed to Mapping'
+      : 'Proceed to Overview';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '24px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
@@ -151,7 +281,7 @@ export const ValidationWizardView: React.FC = () => {
             {savingDraft ? 'Saving…' : 'Save Draft'}
           </button>
           <button
-            onClick={handleProceed}
+            onClick={() => void handleProceed()}
             disabled={isNextButtonDisabled}
             style={{
               padding: '0 32px', height: '40px', borderRadius: '8px', border: 'none',
@@ -161,7 +291,7 @@ export const ValidationWizardView: React.FC = () => {
               display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s',
             }}
           >
-            {isActuallyLoading ? 'Processing...' : (currentStep === 3 ? 'Run Validation' : 'Proceed to Mapping')}
+            {isActuallyLoading ? 'Processing...' : proceedLabel}
             {!isActuallyLoading && <ArrowRightOutlined style={{ fontSize: '16px' }} />}
           </button>
         </div>

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Header } from '../components/ui/Header'; // Imported here globally
+import { Header } from '../components/ui/Header';
+import { ValidationTabSessionGuard } from '../pages/validation/ValidationTabSessionGuard';
 
 interface BaseLayoutProps {
   children: React.ReactNode;
@@ -19,6 +20,7 @@ export const BaseLayout: React.FC<BaseLayoutProps> = ({ children }) => {
     }}>
       {/* Dynamic persistent header layer */}
       <Header />
+      <ValidationTabSessionGuard />
 
       {/* Main Workspace Frame container */}
       <main style={{

@@ -50,6 +50,7 @@ export interface OverviewProfileCache {
 export interface ValidationReducerState {
   currentStep: number;
   isStep1Valid: boolean;
+  wizardRunId: string | null;
   validationForm: ValidationFormState;
   overviewProfileCache: OverviewProfileCache | null;
   validationDataState: {

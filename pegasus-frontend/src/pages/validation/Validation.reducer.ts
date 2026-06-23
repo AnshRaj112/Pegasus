@@ -7,10 +7,7 @@ import {
   type ValidationDataResponse,
 } from './Validation.interface';
 import type { GoogleCloudStorageConfig } from '../../shared/api/Api';
-import {
-  loadValidationWizardSession,
-  type PersistedValidationWizardState,
-} from './validationWizardStorage';
+import type { ValidationTabSession } from './validationTabStorage';
 
 const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string =>
   cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';
@@ -48,29 +45,15 @@ const defaultValidationForm: ValidationFormState = {
   columnMappings: [],
 };
 
-const buildInitialState = (): ValidationReducerState => {
-  const saved = loadValidationWizardSession();
-  if (!saved) {
-    return {
-      currentStep: 1,
-      isStep1Valid: false,
-      validationForm: defaultValidationForm,
-      overviewProfileCache: null,
-      validationDataState: initializeNullState,
-      pendingHistoryNavigation: null,
-    };
-  }
-  return {
-    currentStep: saved.currentStep ?? 1,
-    isStep1Valid: saved.isStep1Valid ?? false,
-    validationForm: { ...defaultValidationForm, ...saved.validationForm },
-    overviewProfileCache: saved.overviewProfileCache ?? null,
-    validationDataState: initializeNullState,
-    pendingHistoryNavigation: null,
-  };
+export const initialState: ValidationReducerState = {
+  currentStep: 1,
+  isStep1Valid: false,
+  wizardRunId: null,
+  validationForm: defaultValidationForm,
+  overviewProfileCache: null,
+  validationDataState: initializeNullState,
+  pendingHistoryNavigation: null,
 };
-
-export const initialState: ValidationReducerState = buildInitialState();
 
 const validationSlice = createSlice({
   name: 'validation',
@@ -96,19 +79,25 @@ const validationSlice = createSlice({
       ...state,
       overviewProfileCache: action.payload,
     }),
+    setWizardRunId: (state, action: PayloadAction<string | null>) => ({
+      ...state,
+      wizardRunId: action.payload,
+    }),
     resetWizard: () => ({
       currentStep: 1,
       isStep1Valid: false,
+      wizardRunId: null,
       validationForm: defaultValidationForm,
       overviewProfileCache: null,
       validationDataState: initializeNullState,
       pendingHistoryNavigation: null,
     }),
-    restoreWizardSession: (_state, action: PayloadAction<PersistedValidationWizardState>) => ({
-      currentStep: action.payload.currentStep ?? 1,
-      isStep1Valid: action.payload.isStep1Valid ?? false,
+    restoreTabSession: (_state, action: PayloadAction<ValidationTabSession>) => ({
+      currentStep: 1,
+      isStep1Valid: action.payload.isStep1Valid,
+      wizardRunId: action.payload.wizardRunId,
       validationForm: { ...defaultValidationForm, ...action.payload.validationForm },
-      overviewProfileCache: action.payload.overviewProfileCache ?? null,
+      overviewProfileCache: action.payload.overviewProfileCache,
       validationDataState: initializeNullState,
       pendingHistoryNavigation: null,
     }),
