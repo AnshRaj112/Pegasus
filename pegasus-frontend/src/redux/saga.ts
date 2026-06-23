@@ -3,7 +3,6 @@ import { all } from 'redux-saga/effects';
 import { dashboardSaga } from '../pages/dashboard/Dashboard.saga';
 import validationSaga from '../pages/validation/Validation.saga';
 import adminSaga from '../pages/admin/Admin.saga';
-import historySaga from '../pages/history/History.saga';
 import { reportSaga } from '../pages/report/Report.saga';
 
 export default function* rootSaga() {
@@ -11,7 +10,6 @@ export default function* rootSaga() {
     dashboardSaga(),
     validationSaga(),
     adminSaga(),
-    historySaga(),
     reportSaga(),
   ]);
 }

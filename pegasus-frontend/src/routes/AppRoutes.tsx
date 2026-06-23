@@ -4,10 +4,8 @@ import { BaseLayout } from '../layouts/BaseLayout';
 import { ValidationHistoryNavigation } from '../pages/validation/ValidationHistoryNavigation';
 import { Dashboard } from '../pages/dashboard/Dashboard';
 import { ValidationWizardView } from '../pages/validation/ValidationWizardView';
-import { HistoryView } from '../pages/history/HistoryView';
 import { Report } from '../pages/report/Report';
 import { AdminView } from '../pages/admin/AdminView';
-import { MappingSchemaView } from '../pages/history/components/MappingSchemaView';
 import { Login } from '../pages/auth/Login';
 import { ProtectedRoute } from './ProtectedRoute';
 import { SnippetComparison } from '../pages/report/views/SnippetComparison';
@@ -24,9 +22,7 @@ export const AppRoutes: React.FC = () => {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/validations" element={<ValidationWizardView />} />
-              <Route path="/history" element={<HistoryView />} />
               <Route path="/reports" element={<Report />} />
-              <Route path="/history/mapping/:runId/schema" element={<MappingSchemaView />} />
               <Route path="/reports/:mappingId/history" element={<ExecutionHistory />} />
               <Route path="/reports/:mappingId/history/:runId/snippet" element={<SnippetComparison />} />
               <Route path="/admin" element={<AdminView />} />
