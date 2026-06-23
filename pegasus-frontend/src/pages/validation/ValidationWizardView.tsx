@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import { ArrowRightOutlined } from '@ant-design/icons';
 import { notification } from 'antd';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
@@ -19,17 +19,14 @@ export const ValidationWizardView: React.FC = () => {
   const dispatch = useAppDispatch();
   const currentStep = useAppSelector((state) => state.validation.currentStep);
   const isStep1Valid = useAppSelector((state) => state.validation.isStep1Valid);
-  const { isFetching, data } = useAppSelector((state) => state.validation.validationDataState);
+  const { isFetching } = useAppSelector((state) => state.validation.validationDataState);
   const validationForm = useAppSelector((state) => state.validation.validationForm);
   const overviewCache = useAppSelector((state) => state.validation.overviewProfileCache);
   const [savingDraft, setSavingDraft] = useState(false);
 
-  useEffect(() => {
-    if (data?.status === 'Complete' || data?.status === 'Failed') {
-      dispatch(validationActions.clearValidationRun());
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useLayoutEffect(() => {
+    dispatch(validationActions.resetWizard());
+  }, [dispatch]);
 
   const isStep2Loading = currentStep === 2 && (
     overviewCache?.sourceKey !== cloudObjectKey(validationForm.sourceCloud) ||
