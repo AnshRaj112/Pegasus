@@ -20,7 +20,6 @@ export const Header: React.FC = () => {
             <Link to="/validations" className={getLinkClass('/validations')}>Validations</Link>
             {/* Admin Workspace panel */}
             <Link to="/admin" className={getLinkClass('/admin')}>Admin</Link>
-            <Link to="/history" className={getLinkClass('/history')}>History</Link>
             <Link to="/reports" className={getLinkClass('/reports')}>Reports</Link>
           </div>
         </div>
