@@ -4,6 +4,7 @@ import { dashboardSaga } from '../pages/dashboard/Dashboard.saga';
 import validationSaga from '../pages/validation/Validation.saga';
 import adminSaga from '../pages/admin/Admin.saga';
 import { reportSaga } from '../pages/report/Report.saga';
+import { watchProfileSagas } from '../pages/profile/Profile.saga';
 
 export default function* rootSaga() {
   yield all([
@@ -11,5 +12,6 @@ export default function* rootSaga() {
     validationSaga(),
     adminSaga(),
     reportSaga(),
+    watchProfileSagas(),
   ]);
 }

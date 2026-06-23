@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-23T05:59:19Z
+# Last edited: 2026-06-23T05:59:50Z
 # --- END GENERATED FILE METADATA ---
 
 """GCS adapter prefix reads are cached across header and delimiter sampling."""
