@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-19T09:47:48Z
+# Last edited: 2026-06-23T11:03:59+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Validation service — routes tabular full validation through Category-1 pipeline."""
