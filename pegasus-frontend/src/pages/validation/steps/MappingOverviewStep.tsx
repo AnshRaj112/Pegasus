@@ -84,23 +84,6 @@ const Row: React.FC<{ icon: React.ReactNode; label: string; value: string; warn?
 export const MappingOverviewStep: React.FC = () => {
   const [isHovered, setIsHovered] = useState(false);
   const [isActive, setIsActive] = useState(false);
-  const buttonStyle: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    backgroundColor: isHovered ? '#1a3847' : '#234B5F', // Darkens slightly on hover
-    color: '#ffffff',
-    border: isHovered ? '1.5px solid #1a3847' : '1.5px solid #234B5F',
-    padding: '8px 10px',
-    borderRadius: '6px',
-    fontSize: '12px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    transition: 'all 0.2s ease-in-out',
-    transform: isActive ? 'scale(0.98)' : 'scale(1)', // Slight press effect on click
-    boxShadow: isHovered ? '0 4px 6px -1px rgba(35, 75, 95, 0.2)' : 'none',
-  };
   const dispatch = useAppDispatch();
   const form = useAppSelector((s) => s.validation.validationForm);
   const cache = useAppSelector((s) => s.validation.overviewProfileCache);
@@ -128,6 +111,24 @@ export const MappingOverviewStep: React.FC = () => {
 
     return () => { cancelled = true; };
   }, [form.sourceCloud, form.targetCloud, sourceKey, targetKey, cacheHit, dispatch, form.delimiter, form.hasHeader]);
+
+  const buttonStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    backgroundColor: isHovered ? '#1a3847' : '#234B5F', // Darkens slightly on hover
+    color: '#ffffff',
+    border: isHovered ? '1.5px solid #1a3847' : '1.5px solid #234B5F',
+    padding: '8px 10px',
+    borderRadius: '6px',
+    fontSize: '12px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    transition: 'all 0.2s ease-in-out',
+    transform: isActive ? 'scale(0.98)' : 'scale(1)', // Slight press effect on click
+    boxShadow: isHovered ? '0 4px 6px -1px rgba(35, 75, 95, 0.2)' : 'none',
+  };
 
   const sourceStats = {
     name: form.sourceFileName ?? '—',
@@ -176,6 +177,8 @@ export const MappingOverviewStep: React.FC = () => {
       <EyeOutlined style={{ fontSize: '16px' }} />
     </button>,
   };
+
+  
 
   const isFetching = sourceProfile.loading || targetProfile.loading;
 

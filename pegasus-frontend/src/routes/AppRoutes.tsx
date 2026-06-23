@@ -10,6 +10,7 @@ import { Login } from '../pages/auth/Login';
 import { ProtectedRoute } from './ProtectedRoute';
 import { SnippetComparison } from '../pages/report/views/SnippetComparison';
 import { ExecutionHistory } from '../pages/report/views/ExecutionHistory';
+import Profile from '../pages/profile/Profile';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -26,6 +27,7 @@ export const AppRoutes: React.FC = () => {
               <Route path="/reports/:mappingId/history" element={<ExecutionHistory />} />
               <Route path="/reports/:mappingId/history/:runId/snippet" element={<SnippetComparison />} />
               <Route path="/admin" element={<AdminView />} />
+              <Route path="/profile" element={<Profile />} />
               <Route path="*" element={<div style={{ color: 'var(--on-surface)', padding: 'var(--lg)' }}>404 Error: Section View Not Found</div>} />
             </Routes>
           </BaseLayout>

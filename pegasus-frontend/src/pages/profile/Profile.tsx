@@ -1,9 +1,9 @@
 import React, { useEffect } from 'react';
 import { useDispatch } from 'react-redux';
+import { Row, Col, Flex } from 'antd';
 import styles from './Profile.module.scss';
-import { type UserProfile } from './Profile.inerface';
+import { type UserProfile } from './Profile.interface';
 
-// Temporary mock data mapping to your HTML layout
 const mockUser: UserProfile = {
   firstName: 'Super User',
   lastName: '-',
@@ -20,10 +20,7 @@ const mockUser: UserProfile = {
 
 const Profile: React.FC = () => {
   const dispatch = useDispatch();
-  
-  // Example of how you would connect this to your Redux state:
-  // const { data, isLoading } = useSelector((state: any) => state.profile);
-  const data = mockUser; // Using mock data for UI representation
+  const data = mockUser; 
 
   useEffect(() => {
     // dispatch({ type: 'FETCH_PROFILE_REQUEST' });
@@ -32,120 +29,118 @@ const Profile: React.FC = () => {
   if (!data) return <div>Loading...</div>;
 
   return (
-    <div className="bg-background text-on-surface min-h-screen">
-      <main className="max-w-[960px] mx-auto px-4 md:px-0 py-8 flex flex-col gap-6">
-        
-        {/* Card A (Header) */}
-        <section className={`bg-surface-container-lowest rounded-lg p-6 ${styles.cardShadow}`}>
-          <h1 className="text-xl font-bold text-primary font-headline-md text-headline-md">
-            Profile
-          </h1>
-        </section>
+    <main className={`d-flex flex-column gap-4 py-4 px-3 px-md-0 ${styles.container}`}>
+      
+      {/* Card A (Header) */}
+      <section className={styles.card}>
+        <h1 className={`m-0 ${styles.headlineMd}`}>Profile</h1>
+      </section>
 
-        {/* Card B (User Details) */}
-        <section className={`bg-surface-container-lowest rounded-lg p-6 ${styles.cardShadow}`}>
-          <div className="flex items-center gap-3 mb-8">
-            <h2 className="text-lg font-semibold text-on-surface font-headline-sm text-headline-sm">
-              User Details
-            </h2>
-            {data.isLocal && (
-              <span className="px-3 py-1 bg-primary-fixed text-on-primary-fixed-variant text-[12px] font-medium rounded-full uppercase tracking-wider">
-                LOCAL
-              </span>
-            )}
-          </div>
+      {/* Card B (User Details) */}
+      <section className={styles.card}>
+        <Flex align="center" gap="small" className="mb-4">
+          <h2 className={`m-0 ${styles.headlineSm}`}>User Details</h2>
+          {data.isLocal && (
+            <span className={styles.badgeLocal}>LOCAL</span>
+          )}
+        </Flex>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
-            
-            <div className="flex flex-col gap-2">
-              <label className="text-[12px] font-medium text-outline uppercase tracking-tight">First Name</label>
-              <p className="text-[14px] font-semibold text-on-surface">{data.firstName}</p>
-            </div>
+        <Row gutter={[36, 30]}>
+          <Col xs={24} md={12}>
+            <Flex vertical gap="small">
+              <label className={styles.label}>First Name</label>
+              <p className={styles.value}>{data.firstName}</p>
+            </Flex>
+          </Col>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-[12px] font-medium text-outline uppercase tracking-tight">Last Name</label>
-              <p className="text-[14px] font-semibold text-on-surface">{data.lastName}</p>
-            </div>
+          <Col xs={24} md={12}>
+            <Flex vertical gap="small">
+              <label className={styles.label}>Last Name</label>
+              <p className={styles.value}>{data.lastName}</p>
+            </Flex>
+          </Col>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-[12px] font-medium text-outline uppercase tracking-tight">User Name</label>
-              <p className="text-[14px] font-semibold text-on-surface">{data.userName}</p>
-            </div>
+          <Col xs={24} md={12}>
+            <Flex vertical gap="small">
+              <label className={styles.label}>User Name</label>
+              <p className={styles.value}>{data.userName}</p>
+            </Flex>
+          </Col>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-[12px] font-medium text-outline uppercase tracking-tight">Email</label>
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px] text-primary">mail</span>
-                <p className="text-[14px] font-semibold text-on-surface">{data.email}</p>
-              </div>
-            </div>
+          <Col xs={24} md={12}>
+            <Flex vertical gap="small">
+              <label className={styles.label}>Email</label>
+                <p className={styles.value}>{data.email}</p>
+            </Flex>
+          </Col>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-[12px] font-medium text-outline uppercase tracking-tight">Role</label>
+          <Col xs={24} md={12}>
+            <Flex vertical gap="small">
+              <label className={styles.label}>Role</label>
               <div>
-                <span className="px-3 py-1 bg-secondary-container text-on-secondary-fixed-variant text-[12px] font-bold rounded-full">
+                <span className={styles.badgeRole}>
                   {data.role}
                 </span>
               </div>
-            </div>
+            </Flex>
+          </Col>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-[12px] font-medium text-outline uppercase tracking-tight">Assigned Workspaces</label>
+          <Col xs={24} md={12}>
+            <Flex vertical gap="small">
+              <label className={styles.label}>Assigned Workspaces</label>
               <div>
-                <span className="px-3 py-1 bg-primary-fixed text-on-primary-fixed-variant text-[12px] font-bold rounded-full">
+                <span className={styles.badgeWorkspace}>
                   {data.assignedWorkspaces}
                 </span>
               </div>
-            </div>
+            </Flex>
+          </Col>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-[12px] font-medium text-outline uppercase tracking-tight">Last Login Time</label>
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px] text-outline">history</span>
-                <p className="text-[14px] font-semibold text-on-surface">{data.lastLoginTime}</p>
-              </div>
-            </div>
+          <Col xs={24} md={12}>
+            <Flex vertical gap="small">
+              <label className={styles.label}>Last Login Time</label>
+                <p className={styles.value}>{data.lastLoginTime}</p>
+            </Flex>
+          </Col>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-[12px] font-medium text-outline uppercase tracking-tight">Organization</label>
-              <p className="text-[14px] font-semibold text-on-surface">{data.organization}</p>
-            </div>
+          <Col xs={24} md={12}>
+            <Flex vertical gap="small">
+              <label className={styles.label}>Organization</label>
+              <p className={styles.value}>{data.organization}</p>
+            </Flex>
+          </Col>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-[12px] font-medium text-outline uppercase tracking-tight">Team</label>
-              <p className="text-[14px] font-semibold text-on-surface">{data.team}</p>
-            </div>
+          <Col xs={24} md={12}>
+            <Flex vertical gap="small">
+              <label className={styles.label}>Team</label>
+              <p className={styles.value}>{data.team}</p>
+            </Flex>
+          </Col>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-[12px] font-medium text-outline uppercase tracking-tight">Location</label>
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px] text-outline">location_on</span>
-                <p className="text-[14px] font-semibold text-on-surface">{data.location}</p>
-              </div>
-            </div>
+          <Col xs={24} md={12}>
+            <Flex vertical gap="small">
+              <label className={styles.label}>Location</label>
+                <p className={styles.value}>{data.location}</p>
+            </Flex>
+          </Col>
+        </Row>
+      </section>
 
-          </div>
-        </section>
+      {/* Card C (Password) */}
+      <section className={styles.card}>
+        <h2 className={`mb-4 ${styles.headlineSm}`}>Password</h2>
+        <div>
+          <button className={`btn ${styles.btnPrimaryOutline}`}>
+            {/* <span className="material-symbols-outlined fs-6">lock_reset</span> */}
+            Reset Password
+          </button>
+        </div>
+      </section>
 
-        {/* Card C (Password) */}
-        <section className={`bg-surface-container-lowest rounded-lg p-6 ${styles.cardShadow}`}>
-          <h2 className="text-lg font-semibold text-on-surface font-headline-sm text-headline-sm mb-6">
-            Password
-          </h2>
-          <div>
-            <button className={`${styles.btnPrimaryOutline} px-6 py-2.5 rounded font-medium text-sm inline-flex items-center gap-2`}>
-              <span className="material-symbols-outlined text-[18px]">lock_reset</span>
-              Reset Password
-            </button>
-          </div>
-        </section>
-
-      </main>
-
-      <footer className="max-w-[960px] mx-auto px-4 py-12 text-center text-outline text-[12px]">
+      <footer className={styles.footer}>
         © 2026 Pelican Systems • Administrative Profile Management Interface
       </footer>
-    </div>
+    </main>
   );
 };
 

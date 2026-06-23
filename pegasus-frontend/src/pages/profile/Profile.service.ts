@@ -1,4 +1,4 @@
-import { type UserProfile } from './Profile.inerface';
+import { type UserProfile } from './Profile.interface';
 
 export const fetchUserProfile = async (): Promise<UserProfile> => {
   // Replace with your actual Axios/Fetch call

@@ -1,19 +1,115 @@
-.cardShadow {
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+/* Local Variables based on your HTML design */
+$primary: #053447;
+$on-surface: #191c1e;
+$outline: #72787d;
+$surface-container-lowest: #ffffff;
+$primary-fixed: #c3e8ff;
+$on-primary-fixed-variant: #234b5f;
+$secondary-container: #e9d5ff;
+$on-secondary-fixed-variant: #4f4062;
+
+.container {
+  max-width: 60rem; /* ~960px */
+  margin: 0 auto;
 }
 
+.card {
+  background-color: $surface-container-lowest;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  padding: 1.5rem;
+}
+
+/* Typography styles to replace Tailwind's font-headline-md, text-[12px], etc. */
+.headlineMd {
+  font-size: 1.5rem; /* 24px */
+  line-height: 2rem;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+  color: $primary;
+}
+
+.headlineSm {
+  font-size: 1.125rem; /* 18px */
+  line-height: 1.5rem;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+  color: $on-surface;
+}
+
+.label {
+  font-size: 0.75rem; /* 12px */
+  font-weight: 500;
+  color: $outline;
+  text-transform: uppercase;
+  letter-spacing: -0.015em;
+}
+
+.value {
+  font-size: 0.875rem; /* 14px */
+  font-weight: 600;
+  color: $on-surface;
+  margin: 0;
+}
+
+/* Custom Badges */
+.badgeLocal, .badgeWorkspace {
+  background-color: $primary-fixed;
+  color: $on-primary-fixed-variant;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.badgeRole {
+  background-color: $secondary-container;
+  color: $on-secondary-fixed-variant;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  text-transform: uppercase;
+}
+
+/* Icons */
+.icon {
+  font-size: 1.125rem; /* 18px */
+  display: flex;
+  align-items: center;
+  
+  &--primary { color: $primary; }
+  &--outline { color: $outline; }
+}
+
+/* Buttons */
 .btnPrimaryOutline {
   border: 1.5px solid #234B5F;
   color: #234B5F;
-  transition: all 0.2s ease-in-out;
   background-color: transparent;
+  transition: all 0.2s ease-in-out;
+  font-weight: 500;
+  font-size: 0.875rem;
+  border-radius: 0.25rem;
+  padding: 0.625rem 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
 
   &:hover {
     background-color: #234B5F;
     color: #ffffff;
   }
-
   &:active {
     opacity: 0.8;
   }
+}
+
+.footer {
+  color: $outline;
+  font-size: 0.75rem;
+  text-align: center;
+  padding: 3rem 1rem;
 }
