@@ -1,9 +1,10 @@
-import React, { useLayoutEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { ArrowRightOutlined } from '@ant-design/icons';
 import { notification } from 'antd';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
 import { validationActions } from './Validation.reducer';
 import { reportActions } from '../report/Report.reducer';
+import { saveValidationWizardSession } from './validationWizardStorage';
 
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
@@ -22,11 +23,16 @@ export const ValidationWizardView: React.FC = () => {
   const { isFetching } = useAppSelector((state) => state.validation.validationDataState);
   const validationForm = useAppSelector((state) => state.validation.validationForm);
   const overviewCache = useAppSelector((state) => state.validation.overviewProfileCache);
-  const [savingDraft, setSavingDraft] = useState(false);
+  const [savingDraft, setSavingDraft] = React.useState(false);
 
-  useLayoutEffect(() => {
-    dispatch(validationActions.resetWizard());
-  }, [dispatch]);
+  useEffect(() => {
+    saveValidationWizardSession({
+      currentStep,
+      isStep1Valid,
+      validationForm,
+      overviewProfileCache: overviewCache,
+    });
+  }, [currentStep, isStep1Valid, validationForm, overviewCache]);
 
   const isStep2Loading = currentStep === 2 && (
     overviewCache?.sourceKey !== cloudObjectKey(validationForm.sourceCloud) ||

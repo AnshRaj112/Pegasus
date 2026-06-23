@@ -108,6 +108,19 @@ const emptyBrowseContext = (): BrowseContext => ({
   prefix: '',
 });
 
+const cloudObjectKey = (
+  cloud: { connection_id?: string | null; bucket?: string | null; object_name?: string | null } | null,
+): string => (cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '');
+
+const initialSelectingFor = (
+  sourceCloud: GoogleCloudStorageConfig | null,
+  targetCloud: GoogleCloudStorageConfig | null,
+): 'source' | 'target' | 'none' => {
+  if (sourceCloud && targetCloud) return 'none';
+  if (targetCloud && !sourceCloud) return 'target';
+  return 'source';
+};
+
 const fileFromValidationCloud = (
   cloud: GoogleCloudStorageConfig,
   fileName: string | null,
@@ -186,17 +199,38 @@ export const FileSelectionStep: React.FC = () => {
   const [connections, setConnections] = useState<CloudConnection[]>([]);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
 
-  const [browse, setBrowse] = useState<BrowseContext>(emptyBrowseContext);
+  const [browse, setBrowse] = useState<BrowseContext>(() =>
+    validationForm.sourceCloud
+      ? browseContextFromCloud(validationForm.sourceCloud)
+      : emptyBrowseContext(),
+  );
   const [parentPrefix, setParentPrefix] = useState<string | null>(null);
   const [browseEntries, setBrowseEntries] = useState<FileExplorerItem[]>([]);
   const [browseError, setBrowseError] = useState<string | null>(null);
   const [loadingBrowseKey, setLoadingBrowseKey] = useState<string | null>(null);
   const browseRequestIdRef = useRef(0);
-  const wizardHydratedRef = useRef(false);
 
-  const [selectingFor, setSelectingFor] = useState<'source' | 'target' | 'none'>('source');
-  const [sourceFile, setSourceFile] = useState<FileExplorerItem | null>(null);
-  const [targetFile, setTargetFile] = useState<FileExplorerItem | null>(null);
+  const [selectingFor, setSelectingFor] = useState<'source' | 'target' | 'none'>(() =>
+    initialSelectingFor(validationForm.sourceCloud, validationForm.targetCloud),
+  );
+  const [sourceFile, setSourceFile] = useState<FileExplorerItem | null>(() =>
+    validationForm.sourceCloud
+      ? fileFromValidationCloud(
+        validationForm.sourceCloud,
+        validationForm.sourceFileName,
+        validationForm.sourceFileSize,
+      )
+      : null,
+  );
+  const [targetFile, setTargetFile] = useState<FileExplorerItem | null>(() =>
+    validationForm.targetCloud
+      ? fileFromValidationCloud(
+        validationForm.targetCloud,
+        validationForm.targetFileName,
+        validationForm.targetFileSize,
+      )
+      : null,
+  );
 
   const currentBrowsePathId = browsePathId(browse);
   const isBrowsing = loadingBrowseKey != null && loadingBrowseKey === currentBrowsePathId;
@@ -349,53 +383,6 @@ export const FileSelectionStep: React.FC = () => {
     applyBrowseSnapshot,
   ]);
 
-  useEffect(() => {
-    if (wizardHydratedRef.current) return;
-    wizardHydratedRef.current = true;
-
-    if (validationForm.sourceCloud) {
-      setSourceFile(fileFromValidationCloud(
-        validationForm.sourceCloud,
-        validationForm.sourceFileName,
-        validationForm.sourceFileSize,
-      ));
-      setBrowse(browseContextFromCloud(validationForm.sourceCloud));
-    }
-    if (validationForm.targetCloud) {
-      setTargetFile(fileFromValidationCloud(
-        validationForm.targetCloud,
-        validationForm.targetFileName,
-        validationForm.targetFileSize,
-      ));
-    }
-    if (validationForm.sourceCloud && validationForm.targetCloud) {
-      setSelectingFor('none');
-    } else if (validationForm.targetCloud && !validationForm.sourceCloud) {
-      setSelectingFor('target');
-    }
-  }, [
-    validationForm.sourceCloud,
-    validationForm.targetCloud,
-    validationForm.sourceFileName,
-    validationForm.targetFileName,
-    validationForm.sourceFileSize,
-    validationForm.targetFileSize,
-  ]);
-
-  useEffect(() => {
-    if (validationForm.sourceCloud || validationForm.targetCloud) return;
-    wizardHydratedRef.current = false;
-    setSourceFile(null);
-    setTargetFile(null);
-    setSelectingFor('source');
-    setBrowse(emptyBrowseContext());
-    setBrowseEntries([]);
-    setParentPrefix(null);
-    setBrowseError(null);
-    setLoadingBrowseKey(null);
-    cancelInFlightBrowse();
-  }, [validationForm.sourceCloud, validationForm.targetCloud, cancelInFlightBrowse]);
-
   const connectionName = (connectionId?: string) =>
     connections.find((c) => c.id === connectionId)?.name ?? 'Unknown connection';
 
@@ -429,15 +416,42 @@ export const FileSelectionStep: React.FC = () => {
         ? { provider: 'google-cloud-storage' as const, connection_id: file.connectionId, bucket: file.bucket, object_name: file.objectName }
         : null;
 
+    const nextSourceCloud = makeCloudRef(sourceFile);
+    const nextTargetCloud = makeCloudRef(targetFile);
+    const nextSourceFileName = sourceFile?.name ?? null;
+    const nextTargetFileName = targetFile?.name ?? null;
+    const nextSourceFileSize = sourceFile?.sizeBytes ?? null;
+    const nextTargetFileSize = targetFile?.sizeBytes ?? null;
+
+    const hasChanges =
+      cloudObjectKey(nextSourceCloud) !== cloudObjectKey(validationForm.sourceCloud) ||
+      cloudObjectKey(nextTargetCloud) !== cloudObjectKey(validationForm.targetCloud) ||
+      nextSourceFileName !== validationForm.sourceFileName ||
+      nextTargetFileName !== validationForm.targetFileName ||
+      nextSourceFileSize !== validationForm.sourceFileSize ||
+      nextTargetFileSize !== validationForm.targetFileSize;
+
+    if (!hasChanges) return;
+
     dispatch(validationActions.setValidationForm({
-      sourceCloud: makeCloudRef(sourceFile),
-      targetCloud: makeCloudRef(targetFile),
-      sourceFileName: sourceFile?.name ?? null,
-      targetFileName: targetFile?.name ?? null,
-      sourceFileSize: sourceFile?.sizeBytes ?? null,
-      targetFileSize: targetFile?.sizeBytes ?? null,
+      sourceCloud: nextSourceCloud,
+      targetCloud: nextTargetCloud,
+      sourceFileName: nextSourceFileName,
+      targetFileName: nextTargetFileName,
+      sourceFileSize: nextSourceFileSize,
+      targetFileSize: nextTargetFileSize,
     }));
-  }, [sourceFile, targetFile, dispatch]);
+  }, [
+    sourceFile,
+    targetFile,
+    dispatch,
+    validationForm.sourceCloud,
+    validationForm.targetCloud,
+    validationForm.sourceFileName,
+    validationForm.targetFileName,
+    validationForm.sourceFileSize,
+    validationForm.targetFileSize,
+  ]);
 
   const handleConnectionSelect = (conn: CloudConnection) => {
     resetFilters(); // ⚡ Wipe filters on connection change
