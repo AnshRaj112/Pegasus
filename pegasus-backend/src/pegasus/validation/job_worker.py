@@ -90,8 +90,13 @@ def _resolve_job_mismatch_artifact(
     return export_path
 
 
-def _artifact_lacks_cell_detail(path: Path) -> bool:
-    """True when NDJSON value_mismatch rows have no column-level source/target values."""
+def _artifact_lacks_cell_detail(path: Path, compare_columns: list[str] | None = None) -> bool:
+    """True when NDJSON rows have no compare-column values in row_detail."""
+    from pegasus.validation.pipeline.mismatch_export import ndjson_row_detail_lacks_columns
+
+    cols = list(compare_columns or [])
+    if cols:
+        return ndjson_row_detail_lacks_columns(path, cols)
     try:
         with path.open(encoding="utf-8") as fp:
             for line in fp:
@@ -123,6 +128,94 @@ def _artifact_lacks_cell_detail(path: Path) -> bool:
     except (OSError, json.JSONDecodeError):
         return True
     return False
+
+
+def _build_mismatch_lookups(
+    src: object,
+    tgt: object,
+    *,
+    identity_columns: list[str],
+    compare_columns: list[str],
+    delimiter: str,
+    has_header: bool,
+    header_leading_rows: int,
+) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+    from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+    from pegasus.validation.pipeline.fingerprint import canonical
+    from pegasus.validation.pipeline.in_memory import _load_frame
+
+    def _as_adapter(side: object):
+        if hasattr(side, "get_schema"):
+            return side
+        return FileDelimitedAdapter(
+            Path(side),
+            delimiter=delimiter,
+            has_header=has_header,
+            skip_rows=header_leading_rows,
+        )
+
+    def _to_lookup(frame, columns: list[str]) -> dict[str, dict[str, str]]:
+        if frame is None or frame.is_empty():
+            return {}
+        out: dict[str, dict[str, str]] = {}
+        for row in frame.iter_rows(named=True):
+            key = "|".join(canonical(row.get(c)) for c in identity_columns)
+            if not key:
+                continue
+            out[key] = {
+                col: "" if row.get(col) is None else str(row.get(col))
+                for col in columns
+                if col in row
+            }
+        return out
+
+    src_frame = _load_frame(
+        _as_adapter(src),
+        identity_columns=identity_columns,
+        compare_columns=compare_columns,
+    )
+    tgt_frame = _load_frame(
+        _as_adapter(tgt),
+        identity_columns=identity_columns,
+        compare_columns=compare_columns,
+    )
+    return _to_lookup(src_frame, compare_columns), _to_lookup(tgt_frame, compare_columns)
+
+
+def _maybe_enrich_mismatch_artifact(
+    artifact: Path,
+    *,
+    compare_columns: list[str],
+    src: object,
+    tgt: object,
+    identity_columns: list[str],
+    delimiter: str,
+    has_header: bool,
+    header_leading_rows: int,
+) -> None:
+    if not compare_columns or not artifact.is_file():
+        return
+    if not _artifact_lacks_cell_detail(artifact, compare_columns):
+        return
+    from pegasus.validation.pipeline.mismatch_export import enrich_mismatch_ndjson_from_lookups
+
+    src_lookup, tgt_lookup = _build_mismatch_lookups(
+        src,
+        tgt,
+        identity_columns=identity_columns,
+        compare_columns=compare_columns,
+        delimiter=delimiter,
+        has_header=has_header,
+        header_leading_rows=header_leading_rows,
+    )
+    updated = enrich_mismatch_ndjson_from_lookups(
+        artifact,
+        compare_columns=compare_columns,
+        source_lookup=src_lookup,
+        target_lookup=tgt_lookup,
+    )
+    if updated > 0:
+        logger.info("Enriched %d mismatch rows with source/target column values", updated)
 
 
 def _compare_policy_for_export(
@@ -490,24 +583,25 @@ def _run_job_body(
             pipeline_path = extra_stats.get("path") if isinstance(extra_stats, dict) else None
             if pipeline_path is None:
                 pipeline_path = (getattr(result, "pipeline_metadata", None) or {}).get("path")
-            if not settings.validation_stream_mismatches_to_disk:
-                logger.info(
-                    "Skipping spill mismatch NDJSON export (validation_stream_mismatches_to_disk=false)"
-                )
-            elif wave_export.is_file():
+            compared_cols = list(result.compared_columns or [])
+            if wave_export.is_file():
                 try:
                     export_path.write_bytes(wave_export.read_bytes())
                     artifact = export_path
                     logger.info("Using wave-exported mismatches from %s", wave_export)
                 except OSError:
                     logger.exception("Failed to copy wave mismatch export")
-            elif workspace.is_dir() and result.compared_columns:
+            elif workspace.is_dir() and compared_cols:
                 try:
                     from pegasus.validation.comparators.policy import compare_policy_context
                     from pegasus.validation.pipeline.mismatch_export import export_workspace_mismatches_ndjson
 
+                    if not settings.validation_stream_mismatches_to_disk:
+                        logger.info(
+                            "Building mismatch NDJSON from reconcile workspace for persistence"
+                        )
                     export_policy = _compare_policy_for_export(
-                        list(result.compared_columns),
+                        compared_cols,
                         column_mappings,
                     )
                     sensitive_cols = {
@@ -519,7 +613,7 @@ def _run_job_body(
                         export_stats = export_workspace_mismatches_ndjson(
                             workspace,
                             export_path,
-                            compare_columns=list(result.compared_columns),
+                            compare_columns=compared_cols,
                             sensitive_columns=sensitive_cols,
                         )
                     if export_stats.total > 0 and export_path.is_file():
@@ -539,9 +633,27 @@ def _run_job_body(
                         )
                 except Exception:
                     logger.exception("Failed to export mismatches from reconcile workspace")
-            if artifact is not None and artifact.is_file() and _artifact_lacks_cell_detail(artifact):
+            if artifact is not None and artifact.is_file():
+                from pegasus.validation.pipeline.fingerprint import parse_identity_columns
+
+                identity_columns = parse_identity_columns(uid_column) or [uid_column.strip()]
+                _maybe_enrich_mismatch_artifact(
+                    artifact,
+                    compare_columns=compared_cols,
+                    src=src,
+                    tgt=tgt,
+                    identity_columns=identity_columns,
+                    delimiter=delimiter,
+                    has_header=has_header,
+                    header_leading_rows=header_leading_rows,
+                )
+            if artifact is not None and artifact.is_file() and _artifact_lacks_cell_detail(
+                artifact, compared_cols
+            ):
                 rich = _resolve_job_mismatch_artifact(job_dir, result, None)
-                if rich is not None and rich.is_file() and not _artifact_lacks_cell_detail(rich):
+                if rich is not None and rich.is_file() and not _artifact_lacks_cell_detail(
+                    rich, compared_cols
+                ):
                     artifact = rich
                     logger.info("Using in-memory mismatch export with column detail at %s", rich)
             if artifact is None or not artifact.is_file():

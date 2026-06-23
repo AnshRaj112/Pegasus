@@ -162,6 +162,14 @@ class ValidationRunRepository:
                 existing_footer["_persistence"] = persistence
                 run.footer_validation = existing_footer
 
+        if artifact is not None and artifact.is_file():
+            existing_footer = dict(run.footer_validation or {})
+            persistence = dict(existing_footer.get("_persistence") or {})
+            persistence.setdefault("mismatch_rows_persisted", persist_rows)
+            persistence["mismatch_artifact_path"] = str(artifact)
+            existing_footer["_persistence"] = persistence
+            run.footer_validation = existing_footer
+
         if persist_rows and artifact is not None and artifact.is_file():
             p = Path(artifact)
             batch_orm: list[MismatchReport] = []

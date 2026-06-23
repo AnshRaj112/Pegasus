@@ -628,11 +628,7 @@ class TabularReconciliationPipeline:
         )
         sorted_pids = sorted(active_pids)
         waves = partition_waves(sorted_pids, wave_size) if use_waves else [sorted_pids]
-        mismatch_export_path = (
-            work / "mismatches_partial.ndjson"
-            if use_waves and self._config.stream_mismatches_to_disk
-            else None
-        )
+        mismatch_export_path = work / "mismatches_partial.ndjson" if use_waves else None
 
         try:
             assert_disk_headroom(

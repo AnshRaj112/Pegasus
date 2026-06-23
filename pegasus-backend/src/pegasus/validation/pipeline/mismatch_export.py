@@ -280,6 +280,137 @@ def export_partitions_to_ndjson(
         )
 
 
+def _parse_row_detail_obj(raw: object) -> dict[str, Any]:
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _record_has_compare_columns(record: object, compare_columns: list[str]) -> bool:
+    if not isinstance(record, dict):
+        return False
+    return any(col in record and str(record.get(col) or "") not in ("", "__NULL__") for col in compare_columns)
+
+
+def ndjson_row_detail_lacks_columns(path: Path, compare_columns: list[str]) -> bool:
+    """True when NDJSON rows are missing compare-column values in row_detail."""
+    if not compare_columns or not path.is_file():
+        return False
+    try:
+        with path.open(encoding="utf-8") as fp:
+            for line in fp:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                mtype = str(row.get("mismatch_type") or "")
+                detail = _parse_row_detail_obj(row.get("row_detail"))
+                if mtype == MismatchType.MISSING_IN_TARGET.value:
+                    if not _record_has_compare_columns(detail.get("source_record"), compare_columns):
+                        return True
+                    continue
+                if mtype == MismatchType.EXTRA_IN_TARGET.value:
+                    if not _record_has_compare_columns(detail.get("target_record"), compare_columns):
+                        return True
+                    continue
+                if mtype == MismatchType.VALUE_MISMATCH.value:
+                    col = str(row.get("column_name") or "")
+                    if col and (
+                        row.get("source_value") not in (None, "")
+                        or row.get("target_value") not in (None, "")
+                    ):
+                        return False
+                    if not _record_has_compare_columns(detail.get("source_record"), compare_columns):
+                        return True
+                    if not _record_has_compare_columns(detail.get("target_record"), compare_columns):
+                        return True
+                    return False
+    except (OSError, json.JSONDecodeError):
+        return True
+    return False
+
+
+def enrich_mismatch_ndjson_from_lookups(
+    path: Path,
+    *,
+    compare_columns: list[str],
+    source_lookup: dict[str, dict[str, str]],
+    target_lookup: dict[str, dict[str, str]],
+) -> int:
+    """Fill missing row_detail cells from uid -> column maps; returns rows updated."""
+    if not path.is_file() or not compare_columns:
+        return 0
+    updated = 0
+    out_lines: list[str] = []
+    with path.open(encoding="utf-8") as fp:
+        for line in fp:
+            raw = line.strip()
+            if not raw:
+                continue
+            row = json.loads(raw)
+            uid = str(row.get("uid") or "")
+            mtype = str(row.get("mismatch_type") or "")
+            detail = _parse_row_detail_obj(row.get("row_detail"))
+            changed = False
+
+            if mtype == MismatchType.MISSING_IN_TARGET.value:
+                src_rec = dict(detail.get("source_record") or {"uid": uid})
+                if uid and not _record_has_compare_columns(src_rec, compare_columns):
+                    cells = source_lookup.get(uid, {})
+                    if cells:
+                        src_rec = {"uid": uid, **cells}
+                        detail["source_record"] = src_rec
+                        detail.setdefault("target_record", None)
+                        changed = True
+            elif mtype == MismatchType.EXTRA_IN_TARGET.value:
+                tgt_rec = dict(detail.get("target_record") or {"uid": uid})
+                if uid and not _record_has_compare_columns(tgt_rec, compare_columns):
+                    cells = target_lookup.get(uid, {})
+                    if cells:
+                        tgt_rec = {"uid": uid, **cells}
+                        detail["target_record"] = tgt_rec
+                        detail.setdefault("source_record", None)
+                        changed = True
+            elif mtype == MismatchType.VALUE_MISMATCH.value:
+                src_rec = dict(detail.get("source_record") or {"uid": uid})
+                tgt_rec = dict(detail.get("target_record") or {"uid": uid})
+                src_cells = source_lookup.get(uid, {})
+                tgt_cells = target_lookup.get(uid, {})
+                if src_cells and not _record_has_compare_columns(src_rec, compare_columns):
+                    src_rec = {"uid": uid, **src_cells}
+                    changed = True
+                if tgt_cells and not _record_has_compare_columns(tgt_rec, compare_columns):
+                    tgt_rec = {"uid": uid, **tgt_cells}
+                    changed = True
+                if changed:
+                    detail["source_record"] = src_rec
+                    detail["target_record"] = tgt_rec
+                col = str(row.get("column_name") or "")
+                if col and col in src_rec and not row.get("source_value"):
+                    row["source_value"] = _serialize_value(src_rec.get(col))
+                    changed = True
+                if col and col in tgt_rec and not row.get("target_value"):
+                    row["target_value"] = _serialize_value(tgt_rec.get(col))
+                    changed = True
+
+            if changed:
+                row["row_detail"] = json.dumps(detail, ensure_ascii=False)
+                updated += 1
+            out_lines.append(json.dumps(row, ensure_ascii=False))
+
+    if updated > 0:
+        path.write_text("\n".join(out_lines) + ("\n" if out_lines else ""), encoding="utf-8")
+    return updated
+
+
 def export_workspace_mismatches_ndjson(
     workspace: Path,
     out_path: Path,
