@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { ConfigProvider } from 'antd';
 import { Provider } from 'react-redux';
-
+import 'bootstrap/dist/css/bootstrap-utilities.min.css';
 import { store } from './redux/store.ts';
 
 import App from './App.tsx';

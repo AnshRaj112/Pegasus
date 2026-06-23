@@ -1,10 +1,15 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { UserOutlined, LogoutOutlined } from '@ant-design/icons';
 import styles from './Header.module.scss';
 
 export const Header: React.FC = () => {
   const location = useLocation();
   const currentPath = location.pathname;
+  
+  // State and ref for the dropdown menu
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const getLinkClass = (path: string): string => {
     const active = path === '/validations'
@@ -13,16 +18,29 @@ export const Header: React.FC = () => {
     return active ? styles.navLinkActive : styles.navLink;
   };
 
+  // Close the dropdown if the user clicks outside of it
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   return (
     <nav className={styles.header}>
       <div className={styles.inner}>
-        {/* Branding Title + Nav Links — Onyx Red branding per palette */}
+        {/* Branding Title + Nav Links */}
         <div className={styles.brandGroup}>
           <span className={styles.brandTitle}>Pegasus</span>
           <div className={styles.navLinks}>
             <Link to="/" className={getLinkClass('/')}>Dashboard</Link>
             <Link to="/validations" className={getLinkClass('/validations')}>Validations</Link>
-            {/* Admin Workspace panel */}
             <Link to="/admin" className={getLinkClass('/admin')}>Admin</Link>
             <Link to="/reports" className={getLinkClass('/reports')}>Reports</Link>
           </div>
@@ -44,11 +62,45 @@ export const Header: React.FC = () => {
           >
             Help
           </span>
-          <img
-            alt="Profile Avatar"
-            className={styles.avatar}
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuDBZhdsvY8UoOClzZZSWqP_e1f10fDQH3S329Fqt8U1mE_x0qkSmL0sqwzXd4UPavjsg7zyWEUECcr5AB-9lefgvfCCg3i7KCIbTh2dtc0YUvR9kph-I3RmAVuc0lAojPROCyebE38Llzj2Wh4Gf9Q43R-0x5dQ1EWSsUTpe0aUbJfwiEWN8iuE-JREpY7Chkx3m_n-W0kDTriINmZHMEUxcXfhPN_BMIh1bW3Cz4zvGsuhVcGvjikyD5Uh3rqPnx4uQgo0yu6GXVk"
-          />
+
+          {/* Profile Dropdown Container */}
+          <div className={styles.profileContainer} ref={dropdownRef}>
+            <div 
+              className={styles.avatarWrapper} 
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              role="button"
+              aria-label="User Menu"
+            >
+              <UserOutlined className={styles.avatarIcon} />
+            </div>
+
+            {/* The Dropdown Menu */}
+            {isDropdownOpen && (
+              <div className={styles.dropdownMenu}>
+                <Link 
+                  to="/profile" 
+                  className={styles.dropdownItem} 
+                  onClick={() => setIsDropdownOpen(false)}
+                >
+                  <UserOutlined />
+                  <span>Profile</span>
+                </Link>
+                
+                <div className={styles.dropdownDivider} />
+                
+                <button 
+                  className={styles.dropdownItem} 
+                  onClick={() => {
+                    // TODO: Add your logout logic here
+                    setIsDropdownOpen(false);
+                  }}
+                >
+                  <LogoutOutlined />
+                  <span>Logout</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </nav>
