@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-23T09:24:57Z
+# Last edited: 2026-06-23T11:10:12Z
 # --- END GENERATED FILE METADATA ---
 
 """Persisted validation history (mappings, reports, durations)."""
@@ -357,35 +357,32 @@ async def list_validation_history_mismatches(
                 offset=offset,
                 mismatch_type=mismatch_type,
             )
-            expected_total = int(run.total_mismatch_records or 0)
-            use_artifact = expected_total > 0 and (total < expected_total or total == 0)
-            if use_artifact:
-                artifact = resolve_history_mismatch_artifact(settings, run)
-                if artifact is not None:
-                    raw_items, total = paginate_mismatch_rows_from_ndjson(
-                        artifact,
-                        limit=limit,
-                        offset=offset,
-                        mismatch_type=mismatch_type,
-                        totals_by_type=mismatch_totals_from_run(run),
-                    )
-                    return ValidationHistoryMismatchesResponse(
-                        run_id=run_id,
-                        items=[
-                            ValidationHistoryMismatchRow(
-                                uid=str(item.get("uid") or ""),
-                                mismatch_type=str(item.get("mismatch_type") or ""),
-                                column_name=item.get("column_name"),
-                                source_value=item.get("source_value"),
-                                target_value=item.get("target_value"),
-                                row_detail=item.get("row_detail"),
-                            )
-                            for item in raw_items
-                        ],
-                        total=total,
-                        offset=offset,
-                        limit=limit,
-                    )
+            artifact = resolve_history_mismatch_artifact(settings, run)
+            if artifact is not None:
+                raw_items, total = paginate_mismatch_rows_from_ndjson(
+                    artifact,
+                    limit=limit,
+                    offset=offset,
+                    mismatch_type=mismatch_type,
+                    totals_by_type=mismatch_totals_from_run(run),
+                )
+                return ValidationHistoryMismatchesResponse(
+                    run_id=run_id,
+                    items=[
+                        ValidationHistoryMismatchRow(
+                            uid=str(item.get("uid") or ""),
+                            mismatch_type=str(item.get("mismatch_type") or ""),
+                            column_name=item.get("column_name"),
+                            source_value=item.get("source_value"),
+                            target_value=item.get("target_value"),
+                            row_detail=item.get("row_detail"),
+                        )
+                        for item in raw_items
+                    ],
+                    total=total,
+                    offset=offset,
+                    limit=limit,
+                )
     except HTTPException:
         raise
     except Exception as exc:

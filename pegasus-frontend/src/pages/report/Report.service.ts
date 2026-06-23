@@ -58,7 +58,7 @@ const toReportItem = (runs: ValidationHistorySummary[], mappingId: string): Repo
     id: mappingId,
     sourcePath,
     targetPath,
-    sourceTitle: basename(latest.source_path, latest.source_filename).replace(/\.[^.]+$/, '').toUpperCase(),
+    sourceTitle: basename(latest.source_path, latest.source_filename),
     sourceSubtitle: sourcePath,
     jobTitle: basename(latest.target_path, latest.target_filename),
     jobSubtitle: `Latest: ${formatWhen(latest.completed_at ?? latest.created_at)} · ${runs.length} run(s)`,
