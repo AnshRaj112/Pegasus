@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   DatabaseOutlined, FileTextOutlined, ArrowRightOutlined,
   CheckCircleFilled, WarningFilled, ProfileOutlined,
@@ -7,6 +7,7 @@ import {
 import { Api, type CloudFileProfileResponse, type GoogleCloudStorageConfig } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
+import { EyeOutlined } from '@ant-design/icons';
 
 const formatBytes = (bytes: number | null) => {
   if (bytes == null) return '—';
@@ -44,7 +45,62 @@ const SkeletonBlock: React.FC<{ width?: string; height?: string }> = ({ width = 
   <div style={{ width, height, backgroundColor: '#e2e8f0', borderRadius: '4px', animation: 'skeleton-pulse 1.5s ease-in-out infinite' }} />
 );
 
+const FileCard: React.FC<{ label: string; color: string; stats: any; warn: any; loading: boolean; icon?: React.ReactNode; }> = ({ label, color, stats, warn, loading, icon }) => (
+  <div style={{ flex: 1, backgroundColor: '#fff', border: '1px solid #d9d9d9', borderRadius: '12px', padding: '24px', minWidth: '300px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color }}>
+      {icon ?? <FileTextOutlined />}
+      <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase' }}>{label}</span>
+    </div>
+
+    <h4 style={{ margin: '0 0 4px 0', fontSize: '18px', minHeight: '24px' }}>
+      {loading ? <SkeletonBlock width="60%" height="24px" /> : stats.name}
+    </h4>
+    <div style={{ fontSize: '12px', color: '#727786', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', minHeight: '16px' }}>
+      {loading ? <SkeletonBlock width="90%" height="16px" /> : stats.path}
+    </div>
+
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
+      <Row icon={<ProfileOutlined />} label="Format" value={stats.format} loading={loading} />
+      <Row icon={<HddOutlined />} label="Size" value={formatBytes(stats.sizeBytes)} warn={warn.size} loading={loading} />
+      <Row icon={<TableOutlined />} label="Columns" value={formatCount(stats.columnCount)} warn={warn.columns} loading={loading} />
+      <Row icon={<BarcodeOutlined />} label="Rows" value={formatCount(stats.rowCount)} warn={warn.rows} loading={loading} />
+      {/* ⚡ Added new Header & Footer attributes */}
+      <Row icon={<BuildOutlined />} label="Header" value={stats.header} loading={loading} />
+      <Row icon={<BuildOutlined />} label="Footer" value={stats.footer} loading={loading} />
+      <Row icon={<EyeOutlined />} label="Preview" value={stats.preview} loading={loading} />
+    </div>
+  </div>
+);
+
+const Row: React.FC<{ icon: React.ReactNode; label: string; value: string; warn?: boolean; loading: boolean }> = ({ icon, label, value, warn, loading }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f0eded', paddingBottom: '8px', alignItems: 'center' }}>
+    <span style={{ fontSize: '13px', color: '#414755', display: 'flex', alignItems: 'center', gap: '6px' }}>{icon} {label}</span>
+    <span style={{ fontSize: '13px', fontWeight: 600, color: warn ? '#ba1a1a' : '#1b1b1c' }}>
+      {loading ? <SkeletonBlock width="48px" height="16px" /> : value}
+    </span>
+  </div>
+);
+
 export const MappingOverviewStep: React.FC = () => {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isActive, setIsActive] = useState(false);
+  const buttonStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    backgroundColor: isHovered ? '#1a3847' : '#234B5F', // Darkens slightly on hover
+    color: '#ffffff',
+    border: isHovered ? '1.5px solid #1a3847' : '1.5px solid #234B5F',
+    padding: '8px 10px',
+    borderRadius: '6px',
+    fontSize: '12px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    transition: 'all 0.2s ease-in-out',
+    transform: isActive ? 'scale(0.98)' : 'scale(1)', // Slight press effect on click
+    boxShadow: isHovered ? '0 4px 6px -1px rgba(35, 75, 95, 0.2)' : 'none',
+  };
   const dispatch = useAppDispatch();
   const form = useAppSelector((s) => s.validation.validationForm);
   const cache = useAppSelector((s) => s.validation.overviewProfileCache);
@@ -82,7 +138,19 @@ export const MappingOverviewStep: React.FC = () => {
     rowCount: form.sourceFileSize === 0 ? 0 : sourceProfile.profile?.row_count ?? null,
     // ⚡ Header and footer mapping
     header: formatBoolean(sourceProfile.profile?.has_header),
-    footer: formatBoolean((sourceProfile.profile as any)?.has_footer) // Assuming API might pass this later
+    footer: formatBoolean((sourceProfile.profile as any)?.has_footer), // Assuming API might pass this later
+    preview: <button
+      style={buttonStyle}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        setIsActive(false); // Resets the click effect if the user drags the mouse away
+      }}
+      onMouseDown={() => setIsActive(true)}
+      onMouseUp={() => setIsActive(false)}
+    >
+      <EyeOutlined style={{ fontSize: '16px' }} />
+    </button>,
   };
 
   const targetStats = {
@@ -94,7 +162,19 @@ export const MappingOverviewStep: React.FC = () => {
     rowCount: targetProfile.profile?.row_count ?? null,
     // ⚡ Header and footer mapping
     header: formatBoolean(targetProfile.profile?.has_header),
-    footer: formatBoolean((targetProfile.profile as any)?.has_footer)
+    footer: formatBoolean((targetProfile.profile as any)?.has_footer),
+    preview: <button
+      style={buttonStyle}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        setIsActive(false); // Resets the click effect if the user drags the mouse away
+      }}
+      onMouseDown={() => setIsActive(true)}
+      onMouseUp={() => setIsActive(false)}
+    >
+      <EyeOutlined style={{ fontSize: '16px' }} />
+    </button>,
   };
 
   const isFetching = sourceProfile.loading || targetProfile.loading;
@@ -150,38 +230,3 @@ export const MappingOverviewStep: React.FC = () => {
     </div>
   );
 };
-
-const FileCard: React.FC<{ label: string; color: string; stats: any; warn: any; loading: boolean; icon?: React.ReactNode; }> = ({ label, color, stats, warn, loading, icon }) => (
-  <div style={{ flex: 1, backgroundColor: '#fff', border: '1px solid #d9d9d9', borderRadius: '12px', padding: '24px', minWidth: '300px' }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color }}>
-      {icon ?? <FileTextOutlined />}
-      <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase' }}>{label}</span>
-    </div>
-
-    <h4 style={{ margin: '0 0 4px 0', fontSize: '18px', minHeight: '24px' }}>
-      {loading ? <SkeletonBlock width="60%" height="24px" /> : stats.name}
-    </h4>
-    <div style={{ fontSize: '12px', color: '#727786', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', minHeight: '16px' }}>
-      {loading ? <SkeletonBlock width="90%" height="16px" /> : stats.path}
-    </div>
-
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
-      <Row icon={<ProfileOutlined />} label="Format" value={stats.format} loading={loading} />
-      <Row icon={<HddOutlined />} label="Size" value={formatBytes(stats.sizeBytes)} warn={warn.size} loading={loading} />
-      <Row icon={<TableOutlined />} label="Columns" value={formatCount(stats.columnCount)} warn={warn.columns} loading={loading} />
-      <Row icon={<BarcodeOutlined />} label="Rows" value={formatCount(stats.rowCount)} warn={warn.rows} loading={loading} />
-      {/* ⚡ Added new Header & Footer attributes */}
-      <Row icon={<BuildOutlined />} label="Header" value={stats.header} loading={loading} />
-      <Row icon={<BuildOutlined />} label="Footer" value={stats.footer} loading={loading} />
-    </div>
-  </div>
-);
-
-const Row: React.FC<{ icon: React.ReactNode; label: string; value: string; warn?: boolean; loading: boolean }> = ({ icon, label, value, warn, loading }) => (
-  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f0eded', paddingBottom: '8px', alignItems: 'center' }}>
-    <span style={{ fontSize: '13px', color: '#414755', display: 'flex', alignItems: 'center', gap: '6px' }}>{icon} {label}</span>
-    <span style={{ fontSize: '13px', fontWeight: 600, color: warn ? '#ba1a1a' : '#1b1b1c' }}>
-      {loading ? <SkeletonBlock width="48px" height="16px" /> : value}
-    </span>
-  </div>
-);
