@@ -5,6 +5,7 @@ import type {
   ValidateRequest,
   ValidationHistoryDetail,
 } from '../../shared/api/Api';
+import { Api } from '../../shared/api/Api';
 import type { ValidationFormState } from './Validation.interface';
 import { gcsUri } from '../report/reportPairId';
 
@@ -50,6 +51,24 @@ export const enrichFormWithConnections = (
     ?? connections.find((c) => c.active && c.bucket.trim() === (form.sourceCloud?.bucket ?? '').trim())?.id
     ?? null,
 });
+
+/** Load a persisted validation run and map it into wizard form fields. */
+export const loadValidationRunForm = async (
+  runId: string,
+): Promise<Partial<ValidationFormState>> => {
+  const { data: detail } = await Api.getValidationHistoryRun(runId);
+  let formPatch = formFromHistory(detail);
+  try {
+    const { data: connections } = await Api.listCloudConnections();
+    formPatch = enrichFormWithConnections(
+      formPatch,
+      connections.filter((c) => c.active && c.provider === 'google-cloud-storage'),
+    );
+  } catch {
+    // Paths without connection metadata still render read-only labels.
+  }
+  return formPatch;
+};
 
 export const formFromHistory = (detail: ValidationHistoryDetail): Partial<ValidationFormState> => {
   const sourceCloud = cloudFromPath(detail.source_path);

@@ -11,8 +11,12 @@ export const Header: React.FC = () => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const getLinkClass = (path: string): string =>
-    currentPath === path ? styles.navLinkActive : styles.navLink;
+  const getLinkClass = (path: string): string => {
+    const active = path === '/validations'
+      ? currentPath === '/validations' || currentPath.startsWith('/validations/')
+      : currentPath === path;
+    return active ? styles.navLinkActive : styles.navLink;
+  };
 
   // Close the dropdown if the user clicks outside of it
   useEffect(() => {

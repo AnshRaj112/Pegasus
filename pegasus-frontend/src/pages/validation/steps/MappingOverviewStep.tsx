@@ -1,13 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   DatabaseOutlined, FileTextOutlined, ArrowRightOutlined,
   CheckCircleFilled, WarningFilled, ProfileOutlined,
-  HddOutlined, TableOutlined, BarcodeOutlined, BuildOutlined
+  HddOutlined, TableOutlined, BarcodeOutlined, BuildOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
-import { Api, type CloudFileProfileResponse, type GoogleCloudStorageConfig } from '../../../shared/api/Api';
+import { Api, type CloudFileProfileResponse, type GoogleCloudStorageConfig, type LocalColumnPreviewResponse } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
-import { EyeOutlined } from '@ant-design/icons';
+import { OverviewFilePreview } from './OverviewFilePreview';
 
 const formatBytes = (bytes: number | null) => {
   if (bytes == null) return '—';
@@ -31,7 +32,6 @@ const formatCount = (value: number | null | undefined) => value == null ? '—' 
 const gsPath = (bucket: string | null, objectName: string | null) => bucket && objectName ? `gs://${bucket}/${objectName}` : '—';
 const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string => cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';
 
-// ⚡ Safely stringify booleans for the UI
 const formatBoolean = (val: boolean | null | undefined) => {
   if (val === true) return 'Yes';
   if (val === false) return 'No';
@@ -45,7 +45,63 @@ const SkeletonBlock: React.FC<{ width?: string; height?: string }> = ({ width = 
   <div style={{ width, height, backgroundColor: '#e2e8f0', borderRadius: '4px', animation: 'skeleton-pulse 1.5s ease-in-out infinite' }} />
 );
 
-const FileCard: React.FC<{ label: string; color: string; stats: any; warn: any; loading: boolean; icon?: React.ReactNode; }> = ({ label, color, stats, warn, loading, icon }) => (
+const PreviewButton: React.FC<{ onClick: () => void; disabled?: boolean }> = ({ onClick, disabled }) => {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isActive, setIsActive] = useState(false);
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        setIsActive(false);
+      }}
+      onMouseDown={() => setIsActive(true)}
+      onMouseUp={() => setIsActive(false)}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '8px',
+        backgroundColor: disabled ? '#e5e2e1' : isHovered ? '#1a3847' : '#234B5F',
+        color: disabled ? '#727786' : '#ffffff',
+        border: disabled ? '1.5px solid #e5e2e1' : isHovered ? '1.5px solid #1a3847' : '1.5px solid #234B5F',
+        padding: '8px 10px',
+        borderRadius: '6px',
+        fontSize: '12px',
+        fontWeight: 500,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        transition: 'all 0.2s ease-in-out',
+        transform: isActive ? 'scale(0.98)' : 'scale(1)',
+        boxShadow: isHovered && !disabled ? '0 4px 6px -1px rgba(35, 75, 95, 0.2)' : 'none',
+      }}
+    >
+      <EyeOutlined style={{ fontSize: '16px' }} />
+    </button>
+  );
+};
+
+const FileCard: React.FC<{
+  label: string;
+  color: string;
+  stats: {
+    name: string;
+    path: string;
+    format: string;
+    sizeBytes: number | null;
+    columnCount: number | null;
+    rowCount: number | null;
+    header: string;
+    footer: string;
+    preview: React.ReactNode;
+  };
+  warn: { size: boolean; columns: boolean; rows: boolean };
+  loading: boolean;
+  icon?: React.ReactNode;
+}> = ({ label, color, stats, warn, loading, icon }) => (
   <div style={{ flex: 1, backgroundColor: '#fff', border: '1px solid #d9d9d9', borderRadius: '12px', padding: '24px', minWidth: '300px' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color }}>
       {icon ?? <FileTextOutlined />}
@@ -64,32 +120,42 @@ const FileCard: React.FC<{ label: string; color: string; stats: any; warn: any; 
       <Row icon={<HddOutlined />} label="Size" value={formatBytes(stats.sizeBytes)} warn={warn.size} loading={loading} />
       <Row icon={<TableOutlined />} label="Columns" value={formatCount(stats.columnCount)} warn={warn.columns} loading={loading} />
       <Row icon={<BarcodeOutlined />} label="Rows" value={formatCount(stats.rowCount)} warn={warn.rows} loading={loading} />
-      {/* ⚡ Added new Header & Footer attributes */}
       <Row icon={<BuildOutlined />} label="Header" value={stats.header} loading={loading} />
       <Row icon={<BuildOutlined />} label="Footer" value={stats.footer} loading={loading} />
-      <Row icon={<EyeOutlined />} label="Preview" value={stats.preview} loading={loading} />
+      <Row icon={<EyeOutlined />} label="Preview" value={stats.preview} loading={loading} isNode />
     </div>
   </div>
 );
 
-const Row: React.FC<{ icon: React.ReactNode; label: string; value: string; warn?: boolean; loading: boolean }> = ({ icon, label, value, warn, loading }) => (
+const Row: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+  warn?: boolean;
+  loading: boolean;
+  isNode?: boolean;
+}> = ({ icon, label, value, warn, loading, isNode }) => (
   <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f0eded', paddingBottom: '8px', alignItems: 'center' }}>
     <span style={{ fontSize: '13px', color: '#414755', display: 'flex', alignItems: 'center', gap: '6px' }}>{icon} {label}</span>
     <span style={{ fontSize: '13px', fontWeight: 600, color: warn ? '#ba1a1a' : '#1b1b1c' }}>
-      {loading ? <SkeletonBlock width="48px" height="16px" /> : value}
+      {loading && !isNode ? <SkeletonBlock width="48px" height="16px" /> : value}
     </span>
   </div>
 );
 
 export const MappingOverviewStep: React.FC = () => {
-  const [isHovered, setIsHovered] = useState(false);
-  const [isActive, setIsActive] = useState(false);
   const dispatch = useAppDispatch();
   const form = useAppSelector((s) => s.validation.validationForm);
   const cache = useAppSelector((s) => s.validation.overviewProfileCache);
 
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewData, setPreviewData] = useState<LocalColumnPreviewResponse | null>(null);
+
   const sourceKey = cloudObjectKey(form.sourceCloud);
   const targetKey = cloudObjectKey(form.targetCloud);
+  const previewPairKey = `${sourceKey}|${targetKey}|${form.delimiter || 'auto'}|${form.hasHeader}`;
   const cacheHit = cache?.sourceKey === sourceKey && cache?.targetKey === targetKey;
 
   const sourceProfile: FileProfileState = !form.sourceCloud ? emptyProfileState : cacheHit ? { profile: cache.source, loading: false, error: cache.sourceError } : { profile: null, loading: true, error: false };
@@ -112,23 +178,62 @@ export const MappingOverviewStep: React.FC = () => {
     return () => { cancelled = true; };
   }, [form.sourceCloud, form.targetCloud, sourceKey, targetKey, cacheHit, dispatch, form.delimiter, form.hasHeader]);
 
-  const buttonStyle: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    backgroundColor: isHovered ? '#1a3847' : '#234B5F', // Darkens slightly on hover
-    color: '#ffffff',
-    border: isHovered ? '1.5px solid #1a3847' : '1.5px solid #234B5F',
-    padding: '8px 10px',
-    borderRadius: '6px',
-    fontSize: '12px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    transition: 'all 0.2s ease-in-out',
-    transform: isActive ? 'scale(0.98)' : 'scale(1)', // Slight press effect on click
-    boxShadow: isHovered ? '0 4px 6px -1px rgba(35, 75, 95, 0.2)' : 'none',
-  };
+  useEffect(() => {
+    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey) {
+      setPreviewData(null);
+      setPreviewError(null);
+      setPreviewLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError(null);
+
+    Api.previewValidationColumns({
+      source_cloud: form.sourceCloud,
+      target_cloud: form.targetCloud,
+      uid_column: form.uidColumn || 'id',
+      delimiter: form.delimiter || 'auto',
+      has_header: form.hasHeader,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        setPreviewData(res.data);
+      })
+      .catch((err: { response?: { data?: { detail?: unknown } } }) => {
+        if (cancelled) return;
+        const detail = err.response?.data?.detail;
+        const message = typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((item) => (typeof item === 'object' && item && 'msg' in item ? String((item as { msg: string }).msg) : String(item))).join('; ')
+            : null;
+        setPreviewError(message ?? 'Could not load file preview from server');
+        setPreviewData(null);
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [form.sourceCloud, form.targetCloud, form.uidColumn, form.delimiter, form.hasHeader, previewPairKey, sourceKey, targetKey]);
+
+  useEffect(() => {
+    setPreviewOpen(false);
+  }, [previewPairKey]);
+
+  const openPreview = useCallback(() => {
+    setPreviewOpen(true);
+  }, []);
+
+  const previewControl = previewData
+    ? <PreviewButton onClick={openPreview} />
+    : previewLoading
+      ? <SkeletonBlock width="36px" height="32px" />
+      : '—';
+
+  const isFetching = sourceProfile.loading || targetProfile.loading;
 
   const sourceStats = {
     name: form.sourceFileName ?? '—',
@@ -137,21 +242,9 @@ export const MappingOverviewStep: React.FC = () => {
     sizeBytes: sourceProfile.profile?.file_size_bytes ?? form.sourceFileSize,
     columnCount: form.sourceFileSize === 0 ? 0 : sourceProfile.profile?.column_count ?? null,
     rowCount: form.sourceFileSize === 0 ? 0 : sourceProfile.profile?.row_count ?? null,
-    // ⚡ Header and footer mapping
     header: formatBoolean(sourceProfile.profile?.has_header),
-    footer: formatBoolean((sourceProfile.profile as any)?.has_footer), // Assuming API might pass this later
-    preview: <button
-      style={buttonStyle}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => {
-        setIsHovered(false);
-        setIsActive(false); // Resets the click effect if the user drags the mouse away
-      }}
-      onMouseDown={() => setIsActive(true)}
-      onMouseUp={() => setIsActive(false)}
-    >
-      <EyeOutlined style={{ fontSize: '16px' }} />
-    </button>,
+    footer: formatBoolean((sourceProfile.profile as { has_footer?: boolean })?.has_footer),
+    preview: previewControl,
   };
 
   const targetStats = {
@@ -161,28 +254,11 @@ export const MappingOverviewStep: React.FC = () => {
     sizeBytes: targetProfile.profile?.file_size_bytes ?? form.targetFileSize,
     columnCount: targetProfile.profile?.column_count ?? null,
     rowCount: targetProfile.profile?.row_count ?? null,
-    // ⚡ Header and footer mapping
     header: formatBoolean(targetProfile.profile?.has_header),
-    footer: formatBoolean((targetProfile.profile as any)?.has_footer),
-    preview: <button
-      style={buttonStyle}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => {
-        setIsHovered(false);
-        setIsActive(false); // Resets the click effect if the user drags the mouse away
-      }}
-      onMouseDown={() => setIsActive(true)}
-      onMouseUp={() => setIsActive(false)}
-    >
-      <EyeOutlined style={{ fontSize: '16px' }} />
-    </button>,
+    footer: formatBoolean((targetProfile.profile as { has_footer?: boolean })?.has_footer),
+    preview: previewControl,
   };
 
-  
-
-  const isFetching = sourceProfile.loading || targetProfile.loading;
-
-  // ⚡ Updated to aggregate ALL warnings simultaneously
   const runComparison = () => {
     if (!form.sourceCloud || !form.targetCloud) return { status: 'warning' as const, title: 'Files not selected', message: 'Select source and target GCS objects in step 1.', mismatches: { size: false, columns: false, rows: false } };
     if (isFetching) return { status: 'warning' as const, title: 'Analyzing files', message: 'Detecting format and estimating file shape…', mismatches: { size: false, columns: false, rows: false } };
@@ -204,7 +280,7 @@ export const MappingOverviewStep: React.FC = () => {
         status: 'warning' as const,
         title: issues.length > 1 ? 'Multiple Mismatches Detected' : 'Mismatch Detected',
         message: `Source and target differ in: ${issues.join(' | ')}.`,
-        mismatches
+        mismatches,
       };
     }
 
@@ -222,6 +298,16 @@ export const MappingOverviewStep: React.FC = () => {
         <ArrowRightOutlined style={{ fontSize: '20px', color: '#727786' }} />
         <FileCard label="Target" color="#234B5F" icon={<DatabaseOutlined />} stats={targetStats} warn={alert.mismatches} loading={isFetching} />
       </div>
+
+      <OverviewFilePreview
+        open={previewOpen}
+        preview={previewData}
+        sourceLabel={sourceStats.name}
+        targetLabel={targetStats.name}
+        loading={previewLoading}
+        error={previewError}
+        onClose={() => setPreviewOpen(false)}
+      />
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '16px 20px', borderRadius: '8px', backgroundColor: alert.status === 'success' ? '#f0fdf4' : '#fffbeb', border: `1px solid ${alert.status === 'success' ? '#bbf7d0' : '#fde68a'}` }}>
         {alert.status === 'success' ? <CheckCircleFilled style={{ color: '#16a34a', fontSize: '20px' }} /> : <WarningFilled style={{ color: '#d97706', fontSize: '20px' }} />}

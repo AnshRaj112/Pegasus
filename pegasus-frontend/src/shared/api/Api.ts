@@ -137,6 +137,7 @@ export interface LocalColumnPreviewResponse {
   inferred_has_header?: boolean | null;
   source_samples: Record<string, string[]>;
   target_samples: Record<string, string[]>;
+  sample_row_count?: number;
   complex_columns?: string[];
   needs_order_preference?: boolean;
 }
@@ -468,6 +469,6 @@ export const Api = {
     httpClient.get(E.validateHistoryMismatches(runId), { params }),
 
   /** POST /validate/history/draft — save mapping without running */
-  saveValidationDraft: (body: SaveDraftRequest): Promise<AxiosResponse<unknown>> =>
+  saveValidationDraft: (body: SaveDraftRequest): Promise<AxiosResponse<ValidationHistoryDetail>> =>
     httpClient.post(E.validateHistoryDraft, body),
 };
