@@ -50,10 +50,11 @@ class TabularPipelineConfig:
     distributed_redis_url: str | None = None
     distributed_job_id: str | None = None
     distributed_min_bytes: int = 10 * 1024 * 1024 * 1024
+    stream_mismatches_to_disk: bool = True
     compare_policy: ComparePolicy | None = None
 
     def resolved_partition_count(self) -> int:
         if self.partition_preset and self.partition_preset in _PARTITION_PRESETS:
             preset = _PARTITION_PRESETS[self.partition_preset]
             return min(self.partition_count, preset) if self.partition_count else preset
-        return max(1024, self.partition_count)
+        return max(1, self.partition_count)

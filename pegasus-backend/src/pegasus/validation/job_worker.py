@@ -490,7 +490,11 @@ def _run_job_body(
             pipeline_path = extra_stats.get("path") if isinstance(extra_stats, dict) else None
             if pipeline_path is None:
                 pipeline_path = (getattr(result, "pipeline_metadata", None) or {}).get("path")
-            if wave_export.is_file():
+            if not settings.validation_stream_mismatches_to_disk:
+                logger.info(
+                    "Skipping spill mismatch NDJSON export (validation_stream_mismatches_to_disk=false)"
+                )
+            elif wave_export.is_file():
                 try:
                     export_path.write_bytes(wave_export.read_bytes())
                     artifact = export_path

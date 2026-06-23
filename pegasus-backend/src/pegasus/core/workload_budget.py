@@ -110,7 +110,10 @@ def plan_workload_budget(
         chunk_rows = max(4096, chunk_rows // 2)
 
     workers_cap_by_memory = max(1, usable_budget // (max(1, chunk_rows * estimated_row_bytes * chunk_buffers)))
-    workers = requested_max_workers if requested_max_workers is not None else cores
+    if requested_max_workers is not None and requested_max_workers > 0:
+        workers = requested_max_workers
+    else:
+        workers = cores
     worker_ceiling = min(cores, 16 if file_bytes >= 8 * 1024**3 else 8)
     workers = min(max(1, workers), worker_ceiling, workers_cap_by_memory)
 

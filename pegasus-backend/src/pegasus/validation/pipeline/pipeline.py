@@ -117,15 +117,16 @@ def _adaptive_partition_count(
         max_partitions = 1024
     row_cap = max(
         4,
-        min(requested, max_partitions, (est_rows + rows_per_partition - 1) // rows_per_partition),
+        min(max_partitions, (est_rows + rows_per_partition - 1) // rows_per_partition),
     )
+    capped = min(requested, row_cap) if requested > 0 else row_cap
     if file_bytes <= 4 * 1024 * 1024:
-        return min(requested, 16, row_cap)
+        return min(capped, 16)
     if file_bytes <= 32 * 1024 * 1024:
-        return min(requested, 64, row_cap)
+        return min(capped, 64)
     if file_bytes <= 128 * 1024 * 1024:
-        return min(requested, 256, row_cap)
-    return row_cap
+        return min(capped, 256)
+    return capped
 
 
 def _compare_schemas(source: TabularSchema, target: TabularSchema) -> list[SchemaDifference]:
@@ -627,7 +628,11 @@ class TabularReconciliationPipeline:
         )
         sorted_pids = sorted(active_pids)
         waves = partition_waves(sorted_pids, wave_size) if use_waves else [sorted_pids]
-        mismatch_export_path = work / "mismatches_partial.ndjson" if use_waves else None
+        mismatch_export_path = (
+            work / "mismatches_partial.ndjson"
+            if use_waves and self._config.stream_mismatches_to_disk
+            else None
+        )
 
         try:
             assert_disk_headroom(
@@ -780,14 +785,15 @@ class TabularReconciliationPipeline:
             if live_progress is not None:
                 live_progress.on_reconcile_done(partitions_done=partitions_done)
 
-            if use_waves and mismatch_export_path is not None:
-                export_partitions_to_ndjson(
-                    work,
-                    mismatch_export_path,
-                    compare_columns=compare_columns,
-                    pids=wave_pids,
-                    append=wave_idx > 0,
-                )
+            if use_waves:
+                if mismatch_export_path is not None:
+                    export_partitions_to_ndjson(
+                        work,
+                        mismatch_export_path,
+                        compare_columns=compare_columns,
+                        pids=wave_pids,
+                        append=wave_idx > 0,
+                    )
                 delete_partition_files(work, wave_pids)
                 checkpoint = {
                     "completed_wave": wave_idx,

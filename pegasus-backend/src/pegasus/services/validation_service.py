@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from pegasus.core.config import Settings
-from pegasus.core.resource_tuning import cap_partition_buckets
+from pegasus.core.resource_tuning import align_partition_buckets_to_threads, cap_partition_buckets
+from pegasus.services.queue_resource_policy import QueueResourcePolicy
 from pegasus.core.workload_budget import plan_workload_budget
 from pegasus.schemas.validation import (
     CloudFileProfileResponse,
@@ -87,6 +88,20 @@ class ValidationService:
         memory_budget = int(
             policy.get("memory_budget_bytes") or self._settings.validation_memory_budget_bytes
         )
+        target_duration = int(
+            policy.get("target_duration_seconds") or self._settings.validation_target_duration_seconds
+        )
+        cpu_cores = os.cpu_count() or 1
+        stamped_effective = policy.get("effective_threads_per_job")
+        raw_threads = policy.get("threads_per_job")
+        if stamped_effective is not None and int(stamped_effective) > 0:
+            requested_max_workers = int(stamped_effective)
+        elif raw_threads is not None and int(raw_threads) > 0:
+            requested_max_workers = int(raw_threads)
+        else:
+            requested_max_workers = QueueResourcePolicy.from_settings(
+                self._settings
+            ).effective_threads(cpu_cores=cpu_cores)
         inline_native = native_multichar.native_extension_available()
         row_width = _estimated_row_bytes(
             compare_column_count=compare_column_count,
@@ -102,20 +117,24 @@ class ValidationService:
             source_bytes=source_bytes,
             target_bytes=target_bytes,
             compare_column_count=compare_column_count,
-            cpu_cores=os.cpu_count() or 1,
+            cpu_cores=cpu_cores,
             memory_budget_bytes=memory_budget,
-            target_duration_seconds=self._settings.validation_target_duration_seconds,
+            target_duration_seconds=target_duration,
             requested_chunk_rows=self._settings.validation_reconciliation_chunk_rows,
             requested_partition_buckets=cap_partition_buckets(
                 self._settings.validation_reconciliation_partition_buckets,
                 combined_file_bytes=source_bytes + target_bytes,
             ),
-            requested_max_workers=policy.get("threads_per_job"),
+            requested_max_workers=requested_max_workers,
             requested_sub_partition_buckets=self._settings.validation_reconciliation_sub_partition_buckets,
             source_row_estimate=source_row_estimate,
             target_row_estimate=target_row_estimate,
             identity_column_count=identity_column_count,
             inline_native_spill=inline_native,
+        )
+        partition_buckets = align_partition_buckets_to_threads(
+            budget.partition_buckets,
+            budget.max_parallel_workers,
         )
         preset = self._settings.validation_tabular_partition_preset
         reconcile_workers = self._settings.validation_partition_reconcile_workers
@@ -123,7 +142,7 @@ class ValidationService:
             reconcile_workers = budget.max_parallel_workers
         return TabularPipelineConfig(
             chunk_rows=budget.chunk_rows,
-            partition_count=budget.partition_buckets,
+            partition_count=partition_buckets,
             partition_preset=preset,
             enable_column_drilldown=self._settings.validation_tabular_enable_column_drilldown,
             enable_in_memory_reconcile=self._settings.validation_enable_in_memory_reconcile,
@@ -147,6 +166,7 @@ class ValidationService:
             distributed_enabled=self._settings.validation_distributed_enabled,
             distributed_redis_url=self._settings.validation_redis_url,
             distributed_min_bytes=self._settings.validation_distributed_min_bytes,
+            stream_mismatches_to_disk=self._settings.validation_stream_mismatches_to_disk,
         )
 
     def _resolve_delimiter(
