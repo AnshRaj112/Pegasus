@@ -95,11 +95,6 @@ export const ValidationWizardView: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '24px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
       <header className={styles.wizardHeaderShell}>
         <div className={styles.wizardHeaderLogoGroup}>
-          <div style={{ width: '24px', height: '24px', color: 'var(--primary, #234B5F)' }}>
-            <svg fill="none" viewBox="0 0 48 48" xmlns="http://w3.org">
-              <path d="M44 4H30.6666V17.3334H17.3334V30.6666H4V44H44V4Z" fill="currentColor" />
-            </svg>
-          </div>
           <h2 style={{ fontSize: '18px', fontWeight: 700, margin: 0, letterSpacing: '-0.015em' }}>
             File-to-File Validation Tool
           </h2>
