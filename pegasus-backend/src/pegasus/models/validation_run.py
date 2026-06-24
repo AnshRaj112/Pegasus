@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-23T11:11:28Z
+# Last edited: 2026-06-24T10:28:40+05:30
 # --- END GENERATED FILE METADATA ---
 
 """ORM model for a validation execution stored in PostgreSQL."""
@@ -70,6 +70,7 @@ class ValidationRun(Base):
     missing_in_target_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     extra_in_target_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     value_mismatch_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    value_mismatch_row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_mismatch_records: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     source_row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

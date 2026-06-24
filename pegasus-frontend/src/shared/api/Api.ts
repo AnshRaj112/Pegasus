@@ -152,6 +152,7 @@ export interface MismatchCounts {
   missing_in_target: number;
   extra_in_target: number;
   value_mismatch: number;
+  value_mismatch_rows?: number;
 }
 
 export interface MismatchSampleRow {
