@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T05:22:13Z
+# Last edited: 2026-06-24T06:44:56Z
 # --- END GENERATED FILE METADATA ---
 
 """Layer 9: validation strategy and dataset model selection."""
@@ -41,7 +41,14 @@ def select_validation_strategy(
         if structured.metadata.get("delimiter"):
             pass
     if magic and magic.confidence >= 70:
-        add(magic.detected_type, magic.confidence, "magic")
+        magic_type = magic.detected_type
+        structured_tabular = (
+            structured
+            and structured.confidence >= 60
+            and structured.detected_type in {"fixed-width", "csv", "tsv", "psv"}
+        )
+        if not (magic_type == "text" and structured_tabular):
+            add(magic_type, magic.confidence, "magic")
     if compression and compression.detected_type != "none" and compression.confidence >= 80:
         add(compression.detected_type, compression.confidence, "compression")
     if container and container.detected_type not in {"none"} and container.confidence >= 70:
@@ -125,13 +132,49 @@ def select_validation_strategy(
         stage = DetectionStage("fixed-width", best_conf, evidence=[f"resolved from {best_src}"])
         return stage, "tabular", "fixed-width", None, warnings
 
+    ambiguous_tabular = (
+        extension is not None
+        and extension.metadata.get("ambiguous_tabular")
+        and not (structured and structured.confidence >= 60)
+    )
+
+    _DELIMITED_EXTENSIONS = {".csv", ".tsv", ".psv"}
+
+    if best_kind == "text" and not (structured and structured.confidence >= 60):
+        ext = str(extension.metadata.get("extension", "") if extension else "").lower()
+        if ext in _DELIMITED_EXTENSIONS:
+            fmt = "tsv" if ext == ".tsv" else "psv" if ext == ".psv" else "csv"
+            stage = DetectionStage(fmt, best_conf, evidence=[f"text/plain with {ext} extension"])
+            return stage, "tabular", fmt, None, warnings
+        stage = DetectionStage(
+            "txt",
+            best_conf,
+            evidence=["generic text without tabular structure"],
+        )
+        return stage, "unknown", None, None, warnings
+
     if best_kind in _TABULAR or best_kind in {"csv", "tsv", "psv", "text"}:
+        if ambiguous_tabular and best_kind == "text":
+            stage = DetectionStage(
+                "txt",
+                best_conf,
+                evidence=["plain text without delimited/fixed-width structure"],
+            )
+            return stage, "unknown", None, None, warnings
         fmt = best_kind if best_kind in {"csv", "tsv", "psv"} else "csv"
         delim = None
         if structured and structured.metadata.get("delimiter"):
             delim = structured.metadata["delimiter"]
         stage = DetectionStage(fmt, best_conf, evidence=[f"tabular route from {best_src}"])
         return stage, "tabular", fmt, delim, warnings
+
+    if best_kind == "txt" and ambiguous_tabular:
+        stage = DetectionStage(
+            "txt",
+            best_conf,
+            evidence=["ambiguous tabular suffix without structure match"],
+        )
+        return stage, "unknown", None, None, warnings
 
     if best_kind == "xml" or best_kind == "yaml":
         stage = DetectionStage("unknown", 40, evidence=[f"{best_kind} not yet supported for validation"])

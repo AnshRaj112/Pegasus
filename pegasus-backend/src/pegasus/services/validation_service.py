@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T05:22:13Z
+# Last edited: 2026-06-24T17:03:25+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Validation service — routes tabular full validation through Category-1 pipeline."""
@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+import polars as pl
+
 from pegasus.core.config import Settings
 from pegasus.core.resource_tuning import align_partition_buckets_to_threads, cap_partition_buckets
 from pegasus.services.queue_resource_policy import QueueResourcePolicy
@@ -19,13 +21,20 @@ from pegasus.core.workload_budget import plan_workload_budget
 from pegasus.schemas.validation import (
     CloudFileProfileResponse,
     ColumnMapping,
+    FixedWidthConfig,
     LitmusComparison,
     LitmusFileStats,
     ValidationTestMode,
 )
 from pegasus.services.exceptions import ValidationBadRequestError, ValidationUnprocessableError
 from pegasus.services.validation_results import ValidationRunDurations, ValidationRunResult
-from pegasus.validation.adapters.file_columnar import FileColumnarAdapter
+from pegasus.validation.test_mode_policy import (
+    MismatchCollectionPolicy,
+    build_litmus_row_count_failure,
+    clamp_snippet_limit,
+    finalize_litmus_run_result,
+    resolve_mismatch_collection_policy,
+)
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
 from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter, create_delimited_adapter
 from pegasus.validation.comparators.models import MismatchReport, empty_mismatch_frame
@@ -78,6 +87,7 @@ class ValidationService:
         compare_column_count: int,
         identity_column_count: int = 1,
         resource_policy: dict[str, Any] | None = None,
+        collection_policy: MismatchCollectionPolicy | None = None,
     ) -> TabularPipelineConfig:
         import os
 
@@ -140,6 +150,15 @@ class ValidationService:
         reconcile_workers = self._settings.validation_partition_reconcile_workers
         if reconcile_workers <= 0:
             reconcile_workers = budget.max_parallel_workers
+        policy = collection_policy or resolve_mismatch_collection_policy(
+            self._settings,
+            test_mode=ValidationTestMode.FULL,
+            compare_column_count=compare_column_count,
+        )
+        stream_to_disk = (
+            self._settings.validation_stream_mismatches_to_disk
+            and policy.export_mismatch_artifact
+        )
         return TabularPipelineConfig(
             chunk_rows=budget.chunk_rows,
             partition_count=partition_buckets,
@@ -166,7 +185,8 @@ class ValidationService:
             distributed_enabled=self._settings.validation_distributed_enabled,
             distributed_redis_url=self._settings.validation_redis_url,
             distributed_min_bytes=self._settings.validation_distributed_min_bytes,
-            stream_mismatches_to_disk=self._settings.validation_stream_mismatches_to_disk,
+            stream_mismatches_to_disk=stream_to_disk,
+            mismatch_sample_limit=policy.pipeline_sample_limit,
         )
 
     def _resolve_delimiter(
@@ -237,10 +257,8 @@ class ValidationService:
         file_format: str = "csv",
         resource_policy: dict[str, Any] | None = None,
         test_mode: ValidationTestMode = ValidationTestMode.FULL,
+        mismatch_snippet_limit: int | None = None,
     ) -> ValidationRunResult:
-        if test_mode == ValidationTestMode.LITMUS:
-            raise ValidationBadRequestError("Litmus mode is not supported for cloud streaming inputs yet")
-
         if progress_callback:
             progress_callback({"phase": "planning", "message": "Planning reconciliation budget"})
 
@@ -282,12 +300,29 @@ class ValidationService:
         compare_columns = compare_policy.compare_keys
         identity_columns = parse_identity_columns(uid_column) or [uid_column.strip()]
 
+        collection_policy = resolve_mismatch_collection_policy(
+            self._settings,
+            test_mode=test_mode,
+            mismatch_snippet_limit=mismatch_snippet_limit,
+            compare_column_count=len(compare_columns),
+        )
+        if collection_policy.fail_on_row_count_mismatch:
+            source_count = int(source.get_row_count() or 0)
+            target_count = int(target.get_row_count() or 0)
+            if source_count != target_count:
+                return build_litmus_row_count_failure(
+                    source_row_count=source_count,
+                    target_row_count=target_count,
+                    compared_columns=compare_columns,
+                )
+
         cfg = self._pipeline_config(
             source_bytes=source.get_size_bytes(),
             target_bytes=target.get_size_bytes(),
             compare_column_count=len(compare_columns),
             identity_column_count=len(identity_columns),
             resource_policy=resource_policy,
+            collection_policy=collection_policy,
         )
         cfg.compare_policy = compare_policy
         if artifact_export_parent is not None:
@@ -383,7 +418,113 @@ class ValidationService:
 
         run_result = pipeline_result_to_run_result(result)
         run_result.durations = ValidationRunDurations(validation_seconds=elapsed)
-        return run_result
+        run_result.test_mode = test_mode.value
+        run_result.mismatch_snippet_limit = (
+            clamp_snippet_limit(self._settings, requested=mismatch_snippet_limit)
+            if test_mode == ValidationTestMode.FULL
+            else None
+        )
+        return finalize_litmus_run_result(run_result)
+
+    def validate_fixed_width_pair_sync(
+        self,
+        source_path: Path,
+        target_path: Path,
+        fixed_width_config: FixedWidthConfig | dict[str, Any],
+        *,
+        artifact_export_parent: Path | None = None,
+        test_mode: ValidationTestMode = ValidationTestMode.FULL,
+        mismatch_snippet_limit: int | None = None,
+    ) -> ValidationRunResult:
+        """Compare two fixed-width files using explicit slice configuration."""
+        from pegasus.api.v1.mismatch_sample import build_grouped_mismatch_samples
+        from pegasus.validation.fixed_width import read_fixed_width_records, validate_fixed_width_pair
+
+        source_path = source_path.resolve()
+        target_path = target_path.resolve()
+        if not source_path.is_file():
+            raise ValidationBadRequestError(f"Source file not found: {source_path}")
+        if not target_path.is_file():
+            raise ValidationBadRequestError(f"Target file not found: {target_path}")
+
+        config = (
+            fixed_width_config
+            if isinstance(fixed_width_config, FixedWidthConfig)
+            else FixedWidthConfig.model_validate(fixed_width_config)
+        )
+        compared = [
+            f.field_name
+            for f in config.fields
+            if f.field_name != (config.uid_column or config.fields[0].field_name)
+        ]
+        source_count = len(read_fixed_width_records(source_path, config, side="source"))
+        target_count = len(read_fixed_width_records(target_path, config, side="target"))
+        collection_policy = resolve_mismatch_collection_policy(
+            self._settings,
+            test_mode=test_mode,
+            mismatch_snippet_limit=mismatch_snippet_limit,
+            compare_column_count=len(compared),
+        )
+        if collection_policy.fail_on_row_count_mismatch and source_count != target_count:
+            return build_litmus_row_count_failure(
+                source_row_count=source_count,
+                target_row_count=target_count,
+                compared_columns=compared,
+            )
+
+        report = validate_fixed_width_pair(source_path, target_path, config)
+        artifact_path = None
+        sample_frame = report.mismatches
+        if not report.mismatches.is_empty() and collection_policy.export_mismatch_artifact:
+            miss_df, ext_df, val_df = build_grouped_mismatch_samples(
+                report.mismatches,
+                0,
+                value_per_column_limit=(
+                    collection_policy.value_per_column_cap
+                    if collection_policy.value_per_column_cap > 0
+                    else None
+                ),
+                presence_max_rows=(
+                    collection_policy.presence_snippet_cap
+                    if collection_policy.presence_snippet_cap > 0
+                    else None
+                ),
+            )
+            parts = [df for df in (miss_df, ext_df, val_df) if df.height > 0]
+            sample_frame = pl.concat(parts, how="vertical") if parts else report.mismatches.slice(0, 0)
+            if artifact_export_parent is not None and sample_frame.height > 0:
+                export_path = artifact_export_parent / "mismatches.ndjson"
+                export_path.parent.mkdir(parents=True, exist_ok=True)
+                sample_frame.write_ndjson(export_path)
+                artifact_path = export_path
+        elif test_mode == ValidationTestMode.LITMUS:
+            sample_frame = report.mismatches.slice(0, 0)
+
+        if artifact_path is not None:
+            report = MismatchReport(
+                mismatches=sample_frame,
+                summary=report.summary,
+                mismatch_artifact_path=artifact_path,
+            )
+        else:
+            report = MismatchReport(mismatches=sample_frame, summary=report.summary)
+
+        return finalize_litmus_run_result(
+            ValidationRunResult(
+            report=report,
+            source_row_count=source_count,
+            target_row_count=target_count,
+            compared_column_count=len(compared),
+            compared_columns=compared,
+            test_mode=test_mode.value,
+            mismatch_snippet_limit=(
+                clamp_snippet_limit(self._settings, requested=mismatch_snippet_limit)
+                if test_mode == ValidationTestMode.FULL
+                else None
+            ),
+            mismatch_artifact_path=artifact_path,
+            )
+        )
 
     def _validate_csv_pair_sync(
         self,
@@ -400,6 +541,7 @@ class ValidationService:
         file_format: str = "csv",
         resource_policy: dict[str, Any] | None = None,
         test_mode: ValidationTestMode = ValidationTestMode.FULL,
+        mismatch_snippet_limit: int | None = None,
     ) -> ValidationRunResult:
         source_path = source_path.resolve()
         target_path = target_path.resolve()
@@ -408,8 +550,19 @@ class ValidationService:
         if not target_path.is_file():
             raise ValidationBadRequestError(f"Target file not found: {target_path}")
 
-        if test_mode == ValidationTestMode.LITMUS:
-            return self.validate_csv_litmus_sync(source_path, target_path, delimiter=delimiter)
+        from pegasus.validation.empty_inputs import validate_delimited_degenerate_pair
+
+        degenerate = validate_delimited_degenerate_pair(
+            source_path=source_path,
+            target_path=target_path,
+            uid_column=uid_column,
+            delimiter=delimiter,
+            column_mappings=column_mappings,
+            has_header=has_header,
+            header_leading_rows=header_leading_rows,
+        )
+        if degenerate is not None:
+            return degenerate
 
         source = FileDelimitedAdapter(
             source_path, delimiter=delimiter, has_header=has_header, skip_rows=header_leading_rows
@@ -432,6 +585,7 @@ class ValidationService:
             file_format=file_format,
             resource_policy=resource_policy,
             test_mode=test_mode,
+            mismatch_snippet_limit=mismatch_snippet_limit,
         )
 
     def preview_column_headers_from_adapters(
@@ -446,6 +600,13 @@ class ValidationService:
         file_format: str | None = None,
     ) -> dict[str, object]:
         from pegasus.validation.column_preview import build_column_preview_from_adapters
+        from pegasus.validation.file_format import normalize_file_format
+
+        fmt = normalize_file_format(file_format) if file_format else None
+        if fmt == "fixed-width":
+            raise ValueError(
+                "Fixed-width files use POST /validate/local/fixed-width-layout for column preview"
+            )
 
         sep = self._resolve_delimiter_for_inputs(delimiter, source, target)
         source = self._rebuild_delimited_adapter(
@@ -462,6 +623,26 @@ class ValidationService:
             has_header=has_header,
             file_format=file_format or "csv",
         )
+
+    def preview_fixed_width_layout_from_adapters(
+        self,
+        *,
+        source: FileDelimitedAdapter | GcsDelimitedAdapter,
+        target: FileDelimitedAdapter | GcsDelimitedAdapter,
+    ) -> dict[str, object]:
+        from pegasus.validation.fixed_width_layout import build_layout_preview, sample_lines_from_adapter
+
+        preview = build_layout_preview(
+            sample_lines_from_adapter(source),
+            sample_lines_from_adapter(target),
+        )
+        return {
+            "columns": preview["columns"],
+            "suggested_join_column": preview["suggested_join_column"],
+            "source_sample": preview["source_sample"],
+            "target_sample": preview["target_sample"],
+            "line_width": preview["line_width"],
+        }
 
     def profile_delimited_adapter(
         self,
@@ -496,18 +677,36 @@ class ValidationService:
         *,
         artifact_export_parent: Path | None = None,
         resource_policy: dict[str, Any] | None = None,
+        test_mode: ValidationTestMode = ValidationTestMode.FULL,
+        mismatch_snippet_limit: int | None = None,
     ) -> ValidationRunResult:
         src_adapter = FileColumnarAdapter(source_path, file_format=file_format)
         tgt_adapter = FileColumnarAdapter(target_path, file_format=file_format)
         schema = src_adapter.get_schema()
         identity_columns = parse_identity_columns(uid_column) or [uid_column.strip()]
         compare_columns = [c for c in schema.column_names if c not in identity_columns]
+        collection_policy = resolve_mismatch_collection_policy(
+            self._settings,
+            test_mode=test_mode,
+            mismatch_snippet_limit=mismatch_snippet_limit,
+            compare_column_count=len(compare_columns),
+        )
+        if collection_policy.fail_on_row_count_mismatch:
+            source_count = int(src_adapter.get_row_count() or 0)
+            target_count = int(tgt_adapter.get_row_count() or 0)
+            if source_count != target_count:
+                return build_litmus_row_count_failure(
+                    source_row_count=source_count,
+                    target_row_count=target_count,
+                    compared_columns=compare_columns,
+                )
         cfg = self._pipeline_config(
             source_bytes=source_path.stat().st_size,
             target_bytes=target_path.stat().st_size,
             compare_column_count=len(compare_columns),
             identity_column_count=len(identity_columns),
             resource_policy=resource_policy,
+            collection_policy=collection_policy,
         )
         workspace = None
         if artifact_export_parent is not None:
@@ -528,7 +727,14 @@ class ValidationService:
                 source_label=str(source_path),
                 target_label=str(target_path),
             )
-        return pipeline_result_to_run_result(result)
+        run_result = pipeline_result_to_run_result(result)
+        run_result.test_mode = test_mode.value
+        run_result.mismatch_snippet_limit = (
+            clamp_snippet_limit(self._settings, requested=mismatch_snippet_limit)
+            if test_mode == ValidationTestMode.FULL
+            else None
+        )
+        return finalize_litmus_run_result(run_result)
 
     def preview_local_column_headers(
         self,

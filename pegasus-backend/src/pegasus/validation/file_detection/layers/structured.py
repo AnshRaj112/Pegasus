@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T05:22:13Z
+# Last edited: 2026-06-24T06:44:56Z
 # --- END GENERATED FILE METADATA ---
 
 """Layer 7: structured format heuristics on a bounded sample."""
@@ -65,13 +65,13 @@ def detect_structured(
     if yaml_stage.confidence >= 70:
         return yaml_stage
 
-    delim_stage = _detect_delimited(text)
-    if delim_stage.confidence >= 60:
-        return delim_stage
-
     fw_stage = _detect_fixed_width(text)
     if fw_stage.confidence >= 65:
         return fw_stage
+
+    delim_stage = _detect_delimited(text)
+    if delim_stage.confidence >= 60:
+        return delim_stage
 
     return DetectionStage(
         detected_type="unknown",
@@ -82,7 +82,7 @@ def detect_structured(
 
 
 def _decode_text_sample(sample: FileSample) -> str:
-    return sample.raw.decode("utf-8", errors="replace")
+    return sample.raw.decode("utf-8-sig", errors="replace")
 
 
 def _detect_json(text: str) -> DetectionStage:
@@ -159,14 +159,24 @@ def _detect_delimited(text: str) -> DetectionStage:
 
 def _detect_fixed_width(text: str) -> DetectionStage:
     lines = [ln for ln in text.splitlines() if ln.strip()][:20]
-    if len(lines) < 3:
+    if len(lines) < 2:
         return DetectionStage("unknown", 0, evidence=[])
-    lengths = [len(ln) for ln in lines]
-    if len(set(lengths)) == 1 and lengths[0] > 20 and "," not in lines[0]:
+
+    for candidate in (lines[1:], lines):
+        lengths = [len(ln) for ln in candidate]
+        if len(set(lengths)) != 1:
+            continue
+        line_length = lengths[0]
+        if line_length <= 20:
+            continue
+        if any("," in ln for ln in candidate[:5]):
+            continue
+        if not all("  " in ln for ln in candidate[:5]):
+            continue
         return DetectionStage(
             "fixed-width",
             70,
-            evidence=[f"uniform line length={lengths[0]}"],
-            metadata={"line_length": lengths[0]},
+            evidence=[f"uniform line length={line_length}"],
+            metadata={"line_length": line_length},
         )
     return DetectionStage("unknown", 0, evidence=[])

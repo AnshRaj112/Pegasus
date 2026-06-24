@@ -114,7 +114,8 @@ const buildSnippetRows = (items: MismatchSampleRow[], columns: string[]): Snippe
 /** UID has any row-level or value-level issue (not scoped to visible columns). */
 const rowHasAnyIssue = (row: SnippetRow): boolean => {
   if (row.status === 'extra_source' || row.status === 'missing_target') return true;
-  return row.mismatchColumns.size > 0;
+  if (row.mismatchColumns.size > 0) return true;
+  return row.status === 'mismatch';
 };
 
 export const SnippetComparison: React.FC = () => {
@@ -152,7 +153,9 @@ export const SnippetComparison: React.FC = () => {
         setSourceLabel(detail.source_path ?? detail.source_filename ?? 'Source');
         setTargetLabel(detail.target_path ?? detail.target_filename ?? 'Target');
         const mc = detail.mismatch_counts;
-        const expected = mc.missing_in_target + mc.extra_in_target + mc.value_mismatch;
+        const expected = mc.missing_in_target + mc.extra_in_target + (
+          mc.value_mismatch_rows ?? mc.value_mismatch
+        );
         setExpectedMismatchTotal(expected);
         setColPage(0);
         setRowPage(0);
@@ -179,7 +182,7 @@ export const SnippetComparison: React.FC = () => {
             if (collected.length >= page.total || page.items.length < FETCH_BATCH) break;
             offset += FETCH_BATCH;
           }
-          if (collected.length > 0 || expected === 0 || pageTotal > 0) break;
+            if (collected.length > 0 || expected === 0 || pageTotal > 0) break;
           setLoadProgress('Waiting for mismatch rows to finish saving…');
           await new Promise((r) => setTimeout(r, 2000));
         }
@@ -363,9 +366,11 @@ export const SnippetComparison: React.FC = () => {
                   <SnippetSkeletonRows colCount={skeletonColCount} />
                 ) : pageRows.length === 0 ? (
                   <tr><td colSpan={displayCols.length || 1} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
-                    {expectedMismatchTotal > 0
+                    {allItems.length === 0 && expectedMismatchTotal > 0
                       ? 'Mismatch rows are still being saved or could not be loaded. Refresh in a few seconds.'
-                      : 'No mismatches for this validation run.'}
+                      : issueRows.length === 0
+                        ? 'No mismatches for this validation run.'
+                        : 'No issues in the current column window. Use “Next cols” to inspect other columns.'}
                   </td></tr>
                 ) : pageRows.map((row) => (
                   <tr key={`src-${row.uid}`} style={{ backgroundColor: rowBg(row), borderBottom: '1px solid #f1f5f9' }}>
@@ -398,9 +403,11 @@ export const SnippetComparison: React.FC = () => {
                   <SnippetSkeletonRows colCount={skeletonColCount} />
                 ) : pageRows.length === 0 ? (
                   <tr><td colSpan={displayCols.length || 1} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
-                    {expectedMismatchTotal > 0
+                    {allItems.length === 0 && expectedMismatchTotal > 0
                       ? 'Mismatch rows are still being saved or could not be loaded. Refresh in a few seconds.'
-                      : 'No mismatches for this validation run.'}
+                      : issueRows.length === 0
+                        ? 'No mismatches for this validation run.'
+                        : 'No issues in the current column window. Use “Next cols” to inspect other columns.'}
                   </td></tr>
                 ) : pageRows.map((row) => (
                   <tr key={`tgt-${row.uid}`} style={{ backgroundColor: rowBg(row), borderBottom: '1px solid #f1f5f9' }}>

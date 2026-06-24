@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T05:22:13Z
+# Last edited: 2026-06-24T17:03:25+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Pipeline configuration."""
@@ -50,6 +50,7 @@ class TabularPipelineConfig:
     distributed_redis_url: str | None = None
     distributed_job_id: str | None = None
     distributed_min_bytes: int = 10 * 1024 * 1024 * 1024
+    mismatch_sample_limit: int = 1000
     stream_mismatches_to_disk: bool = True
     compare_policy: ComparePolicy | None = None
 

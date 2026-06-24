@@ -8,6 +8,8 @@ import {
 import { Api } from '../../shared/api/Api';
 import { ValidationFormState } from './Validation.interface';
 import { gcsUri } from '../report/reportPairId';
+import { fixedWidthConfigFromColumns } from './fixedWidthConfig';
+import { isFixedWidthFormat } from './fixedWidthFormat';
 
 export const parseGsUri = (uri: string): GoogleCloudStorageConfig | null => {
   const trimmed = uri.trim();
@@ -93,11 +95,26 @@ export const validateRequestFromForm = (
   form: ValidationFormState,
   pathOverride?: { source_path?: string | null; target_path?: string | null },
 ): ValidateRequest => {
-  const base = {
-    uid_column: form.uidColumn,
+  const isFixedWidth = isFixedWidthFormat(form.detectedFileFormat);
+  const uidColumn = isFixedWidth && form.fixedWidthColumns.length > 0
+    ? (form.uidColumn || form.fixedWidthColumns[0]?.field_name || 'record_id')
+    : form.uidColumn;
+
+  const base: ValidateRequest = {
+    uid_column: uidColumn,
     delimiter: form.delimiter || 'auto',
     has_header: form.hasHeader,
-    column_mappings: form.columnMappings,
+    column_mappings: isFixedWidth ? [] : form.columnMappings,
+    test_mode: form.testMode,
+    ...(form.testMode === 'full' && form.mismatchSnippetLimit != null
+      ? { mismatch_snippet_limit: form.mismatchSnippetLimit }
+      : {}),
+    ...(isFixedWidth
+      ? {
+        file_format: 'fixed-width',
+        fixed_width_config: fixedWidthConfigFromColumns(form.fixedWidthColumns, uidColumn),
+      }
+      : {}),
   };
 
   const srcPath = pathOverride?.source_path

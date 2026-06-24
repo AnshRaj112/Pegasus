@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T05:22:13Z
+# Last edited: 2026-06-24T16:07:50+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Profile GCS delimited objects: format detection, column count, row count."""
@@ -14,20 +14,23 @@ from pegasus.schemas.validation import CloudFileProfileResponse
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
 from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
 from pegasus.validation.file_detection import detect_file
+from pegasus.validation.file_detection.display_label import build_format_display_label
 from pegasus.validation.file_detection.types import FileDetectionReport
-from pegasus.validation.file_format import format_hint_from_suffix
 
 
 def format_display_label(
     report: FileDetectionReport,
     *,
     object_name: str,
+    path: str | Path | None = None,
 ) -> str:
-    """Return a short UI label (csv, fixed-width, parquet, …)."""
-    if report.suggested_file_format:
-        return report.suggested_file_format
-    suffix = Path(object_name).suffix
-    return format_hint_from_suffix(suffix) or "unknown"
+    """Return a short UI label (csv, fixed-width, zip -> csv, …)."""
+    resolved_path = Path(path) if path is not None else Path(report.path)
+    return build_format_display_label(
+        report,
+        path=resolved_path,
+        object_name=object_name,
+    )
 
 
 def detect_format_from_adapter(
@@ -66,17 +69,60 @@ def build_delimited_profile(
     """Build a cloud file profile from a warmed delimited adapter."""
     if isinstance(adapter, GcsDelimitedAdapter):
         adapter.warm_metadata()
+    size_bytes = int(adapter.get_size_bytes() if hasattr(adapter, "get_size_bytes") else 0)
+    if size_bytes == 0:
+        return CloudFileProfileResponse(
+            object_name=object_name,
+            gcs_uri=gcs_uri,
+            file_size_bytes=0,
+            file_format="empty",
+            suggested_file_format="empty",
+            dataset_model=None,
+            column_count=0,
+            row_count=0,
+            delimiter=resolved_delimiter,
+            has_header=has_header,
+        )
+    if isinstance(adapter, FileDelimitedAdapter):
+        from pegasus.validation.empty_inputs import file_has_no_content
+
+        if file_has_no_content(adapter.path):
+            return CloudFileProfileResponse(
+                object_name=object_name,
+                gcs_uri=gcs_uri,
+                file_size_bytes=size_bytes,
+                file_format="empty",
+                suggested_file_format="empty",
+                dataset_model=None,
+                column_count=0,
+                row_count=0,
+                delimiter=resolved_delimiter,
+                has_header=has_header,
+            )
+
     report = detect_format_from_adapter(adapter)
     schema = adapter.get_schema()
     column_count = len(schema.columns)
+    if report.suggested_file_format == "fixed-width":
+        from pegasus.validation.fixed_width_layout import build_column_previews, sample_lines_from_adapter
+
+        lines = sample_lines_from_adapter(adapter)
+        inferred = build_column_previews(lines, lines)
+        if inferred:
+            column_count = len(inferred)
     row_count = count_adapter_rows(adapter)
-    size_bytes = adapter.get_size_bytes() if hasattr(adapter, "get_size_bytes") else 0
+
+    detect_path = adapter.path if isinstance(adapter, FileDelimitedAdapter) else Path(object_name)
 
     return CloudFileProfileResponse(
         object_name=object_name,
         gcs_uri=gcs_uri,
-        file_size_bytes=int(size_bytes or 0),
-        file_format=format_display_label(report, object_name=object_name),
+        file_size_bytes=size_bytes,
+        file_format=format_display_label(
+            report,
+            object_name=object_name,
+            path=detect_path,
+        ),
         suggested_file_format=report.suggested_file_format,
         dataset_model=report.dataset_model,
         column_count=column_count,

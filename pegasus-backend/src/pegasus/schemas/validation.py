@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T05:22:13Z
+# Last edited: 2026-06-24T17:03:25+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Request/response models for the validation API."""
@@ -75,7 +75,7 @@ class ValidationSummary(BaseModel):
 
 
 class ValidationTestMode(str, Enum):
-    """Execution depth for CSV validation."""
+    """Execution depth for file validation."""
 
     LITMUS = "litmus"
     FULL = "full"
@@ -153,6 +153,24 @@ class FixedWidthField(BaseModel):
         default=None,
         description="Target-side date format when field_type is date (overrides date_format)",
     )
+    compare_enabled: bool = Field(
+        default=True,
+        description="When false, the field is excluded from value comparison (join key is always used)",
+    )
+    is_sensitive: bool = Field(
+        default=False,
+        description="Mask cell values in mismatch reports",
+    )
+    source_regex_pattern: str | None = Field(
+        default=None,
+        description="Optional regex applied to the source slice before compare",
+    )
+    source_regex_replacement: str = Field(default="", description="Replacement for source_regex_pattern")
+    target_regex_pattern: str | None = Field(
+        default=None,
+        description="Optional regex applied to the target slice before compare",
+    )
+    target_regex_replacement: str = Field(default="", description="Replacement for target_regex_pattern")
 
 
 class FixedWidthMatchStrategy(str, Enum):
@@ -291,8 +309,17 @@ class LocalPathValidateRequest(BaseModel):
     test_mode: ValidationTestMode = Field(
         default=ValidationTestMode.FULL,
         description=(
-            "litmus: quick structural checks only (name/type/size/rows/columns/headers); "
-            "full: complete UID-based row comparison."
+            "litmus: full reconciliation with no snippets; fails immediately when row counts differ; "
+            "full: full reconciliation with capped mismatch snippets (admin default, user-adjustable)."
+        ),
+    )
+    mismatch_snippet_limit: int | None = Field(
+        default=None,
+        ge=1,
+        le=50,
+        description=(
+            "Per-category snippet cap for full mode (missing, extra, and per-column value mismatches). "
+            "Defaults to the admin-configured value; cannot exceed validation_mismatch_snippet_limit_max."
         ),
     )
     uid_gte: str | None = Field(
@@ -440,10 +467,14 @@ class MismatchPersistenceNote(BaseModel):
     mismatch_rows_persisted: bool
     mismatch_artifact_path: str | None = None
     mismatch_row_cap: int | None = Field(default=None, ge=0)
+    validation_job_id: str | None = Field(
+        default=None,
+        description="Worker job directory id (differs from run_id) for on-disk mismatch NDJSON",
+    )
 
 
 _FOOTER_PERSISTENCE_KEYS = frozenset(
-    {"mismatch_rows_persisted", "mismatch_artifact_path", "mismatch_row_cap"},
+    {"mismatch_rows_persisted", "mismatch_artifact_path", "mismatch_row_cap", "validation_job_id"},
 )
 
 
@@ -521,15 +552,32 @@ class FixedWidthColumnPreview(BaseModel):
     target_start: int = Field(ge=0)
     target_end: int = Field(ge=0)
     field_type: str = "text"
+    width: int = Field(ge=0, default=0, description="Character width (end − start)")
+    source_sample: str = ""
+    target_sample: str = ""
+    date_format: str | None = Field(
+        default=None,
+        description="Inferred or user-edited friendly date format (e.g. DD/MM/YYYY)",
+    )
+    source_date_format: str | None = None
+    target_date_format: str | None = None
+    structured_order_sensitive: bool = False
+    compare_enabled: bool = True
+    is_sensitive: bool = False
+    source_regex_pattern: str | None = None
+    source_regex_replacement: str = ""
+    target_regex_pattern: str | None = None
+    target_regex_replacement: str = ""
 
 
 class FixedWidthLayoutPreviewResponse(BaseModel):
     """Detected columns and sample lines for the fixed-width mapping UI."""
 
     columns: list[FixedWidthColumnPreview] = Field(default_factory=list)
-    suggested_join_column: str = "id"
+    suggested_join_column: str = "record_id"
     source_sample: str = ""
     target_sample: str = ""
+    line_width: int = Field(ge=0, default=0)
 
 
 class FileDetectionStageResponse(BaseModel):
@@ -651,6 +699,20 @@ class LocalPathBrowseConfigResponse(BaseModel):
         default=None,
         description="In-container mount path paired with host_path_prefix",
     )
+
+
+class ValidationOptionsResponse(BaseModel):
+    """Public validation wizard options (snippet caps and supported test modes)."""
+
+    test_modes: list[ValidationTestMode] = Field(
+        default_factory=lambda: [
+            ValidationTestMode.LITMUS,
+            ValidationTestMode.FULL,
+        ],
+        description="Test modes exposed in the validation wizard.",
+    )
+    mismatch_snippet_limit_default: int = Field(ge=1, le=50)
+    mismatch_snippet_limit_max: int = Field(ge=1, le=50)
 
 
 class ValidationDurations(BaseModel):

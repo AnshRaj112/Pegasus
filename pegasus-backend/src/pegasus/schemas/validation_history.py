@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T05:22:13Z
+# Last edited: 2026-06-24T17:03:25+05:30
 # --- END GENERATED FILE METADATA ---
 
 """API models for persisted validation history."""
@@ -42,6 +42,10 @@ class ValidationHistorySummary(BaseModel):
     completed_at: datetime | None = None
     source_row_count: int | None = Field(default=None, ge=0)
     target_row_count: int | None = Field(default=None, ge=0)
+    test_mode: str | None = Field(
+        default=None,
+        description="Validation depth for this run (litmus or full).",
+    )
 
 
 class ValidationDailyStatRow(BaseModel):

@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T05:22:13Z
+# Last edited: 2026-06-24T17:03:25+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Validation run result types (shared by service and tabular pipeline)."""
@@ -36,6 +36,7 @@ class ValidationRunResult:
     mapping_format_checks: list[dict[str, Any]] | None = None
     footer_validation: dict[str, Any] | None = None
     test_mode: str = "full"
+    mismatch_snippet_limit: int | None = None
     litmus: dict[str, Any] | None = None
     pipeline_metadata: dict[str, Any] | None = None
     durations: ValidationRunDurations | None = None

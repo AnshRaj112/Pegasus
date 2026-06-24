@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T05:22:13Z
+# Last edited: 2026-06-24T17:03:25+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Persisted validation history (mappings, reports, durations)."""
@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from pegasus.api.deps import AppSettings
 from pegasus.core.database import AsyncSessionLocal
+from pegasus.core.delimiter_tokens import normalize_delimiter_for_storage
 from pegasus.core.file_pair import compute_file_pair_key
 from pegasus.core.local_paths import (
     compute_file_pair_key_for_settings,
@@ -26,16 +27,17 @@ from pegasus.models import ValidationEntity
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.api.v1.validation_helpers import (
+    backfill_mismatch_rows_for_run,
     mismatch_totals_from_run,
     resolve_history_mismatch_artifact,
 )
-from pegasus.api.v1.mismatch_sample import paginate_mismatch_rows_from_ndjson
+from pegasus.api.v1.mismatch_sample import mismatch_record_total, paginate_mismatch_rows_from_ndjson
 from pegasus.services.entity_inference_service import (
     EntityDefinition,
     infer_entity_from_filenames,
     normalize_entity_name,
 )
-from pegasus.core.delimiter_tokens import normalize_delimiter_for_storage
+from pegasus.validation.test_mode_policy import effective_run_is_match, read_footer_test_mode
 from pegasus.schemas.validation import (
     ColumnMapping,
     ColumnMappingFormatCheck,
@@ -131,6 +133,14 @@ def _summary_from_run(run, settings: AppSettings) -> ValidationHistorySummary:
     mappings = run.column_mappings if isinstance(run.column_mappings, list) else []
     source_path = to_display_path(run.source_path, settings) if run.source_path else None
     target_path = to_display_path(run.target_path, settings) if run.target_path else None
+    footer_raw = run.footer_validation if isinstance(run.footer_validation, dict) else None
+    test_mode = read_footer_test_mode(footer_raw)
+    mismatch_counts = _mismatch_counts_from_run(run)
+    total_mismatch = (
+        mismatch_counts.missing_in_target
+        + mismatch_counts.extra_in_target
+        + mismatch_counts.value_mismatch
+    )
     return ValidationHistorySummary(
         run_id=run.id,
         status=run.status.value if isinstance(run.status, ValidationRunStatus) else str(run.status),
@@ -140,14 +150,21 @@ def _summary_from_run(run, settings: AppSettings) -> ValidationHistorySummary:
         target_filename=run.target_filename,
         uid_column=run.uid_column,
         delimiter=run.delimiter,
-        is_match=run.is_match,
-        mismatch_counts=_mismatch_counts_from_run(run),
+        is_match=effective_run_is_match(
+            is_match=run.is_match,
+            test_mode=test_mode,
+            source_row_count=run.source_row_count,
+            target_row_count=run.target_row_count,
+            total_mismatch_records=total_mismatch,
+        ),
+        mismatch_counts=mismatch_counts,
         mapping_count=len(mappings),
         durations=_durations_from_run(run),
         created_at=run.created_at,
         completed_at=run.completed_at,
         source_row_count=run.source_row_count,
         target_row_count=run.target_row_count,
+        test_mode=test_mode,
     )
 
 
@@ -351,39 +368,69 @@ async def list_validation_history_mismatches(
             run = await ValidationRunRepository.get_run(session, run_id)
             if run is None:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown run_id")
-            rows, total = await ValidationRunRepository.list_mismatches(
+            rows, db_total = await ValidationRunRepository.list_mismatches(
                 session,
                 run_id,
                 limit=limit,
                 offset=offset,
                 mismatch_type=mismatch_type,
             )
+            if db_total == 0 and mismatch_record_total(mismatch_totals_from_run(run)) > 0:
+                await backfill_mismatch_rows_for_run(settings, run_id)
+                rows, db_total = await ValidationRunRepository.list_mismatches(
+                    session,
+                    run_id,
+                    limit=limit,
+                    offset=offset,
+                    mismatch_type=mismatch_type,
+                )
             artifact = resolve_history_mismatch_artifact(settings, run)
             if artifact is not None:
-                raw_items, total = paginate_mismatch_rows_from_ndjson(
+                raw_items, ndjson_total = paginate_mismatch_rows_from_ndjson(
                     artifact,
                     limit=limit,
                     offset=offset,
                     mismatch_type=mismatch_type,
                     totals_by_type=mismatch_totals_from_run(run),
                 )
-                return ValidationHistoryMismatchesResponse(
-                    run_id=run_id,
-                    items=[
-                        ValidationHistoryMismatchRow(
-                            uid=str(item.get("uid") or ""),
-                            mismatch_type=str(item.get("mismatch_type") or ""),
-                            column_name=item.get("column_name"),
-                            source_value=item.get("source_value"),
-                            target_value=item.get("target_value"),
-                            row_detail=item.get("row_detail"),
-                        )
-                        for item in raw_items
-                    ],
-                    total=total,
-                    offset=offset,
-                    limit=limit,
-                )
+                if raw_items or (ndjson_total > 0 and db_total <= 0):
+                    return ValidationHistoryMismatchesResponse(
+                        run_id=run_id,
+                        items=[
+                            ValidationHistoryMismatchRow(
+                                uid=str(item.get("uid") or ""),
+                                mismatch_type=str(item.get("mismatch_type") or ""),
+                                column_name=item.get("column_name"),
+                                source_value=item.get("source_value"),
+                                target_value=item.get("target_value"),
+                                row_detail=item.get("row_detail"),
+                            )
+                            for item in raw_items
+                        ],
+                        total=ndjson_total if ndjson_total > 0 else len(raw_items),
+                        offset=offset,
+                        limit=limit,
+                    )
+            response_total = db_total
+            if response_total <= 0:
+                response_total = mismatch_record_total(mismatch_totals_from_run(run))
+            return ValidationHistoryMismatchesResponse(
+                run_id=run_id,
+                items=[
+                    ValidationHistoryMismatchRow(
+                        uid=r.uid,
+                        mismatch_type=r.mismatch_type,
+                        column_name=r.column_name,
+                        source_value=r.source_value,
+                        target_value=r.target_value,
+                        row_detail=r.row_detail,
+                    )
+                    for r in rows
+                ],
+                total=response_total,
+                offset=offset,
+                limit=limit,
+            )
     except HTTPException:
         raise
     except Exception as exc:
@@ -392,24 +439,6 @@ async def list_validation_history_mismatches(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not load mismatch rows; check database connectivity",
         ) from exc
-
-    return ValidationHistoryMismatchesResponse(
-        run_id=run_id,
-        items=[
-            ValidationHistoryMismatchRow(
-                uid=r.uid,
-                mismatch_type=r.mismatch_type,
-                column_name=r.column_name,
-                source_value=r.source_value,
-                target_value=r.target_value,
-                row_detail=r.row_detail,
-            )
-            for r in rows
-        ],
-        total=total,
-        offset=offset,
-        limit=limit,
-    )
 
 
 @router.delete(

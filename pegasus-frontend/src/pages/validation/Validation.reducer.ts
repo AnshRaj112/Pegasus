@@ -28,6 +28,19 @@ const shouldClearOverviewCache = (
   return false;
 };
 
+const shouldResetFixedWidthLayout = (
+  prev: ValidationFormState,
+  patch: Partial<ValidationFormState>,
+): boolean => {
+  if (patch.sourceCloud !== undefined && cloudObjectKey(patch.sourceCloud ?? null) !== cloudObjectKey(prev.sourceCloud)) {
+    return true;
+  }
+  if (patch.targetCloud !== undefined && cloudObjectKey(patch.targetCloud ?? null) !== cloudObjectKey(prev.targetCloud)) {
+    return true;
+  }
+  return false;
+};
+
 const defaultValidationForm: ValidationFormState = {
   connectionId: null,
   bucket: null,
@@ -43,6 +56,11 @@ const defaultValidationForm: ValidationFormState = {
   hasHeader: true,
   structuredOrderSensitive: false,
   columnMappings: [],
+  detectedFileFormat: null,
+  fixedWidthColumns: [],
+  fixedWidthLineWidth: null,
+  testMode: 'full',
+  mismatchSnippetLimit: null,
 };
 
 export const initialState: ValidationReducerState = {
@@ -68,13 +86,23 @@ const validationSlice = createSlice({
       ...state,
       isStep1Valid: action.payload,
     }),
-    setValidationForm: (state, action: PayloadAction<Partial<ValidationFormState>>) => ({
-      ...state,
-      validationForm: { ...state.validationForm, ...action.payload },
-      overviewProfileCache: shouldClearOverviewCache(state.validationForm, action.payload)
-        ? null
-        : state.overviewProfileCache,
-    }),
+    setValidationForm: (state, action: PayloadAction<Partial<ValidationFormState>>) => {
+      const resetFixedWidth = shouldResetFixedWidthLayout(state.validationForm, action.payload);
+      const clearedFixedWidth = resetFixedWidth && action.payload.fixedWidthColumns === undefined
+        ? {
+          fixedWidthColumns: [] as ValidationFormState['fixedWidthColumns'],
+          fixedWidthLineWidth: null,
+          detectedFileFormat: action.payload.detectedFileFormat ?? null,
+        }
+        : {};
+      return {
+        ...state,
+        validationForm: { ...state.validationForm, ...action.payload, ...clearedFixedWidth },
+        overviewProfileCache: shouldClearOverviewCache(state.validationForm, action.payload)
+          ? null
+          : state.overviewProfileCache,
+      };
+    },
     setOverviewProfileCache: (state, action: PayloadAction<OverviewProfileCache>) => ({
       ...state,
       overviewProfileCache: action.payload,

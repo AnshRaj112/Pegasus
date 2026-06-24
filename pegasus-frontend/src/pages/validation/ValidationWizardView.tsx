@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRightOutlined } from '@ant-design/icons';
 import { notification } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -16,11 +16,13 @@ import {
   loadValidationTabSession,
   saveValidationTabSession,
 } from './validationTabStorage';
+import { assessEmptyValidationFiles } from './validationEmptyFiles';
 
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
 import { ConfigureMappingStep } from './steps/ConfigureMappingStep';
 import { Api } from '../../shared/api/Api';
+import { isFixedWidthFormat } from './fixedWidthFormat';
 
 import styles from './Validation.module.scss';
 
@@ -113,14 +115,51 @@ export const ValidationWizardView: React.FC = () => {
     || overviewCache?.targetKey !== cloudObjectKey(validationForm.targetCloud)
   );
 
+  const overviewIsFixedWidth = useMemo(() => {
+    if (!overviewCache?.source && !overviewCache?.target) return isFixedWidthFormat(validationForm.detectedFileFormat);
+    return isFixedWidthFormat(overviewCache?.source?.suggested_file_format ?? overviewCache?.source?.file_format)
+      || isFixedWidthFormat(overviewCache?.target?.suggested_file_format ?? overviewCache?.target?.file_format);
+  }, [overviewCache, validationForm.detectedFileFormat]);
+
+  const overviewBlocksMapping = useMemo(() => {
+    if (currentStep !== 2 || isStep2Loading || loadingRun) return false;
+    if (!validationForm.sourceCloud || !validationForm.targetCloud) return true;
+    if (overviewIsFixedWidth && validationForm.fixedWidthColumns.length === 0) return true;
+    const assessment = assessEmptyValidationFiles({
+      sourceSizeBytes: validationForm.sourceFileSize,
+      targetSizeBytes: validationForm.targetFileSize,
+      sourceProfile: overviewCache?.source ?? null,
+      targetProfile: overviewCache?.target ?? null,
+      profilesLoading: false,
+      sourceProfileError: overviewCache?.sourceError ?? false,
+      targetProfileError: overviewCache?.targetError ?? false,
+    });
+    return assessment?.blocksMapping ?? false;
+  }, [
+    currentStep,
+    isStep2Loading,
+    loadingRun,
+    validationForm.sourceCloud,
+    validationForm.targetCloud,
+    validationForm.sourceFileSize,
+    validationForm.targetFileSize,
+    overviewCache,
+    overviewIsFixedWidth,
+    validationForm.fixedWidthColumns.length,
+  ]);
+
+  const isFixedWidth = isFixedWidthFormat(validationForm.detectedFileFormat);
   const isStep3Loading = currentStep === 3 && (
     loadingRun
-    || !validationForm.columnMappings
-    || validationForm.columnMappings.length === 0
+    || (isFixedWidth
+      ? validationForm.fixedWidthColumns.length === 0
+      : !validationForm.columnMappings || validationForm.columnMappings.length === 0)
   );
 
   const isActuallyLoading = isFetching || advancing || isStep2Loading || isStep3Loading;
-  const isNextButtonDisabled = isActuallyLoading || (currentStep === 1 && !isStep1Valid);
+  const isNextButtonDisabled = isActuallyLoading
+    || (currentStep === 1 && !isStep1Valid)
+    || (currentStep === 2 && overviewBlocksMapping);
 
   const handleProceed = async () => {
     if (currentStep === 1) {
@@ -149,7 +188,7 @@ export const ValidationWizardView: React.FC = () => {
     }
 
     if (currentStep === 2) {
-      if (!runId) return;
+      if (!runId || overviewBlocksMapping) return;
       navigate(validationMappingPath(runId));
       return;
     }
@@ -224,7 +263,9 @@ export const ValidationWizardView: React.FC = () => {
   const proceedLabel = currentStep === 3
     ? 'Run Validation'
     : currentStep === 2
-      ? 'Proceed to Mapping'
+      ? overviewBlocksMapping
+        ? 'Cannot proceed — empty file'
+        : 'Proceed to Mapping'
       : 'Proceed to Overview';
 
   return (

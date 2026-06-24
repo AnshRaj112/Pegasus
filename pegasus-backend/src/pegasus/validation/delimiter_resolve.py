@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T05:22:13Z
+# Last edited: 2026-06-24T16:07:50+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Resolve API delimiter tokens to the literal separator string."""
@@ -74,10 +74,12 @@ def resolve_delimiter_for_adapters(
 
     src_path = Path(getattr(source, "path", "source"))
     tgt_path = Path(getattr(target, "path", "target"))
-    src_lines = source.sample_lines() if isinstance(source, GcsDelimitedAdapter) else None
-    tgt_lines = target.sample_lines() if isinstance(target, GcsDelimitedAdapter) else None
+    src_is_gcs = isinstance(source, GcsDelimitedAdapter)
+    tgt_is_gcs = isinstance(target, GcsDelimitedAdapter)
+    src_lines = source.sample_lines() if src_is_gcs else None
+    tgt_lines = target.sample_lines() if tgt_is_gcs else None
 
-    if src_lines is not None or tgt_lines is not None:
+    if src_is_gcs or tgt_is_gcs:
         result = resolve_shared_auto_delimiter(
             src_path,
             tgt_path,
@@ -90,6 +92,9 @@ def resolve_delimiter_for_adapters(
         return resolve_delimiter_for_paths(token, source.path, target.path)
 
     if hasattr(source, "path") and hasattr(target, "path"):
-        return resolve_delimiter_for_paths(token, Path(source.path), Path(target.path))
+        src_p = Path(source.path)
+        tgt_p = Path(target.path)
+        if src_p.is_file() and tgt_p.is_file():
+            return resolve_delimiter_for_paths(token, src_p, tgt_p)
 
     raise ValueError("Could not resolve delimiter for the provided inputs")

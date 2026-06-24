@@ -1,14 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   DatabaseOutlined, FileTextOutlined, ArrowRightOutlined,
-  CheckCircleFilled, WarningFilled, ProfileOutlined,
+  CheckCircleFilled, WarningFilled, CloseCircleFilled, ProfileOutlined,
   HddOutlined, TableOutlined, BarcodeOutlined, BuildOutlined,
   EyeOutlined,
 } from '@ant-design/icons';
-import { Api, CloudFileProfileResponse, GoogleCloudStorageConfig, LocalColumnPreviewResponse } from '../../../shared/api/Api';
+import { Api, CloudFileProfileResponse, FixedWidthColumnPreview, GoogleCloudStorageConfig, LocalColumnPreviewResponse } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { OverviewFilePreview } from './OverviewFilePreview';
+import { assessEmptyValidationFiles, isValidationFileEmpty } from '../validationEmptyFiles';
+import { isFixedWidthFormat } from '../fixedWidthFormat';
+import { FixedWidthLayoutPanel } from './FixedWidthLayoutPanel';
+import { formatDetectionLabel } from '../../../shared/formatDisplayLabel';
 
 const formatBytes = (bytes: number | null) => {
   if (bytes == null) return '—';
@@ -16,16 +20,6 @@ const formatBytes = (bytes: number | null) => {
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
-};
-
-const getFriendlyFormatLabel = (format: string | null | undefined): string => {
-  if (!format || format === '—' || format === '…') return format ?? '—';
-  const fmt = format.toLowerCase().trim();
-  if (fmt === 'empty file') return 'Empty File';
-  if (['csv', 'tsv', 'psv', 'tsc'].includes(fmt) || fmt.includes('delimited')) return 'Delimited File';
-  if (['fixed-width', 'fixed_width', 'fixed', 'fixedwidth'].includes(fmt)) return 'Fixed Width';
-  if (['archive', '7z', 'rar', 'container', 'decompress_first', 'gzip', 'bzip2', 'xz', 'zstd', 'lz4'].includes(fmt)) return 'Archive';
-  return fmt.charAt(0).toUpperCase() + fmt.slice(1);
 };
 
 const formatCount = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString();
@@ -101,14 +95,23 @@ const FileCard: React.FC<{
   warn: { size: boolean; columns: boolean; rows: boolean };
   loading: boolean;
   icon?: React.ReactNode;
-}> = ({ label, color, stats, warn, loading, icon }) => (
-  <div style={{ flex: 1, backgroundColor: '#fff', border: '1px solid #d9d9d9', borderRadius: '12px', padding: '24px', minWidth: '300px' }}>
+  isEmpty?: boolean;
+}> = ({ label, color, stats, warn, loading, icon, isEmpty }) => (
+  <div style={{
+    flex: 1,
+    backgroundColor: '#fff',
+    border: `1px solid ${isEmpty ? '#fecaca' : '#d9d9d9'}`,
+    borderRadius: '12px',
+    padding: '24px',
+    minWidth: '300px',
+    boxShadow: isEmpty ? 'inset 0 0 0 1px #fee2e2' : undefined,
+  }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color }}>
       {icon ?? <FileTextOutlined />}
       <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase' }}>{label}</span>
     </div>
 
-    <h4 style={{ margin: '0 0 4px 0', fontSize: '18px', minHeight: '24px' }}>
+    <h4 style={{ margin: '0 0 4px 0', fontSize: '18px', minHeight: '24px', color: isEmpty ? '#ba1a1a' : undefined }}>
       {loading ? <SkeletonBlock width="60%" height="24px" /> : stats.name}
     </h4>
     <div style={{ fontSize: '12px', color: '#727786', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', minHeight: '16px' }}>
@@ -116,10 +119,10 @@ const FileCard: React.FC<{
     </div>
 
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
-      <Row icon={<ProfileOutlined />} label="Format" value={stats.format} loading={loading} />
-      <Row icon={<HddOutlined />} label="Size" value={formatBytes(stats.sizeBytes)} warn={warn.size} loading={loading} />
+      <Row icon={<ProfileOutlined />} label="Format" value={isEmpty ? 'Empty' : stats.format} loading={loading} warn={isEmpty} />
+      <Row icon={<HddOutlined />} label="Size" value={formatBytes(stats.sizeBytes)} warn={warn.size || isEmpty} loading={loading} />
       <Row icon={<TableOutlined />} label="Columns" value={formatCount(stats.columnCount)} warn={warn.columns} loading={loading} />
-      <Row icon={<BarcodeOutlined />} label="Rows" value={formatCount(stats.rowCount)} warn={warn.rows} loading={loading} />
+      <Row icon={<BarcodeOutlined />} label="Rows" value={isEmpty ? '0 (empty)' : formatCount(stats.rowCount)} warn={warn.rows || isEmpty} loading={loading} />
       <Row icon={<BuildOutlined />} label="Header" value={stats.header} loading={loading} />
       <Row icon={<BuildOutlined />} label="Footer" value={stats.footer} loading={loading} />
       <Row icon={<EyeOutlined />} label="Preview" value={stats.preview} loading={loading} isNode />
@@ -152,6 +155,8 @@ export const MappingOverviewStep: React.FC = () => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<LocalColumnPreviewResponse | null>(null);
+  const [fixedWidthLoading, setFixedWidthLoading] = useState(false);
+  const [fixedWidthError, setFixedWidthError] = useState<string | null>(null);
 
   const sourceKey = cloudObjectKey(form.sourceCloud);
   const targetKey = cloudObjectKey(form.targetCloud);
@@ -160,6 +165,85 @@ export const MappingOverviewStep: React.FC = () => {
 
   const sourceProfile: FileProfileState = !form.sourceCloud ? emptyProfileState : cacheHit ? { profile: cache.source, loading: false, error: cache.sourceError } : { profile: null, loading: true, error: false };
   const targetProfile: FileProfileState = !form.targetCloud ? emptyProfileState : cacheHit ? { profile: cache.target, loading: false, error: cache.targetError } : { profile: null, loading: true, error: false };
+  const isFetching = sourceProfile.loading || targetProfile.loading;
+  const sourceEmpty = isValidationFileEmpty(
+    form.sourceFileSize,
+    sourceProfile.profile,
+    sourceProfile.error,
+  );
+  const targetEmpty = isValidationFileEmpty(
+    form.targetFileSize,
+    targetProfile.profile,
+    targetProfile.error,
+  );
+  const isFixedWidth = !sourceEmpty && !targetEmpty && (
+    isFixedWidthFormat(sourceProfile.profile?.suggested_file_format ?? sourceProfile.profile?.file_format)
+    || isFixedWidthFormat(targetProfile.profile?.suggested_file_format ?? targetProfile.profile?.file_format)
+  );
+
+  useEffect(() => {
+    if (!isFixedWidth || isFetching) return;
+    dispatch(validationActions.setValidationForm({ detectedFileFormat: 'fixed-width' }));
+  }, [isFixedWidth, isFetching, dispatch]);
+
+  useEffect(() => {
+    if (!form.sourceCloud || !form.targetCloud || !isFixedWidth || form.fixedWidthColumns.length > 0) {
+      if (!isFixedWidth) {
+        setFixedWidthLoading(false);
+        setFixedWidthError(null);
+      }
+      return;
+    }
+
+    let cancelled = false;
+    setFixedWidthLoading(true);
+    setFixedWidthError(null);
+
+    Api.previewFixedWidthLayout({
+      source_cloud: form.sourceCloud,
+      target_cloud: form.targetCloud,
+      uid_column: form.uidColumn,
+      delimiter: form.delimiter || 'auto',
+      has_header: form.hasHeader,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        const { columns, suggested_join_column: joinCol, line_width: lineWidth } = res.data;
+        dispatch(validationActions.setValidationForm({
+          fixedWidthColumns: columns,
+          fixedWidthLineWidth: lineWidth,
+          uidColumn: form.uidColumn || joinCol,
+          detectedFileFormat: 'fixed-width',
+        }));
+      })
+      .catch((err: { response?: { data?: { detail?: unknown } } }) => {
+        if (cancelled) return;
+        const detail = err.response?.data?.detail;
+        setFixedWidthError(typeof detail === 'string' ? detail : 'Could not infer fixed-width layout');
+      })
+      .finally(() => {
+        if (!cancelled) setFixedWidthLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [
+    form.sourceCloud,
+    form.targetCloud,
+    form.uidColumn,
+    form.delimiter,
+    form.hasHeader,
+    form.fixedWidthColumns.length,
+    isFixedWidth,
+    dispatch,
+  ]);
+
+  const handleFixedWidthChange = (columns: FixedWidthColumnPreview[]) => {
+    dispatch(validationActions.setValidationForm({ fixedWidthColumns: columns }));
+  };
+
+  const handleJoinColumnChange = (joinColumn: string) => {
+    dispatch(validationActions.setValidationForm({ uidColumn: joinColumn }));
+  };
 
   useEffect(() => {
     if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || cacheHit) return;
@@ -179,7 +263,7 @@ export const MappingOverviewStep: React.FC = () => {
   }, [form.sourceCloud, form.targetCloud, sourceKey, targetKey, cacheHit, dispatch, form.delimiter, form.hasHeader]);
 
   useEffect(() => {
-    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey) {
+    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || isFixedWidth || isFetching) {
       setPreviewData(null);
       setPreviewError(null);
       setPreviewLoading(false);
@@ -217,7 +301,7 @@ export const MappingOverviewStep: React.FC = () => {
       });
 
     return () => { cancelled = true; };
-  }, [form.sourceCloud, form.targetCloud, form.uidColumn, form.delimiter, form.hasHeader, previewPairKey, sourceKey, targetKey]);
+  }, [form.sourceCloud, form.targetCloud, form.uidColumn, form.delimiter, form.hasHeader, previewPairKey, sourceKey, targetKey, isFixedWidth, isFetching]);
 
   useEffect(() => {
     setPreviewOpen(false);
@@ -233,15 +317,17 @@ export const MappingOverviewStep: React.FC = () => {
       ? <SkeletonBlock width="36px" height="32px" />
       : '—';
 
-  const isFetching = sourceProfile.loading || targetProfile.loading;
+  const inferredColumnCount = isFixedWidth
+    ? (form.fixedWidthColumns.length || sourceProfile.profile?.column_count || null)
+    : (sourceProfile.profile?.column_count ?? null);
 
   const sourceStats = {
     name: form.sourceFileName ?? '—',
     path: gsPath(form.sourceCloud?.bucket ?? null, form.sourceCloud?.object_name ?? null),
-    format: getFriendlyFormatLabel(form.sourceFileSize === 0 ? 'empty file' : sourceProfile.profile?.file_format),
+    format: formatDetectionLabel(sourceEmpty ? 'empty' : sourceProfile.profile?.file_format),
     sizeBytes: sourceProfile.profile?.file_size_bytes ?? form.sourceFileSize,
-    columnCount: form.sourceFileSize === 0 ? 0 : sourceProfile.profile?.column_count ?? null,
-    rowCount: form.sourceFileSize === 0 ? 0 : sourceProfile.profile?.row_count ?? null,
+    columnCount: sourceEmpty ? 0 : inferredColumnCount,
+    rowCount: sourceEmpty ? 0 : sourceProfile.profile?.row_count ?? null,
     header: formatBoolean(sourceProfile.profile?.has_header),
     footer: formatBoolean((sourceProfile.profile as { has_footer?: boolean })?.has_footer),
     preview: previewControl,
@@ -250,18 +336,53 @@ export const MappingOverviewStep: React.FC = () => {
   const targetStats = {
     name: form.targetFileName ?? '—',
     path: gsPath(form.targetCloud?.bucket ?? null, form.targetCloud?.object_name ?? null),
-    format: getFriendlyFormatLabel(targetProfile.profile?.file_format),
+    format: formatDetectionLabel(targetEmpty ? 'empty' : targetProfile.profile?.file_format),
     sizeBytes: targetProfile.profile?.file_size_bytes ?? form.targetFileSize,
-    columnCount: targetProfile.profile?.column_count ?? null,
-    rowCount: targetProfile.profile?.row_count ?? null,
+    columnCount: targetEmpty ? 0 : (isFixedWidth ? inferredColumnCount : targetProfile.profile?.column_count ?? null),
+    rowCount: targetEmpty ? 0 : targetProfile.profile?.row_count ?? null,
     header: formatBoolean(targetProfile.profile?.has_header),
     footer: formatBoolean((targetProfile.profile as { has_footer?: boolean })?.has_footer),
     preview: previewControl,
   };
 
+  const emptyAssessment = assessEmptyValidationFiles({
+    sourceSizeBytes: form.sourceFileSize,
+    targetSizeBytes: form.targetFileSize,
+    sourceProfile: sourceProfile.profile,
+    targetProfile: targetProfile.profile,
+    profilesLoading: isFetching,
+    sourceProfileError: sourceProfile.error,
+    targetProfileError: targetProfile.error,
+  });
+
   const runComparison = () => {
-    if (!form.sourceCloud || !form.targetCloud) return { status: 'warning' as const, title: 'Files not selected', message: 'Select source and target GCS objects in step 1.', mismatches: { size: false, columns: false, rows: false } };
-    if (isFetching) return { status: 'warning' as const, title: 'Analyzing files', message: 'Detecting format and estimating file shape…', mismatches: { size: false, columns: false, rows: false } };
+    if (!form.sourceCloud || !form.targetCloud) {
+      return {
+        status: 'warning' as const,
+        title: 'Files not selected',
+        message: 'Select source and target GCS objects in step 1.',
+        mismatches: { size: false, columns: false, rows: false },
+        blocksMapping: true,
+      };
+    }
+    if (isFetching) {
+      return {
+        status: 'warning' as const,
+        title: 'Analyzing files',
+        message: 'Detecting format and estimating file shape…',
+        mismatches: { size: false, columns: false, rows: false },
+        blocksMapping: false,
+      };
+    }
+    if (emptyAssessment?.blocksMapping) {
+      return {
+        status: 'error' as const,
+        title: emptyAssessment.title,
+        message: emptyAssessment.message,
+        mismatches: { size: false, columns: false, rows: false },
+        blocksMapping: true,
+      };
+    }
 
     const sizeDiff = sourceStats.sizeBytes && targetStats.sizeBytes ? Math.abs(sourceStats.sizeBytes - targetStats.sizeBytes) / sourceStats.sizeBytes : 0;
     const columnMismatch = sourceStats.columnCount != null && targetStats.columnCount != null && sourceStats.columnCount !== targetStats.columnCount;
@@ -281,22 +402,34 @@ export const MappingOverviewStep: React.FC = () => {
         title: issues.length > 1 ? 'Multiple Mismatches Detected' : 'Mismatch Detected',
         message: `Source and target differ in: ${issues.join(' | ')}.`,
         mismatches,
+        blocksMapping: false,
       };
     }
 
-    return { status: 'success' as const, title: 'Ready for mapping', message: 'GCS source and target objects are selected.', mismatches };
+    return {
+      status: 'success' as const,
+      title: 'Ready for mapping',
+      message: 'GCS source and target objects are selected.',
+      mismatches,
+      blocksMapping: false,
+    };
   };
 
   const alert = runComparison();
+  const alertStyles = alert.status === 'success'
+    ? { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0', icon: <CheckCircleFilled style={{ color: '#16a34a', fontSize: '20px' }} /> }
+    : alert.status === 'error'
+      ? { backgroundColor: '#fef2f2', borderColor: '#fecaca', icon: <CloseCircleFilled style={{ color: '#dc2626', fontSize: '20px' }} /> }
+      : { backgroundColor: '#fffbeb', borderColor: '#fde68a', icon: <WarningFilled style={{ color: '#d97706', fontSize: '20px' }} /> };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
       <style>{`@keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px' }}>
-        <FileCard label="Source" color="#234B5F" stats={sourceStats} warn={alert.mismatches} loading={isFetching} />
+        <FileCard label="Source" color="#234B5F" stats={sourceStats} warn={alert.mismatches} loading={isFetching} isEmpty={sourceEmpty} />
         <ArrowRightOutlined style={{ fontSize: '20px', color: '#727786' }} />
-        <FileCard label="Target" color="#234B5F" icon={<DatabaseOutlined />} stats={targetStats} warn={alert.mismatches} loading={isFetching} />
+        <FileCard label="Target" color="#234B5F" icon={<DatabaseOutlined />} stats={targetStats} warn={alert.mismatches} loading={isFetching} isEmpty={targetEmpty} />
       </div>
 
       <OverviewFilePreview
@@ -309,8 +442,20 @@ export const MappingOverviewStep: React.FC = () => {
         onClose={() => setPreviewOpen(false)}
       />
 
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '16px 20px', borderRadius: '8px', backgroundColor: alert.status === 'success' ? '#f0fdf4' : '#fffbeb', border: `1px solid ${alert.status === 'success' ? '#bbf7d0' : '#fde68a'}` }}>
-        {alert.status === 'success' ? <CheckCircleFilled style={{ color: '#16a34a', fontSize: '20px' }} /> : <WarningFilled style={{ color: '#d97706', fontSize: '20px' }} />}
+      {isFixedWidth && (
+        <FixedWidthLayoutPanel
+          columns={form.fixedWidthColumns}
+          loading={fixedWidthLoading}
+          error={fixedWidthError}
+          joinColumn={form.uidColumn}
+          lineWidth={form.fixedWidthLineWidth ?? undefined}
+          onChange={handleFixedWidthChange}
+          onJoinColumnChange={handleJoinColumnChange}
+        />
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '16px 20px', borderRadius: '8px', backgroundColor: alertStyles.backgroundColor, border: `1px solid ${alertStyles.borderColor}` }}>
+        {alertStyles.icon}
         <div>
           <h5 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700 }}>{alert.title}</h5>
           <p style={{ margin: 0, fontSize: '13px' }}>{alert.message}</p>

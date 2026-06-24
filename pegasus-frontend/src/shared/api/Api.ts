@@ -47,6 +47,70 @@ export interface ValidateRequest {
   column_mappings?: ColumnMapping[];
   has_header?: boolean;
   file_format?: string;
+  fixed_width_config?: FixedWidthConfig;
+  test_mode?: 'litmus' | 'full';
+  mismatch_snippet_limit?: number | null;
+}
+
+export interface ValidationOptionsResponse {
+  test_modes: ('litmus' | 'full')[];
+  mismatch_snippet_limit_default: number;
+  mismatch_snippet_limit_max: number;
+}
+
+export interface FixedWidthField {
+  field_name: string;
+  source_start: number;
+  source_end: number;
+  target_start: number;
+  target_end: number;
+  field_type?: string;
+  structured_order_sensitive?: boolean;
+  date_format?: string | null;
+  source_date_format?: string | null;
+  target_date_format?: string | null;
+  compare_enabled?: boolean;
+  is_sensitive?: boolean;
+  source_regex_pattern?: string | null;
+  source_regex_replacement?: string;
+  target_regex_pattern?: string | null;
+  target_regex_replacement?: string;
+}
+
+export interface FixedWidthConfig {
+  uid_column?: string | null;
+  fields: FixedWidthField[];
+  match_strategy?: string;
+}
+
+export interface FixedWidthColumnPreview {
+  field_name: string;
+  source_start: number;
+  source_end: number;
+  target_start: number;
+  target_end: number;
+  field_type: string;
+  width?: number;
+  source_sample?: string;
+  target_sample?: string;
+  date_format?: string | null;
+  source_date_format?: string | null;
+  target_date_format?: string | null;
+  structured_order_sensitive?: boolean;
+  compare_enabled?: boolean;
+  is_sensitive?: boolean;
+  source_regex_pattern?: string | null;
+  source_regex_replacement?: string;
+  target_regex_pattern?: string | null;
+  target_regex_replacement?: string;
+}
+
+export interface FixedWidthLayoutPreviewResponse {
+  columns: FixedWidthColumnPreview[];
+  suggested_join_column: string;
+  source_sample: string;
+  target_sample: string;
+  line_width: number;
 }
 
 export interface CloudBrowseRequest {
@@ -257,6 +321,7 @@ export interface ValidationHistorySummary {
   completed_at?: string | null;
   source_row_count?: number | null;
   target_row_count?: number | null;
+  test_mode?: 'litmus' | 'full' | null;
 }
 
 export interface ValidationHistoryDetail extends ValidationHistorySummary {
@@ -332,6 +397,8 @@ const E = {
   validateLocal: '/validate/local',
   validateLocalBatch: '/validate/local/batch',
   validateLocalColumns: '/validate/local/columns',
+  validateOptions: '/validate/options',
+  validateLocalFixedWidthLayout: '/validate/local/fixed-width-layout',
   validateCloudBrowse: '/validate/cloud/browse',
   validateCloudProfile: '/validate/cloud/profile',
   cloudConnections: '/admin/cloud-connections',
@@ -398,6 +465,14 @@ export const Api = {
   /** POST /validate/local/columns — header preview (supports source_cloud / target_cloud) */
   previewValidationColumns: (body: ValidateRequest): Promise<AxiosResponse<LocalColumnPreviewResponse>> =>
     httpClient.post(E.validateLocalColumns, body),
+
+  /** GET /validate/options — wizard test modes and snippet limits */
+  getValidationOptions: (): Promise<AxiosResponse<ValidationOptionsResponse>> =>
+    httpClient.get(E.validateOptions),
+
+  /** POST /validate/local/fixed-width-layout — infer slices and date formats */
+  previewFixedWidthLayout: (body: ValidateRequest): Promise<AxiosResponse<FixedWidthLayoutPreviewResponse>> =>
+    httpClient.post(E.validateLocalFixedWidthLayout, body),
 
   /** POST /validate/local — queue validation job (202); use source_cloud + target_cloud for GCS */
   submitValidation: (body: ValidateRequest): Promise<AxiosResponse<ValidationJobAcceptedResponse>> =>
