@@ -18,14 +18,32 @@ const formatBytes = (bytes: number | null) => {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 };
 
-const getFriendlyFormatLabel = (format: string | null | undefined): string => {
-  if (!format || format === '—' || format === '…') return format ?? '—';
-  const fmt = format.toLowerCase().trim();
+const formatSegmentLabel = (segment: string): string => {
+  const fmt = segment.toLowerCase().trim();
   if (fmt === 'empty file') return 'Empty File';
   if (['csv', 'tsv', 'psv', 'tsc'].includes(fmt) || fmt.includes('delimited')) return 'Delimited File';
   if (['fixed-width', 'fixed_width', 'fixed', 'fixedwidth'].includes(fmt)) return 'Fixed Width';
-  if (['archive', '7z', 'rar', 'container', 'decompress_first', 'gzip', 'bzip2', 'xz', 'zstd', 'lz4'].includes(fmt)) return 'Archive';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(fmt)) return `${fmt.toUpperCase()} Image`;
+  if (['gzip', 'bzip2', 'xz', 'zstd', 'lz4'].includes(fmt)) return fmt.toUpperCase();
+  if (['zip', 'tar', '7z', 'rar'].includes(fmt)) return fmt.toUpperCase();
+  if (fmt === 'dat') return 'DAT';
+  if (fmt === 'txt') return 'Text';
+  if (fmt === 'parquet') return 'Parquet';
+  if (fmt === 'json') return 'JSON';
+  if (fmt === 'excel') return 'Excel';
   return fmt.charAt(0).toUpperCase() + fmt.slice(1);
+};
+
+const getFriendlyFormatLabel = (format: string | null | undefined): string => {
+  if (!format || format === '—' || format === '…') return format ?? '—';
+  const normalized = format.trim();
+  if (normalized.includes('->')) {
+    return normalized
+      .split('->')
+      .map((part) => formatSegmentLabel(part.trim()))
+      .join(' → ');
+  }
+  return formatSegmentLabel(normalized);
 };
 
 const formatCount = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString();

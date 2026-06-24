@@ -11,13 +11,20 @@ from pathlib import Path
 
 from pegasus.validation.file_detection.sample import FileSample
 from pegasus.validation.file_detection.types import DetectionStage
-from pegasus.validation.file_format import format_hint_from_suffix
+from pegasus.validation.file_format import format_hint_from_suffix, is_ambiguous_tabular_suffix
 
 _EXTENSION_CONFIDENCE = 35
 
 
 def detect_extension(sample: FileSample) -> DetectionStage:
     ext = sample.path.suffix.lower()
+    if is_ambiguous_tabular_suffix(ext):
+        return DetectionStage(
+            detected_type="txt",
+            confidence=20,
+            evidence=[f"suffix={ext!r} requires content sniff"],
+            metadata={"extension": ext, "ambiguous_tabular": True},
+        )
     mapped = format_hint_from_suffix(ext)
     if mapped:
         return DetectionStage(

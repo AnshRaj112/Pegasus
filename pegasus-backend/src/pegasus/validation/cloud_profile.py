@@ -14,20 +14,23 @@ from pegasus.schemas.validation import CloudFileProfileResponse
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
 from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
 from pegasus.validation.file_detection import detect_file
+from pegasus.validation.file_detection.display_label import build_format_display_label
 from pegasus.validation.file_detection.types import FileDetectionReport
-from pegasus.validation.file_format import format_hint_from_suffix
 
 
 def format_display_label(
     report: FileDetectionReport,
     *,
     object_name: str,
+    path: str | Path | None = None,
 ) -> str:
-    """Return a short UI label (csv, fixed-width, parquet, …)."""
-    if report.suggested_file_format:
-        return report.suggested_file_format
-    suffix = Path(object_name).suffix
-    return format_hint_from_suffix(suffix) or "unknown"
+    """Return a short UI label (csv, fixed-width, zip -> csv, …)."""
+    resolved_path = Path(path) if path is not None else Path(report.path)
+    return build_format_display_label(
+        report,
+        path=resolved_path,
+        object_name=object_name,
+    )
 
 
 def detect_format_from_adapter(
@@ -72,11 +75,17 @@ def build_delimited_profile(
     row_count = count_adapter_rows(adapter)
     size_bytes = adapter.get_size_bytes() if hasattr(adapter, "get_size_bytes") else 0
 
+    detect_path = adapter.path if isinstance(adapter, FileDelimitedAdapter) else Path(object_name)
+
     return CloudFileProfileResponse(
         object_name=object_name,
         gcs_uri=gcs_uri,
         file_size_bytes=int(size_bytes or 0),
-        file_format=format_display_label(report, object_name=object_name),
+        file_format=format_display_label(
+            report,
+            object_name=object_name,
+            path=detect_path,
+        ),
         suggested_file_format=report.suggested_file_format,
         dataset_model=report.dataset_model,
         column_count=column_count,

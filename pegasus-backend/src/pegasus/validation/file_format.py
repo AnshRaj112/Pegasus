@@ -17,8 +17,6 @@ _COLUMNAR_ALIASES = frozenset({"parquet", "orc", "avro", "excel", "xlsx", "xls"}
 _SUFFIX_TO_FORMAT: dict[str, str] = {
     ".csv": "csv",
     ".tsv": "csv",
-    ".txt": "csv",
-    ".dat": "csv",
     ".parquet": "parquet",
     ".pq": "parquet",
     ".orc": "orc",
@@ -28,6 +26,9 @@ _SUFFIX_TO_FORMAT: dict[str, str] = {
     ".json": "json",
     ".ndjson": "json",
 }
+
+# Content sniff required — may be fixed-width, delimited, or plain text.
+_AMBIGUOUS_TABULAR_SUFFIXES = frozenset({".txt", ".dat"})
 
 
 def normalize_file_format(file_format: str | None) -> str:
@@ -47,6 +48,11 @@ def normalize_file_format(file_format: str | None) -> str:
 def format_hint_from_suffix(suffix: str) -> str | None:
     """Map a file suffix (e.g. ``.csv``) to a canonical format token, if known."""
     return _SUFFIX_TO_FORMAT.get(suffix.lower())
+
+
+def is_ambiguous_tabular_suffix(suffix: str) -> bool:
+    """Return whether the suffix needs content sniff (``.txt``, ``.dat``)."""
+    return suffix.lower() in _AMBIGUOUS_TABULAR_SUFFIXES
 
 
 def infer_file_format_from_path(path: Path, requested: str | None = None) -> str:
