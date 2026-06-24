@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T06:20:27Z
+# Last edited: 2026-06-24T17:03:25+05:30
 # --- END GENERATED FILE METADATA ---
 
 """API models for persisted validation history."""

@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T12:12:48+05:30
+# Last edited: 2026-06-24T16:07:50+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Fixture builders and expected outcomes for format-detection accuracy sweeps."""
