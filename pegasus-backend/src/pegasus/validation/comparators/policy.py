@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-23T11:11:28Z
+# Last edited: 2026-06-23T11:54:13Z
 # --- END GENERATED FILE METADATA ---
 
 """Per-column compare rules wired from API column_mappings into the pipeline."""
