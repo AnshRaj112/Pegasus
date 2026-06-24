@@ -5,7 +5,7 @@ import {
   HddOutlined, TableOutlined, BarcodeOutlined, BuildOutlined,
   EyeOutlined,
 } from '@ant-design/icons';
-import { Api, type CloudFileProfileResponse, type GoogleCloudStorageConfig, type LocalColumnPreviewResponse } from '../../../shared/api/Api';
+import { Api, CloudFileProfileResponse, GoogleCloudStorageConfig, LocalColumnPreviewResponse } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { OverviewFilePreview } from './OverviewFilePreview';

@@ -1,13 +1,13 @@
-import { type PayloadAction, createSlice } from '@reduxjs/toolkit';
+import { PayloadAction, createSlice } from '@reduxjs/toolkit';
 import { initializeNullState } from '../../shared/constants/common.constant';
 import {
-  type OverviewProfileCache,
-  type ValidationFormState,
-  type ValidationReducerState,
-  type ValidationDataResponse,
+ OverviewProfileCache,
+ ValidationFormState,
+ ValidationReducerState,
+ ValidationDataResponse,
 } from './Validation.interface';
-import type { GoogleCloudStorageConfig } from '../../shared/api/Api';
-import type { ValidationTabSession } from './validationTabStorage';
+import { GoogleCloudStorageConfig } from '../../shared/api/Api';
+import { ValidationTabSession } from './validationTabStorage';
 
 const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string =>
   cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';

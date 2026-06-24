@@ -1,7 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import { Modal } from 'antd';
 import { DatabaseOutlined, FileTextOutlined } from '@ant-design/icons';
-import type { LocalColumnPreviewResponse } from '../../../shared/api/Api';
+import { LocalColumnPreviewResponse } from '../../../shared/api/Api';
 
 const SkeletonCell: React.FC<{ width?: string }> = ({ width = '100%' }) => (
   <div

@@ -1,14 +1,14 @@
 import { call, delay, put, select, takeLatest } from 'redux-saga/effects';
-import { type PayloadAction } from '@reduxjs/toolkit';
+import { PayloadAction } from '@reduxjs/toolkit';
 import { notification } from 'antd';
 
 import { getApiErrorMessage } from '../../shared/api/apiError';
 import {
-  type AdminReducerState,
-  type CreateStorageProviderPayload,
-  type StorageProviderItem,
-  type StorageProviderPayload,
-  type WorkspaceItem,
+ AdminReducerState,
+ CreateStorageProviderPayload,
+ StorageProviderItem,
+ StorageProviderPayload,
+ WorkspaceItem,
 } from './Admin.interface';
 import { adminActions } from './Admin.reducer';
 import { adminService } from './Admin.service';

@@ -15,7 +15,7 @@ import {
   SortAscendingOutlined
 } from '@ant-design/icons';
 
-import { Api, type ColumnMapping, type GoogleCloudStorageConfig } from '../../../shared/api/Api';
+import { Api, ColumnMapping, GoogleCloudStorageConfig } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 

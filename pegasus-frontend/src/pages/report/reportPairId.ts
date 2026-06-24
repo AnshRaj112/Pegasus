@@ -1,4 +1,4 @@
-import type { GoogleCloudStorageConfig } from '../../shared/api/Api';
+import { GoogleCloudStorageConfig } from '../../shared/api/Api';
 
 const PAIR_SEP = '__PAIR__';
 

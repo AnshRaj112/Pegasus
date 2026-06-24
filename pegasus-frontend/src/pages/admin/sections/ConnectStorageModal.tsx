@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, Input, Upload, Button } from 'antd';
 import { GoogleOutlined, UploadOutlined, InboxOutlined } from '@ant-design/icons';
-import { type StorageProviderItem, type StorageProviderPayload } from '../Admin.interface';
+import { StorageProviderItem, StorageProviderPayload } from '../Admin.interface';
 import styles from '../Admin.module.scss';
 
 const { TextArea } = Input;

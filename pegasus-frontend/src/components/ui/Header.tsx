@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { UserOutlined, LogoutOutlined } from '@ant-design/icons';
+import { UserOutlined, LogoutOutlined, SettingOutlined } from '@ant-design/icons';
+
+import headerIcon from '~/assets/icon.png';
 import styles from './Header.module.scss';
 
 export const Header: React.FC = () => {
   const location = useLocation();
   const currentPath = location.pathname;
-  
-  // State and ref for the dropdown menu
+
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -18,14 +19,13 @@ export const Header: React.FC = () => {
     return active ? styles.navLinkActive : styles.navLink;
   };
 
-  // Close the dropdown if the user clicks outside of it
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsDropdownOpen(false);
       }
     };
-    
+
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
@@ -35,9 +35,12 @@ export const Header: React.FC = () => {
   return (
     <nav className={styles.header}>
       <div className={styles.inner}>
-        {/* Branding Title + Nav Links */}
+        
         <div className={styles.brandGroup}>
-          <span className={styles.brandTitle}>Pegasus</span>
+          <div className="d-flex align-items-center">
+            <span className={styles.brandTitle}>Pegasus</span>
+            <img src={headerIcon} alt="Pegasus Icon" className={`ms-2 ${styles.brandIcon}`} />
+          </div>
           <div className={styles.navLinks}>
             <Link to="/" className={getLinkClass('/')}>Dashboard</Link>
             <Link to="/validations" className={getLinkClass('/validations')}>Validations</Link>
@@ -46,7 +49,6 @@ export const Header: React.FC = () => {
           </div>
         </div>
 
-        {/* Shared Quick Actions Area */}
         <div className={styles.quickActions}>
           <span
             className={`material-symbols-outlined ${styles.iconButton}`}
@@ -63,37 +65,46 @@ export const Header: React.FC = () => {
             Help
           </span>
 
-          {/* Profile Dropdown Container */}
           <div className={styles.profileContainer} ref={dropdownRef}>
-            <div 
-              className={styles.avatarWrapper} 
+            <div
+              className={styles.avatarWrapper}
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
               role="button"
               aria-label="User Menu"
+              data-testid="header-user-menu"
             >
               <UserOutlined className={styles.avatarIcon} />
             </div>
 
-            {/* The Dropdown Menu */}
             {isDropdownOpen && (
               <div className={styles.dropdownMenu}>
-                <Link 
-                  to="/profile" 
-                  className={styles.dropdownItem} 
+                <Link
+                  to="/profile"
+                  className={styles.dropdownItem}
                   onClick={() => setIsDropdownOpen(false)}
                 >
                   <UserOutlined />
                   <span>Profile</span>
                 </Link>
-                
-                <div className={styles.dropdownDivider} />
-                
-                <button 
+
+                <Link 
+                  to="/setting" 
                   className={styles.dropdownItem} 
+                  onClick={() => setIsDropdownOpen(false)}
+                >
+                  <SettingOutlined />
+                  <span>Setting</span>
+                </Link>
+
+                <div className={styles.dropdownDivider} />
+
+                <button
+                  className={styles.dropdownItem}
                   onClick={() => {
                     // TODO: Add your logout logic here
                     setIsDropdownOpen(false);
                   }}
+                  data-testid="header-logout-btn"
                 >
                   <LogoutOutlined />
                   <span>Logout</span>

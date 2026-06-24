@@ -66,7 +66,7 @@ export const WorkspaceMgmtSubView: React.FC = () => {
                 <td style={{ padding: '16px 24px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <span style={{ fontSize: '14px', fontWeight: 600, color: '#1b1b1c' }}>{row.name}</span>
-                    {row.isDefault && <span style={{ fontSize: '11px', fontWeight: 700, backgroundColor: 'rgba(0, 87, 194, 0.1)', color: '#0057c2', border: '1px solid rgba(0, 87, 194, 0.2)', padding: '2px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>Default/Global</span>}
+                    {row.isDefault && <span style={{ fontSize: '11px', fontWeight: 700, backgroundColor: 'rgba(35, 75, 95, 0.1)', color: '#234B5F', border: '1px solid rgba(35, 75, 95, 0.2)', padding: '2px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>Default/Global</span>}
                   </div>
                 </td>
                 <td style={{ padding: '16px 24px', fontSize: '14px', color: '#414755' }}>{row.createdDate}</td>
@@ -93,8 +93,8 @@ export const WorkspaceMgmtSubView: React.FC = () => {
         </div>
       </div>
 
-      <div style={{ padding: '24px', backgroundColor: 'rgba(0, 87, 194, 0.05)', border: '1px solid rgba(0, 87, 194, 0.1)', borderRadius: '12px', display: 'flex', gap: '24px', alignItems: 'flex-start' }}>
-        <div style={{ padding: '8px', backgroundColor: 'rgba(0, 87, 194, 0.1)', color: '#234B5F', borderRadius: '8px' }}><BulbOutlined style={{ fontSize: '20px' }} /></div>
+      <div style={{ padding: '24px', backgroundColor: 'rgba(35, 75, 95, 0.05)', border: '1px solid rgba(35, 75, 95, 0.1)', borderRadius: '12px', display: 'flex', gap: '24px', alignItems: 'flex-start' }}>
+        <div style={{ padding: '8px', backgroundColor: 'rgba(35, 75, 95, 0.1)', color: '#234B5F', borderRadius: '8px' }}><BulbOutlined style={{ fontSize: '20px' }} /></div>
         <div>
           <h3 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700, color: '#1b1b1c' }}>Administrative Pro-Tip</h3>
           <p style={{ margin: 0, fontSize: '14px', color: '#414755', lineHeight: '22px' }}>Workspaces allow you to isolate validation rules and data source connections between different business units. Remember that the "Global Workspace" rules are inherited by all child workspaces unless explicitly overridden in the workspace configuration settings.</p>

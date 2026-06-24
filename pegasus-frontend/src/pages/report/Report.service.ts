@@ -1,7 +1,7 @@
 import React from 'react';
 import { ClockCircleOutlined, SyncOutlined } from '@ant-design/icons';
-import { Api, type ValidationHistorySummary } from '../../shared/api/Api';
-import { type ReportItem } from './Report.interface';
+import { Api, ValidationHistorySummary } from '../../shared/api/Api';
+import { ReportItem } from './Report.interface';
 import { decodeReportPairId, encodeReportPairId, pairIdFromPathSegment, pairIdToPathSegment } from './reportPairId';
 import { getActiveSessions } from '../validation/validationSessionStorage';
 

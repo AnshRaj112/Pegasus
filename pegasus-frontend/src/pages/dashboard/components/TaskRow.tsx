@@ -1,6 +1,6 @@
 import React from 'react';
 import { CheckCircle2, Loader2, Calendar, AlertCircle } from 'lucide-react';
-import { type TaskItem } from '../Dashboard.interface'; // ⚡ We import it here now!
+import { TaskItem } from '../Dashboard.interface'; // ⚡ We import it here now!
 
 interface TaskRowProps {
   task: TaskItem;

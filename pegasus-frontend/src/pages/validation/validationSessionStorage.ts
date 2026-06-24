@@ -1,4 +1,4 @@
-import type { ColumnMapping, GoogleCloudStorageConfig } from '../../shared/api/Api';
+import { ColumnMapping, GoogleCloudStorageConfig } from '../../shared/api/Api';
 
 const STORAGE_KEY = 'pegasus_active_validation_sessions';
 

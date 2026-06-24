@@ -1,7 +1,7 @@
 import { call, put, select, takeLatest } from 'redux-saga/effects';
 import { reportActions } from './Report.reducer';
 import { ReportService } from './Report.service';
-import { type TabType, type ReportItem } from './Report.interface';
+import { TabType, ReportItem } from './Report.interface';
 
 // Quick selector to check the current tab
 const selectActiveTab = (state: any): TabType => state.report.activeTab;

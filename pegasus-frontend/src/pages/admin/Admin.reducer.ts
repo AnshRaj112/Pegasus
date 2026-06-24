@@ -1,10 +1,10 @@
-import { type PayloadAction, createSlice } from '@reduxjs/toolkit';
+import { PayloadAction, createSlice } from '@reduxjs/toolkit';
 import {
-  type AdminReducerState,
-  type CreateStorageProviderPayload,
-  type StorageProviderItem,
-  type StorageProviderPayload,
-  type WorkspaceItem,
+ AdminReducerState,
+ CreateStorageProviderPayload,
+ StorageProviderItem,
+ StorageProviderPayload,
+ WorkspaceItem,
 } from './Admin.interface';
 
 export const initialState: AdminReducerState = {

@@ -1,7 +1,7 @@
 import React from 'react';
 import { TableOutlined, HistoryOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
-import { type ReportItem, type ReportBadge } from '../Report.interface';
+import { ReportItem, ReportBadge } from '../Report.interface';
 import { useNavigate } from 'react-router-dom';
 import { validationActions } from '../../validation/Validation.reducer';
 

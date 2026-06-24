@@ -11,7 +11,7 @@ import {
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppDispatch } from '../../../redux/store';
 import { ReportService } from '../Report.service';
-import type { ValidationHistorySummary } from '../../../shared/api/Api';
+import { ValidationHistorySummary } from '../../../shared/api/Api';
 import { validationActions } from '../../validation/Validation.reducer';
 
 const formatEnd = (iso: string | null | undefined) => {

@@ -1,5 +1,23 @@
-/* Header.module.scss — Onyx Red branding per color palette (docs/color/29.svg) */
-
+:root {
+  /* Surface & Background Colors */
+  --surface-bright: #fcf9f8;
+  --surface-container-lowest: #ffffff;
+  
+  /* Text Colors */
+  --on-surface: #1b1b1c;
+  --on-surface-variant: #414755;
+  --on-primary: #ffffff;
+  
+  /* Brand & Status Colors */
+  --color-onyx-red: #E06B67;
+  --color-onyx-red-deep: #952622;
+  --color-onyx-red-light: rgba(224, 107, 103, 0.25);
+  --status-fail: #ba1a1a;
+  
+  /* Borders & Outlines */
+  --outline: #727786;
+  --outline-variant: #c1c6d7;
+}
 .header {
   background: #ffffff;
   border-bottom: 1px solid var(--surface-variant);
@@ -29,7 +47,6 @@
   gap: var(--xl);
 }
 
-/* Branding title uses Onyx Red (Primary Color 2) */
 .brandTitle {
   font-family: var(--font-h2);
   font-size: var(--h2);
@@ -39,13 +56,17 @@
   text-decoration: none;
 }
 
+.brandIcon {
+  height: 28px;
+  object-fit: contain;
+}
+
 .navLinks {
   display: flex;
   gap: var(--lg);
   align-items: center;
 }
 
-/* Default (inactive) nav links */
 .navLink {
   color: var(--on-surface-variant);
   font-family: var(--font-label-md);
@@ -53,8 +74,7 @@
   text-decoration: none;
   font-weight: 500;
   padding-bottom: 4px;
-  /* Crucial: Reserves the 2px space so the text never jumps */
-  border-bottom: 2px solid transparent; 
+  border-bottom: 2px solid transparent;
   transition: color 0.2s ease, border-color 0.2s ease;
 
   &:hover {
@@ -64,14 +84,12 @@
 
 .navLinkActive {
   color: var(--color-onyx-red-deep);
-  /* Duplicating base properties because your React code swaps the classes entirely */
   font-family: var(--font-label-md);
   font-size: var(--label-md);
   text-decoration: none;
   font-weight: 500;
   padding-bottom: 4px; 
-  /* Your active line is back! */
-  border-bottom: 2px solid var(--color-onyx-red-deep); 
+  border-bottom: 2px solid var(--color-onyx-red-deep);
 }
 
 .quickActions {
@@ -106,7 +124,6 @@
     border-color: var(--color-midnight-green);
   }
 }
-/* --- Profile & Dropdown Styles --- */
 
 .profileContainer {
   position: relative;
@@ -121,7 +138,7 @@
   width: 32px; 
   height: 32px;
   border-radius: 50%;
-  background-color: #f2f4f6; /* Subtle background circle */
+  background-color: #f2f4f6;
   cursor: pointer;
   transition: background-color 0.2s ease;
 
@@ -132,12 +149,12 @@
 
 .avatarIcon {
   font-size: 16px;
-  color: #234B5F; /* Brand theme color */
+  color: #234B5F;
 }
 
 .dropdownMenu {
   position: absolute;
-  top: calc(100% + 12px); /* Spaced slightly below the avatar */
+  top: calc(100% + 12px);
   right: 0;
   width: 160px;
   background-color: #ffffff;
@@ -147,7 +164,7 @@
   display: flex;
   flex-direction: column;
   z-index: 100;
-  overflow: hidden; /* Keeps hover effects inside rounded corners */
+  overflow: hidden;
 }
 
 .dropdownItem {
@@ -170,7 +187,6 @@
     color: #234B5F;
   }
 
-  /* Ensures icons align nicely with the text */
   svg {
     font-size: 16px;
   }

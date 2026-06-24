@@ -1,4 +1,4 @@
-import { type ProfileState } from './Profile.interface';
+import { ProfileState } from './Profile.interface';
 
 const initialState: ProfileState = {
   data: null,
