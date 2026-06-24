@@ -96,9 +96,9 @@ export const ExecutionHistory: React.FC = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#64748b', fontSize: '12px' }}>
-            <span onClick={() => navigate('/reports')} style={{ cursor: 'pointer' }} onMouseEnter={(e) => { e.currentTarget.style.color = '#0057c2'; }} onMouseLeave={(e) => { e.currentTarget.style.color = '#64748b'; }}>Reports</span>
+            <span onClick={() => navigate('/reports')} style={{ cursor: 'pointer' }} onMouseEnter={(e) => { e.currentTarget.style.color = '#234B5F'; }} onMouseLeave={(e) => { e.currentTarget.style.color = '#64748b'; }}>Reports</span>
             <RightOutlined style={{ fontSize: '10px' }} />
-            <span style={{ color: '#0057c2', fontWeight: 500 }}>{MAPPING_NAME}</span>
+            <span style={{ color: '#234B5F', fontWeight: 500 }}>{MAPPING_NAME}</span>
             <RightOutlined style={{ fontSize: '10px' }} />
             <span style={{ color: '#1b1b1c', fontWeight: 500 }}>History</span>
           </div>
@@ -119,7 +119,7 @@ export const ExecutionHistory: React.FC = () => {
             type="button"
             disabled={!runs[0]?.run_id}
             onClick={() => runs[0]?.run_id && dispatch(validationActions.runValidationFromHistoryRequest(runs[0].run_id))}
-            style={{ backgroundColor: '#0057c2', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 500, cursor: runs[0]?.run_id ? 'pointer' : 'not-allowed', opacity: runs[0]?.run_id ? 1 : 0.6 }}
+            style={{ backgroundColor: '#234B5F', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 500, cursor: runs[0]?.run_id ? 'pointer' : 'not-allowed', opacity: runs[0]?.run_id ? 1 : 0.6 }}
           >
             <PlayCircleOutlined /> Run Validation
           </button>

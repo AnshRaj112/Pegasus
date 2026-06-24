@@ -61,7 +61,7 @@ export const AdminView: React.FC = () => {
       <aside className={styles.adminSidebar}>
         <div style={{ padding: '0 16px', marginBottom: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-            <div style={{ width: '32px', height: '32px', backgroundColor: '#0057c2', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff' }}>
+            <div style={{ width: '32px', height: '32px', backgroundColor: '#234B5F', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff' }}>
               <SafetyCertificateOutlined style={{ fontSize: '20px' }} />
             </div>
             <span style={{ fontSize: '24px', fontWeight: 700, color: '#1b1b1c' }}>Admin Center</span>

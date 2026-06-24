@@ -496,7 +496,7 @@ export const ConfigureStoreSubView: React.FC = () => {
           alignItems: 'flex-start',
         }}
       >
-        <div style={{ padding: '8px', backgroundColor: 'rgba(0, 87, 194, 0.1)', color: '#0057c2', borderRadius: '8px' }}>
+        <div style={{ padding: '8px', backgroundColor: 'rgba(0, 87, 194, 0.1)', color: '#234B5F', borderRadius: '8px' }}>
           <BulbOutlined style={{ fontSize: '20px' }} />
         </div>
         <div>
