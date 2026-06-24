@@ -24,6 +24,43 @@ def test_count_adapter_rows_from_local_file(tmp_path: Path) -> None:
     assert count_adapter_rows(adapter) == 2
 
 
+def test_build_profile_csv_wrong_extension(tmp_path: Path) -> None:
+    path = tmp_path / "data.abc"
+    path.write_text("id,name\n1,alice\n2,bob\n", encoding="utf-8")
+    from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+
+    adapter = FileDelimitedAdapter(path, delimiter=",", has_header=True)
+    profile = build_delimited_profile(
+        adapter,
+        object_name="data.abc",
+        gcs_uri="gs://bucket/data.abc",
+        resolved_delimiter=",",
+    )
+    assert profile.file_format == "csv"
+    assert profile.suggested_file_format == "csv"
+
+
+def test_build_profile_fixed_width_custom_extension(tmp_path: Path) -> None:
+    lines = [
+        "ID      NAME                AMOUNT",
+        "00000001ALICE SMITH          00001234",
+        "00000002BOB JONES            00005678",
+    ]
+    path = tmp_path / "payroll.verizon"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+
+    adapter = FileDelimitedAdapter(path, delimiter=",", has_header=True)
+    profile = build_delimited_profile(
+        adapter,
+        object_name="payroll.verizon",
+        gcs_uri="gs://bucket/payroll.verizon",
+        resolved_delimiter=",",
+    )
+    assert profile.file_format == "fixed-width"
+    assert profile.suggested_file_format == "fixed-width"
+
+
 def test_build_delimited_profile_detects_csv(tmp_path: Path) -> None:
     csv_path = tmp_path / "sample.csv"
     csv_path.write_text("id,name\n1,alice\n2,bob\n", encoding="utf-8")

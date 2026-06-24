@@ -13,6 +13,7 @@ import shutil
 import tarfile
 import tempfile
 import zipfile
+import zlib
 from pathlib import Path
 
 from pegasus.validation.file_detection.pipeline import detect_file
@@ -92,7 +93,11 @@ def _resolve_format_chain(
         if inner_report is not None:
             chain.extend(_resolve_format_chain(inner_path, inner_report, display_name=inner_path.name))
             return chain
-        chain.append(_leaf_type_from_name(display_name))
+        inner = _inner_suffix_chain_from_filename(display_name, skip_outer=compression)
+        if inner:
+            chain.extend(inner)
+        else:
+            chain.append(_leaf_type_from_report(report, display_name))
         return chain
 
     if container not in {"", "none"}:
@@ -115,7 +120,7 @@ def _inspect_archive_inner(
                 return _walk_zip_chain(path, depth=0)
             if container == "tar":
                 return _walk_tar_chain(path, depth=0)
-        except OSError:
+        except (OSError, zipfile.BadZipFile, tarfile.TarError):
             pass
 
     names = []
@@ -130,9 +135,58 @@ def _inspect_archive_inner(
 
 def _inner_suffix_chain_from_filename(name: str, *, skip_outer: str | None = None) -> list[str]:
     chain = _suffix_chain_from_filename(name)
-    if chain and skip_outer and chain[0] == skip_outer:
-        return chain[1:]
+    if skip_outer and skip_outer in chain:
+        idx = chain.index(skip_outer)
+        chain = chain[:idx] + chain[idx + 1 :]
     return chain
+
+
+def _compression_kind_from_name(name: str) -> str | None:
+    lower = name.lower()
+    for suffix, kind in _COMPRESSION_SUFFIXES:
+        if lower.endswith(suffix):
+            return kind
+    return None
+
+
+def _chain_from_extracted_path(
+    path: Path,
+    *,
+    display_name: str,
+    depth: int = 0,
+) -> list[str]:
+    """Resolve a format chain from an on-disk path (compression, archives, leaf)."""
+    if depth >= MAX_ARCHIVE_DEPTH:
+        return ["unknown"]
+    report = detect_file(path)
+    compression = _stage_type(report.compression)
+    container = _stage_type(report.container)
+
+    if compression not in {"", "none"} and container in {"", "none"}:
+        inner_report, inner_path = _inspect_decompressed(path, compression)
+        if inner_report is not None:
+            return [compression, *_chain_from_extracted_path(
+                inner_path, display_name=inner_path.name, depth=depth + 1,
+            )]
+        suffix_chain = _suffix_chain_from_filename(display_name)
+        if suffix_chain:
+            return [compression, *suffix_chain]
+        return [compression, _leaf_type_from_report(report, display_name)]
+
+    if container not in {"", "none"}:
+        inner_chain = _inspect_archive_inner(path, container, report)
+        return [container, *inner_chain]
+
+    return [_leaf_type_from_report(report, display_name)]
+
+
+def _member_name_fallback_chain(member: str) -> list[str]:
+    """Infer inner chain from a member filename when extraction fails."""
+    chain = _suffix_chain_from_filename(Path(member).name)
+    if chain:
+        return chain
+    leaf = _leaf_type_from_member_name(member)
+    return [leaf] if leaf != "unknown" else ["unknown"]
 
 
 def _walk_zip_chain(path: Path, *, depth: int) -> list[str]:
@@ -143,17 +197,7 @@ def _walk_zip_chain(path: Path, *, depth: int) -> list[str]:
         if not names:
             return ["unknown"]
         member = _pick_archive_member(names)
-        member_lower = member.lower()
-        if member_lower.endswith(".zip"):
-            extracted = _extract_zip_member(zf, member)
-            if extracted is not None:
-                return ["zip", *_walk_zip_chain(extracted, depth=depth + 1)]
-        if _is_archive_member(member_lower):
-            inner_kind = _archive_kind_from_name(member_lower)
-            extracted = _extract_zip_member(zf, member)
-            if extracted is not None and inner_kind == "tar":
-                return ["tar", *_walk_tar_chain(extracted, depth=depth + 1)]
-        return _resolve_member_leaf_from_zip(zf, member)
+        return _resolve_member_leaf_from_zip(zf, member, depth=depth)
     return ["unknown"]
 
 
@@ -165,16 +209,7 @@ def _walk_tar_chain(path: Path, *, depth: int) -> list[str]:
         if not members:
             return ["unknown"]
         member = _pick_archive_member([m.name for m in members])
-        member_lower = member.lower()
-        if member_lower.endswith(".zip"):
-            extracted = _extract_tar_member(tf, member)
-            if extracted is not None:
-                return ["zip", *_walk_zip_chain(extracted, depth=depth + 1)]
-        if member_lower.endswith(".tar") or member_lower.endswith(".tgz"):
-            extracted = _extract_tar_member(tf, member)
-            if extracted is not None:
-                return ["tar", *_walk_tar_chain(extracted, depth=depth + 1)]
-        return _resolve_member_leaf_from_tar(tf, member)
+        return _resolve_member_leaf_from_tar(tf, member, depth=depth)
     return ["unknown"]
 
 
@@ -184,11 +219,14 @@ def _inspect_decompressed(
 ) -> tuple[FileDetectionReport | None, Path]:
     try:
         extracted = _decompress_member(path, compression)
-    except OSError:
+    except (OSError, EOFError, ValueError, zlib.error):
         return None, path
     if extracted is None:
         return None, path
-    return detect_file(extracted), extracted
+    try:
+        return detect_file(extracted), extracted
+    except OSError:
+        return None, path
 
 
 def _decompress_member(path: Path, compression: str) -> Path | None:
@@ -211,7 +249,7 @@ def _decompress_member(path: Path, compression: str) -> Path | None:
                 if total > MAX_INNER_EXTRACT_BYTES:
                     return None
                 dst.write(chunk)
-    except OSError:
+    except (OSError, EOFError, ValueError, zlib.error):
         return None
     return out
 
@@ -257,22 +295,18 @@ def _requires_content_sniff(name: str) -> bool:
     return Path(name).suffix.lower() in _AMBIGUOUS_LEAF_SUFFIXES
 
 
-def _resolve_member_leaf_from_zip(zf: zipfile.ZipFile, member: str) -> list[str]:
-    if _requires_content_sniff(member) or _leaf_type_from_member_name(member) == "unknown":
-        extracted = _extract_zip_member(zf, member)
-        if extracted is not None:
-            return [_leaf_type_from_report(detect_file(extracted), member)]
-    leaf = _leaf_type_from_member_name(member)
-    return [leaf] if leaf != "unknown" else ["unknown"]
+def _resolve_member_leaf_from_zip(zf: zipfile.ZipFile, member: str, *, depth: int = 0) -> list[str]:
+    extracted = _extract_zip_member(zf, member)
+    if extracted is not None:
+        return _chain_from_extracted_path(extracted, display_name=member, depth=depth + 1)
+    return _member_name_fallback_chain(member)
 
 
-def _resolve_member_leaf_from_tar(tf: tarfile.TarFile, member: str) -> list[str]:
-    if _requires_content_sniff(member) or _leaf_type_from_member_name(member) == "unknown":
-        extracted = _extract_tar_member(tf, member)
-        if extracted is not None:
-            return [_leaf_type_from_report(detect_file(extracted), member)]
-    leaf = _leaf_type_from_member_name(member)
-    return [leaf] if leaf != "unknown" else ["unknown"]
+def _resolve_member_leaf_from_tar(tf: tarfile.TarFile, member: str, *, depth: int = 0) -> list[str]:
+    extracted = _extract_tar_member(tf, member)
+    if extracted is not None:
+        return _chain_from_extracted_path(extracted, display_name=member, depth=depth + 1)
+    return _member_name_fallback_chain(member)
 
 
 def _pick_archive_member(names: list[str]) -> str:
@@ -304,25 +338,25 @@ def _archive_kind_from_name(name: str) -> str:
 
 def _chain_from_entry_names(names: list[str]) -> list[str]:
     member = _pick_archive_member(names)
-    chain: list[str] = []
-    for part in Path(member).parts:
-        part_lower = part.lower()
-        for suffix, kind in _CONTAINER_SUFFIXES:
-            if part_lower.endswith(suffix):
-                chain.append(kind)
-                leaf = _leaf_type_from_member_name(part)
-                if leaf != "unknown":
-                    chain.append(leaf)
-                return chain
-        leaf = _leaf_type_from_member_name(part)
-        if leaf != "unknown":
-            chain.append(leaf)
-            return chain
+    chain = _suffix_chain_from_filename(Path(member).name)
+    if chain:
+        return chain
     return [_leaf_type_from_member_name(member)]
 
 
+_KNOWN_EXTENSION_SUFFIXES = frozenset(
+    suffix for suffix, _ in _CONTAINER_SUFFIXES + _COMPRESSION_SUFFIXES + _LEAF_SUFFIXES
+) | _AMBIGUOUS_LEAF_SUFFIXES
+
+
 def _suffix_chain_from_filename(name: str) -> list[str]:
-    lower = name.lower()
+    lower = Path(name).name.lower()
+
+    # Strip a trailing vendor extension before peeling archive/compression layers.
+    vendor = Path(lower).suffix.lower()
+    if vendor and vendor not in _KNOWN_EXTENSION_SUFFIXES:
+        lower = lower[: -len(vendor)]
+
     chain: list[str] = []
     changed = True
     while changed:
@@ -333,9 +367,18 @@ def _suffix_chain_from_filename(name: str) -> list[str]:
                 lower = lower[: -len(suffix)]
                 changed = True
                 break
-    leaf = _leaf_type_from_member_name(lower) if lower else "unknown"
-    if leaf != "unknown":
-        chain.append(leaf)
+
+    for suffix, kind in _LEAF_SUFFIXES:
+        if lower.endswith(suffix):
+            chain.append(kind)
+            return chain
+
+    if lower and is_ambiguous_tabular_suffix(Path(lower).suffix):
+        chain.append("txt")
+    elif lower:
+        bare = Path(lower).suffix.lstrip(".")
+        if bare:
+            chain.append(bare)
     return chain
 
 
@@ -357,6 +400,19 @@ def _leaf_type_from_name(name: str) -> str:
     return _leaf_type_from_member_name(name)
 
 
+def _normalize_kind_label(kind: str) -> str:
+    token = kind.lower().strip()
+    if token.startswith("x-"):
+        token = token[2:]
+    aliases = {
+        "sqlite3": "sqlite",
+        "tga": "unknown",
+        "dbt": "bmp",
+        "empty": "empty",
+    }
+    return aliases.get(token, token)
+
+
 def _leaf_type_from_report(report: FileDetectionReport, display_name: str) -> str:
     structured = report.structured_format
     if structured and structured.confidence >= 60:
@@ -373,7 +429,7 @@ def _leaf_type_from_report(report: FileDetectionReport, display_name: str) -> st
 
     magic = report.magic_bytes
     if magic and magic.confidence >= 70:
-        detected = magic.detected_type
+        detected = _normalize_kind_label(magic.detected_type)
         if detected not in {"", "unknown", "zip", "tar", "gzip", "bzip2", "xz", "zstd", "lz4", "text"}:
             return detected
 

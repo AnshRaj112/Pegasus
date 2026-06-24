@@ -82,7 +82,7 @@ def detect_structured(
 
 
 def _decode_text_sample(sample: FileSample) -> str:
-    return sample.raw.decode("utf-8", errors="replace")
+    return sample.raw.decode("utf-8-sig", errors="replace")
 
 
 def _detect_json(text: str) -> DetectionStage:
@@ -170,6 +170,8 @@ def _detect_fixed_width(text: str) -> DetectionStage:
         if line_length <= 20:
             continue
         if any("," in ln for ln in candidate[:5]):
+            continue
+        if not all("  " in ln for ln in candidate[:5]):
             continue
         return DetectionStage(
             "fixed-width",

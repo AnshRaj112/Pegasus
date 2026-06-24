@@ -28,6 +28,7 @@ const formatSegmentLabel = (segment: string): string => {
   if (['zip', 'tar', '7z', 'rar'].includes(fmt)) return fmt.toUpperCase();
   if (fmt === 'dat') return 'DAT';
   if (fmt === 'txt') return 'Text';
+  if (fmt === 'empty') return 'Empty File';
   if (fmt === 'parquet') return 'Parquet';
   if (fmt === 'json') return 'JSON';
   if (fmt === 'excel') return 'Excel';

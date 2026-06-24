@@ -138,6 +138,21 @@ def select_validation_strategy(
         and not (structured and structured.confidence >= 60)
     )
 
+    _DELIMITED_EXTENSIONS = {".csv", ".tsv", ".psv"}
+
+    if best_kind == "text" and not (structured and structured.confidence >= 60):
+        ext = str(extension.metadata.get("extension", "") if extension else "").lower()
+        if ext in _DELIMITED_EXTENSIONS:
+            fmt = "tsv" if ext == ".tsv" else "psv" if ext == ".psv" else "csv"
+            stage = DetectionStage(fmt, best_conf, evidence=[f"text/plain with {ext} extension"])
+            return stage, "tabular", fmt, None, warnings
+        stage = DetectionStage(
+            "txt",
+            best_conf,
+            evidence=["generic text without tabular structure"],
+        )
+        return stage, "unknown", None, None, warnings
+
     if best_kind in _TABULAR or best_kind in {"csv", "tsv", "psv", "text"}:
         if ambiguous_tabular and best_kind == "text":
             stage = DetectionStage(
