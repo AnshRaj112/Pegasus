@@ -37,6 +37,7 @@ from pegasus.schemas.validation import (
     CloudMatchFilePairsRequest,
     FileDetectionResponse,
     FilePairMatch,
+    FixedWidthLayoutPreviewResponse,
     LocalBrowseResponse,
     LocalColumnPreviewResponse,
     LocalPathBrowseConfigResponse,
@@ -274,6 +275,14 @@ async def preview_local_csv_columns_body(
         has_header=body.has_header,
         skip_rows=body.header_leading_rows,
     )
+    from pegasus.validation.file_format import normalize_file_format
+
+    requested_fmt = normalize_file_format(body.file_format) if body.file_format else None
+    if requested_fmt == "fixed-width":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Use POST /validate/local/fixed-width-layout for fixed-width files",
+        )
     try:
         preview = service.preview_column_headers_from_adapters(
             source=source_input.adapter,
@@ -285,6 +294,71 @@ async def preview_local_csv_columns_body(
             file_format=body.file_format,
         )
         return LocalColumnPreviewResponse(**preview)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post(
+    "/validate/local/fixed-width-layout",
+    response_model=FixedWidthLayoutPreviewResponse,
+    summary="Infer fixed-width column slices and date formats for mapping",
+    responses={
+        400: {"description": "Invalid paths, cloud inputs, or unreadable files"},
+        403: {"description": "Local path validation disabled"},
+    },
+)
+async def preview_fixed_width_layout_body(
+    service: ValidationServiceDep,
+    settings: AppSettings,
+    session: DbSession,
+    body: Annotated[LocalPathValidateRequest, Body()],
+) -> FixedWidthLayoutPreviewResponse:
+    source_cloud, source_path = await coerce_cloud_storage_reference(
+        session,
+        label="source",
+        path=body.source_path,
+        cloud=(
+            await resolve_cloud_config_with_saved_connection(body.source_cloud, session=session)
+            if body.source_cloud is not None
+            else None
+        ),
+    )
+    target_cloud, target_path = await coerce_cloud_storage_reference(
+        session,
+        label="target",
+        path=body.target_path,
+        cloud=(
+            await resolve_cloud_config_with_saved_connection(body.target_cloud, session=session)
+            if body.target_cloud is not None
+            else None
+        ),
+    )
+    source_cloud = await ensure_resolved_cloud_config(session, source_cloud)
+    target_cloud = await ensure_resolved_cloud_config(session, target_cloud)
+    source_input = resolve_delimited_input(
+        settings=settings,
+        label="source",
+        path=source_path,
+        cloud=source_cloud,
+        delimiter=body.delimiter,
+        has_header=body.has_header,
+        skip_rows=body.header_leading_rows,
+    )
+    target_input = resolve_delimited_input(
+        settings=settings,
+        label="target",
+        path=target_path,
+        cloud=target_cloud,
+        delimiter=body.delimiter,
+        has_header=body.has_header,
+        skip_rows=body.header_leading_rows,
+    )
+    try:
+        preview = service.preview_fixed_width_layout_from_adapters(
+            source=source_input.adapter,
+            target=target_input.adapter,
+        )
+        return FixedWidthLayoutPreviewResponse(**preview)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -654,11 +728,14 @@ async def validate_csv_local_paths(
         "has_header": body.has_header,
         "header_leading_rows": body.header_leading_rows,
         "run_id": str(run_id) if run_id else None,
+        "job_id": str(job_id),
         "source_filename": source_input.display_name if source_input else resolved_source.name,
         "target_filename": target_input.display_name if target_input else resolved_target.name,
         "file_format": file_format,
         "test_mode": body.test_mode.value,
     }
+    if body.fixed_width_config is not None:
+        meta["fixed_width_config"] = body.fixed_width_config.model_dump()
     if source_input is not None and source_input.is_cloud:
         meta["source_cloud"] = cloud_config_to_meta(source_cloud)  # type: ignore[arg-type]
     else:

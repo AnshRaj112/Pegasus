@@ -12,12 +12,15 @@ import {
   CodeOutlined,
   ArrowRightOutlined,
   CloseOutlined,
-  SortAscendingOutlined
+  OrderedListOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 
-import { Api, type ColumnMapping, type GoogleCloudStorageConfig } from '../../../shared/api/Api';
+import { Api, type ColumnMapping, type FixedWidthColumnPreview, type GoogleCloudStorageConfig } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
+import { isFixedWidthFormat } from '../fixedWidthFormat';
+import { FixedWidthLayoutPanel } from './FixedWidthLayoutPanel';
 
 const PAGE_SIZE = 10;
 
@@ -41,6 +44,19 @@ const looksStructured = (value: string): boolean => {
   return s.length > 0 && /^[\[{]/.test(s);
 };
 
+const isComplexColumn = (row: ComplexMappingRow, complexColumns: string[]): boolean =>
+  complexColumns.includes(row.sourceCol)
+  || row.sourceType === 'Structured'
+  || looksStructured(row.previewValue);
+
+const mergeComplexColumns = (apiComplex: string[], rows: ComplexMappingRow[]): string[] => {
+  const found = new Set(apiComplex);
+  rows.forEach((row) => {
+    if (isComplexColumn(row, apiComplex)) found.add(row.sourceCol);
+  });
+  return Array.from(found);
+};
+
 const inferType = (value: string, isComplex: boolean): string => {
   if (isComplex || looksStructured(value)) return 'Structured';
   if (/^(true|false)$/i.test(value)) return 'Bool';
@@ -59,7 +75,6 @@ const getCloudLabel = (cloud: string | GoogleCloudStorageConfig | null | undefin
 const matrixToColumnMappings = (
   matrix: ComplexMappingRow[],
   complexColumns: string[],
-  structuredOrderSensitive: boolean
 ): ColumnMapping[] =>
   matrix
     .filter((row) => !row.isIgnored && row.targetCols.length > 0)
@@ -69,13 +84,16 @@ const matrixToColumnMappings = (
         source_column: row.sourceCol,
         target_column: primary,
         ...(extra.length > 0 ? { target_columns: extra } : {}),
+        ...(row.isSensitive ? { is_sensitive: true } : {}),
+        ...(row.sourceExpr.trim() ? { source_regex_pattern: row.sourceExpr.trim() } : {}),
+        ...(row.targetExpr.trim() ? { target_regex_pattern: row.targetExpr.trim() } : {}),
       };
 
-      if (complexColumns.includes(row.sourceCol)) {
+      if (isComplexColumn(row, complexColumns)) {
         return {
           ...base,
           compare_mode: 'structured',
-          structured_order_sensitive: row.isOrderSensitive ?? structuredOrderSensitive,
+          structured_order_sensitive: row.isOrderSensitive,
         };
       }
       return base;
@@ -117,6 +135,38 @@ const matrixFromColumnMappings = (
     };
   });
 };
+
+const OrderSensitivityButton: React.FC<{
+  strict: boolean;
+  onToggle: () => void;
+}> = ({ strict, onToggle }) => (
+  <button
+    type="button"
+    onClick={onToggle}
+    title={
+      strict
+        ? 'Strict order: list elements and dict key order must match. Click to ignore order.'
+        : 'Ignore order: reordered lists, dict keys, and nested JSON still match. Click to require strict order.'
+    }
+    style={{
+      padding: '4px 6px',
+      borderRadius: '4px',
+      border: `1px solid ${strict ? '#0057c2' : '#d9d9d9'}`,
+      background: strict ? 'rgba(0, 87, 194, 0.1)' : '#fff',
+      color: strict ? '#0057c2' : '#727786',
+      cursor: 'pointer',
+      fontSize: '10px',
+      fontWeight: 700,
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '4px',
+      whiteSpace: 'nowrap',
+    }}
+  >
+    {strict ? <OrderedListOutlined style={{ fontSize: '13px' }} /> : <UnorderedListOutlined style={{ fontSize: '13px' }} />}
+    <span>{strict ? 'Order on' : 'Order off'}</span>
+  </button>
+);
 
 const SkeletonBlock: React.FC<{ width?: string; height?: string; borderRadius?: string }> = ({ width = '100%', height = '16px', borderRadius = '4px' }) => (
   <div style={{ width, height, backgroundColor: '#e2e8f0', borderRadius, animation: 'skeleton-pulse 1.5s ease-in-out infinite' }} />
@@ -194,6 +244,7 @@ const TargetMappingField: React.FC<{
 export const ConfigureMappingStep: React.FC = () => {
   const dispatch = useAppDispatch();
   const validationForm = useAppSelector((s) => s.validation.validationForm);
+  const isFixedWidth = isFixedWidthFormat(validationForm.detectedFileFormat);
 
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -205,6 +256,7 @@ export const ConfigureMappingStep: React.FC = () => {
     ignored: false,
     sensitive: false,
     expanded: false,
+    orderStrict: false,
   });
 
   const [page, setPage] = useState(1);
@@ -217,7 +269,10 @@ export const ConfigureMappingStep: React.FC = () => {
 
   const [itemsPerPage, setItemsPerPage] = useState(PAGE_SIZE);
 
-  const loadingPreview = Boolean(
+  const [fixedWidthLoading, setFixedWidthLoading] = useState(false);
+  const [fixedWidthError, setFixedWidthError] = useState<string | null>(null);
+
+  const loadingPreview = !isFixedWidth && Boolean(
     validationForm.sourceCloud && validationForm.targetCloud && columnsMatrix.length === 0 && !previewError,
   );
 
@@ -227,16 +282,16 @@ export const ConfigureMappingStep: React.FC = () => {
   const sensitiveCount = columnsMatrix.filter(m => m.isSensitive).length;
   const expandedCount = columnsMatrix.filter(m => m.isExpanded).length;
 
-  const syncMappings = (
-    matrix: ComplexMappingRow[],
-    structuredOrderSensitive = validationForm.structuredOrderSensitive,
-  ) => {
+  const orderStrictCount = columnsMatrix.filter((m) => m.isOrderSensitive && isComplexColumn(m, complexColumns)).length;
+  const complexCount = columnsMatrix.filter((m) => isComplexColumn(m, complexColumns)).length;
+
+  const syncMappings = (matrix: ComplexMappingRow[]) => {
     const activePks = matrix.filter(m => m.isPk).map(m => m.sourceCol);
     const activePkString = activePks.length > 0 ? activePks.join(',') : validationForm.uidColumn;
 
     dispatch(validationActions.setValidationForm({
       uidColumn: activePkString,
-      columnMappings: matrixToColumnMappings(matrix, complexColumns, structuredOrderSensitive),
+      columnMappings: matrixToColumnMappings(matrix, complexColumns),
     }));
   };
 
@@ -245,7 +300,52 @@ export const ConfigureMappingStep: React.FC = () => {
   }, [validationForm.sourceCloud, validationForm.targetCloud]);
 
   useEffect(() => {
-    if (!validationForm.sourceCloud || !validationForm.targetCloud) return;
+    if (!isFixedWidth || !validationForm.sourceCloud || !validationForm.targetCloud) return;
+    if (validationForm.fixedWidthColumns.length > 0) return;
+
+    let cancelled = false;
+    setFixedWidthLoading(true);
+    setFixedWidthError(null);
+
+    Api.previewFixedWidthLayout({
+      source_cloud: validationForm.sourceCloud,
+      target_cloud: validationForm.targetCloud,
+      uid_column: validationForm.uidColumn,
+      delimiter: validationForm.delimiter,
+      has_header: validationForm.hasHeader,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        dispatch(validationActions.setValidationForm({
+          fixedWidthColumns: res.data.columns,
+          fixedWidthLineWidth: res.data.line_width,
+          uidColumn: validationForm.uidColumn || res.data.suggested_join_column,
+          detectedFileFormat: 'fixed-width',
+        }));
+      })
+      .catch((err: { response?: { data?: { detail?: unknown } } }) => {
+        if (cancelled) return;
+        const detail = err.response?.data?.detail;
+        setFixedWidthError(typeof detail === 'string' ? detail : 'Could not infer fixed-width layout');
+      })
+      .finally(() => {
+        if (!cancelled) setFixedWidthLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [
+    isFixedWidth,
+    validationForm.sourceCloud,
+    validationForm.targetCloud,
+    validationForm.uidColumn,
+    validationForm.delimiter,
+    validationForm.hasHeader,
+    validationForm.fixedWidthColumns.length,
+    dispatch,
+  ]);
+
+  useEffect(() => {
+    if (!validationForm.sourceCloud || !validationForm.targetCloud || isFixedWidth) return;
     if (hydratedMappingsRef.current) return;
 
     if (validationForm.columnMappings.length > 0) {
@@ -260,9 +360,12 @@ export const ConfigureMappingStep: React.FC = () => {
       });
       setTargetColumnsList(Array.from(targetNames));
       setComplexColumns(
-        validationForm.columnMappings
-          .filter((m) => m.compare_mode === 'structured')
-          .map((m) => m.source_column),
+        mergeComplexColumns(
+          validationForm.columnMappings
+            .filter((m) => m.compare_mode === 'structured')
+            .map((m) => m.source_column),
+          restored,
+        ),
       );
       setColumnsMatrix(restored);
       setPreviewError(null);
@@ -331,7 +434,8 @@ export const ConfigureMappingStep: React.FC = () => {
 
         setTargetSamplesRecord(tSamples);
         setTargetColumnsList(preview.target_columns || []);
-        setComplexColumns(complex);
+        const mergedComplex = mergeComplexColumns(complex, mappings);
+        setComplexColumns(mergedComplex);
         setColumnsMatrix(mappings);
         setPage(1);
 
@@ -340,7 +444,7 @@ export const ConfigureMappingStep: React.FC = () => {
           uidColumn: initialPks || defaultUid,
           delimiter: preview.delimiter,
           hasHeader: preview.has_header ?? validationForm.hasHeader,
-          columnMappings: matrixToColumnMappings(mappings, complex, validationForm.structuredOrderSensitive),
+          columnMappings: matrixToColumnMappings(mappings, mergedComplex),
         }));
         hydratedMappingsRef.current = true;
       })
@@ -357,7 +461,40 @@ export const ConfigureMappingStep: React.FC = () => {
       });
 
     return () => { cancelled = true; };
-  }, [validationForm.sourceCloud, validationForm.targetCloud, validationForm.uidColumn, validationForm.delimiter, validationForm.hasHeader, validationForm.columnMappings.length, dispatch]);
+  }, [validationForm.sourceCloud, validationForm.targetCloud, validationForm.uidColumn, validationForm.delimiter, validationForm.hasHeader, validationForm.columnMappings.length, dispatch, isFixedWidth]);
+
+  const handleFixedWidthChange = (columns: FixedWidthColumnPreview[]) => {
+    dispatch(validationActions.setValidationForm({ fixedWidthColumns: columns }));
+  };
+
+  const handleJoinColumnChange = (joinColumn: string) => {
+    dispatch(validationActions.setValidationForm({ uidColumn: joinColumn }));
+  };
+
+  if (isFixedWidth) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
+        <div>
+          <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#1b1b1c', margin: '0 0 8px 0', fontFamily: 'var(--font-mono)' }}>
+            Pegasus_Fixed_Width_Layout
+          </h2>
+          <div style={{ display: 'flex', gap: '16px', fontSize: '14px', color: '#414755' }}>
+            <span><strong>Source:</strong> <code style={{ backgroundColor: '#f6f3f2', padding: '2px 6px', borderRadius: '4px' }}>{getCloudLabel(validationForm.sourceCloud)}</code></span>
+            <span><strong>Target:</strong> <code style={{ backgroundColor: '#f6f3f2', padding: '2px 6px', borderRadius: '4px' }}>{getCloudLabel(validationForm.targetCloud)}</code></span>
+          </div>
+        </div>
+        <FixedWidthLayoutPanel
+          columns={validationForm.fixedWidthColumns}
+          loading={fixedWidthLoading}
+          error={fixedWidthError}
+          joinColumn={validationForm.uidColumn}
+          lineWidth={validationForm.fixedWidthLineWidth ?? undefined}
+          onChange={handleFixedWidthChange}
+          onJoinColumnChange={handleJoinColumnChange}
+        />
+      </div>
+    );
+  }
 
   const toggleProperty = (id: string, prop: keyof ComplexMappingRow) => {
     const next = columnsMatrix.map(row => row.id === id ? { ...row, [prop]: !row[prop] } : row);
@@ -422,9 +559,12 @@ export const ConfigureMappingStep: React.FC = () => {
     if (actionFilters.ignored) rows = rows.filter(col => col.isIgnored);
     if (actionFilters.sensitive) rows = rows.filter(col => col.isSensitive);
     if (actionFilters.expanded) rows = rows.filter(col => col.isExpanded);
+    if (actionFilters.orderStrict) {
+      rows = rows.filter((col) => col.isOrderSensitive && isComplexColumn(col, complexColumns));
+    }
 
     return rows;
-  }, [columnsMatrix, searchQuery, showUnmappedOnly, showConfiguredOnly, actionFilters]);
+  }, [columnsMatrix, searchQuery, showUnmappedOnly, showConfiguredOnly, actionFilters, complexColumns]);
 
   const totalPages = Math.max(1, Math.ceil(filteredColumns.length / itemsPerPage));
   const safePage = Math.min(page, totalPages);
@@ -480,6 +620,13 @@ export const ConfigureMappingStep: React.FC = () => {
       </div>
 
       {previewError && <div style={{ padding: '12px', backgroundColor: '#fef2f2', color: '#dc2626', borderRadius: '8px' }}>{previewError}</div>}
+
+      {!loadingPreview && complexCount > 0 && (
+        <div style={{ padding: '12px 16px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', fontSize: '13px', color: '#1e40af' }}>
+          <strong>{complexCount} column{complexCount === 1 ? '' : 's'}</strong> contain JSON, lists, or other structured values.
+          Use the <strong>Order on / Order off</strong> control on those rows to choose whether element and key order must match between source and target.
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', flex: '1 1 280px', maxWidth: '420px' }}>
@@ -553,6 +700,14 @@ export const ConfigureMappingStep: React.FC = () => {
                       <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>({expandedCount})</span>
                     </div>
 
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <div onClick={() => toggleActionFilter('orderStrict')} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: actionFilters.orderStrict ? '#4f46e5' : '#727786' }} title="Filter by strict order (structured columns)">
+                        <OrderedListOutlined style={{ fontSize: '14px' }} />
+                        <FilterOutlined style={{ fontSize: '10px', opacity: actionFilters.orderStrict ? 1 : 0.5 }} />
+                      </div>
+                      <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>({orderStrictCount})</span>
+                    </div>
+
                   </div>
                 </th>
                 <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: 600, color: '#414755' }}>SOURCE COLUMN</th>
@@ -603,20 +758,27 @@ export const ConfigureMappingStep: React.FC = () => {
                           <button onClick={() => toggleProperty(row.id, 'isSensitive')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isSensitive ? 'rgba(186, 26, 26, 0.1)' : 'transparent', color: row.isSensitive ? '#ba1a1a' : '#727786', cursor: 'pointer' }} title="Sensitive">{row.isSensitive ? <EyeInvisibleOutlined /> : <EyeOutlined />}</button>
                           <button onClick={() => toggleProperty(row.id, 'isExpanded')} style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isExpanded ? '#0057c2' : 'transparent', color: row.isExpanded ? '#fff' : '#727786', cursor: 'pointer' }} title="Expression"><CodeOutlined /></button>
 
-                          {row.sourceType === 'Structured' && (
-                            <button
-                              onClick={() => toggleProperty(row.id, 'isOrderSensitive')}
-                              style={{ padding: '4px', borderRadius: '4px', border: 'none', background: row.isOrderSensitive ? 'rgba(0, 87, 194, 0.1)' : 'transparent', color: row.isOrderSensitive ? '#0057c2' : '#727786', cursor: 'pointer' }}
-                              title="Enforce strict array/object order"
-                            >
-                              <SortAscendingOutlined />
-                            </button>
+                          {isComplexColumn(row, complexColumns) && (
+                            <OrderSensitivityButton
+                              strict={row.isOrderSensitive}
+                              onToggle={() => toggleProperty(row.id, 'isOrderSensitive')}
+                            />
                           )}
                         </div>
                       </td>
                       <td style={{ padding: '12px 16px', verticalAlign: 'top', textDecoration: row.isIgnored ? 'line-through' : 'none' }}>
                         <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 500, color: '#1b1b1c', marginBottom: '4px' }}>{row.sourceCol}</div>
-                        <span style={{ backgroundColor: '#f0eded', border: '1px solid #c1c6d7', padding: '2px 4px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, color: '#727786' }}>{row.sourceType}</span>
+                        <span style={{
+                          backgroundColor: isComplexColumn(row, complexColumns) ? '#eff6ff' : '#f0eded',
+                          border: `1px solid ${isComplexColumn(row, complexColumns) ? '#93c5fd' : '#c1c6d7'}`,
+                          padding: '2px 4px',
+                          borderRadius: '4px',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          color: isComplexColumn(row, complexColumns) ? '#1d4ed8' : '#727786',
+                        }}>
+                          {isComplexColumn(row, complexColumns) ? 'Structured' : row.sourceType}
+                        </span>
                       </td>
                       <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>

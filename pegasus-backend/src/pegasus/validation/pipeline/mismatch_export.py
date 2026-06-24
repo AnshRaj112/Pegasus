@@ -124,6 +124,22 @@ def _collect_mismatch_keys(
     return _collect_mismatch_keys_for_pids(workspace, active, compare_columns=compare_columns)
 
 
+def _resolve_cell(
+    uid: str,
+    col: str,
+    cells: dict[str, Any],
+    payload: dict[str, Any],
+    lookup: dict[str, dict[str, str]] | None,
+) -> Any:
+    if col in cells:
+        return cells[col]
+    if col in payload:
+        return payload[col]
+    if lookup and uid in lookup:
+        return lookup[uid].get(col)
+    return None
+
+
 def _export_partitions_to_fp(
     fp,
     workspace: Path,
@@ -133,6 +149,8 @@ def _export_partitions_to_fp(
     sensitive_columns: set[str] | None,
     src_drilldown: dict[str, dict[str, str]],
     tgt_drilldown: dict[str, dict[str, str]],
+    source_lookup: dict[str, dict[str, str]] | None = None,
+    target_lookup: dict[str, dict[str, str]] | None = None,
 ) -> MismatchExportStats:
     missing = 0
     extra = 0
@@ -199,6 +217,10 @@ def _export_partitions_to_fp(
             tgt_cells = {**tgt_drilldown.get(key, {}), **{
                 col: target_data[col] for col in compare_columns if col in target_data
             }}
+            if source_lookup and key in source_lookup:
+                src_cells = {**src_cells, **source_lookup[key]}
+            if target_lookup and key in target_lookup:
+                tgt_cells = {**tgt_cells, **target_lookup[key]}
             has_column_payload = bool(src_cells or tgt_cells) or any(
                 col in source_data or col in target_data for col in compare_columns
             )
@@ -212,9 +234,10 @@ def _export_partitions_to_fp(
                 {"source_record": source_record, "target_record": target_record},
                 ensure_ascii=False,
             )
+            key_value_rows = 0
             for col in compare_columns:
-                source_value = src_cells.get(col, source_data.get(col))
-                target_value = tgt_cells.get(col, target_data.get(col))
+                source_value = _resolve_cell(key, col, src_cells, source_data, source_lookup)
+                target_value = _resolve_cell(key, col, tgt_cells, target_data, target_lookup)
                 if _column_values_match(col, source_value, target_value):
                     continue
                 sv = _serialize_value(source_value)
@@ -235,6 +258,30 @@ def _export_partitions_to_fp(
                 )
                 value_mismatch += 1
                 value_mismatch_row_uids.add(key)
+                key_value_rows += 1
+
+            if fp_diff and key_value_rows == 0:
+                for col in compare_columns:
+                    source_value = _resolve_cell(key, col, src_cells, source_data, source_lookup)
+                    target_value = _resolve_cell(key, col, tgt_cells, target_data, target_lookup)
+                    sv = _serialize_value(source_value)
+                    tv = _serialize_value(target_value)
+                    if sensitive_columns and col in sensitive_columns:
+                        sv = "****" if sv else sv
+                        tv = "****" if tv else tv
+                    _write_line(
+                        fp,
+                        {
+                            "uid": key,
+                            "mismatch_type": MismatchType.VALUE_MISMATCH.value,
+                            "column_name": col,
+                            "source_value": sv,
+                            "target_value": tv,
+                            "row_detail": row_detail,
+                        },
+                    )
+                    value_mismatch += 1
+                    value_mismatch_row_uids.add(key)
 
     return MismatchExportStats(
         missing_in_target=missing,
@@ -252,6 +299,8 @@ def export_partitions_to_ndjson(
     pids: list[int],
     append: bool = False,
     sensitive_columns: set[str] | None = None,
+    source_lookup: dict[str, dict[str, str]] | None = None,
+    target_lookup: dict[str, dict[str, str]] | None = None,
 ) -> MismatchExportStats:
     """Export mismatches for specific partition ids; append mode for wave processing."""
     workspace = Path(workspace)
@@ -282,6 +331,8 @@ def export_partitions_to_ndjson(
             sensitive_columns=sensitive_columns,
             src_drilldown=src_drilldown,
             tgt_drilldown=tgt_drilldown,
+            source_lookup=source_lookup,
+            target_lookup=target_lookup,
         )
 
 
@@ -422,6 +473,8 @@ def export_workspace_mismatches_ndjson(
     *,
     compare_columns: list[str],
     sensitive_columns: set[str] | None = None,
+    source_lookup: dict[str, dict[str, str]] | None = None,
+    target_lookup: dict[str, dict[str, str]] | None = None,
 ) -> MismatchExportStats:
     """Scan spill partitions and write every mismatch row with row_detail payloads."""
     workspace = Path(workspace)
@@ -439,4 +492,6 @@ def export_workspace_mismatches_ndjson(
         pids=active,
         append=False,
         sensitive_columns=sensitive_columns,
+        source_lookup=source_lookup,
+        target_lookup=target_lookup,
     )

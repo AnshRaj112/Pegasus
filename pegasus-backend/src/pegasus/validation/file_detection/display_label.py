@@ -24,6 +24,7 @@ MAX_ARCHIVE_DEPTH = 5
 MAX_INNER_EXTRACT_BYTES = 64 * 1024 * 1024
 
 _AMBIGUOUS_LEAF_SUFFIXES = frozenset({".txt", ".dat"})
+_DELIMITED_LEAF_KINDS = frozenset({"csv", "tsv", "psv", "delimited"})
 
 _CONTAINER_SUFFIXES: tuple[tuple[str, str], ...] = (
     (".tar.gz", "tar"),
@@ -60,6 +61,18 @@ _LEAF_SUFFIXES: tuple[tuple[str, str], ...] = (
     (".bmp", "bmp"),
     (".pdf", "pdf"),
 )
+
+
+def _prefer_ambiguous_suffix_display(detected: str, display_name: str) -> str:
+    """Keep .dat / .txt as the UI label when content sniff resolves to delimited tabular."""
+    suffix = Path(display_name).suffix.lower()
+    token = detected.lower().strip()
+    if token in _DELIMITED_LEAF_KINDS:
+        if suffix == ".dat":
+            return "dat"
+        if suffix == ".txt":
+            return "txt"
+    return detected
 
 
 def build_format_display_label(
@@ -418,10 +431,10 @@ def _leaf_type_from_report(report: FileDetectionReport, display_name: str) -> st
     if structured and structured.confidence >= 60:
         detected = structured.detected_type
         if detected not in {"", "unknown", "binary"}:
-            return detected
+            return _prefer_ambiguous_suffix_display(detected, display_name)
 
     if report.suggested_file_format:
-        return report.suggested_file_format
+        return _prefer_ambiguous_suffix_display(report.suggested_file_format, display_name)
 
     validation = report.validation_strategy
     if validation and validation.detected_type == "txt":

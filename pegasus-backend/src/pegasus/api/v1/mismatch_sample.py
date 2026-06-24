@@ -368,17 +368,29 @@ def paginate_mismatch_rows_from_ndjson(
     if mismatch_type:
         total = int(totals.get(mismatch_type, 0))
     else:
-        total = int(sum(totals.values()))
+        total = mismatch_record_total(totals)
 
     if total <= 0 and path.is_file():
         from_file = count_mismatch_types_ndjson(path)
         if mismatch_type:
             total = int(from_file.get(mismatch_type, 0))
         else:
-            total = int(sum(from_file.values()))
+            total = mismatch_record_total(from_file)
+
+    if not path.is_file():
+        return [], total
 
     if total <= 0 or offset >= total:
-        return [], total
+        # Reconcile against the artifact when stored totals are stale or inflated.
+        from_file = count_mismatch_types_ndjson(path)
+        file_total = (
+            int(from_file.get(mismatch_type, 0))
+            if mismatch_type
+            else mismatch_record_total(from_file)
+        )
+        if file_total <= 0 or offset >= file_total:
+            return [], file_total
+        total = file_total
 
     items: list[dict[str, Any]] = []
     skipped = 0
@@ -400,6 +412,26 @@ def paginate_mismatch_rows_from_ndjson(
             items.append(obj)
             if len(items) >= limit:
                 break
+
+    if offset == 0 and not items:
+        from_file = count_mismatch_types_ndjson(path)
+        file_total = (
+            int(from_file.get(mismatch_type, 0))
+            if mismatch_type
+            else mismatch_record_total(from_file)
+        )
+        return [], file_total
+
+    if items:
+        from_file = count_mismatch_types_ndjson(path)
+        file_total = (
+            int(from_file.get(mismatch_type, 0))
+            if mismatch_type
+            else mismatch_record_total(from_file)
+        )
+        if file_total > 0:
+            total = file_total
+
     return items, total
 
 

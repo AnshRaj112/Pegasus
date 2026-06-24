@@ -122,7 +122,13 @@ def resolve_shared_auto_delimiter(
     best_rank: tuple[int, float] = (-1, float("-inf"))
 
     for delim in candidates:
-        q = _pair_delimiter_quality(source_path, target_path, delim)
+        q = _pair_delimiter_quality(
+            source_path,
+            target_path,
+            delim,
+            source_lines=source_lines,
+            target_lines=target_lines,
+        )
         if q is None:
             continue
         # Prefer same modal field count on both sides, then higher stability score.
@@ -140,9 +146,16 @@ def resolve_shared_auto_delimiter(
     return DelimiterDetectionResult(delimiter=best, strategy="shared-auto-resolve")
 
 
-def _pair_delimiter_quality(source_path: Path, target_path: Path, delim: str) -> _PairDelimiterQuality | None:
-    m1, s1 = _file_delimiter_stability(source_path, delim)
-    m2, s2 = _file_delimiter_stability(target_path, delim)
+def _pair_delimiter_quality(
+    source_path: Path,
+    target_path: Path,
+    delim: str,
+    *,
+    source_lines: list[str] | None = None,
+    target_lines: list[str] | None = None,
+) -> _PairDelimiterQuality | None:
+    m1, s1 = _delimiter_stability(source_path, delim, lines=source_lines)
+    m2, s2 = _delimiter_stability(target_path, delim, lines=target_lines)
     if m1 is None or m2 is None:
         return None
     modes_match = m1 == m2
@@ -156,9 +169,19 @@ class _PairDelimiterQuality:
     score: float
 
 
-def _file_delimiter_stability(path: Path, delim: str) -> tuple[int | None, float]:
+def _delimiter_stability(
+    path: Path,
+    delim: str,
+    *,
+    lines: list[str] | None = None,
+) -> tuple[int | None, float]:
     """Return ``(modal_field_count, score)`` or ``(None, _)`` if *delim* is a poor fit."""
-    lines = _sample_non_empty_lines(path, max_lines=500)
+    if lines is None:
+        if not path.is_file():
+            return None, float("-inf")
+        lines = _sample_non_empty_lines(path, max_lines=500)
+    else:
+        lines = [ln for ln in lines if ln.strip()]
     if len(lines) < 2:
         return None, float("-inf")
 

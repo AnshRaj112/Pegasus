@@ -530,6 +530,18 @@ def _run_job_body(
                 target_path=tgt,
                 delimiter=delimiter,
             )
+        elif file_format == "fixed-width":
+            from pegasus.schemas.validation import FixedWidthConfig
+
+            raw_fw = meta.get("fixed_width_config")
+            if not isinstance(raw_fw, dict):
+                raise ValueError("fixed_width_config is required when file_format is fixed-width")
+            result = service.validate_fixed_width_pair_sync(
+                src,
+                tgt,
+                FixedWidthConfig.model_validate(raw_fw),
+                artifact_export_parent=job_dir,
+            )
         elif file_format in _COLUMNAR_FORMATS:
             result = service.validate_columnar_pair_sync(
                 src,
@@ -618,6 +630,34 @@ def _run_job_body(
                             compare_columns=compared_cols,
                             sensitive_columns=sensitive_cols,
                         )
+                    if export_stats.total <= 0 and mismatch_record_total(result.report.summary) > 0:
+                        from pegasus.validation.pipeline.fingerprint import parse_identity_columns
+
+                        identity_columns = parse_identity_columns(uid_column) or [uid_column.strip()]
+                        src_lookup, tgt_lookup = _build_mismatch_lookups(
+                            src,
+                            tgt,
+                            identity_columns=identity_columns,
+                            compare_columns=compared_cols,
+                            delimiter=delimiter,
+                            has_header=has_header,
+                            header_leading_rows=header_leading_rows,
+                        )
+                        with compare_policy_context(export_policy):
+                            export_stats = export_workspace_mismatches_ndjson(
+                                workspace,
+                                export_path,
+                                compare_columns=compared_cols,
+                                sensitive_columns=sensitive_cols,
+                                source_lookup=src_lookup,
+                                target_lookup=tgt_lookup,
+                            )
+                        if export_stats.total > 0:
+                            logger.info(
+                                "Exported %d mismatch rows using adapter lookups to %s",
+                                export_stats.total,
+                                export_path,
+                            )
                     if export_stats.total > 0 and export_path.is_file():
                         artifact = export_path
                         result.report.summary = _merge_summary_counts(

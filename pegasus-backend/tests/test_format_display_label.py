@@ -40,6 +40,14 @@ def test_display_label_fixed_width_txt(tmp_path: Path) -> None:
     assert build_format_display_label(report, path=path) == "fixed-width"
 
 
+def test_display_label_delimited_dat(tmp_path: Path) -> None:
+    path = tmp_path / "export.dat"
+    path.write_text("id,name\n1,alice\n2,bob\n", encoding="utf-8")
+    report = detect_file(path)
+    assert build_format_display_label(report, path=path, object_name=path.name) == "dat"
+    assert report.suggested_file_format == "csv"
+
+
 def test_display_label_delimited_txt(tmp_path: Path) -> None:
     path = tmp_path / "data.txt"
     path.write_text("id,name\n1,alice\n2,bob\n", encoding="utf-8")

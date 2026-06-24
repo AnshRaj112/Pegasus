@@ -6,6 +6,9 @@ export type {
   CloudBrowseResponse,
   CloudConnection,
   LocalColumnPreviewResponse,
+  FixedWidthColumnPreview,
+  FixedWidthConfig,
+  FixedWidthLayoutPreviewResponse,
   MismatchCounts,
   MismatchSampleRow,
   ValidateResult,
@@ -35,6 +38,9 @@ export interface ValidationFormState {
   hasHeader: boolean;
   structuredOrderSensitive: boolean;
   columnMappings: import('../../shared/api/Api').ColumnMapping[];
+  detectedFileFormat: string | null;
+  fixedWidthColumns: import('../../shared/api/Api').FixedWidthColumnPreview[];
+  fixedWidthLineWidth: number | null;
 }
 
 /** Cached GCS file profiles for step 2; cleared when source/target objects change. */

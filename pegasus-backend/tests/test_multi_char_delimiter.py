@@ -58,3 +58,28 @@ def test_column_preview_multi_char(tmp_path: Path) -> None:
     assert preview["delimiter"] == "||"
     assert preview["source_columns"] == ["id", "name"]
     assert preview["auto_mappings"] == [{"source_column": "name", "target_column": "name"}]
+
+
+def test_shared_auto_delimiter_uses_lines_for_virtual_gcs_paths() -> None:
+    from pegasus.validation.readers.delimiter_detection import resolve_shared_auto_delimiter
+
+    source_path = Path("/gcs/bucket/test-data__generated-10k-fixed_width__source_data.txt")
+    target_path = Path("/gcs/bucket/test-data__generated-10k-fixed_width__target_data.txt")
+    source_lines = [
+        "record_id    name               amount",
+        "0000000001Alice               100.00",
+        "0000000002Bob                 200.00",
+    ]
+    target_lines = [
+        "record_id    name               amount",
+        "0000000001Alice               100.00",
+        "0000000002Bobby               200.00",
+    ]
+    result = resolve_shared_auto_delimiter(
+        source_path,
+        target_path,
+        source_lines=source_lines,
+        target_lines=target_lines,
+    )
+    assert result.delimiter
+    assert not source_path.is_file()

@@ -440,7 +440,7 @@ ACCURACY_CASES: tuple[AccuracyCase, ...] = (
     _case("semicolon csv", "csv", "semicolon_csv", "csv", "delimited"),
     _case("pipe-delimited .txt", "psv", "pipe_txt", "psv", "delimited"),
     _case("tab-delimited .txt", "tsv", "tab_txt", "tsv", "delimited"),
-    _case("comma-delimited .dat", "csv", "dat_csv", "csv", "delimited"),
+    _case("comma-delimited .dat", "dat", "dat_csv", "csv", "delimited"),
     _case("csv single column", "csv", "csv_single_col", "csv", "delimited"),
     _case("csv wide", "csv", "csv_wide", "csv", "delimited"),
     # Fixed-width (4)

@@ -69,18 +69,55 @@ def build_delimited_profile(
     """Build a cloud file profile from a warmed delimited adapter."""
     if isinstance(adapter, GcsDelimitedAdapter):
         adapter.warm_metadata()
+    size_bytes = int(adapter.get_size_bytes() if hasattr(adapter, "get_size_bytes") else 0)
+    if size_bytes == 0:
+        return CloudFileProfileResponse(
+            object_name=object_name,
+            gcs_uri=gcs_uri,
+            file_size_bytes=0,
+            file_format="empty",
+            suggested_file_format="empty",
+            dataset_model=None,
+            column_count=0,
+            row_count=0,
+            delimiter=resolved_delimiter,
+            has_header=has_header,
+        )
+    if isinstance(adapter, FileDelimitedAdapter):
+        from pegasus.validation.empty_inputs import file_has_no_content
+
+        if file_has_no_content(adapter.path):
+            return CloudFileProfileResponse(
+                object_name=object_name,
+                gcs_uri=gcs_uri,
+                file_size_bytes=size_bytes,
+                file_format="empty",
+                suggested_file_format="empty",
+                dataset_model=None,
+                column_count=0,
+                row_count=0,
+                delimiter=resolved_delimiter,
+                has_header=has_header,
+            )
+
     report = detect_format_from_adapter(adapter)
     schema = adapter.get_schema()
     column_count = len(schema.columns)
+    if report.suggested_file_format == "fixed-width":
+        from pegasus.validation.fixed_width_layout import build_column_previews, sample_lines_from_adapter
+
+        lines = sample_lines_from_adapter(adapter)
+        inferred = build_column_previews(lines, lines)
+        if inferred:
+            column_count = len(inferred)
     row_count = count_adapter_rows(adapter)
-    size_bytes = adapter.get_size_bytes() if hasattr(adapter, "get_size_bytes") else 0
 
     detect_path = adapter.path if isinstance(adapter, FileDelimitedAdapter) else Path(object_name)
 
     return CloudFileProfileResponse(
         object_name=object_name,
         gcs_uri=gcs_uri,
-        file_size_bytes=int(size_bytes or 0),
+        file_size_bytes=size_bytes,
         file_format=format_display_label(
             report,
             object_name=object_name,

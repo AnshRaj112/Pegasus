@@ -26,10 +26,11 @@ from pegasus.models import ValidationEntity
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.repositories.validation_repository import ValidationRunRepository
 from pegasus.api.v1.validation_helpers import (
+    backfill_mismatch_rows_for_run,
     mismatch_totals_from_run,
     resolve_history_mismatch_artifact,
 )
-from pegasus.api.v1.mismatch_sample import paginate_mismatch_rows_from_ndjson
+from pegasus.api.v1.mismatch_sample import mismatch_record_total, paginate_mismatch_rows_from_ndjson
 from pegasus.services.entity_inference_service import (
     EntityDefinition,
     infer_entity_from_filenames,
@@ -351,39 +352,69 @@ async def list_validation_history_mismatches(
             run = await ValidationRunRepository.get_run(session, run_id)
             if run is None:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown run_id")
-            rows, total = await ValidationRunRepository.list_mismatches(
+            rows, db_total = await ValidationRunRepository.list_mismatches(
                 session,
                 run_id,
                 limit=limit,
                 offset=offset,
                 mismatch_type=mismatch_type,
             )
+            if db_total == 0 and mismatch_record_total(mismatch_totals_from_run(run)) > 0:
+                await backfill_mismatch_rows_for_run(settings, run_id)
+                rows, db_total = await ValidationRunRepository.list_mismatches(
+                    session,
+                    run_id,
+                    limit=limit,
+                    offset=offset,
+                    mismatch_type=mismatch_type,
+                )
             artifact = resolve_history_mismatch_artifact(settings, run)
             if artifact is not None:
-                raw_items, total = paginate_mismatch_rows_from_ndjson(
+                raw_items, ndjson_total = paginate_mismatch_rows_from_ndjson(
                     artifact,
                     limit=limit,
                     offset=offset,
                     mismatch_type=mismatch_type,
                     totals_by_type=mismatch_totals_from_run(run),
                 )
-                return ValidationHistoryMismatchesResponse(
-                    run_id=run_id,
-                    items=[
-                        ValidationHistoryMismatchRow(
-                            uid=str(item.get("uid") or ""),
-                            mismatch_type=str(item.get("mismatch_type") or ""),
-                            column_name=item.get("column_name"),
-                            source_value=item.get("source_value"),
-                            target_value=item.get("target_value"),
-                            row_detail=item.get("row_detail"),
-                        )
-                        for item in raw_items
-                    ],
-                    total=total,
-                    offset=offset,
-                    limit=limit,
-                )
+                if raw_items or (ndjson_total > 0 and db_total <= 0):
+                    return ValidationHistoryMismatchesResponse(
+                        run_id=run_id,
+                        items=[
+                            ValidationHistoryMismatchRow(
+                                uid=str(item.get("uid") or ""),
+                                mismatch_type=str(item.get("mismatch_type") or ""),
+                                column_name=item.get("column_name"),
+                                source_value=item.get("source_value"),
+                                target_value=item.get("target_value"),
+                                row_detail=item.get("row_detail"),
+                            )
+                            for item in raw_items
+                        ],
+                        total=ndjson_total if ndjson_total > 0 else len(raw_items),
+                        offset=offset,
+                        limit=limit,
+                    )
+            response_total = db_total
+            if response_total <= 0:
+                response_total = mismatch_record_total(mismatch_totals_from_run(run))
+            return ValidationHistoryMismatchesResponse(
+                run_id=run_id,
+                items=[
+                    ValidationHistoryMismatchRow(
+                        uid=r.uid,
+                        mismatch_type=r.mismatch_type,
+                        column_name=r.column_name,
+                        source_value=r.source_value,
+                        target_value=r.target_value,
+                        row_detail=r.row_detail,
+                    )
+                    for r in rows
+                ],
+                total=response_total,
+                offset=offset,
+                limit=limit,
+            )
     except HTTPException:
         raise
     except Exception as exc:
@@ -392,24 +423,6 @@ async def list_validation_history_mismatches(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not load mismatch rows; check database connectivity",
         ) from exc
-
-    return ValidationHistoryMismatchesResponse(
-        run_id=run_id,
-        items=[
-            ValidationHistoryMismatchRow(
-                uid=r.uid,
-                mismatch_type=r.mismatch_type,
-                column_name=r.column_name,
-                source_value=r.source_value,
-                target_value=r.target_value,
-                row_detail=r.row_detail,
-            )
-            for r in rows
-        ],
-        total=total,
-        offset=offset,
-        limit=limit,
-    )
 
 
 @router.delete(

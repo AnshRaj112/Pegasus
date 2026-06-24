@@ -54,6 +54,10 @@ def _value_mismatch_row_count(*, mismatches, artifact: Path | None) -> int:
     return len(uids)
 
 
+def _artifact_has_rows(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 0
+
+
 class ValidationRunRepository:
     """Create and update :class:`ValidationRun` rows and related :class:`MismatchReport` rows."""
 
@@ -124,6 +128,7 @@ class ValidationRunRepository:
         *,
         column_mappings: list[dict[str, Any]] | None = None,
         max_mismatch_rows: int = 0,
+        job_meta: dict[str, Any] | None = None,
     ) -> None:
         """Update aggregates and optionally insert mismatch rows from the Polars report."""
         run = await session.get(ValidationRun, run_id)
@@ -133,7 +138,8 @@ class ValidationRunRepository:
 
         summary = result.report.summary
         mismatches = result.report.mismatches
-        artifact = result.mismatch_artifact_path or result.report.mismatch_artifact_path
+        artifact_raw = result.mismatch_artifact_path or result.report.mismatch_artifact_path
+        artifact_path = Path(artifact_raw).expanduser() if artifact_raw is not None else None
 
         total_mismatch = (
             int(summary.get(MismatchType.MISSING_IN_TARGET.value, 0))
@@ -145,7 +151,6 @@ class ValidationRunRepository:
         run.missing_in_target_count = int(summary.get(MismatchType.MISSING_IN_TARGET.value, 0))
         run.extra_in_target_count = int(summary.get(MismatchType.EXTRA_IN_TARGET.value, 0))
         run.value_mismatch_count = int(summary.get(MismatchType.VALUE_MISMATCH.value, 0))
-        artifact_path = Path(artifact) if artifact is not None else None
         value_mismatch_rows = int(summary.get(VALUE_MISMATCH_ROWS_SUMMARY_KEY, 0))
         if value_mismatch_rows <= 0:
             value_mismatch_rows = _value_mismatch_row_count(
@@ -184,29 +189,32 @@ class ValidationRunRepository:
                 max_mismatch_rows,
             )
             persist_rows = False
-            if artifact is not None and artifact.is_file():
+            if artifact_path is not None and artifact_path.is_file():
                 existing_footer = dict(run.footer_validation or {})
                 persistence = dict(existing_footer.get("_persistence") or {})
                 persistence.update(
                     {
                         "mismatch_rows_persisted": False,
-                        "mismatch_artifact_path": str(artifact),
+                        "mismatch_artifact_path": str(artifact_path),
                         "mismatch_row_cap": max_mismatch_rows,
                     }
                 )
                 existing_footer["_persistence"] = persistence
                 run.footer_validation = existing_footer
 
-        if artifact is not None and artifact.is_file():
+        if artifact_path is not None and _artifact_has_rows(artifact_path):
             existing_footer = dict(run.footer_validation or {})
             persistence = dict(existing_footer.get("_persistence") or {})
-            persistence.setdefault("mismatch_rows_persisted", persist_rows)
-            persistence["mismatch_artifact_path"] = str(artifact)
+            persistence["mismatch_artifact_path"] = str(artifact_path)
+            job_id = (job_meta or {}).get("job_id")
+            if job_id:
+                persistence["validation_job_id"] = str(job_id)
             existing_footer["_persistence"] = persistence
             run.footer_validation = existing_footer
 
-        if persist_rows and artifact is not None and artifact.is_file():
-            p = Path(artifact)
+        rows_persisted = 0
+        if persist_rows and artifact_path is not None and _artifact_has_rows(artifact_path):
+            p = artifact_path
             batch_orm: list[MismatchReport] = []
             batch_size = 2_000
             with p.open(encoding="utf-8") as fp:
@@ -229,6 +237,7 @@ class ValidationRunRepository:
                             row_detail=_optional_str(r.get("row_detail")),
                         )
                     )
+                    rows_persisted += 1
                     if len(batch_orm) >= batch_size:
                         session.add_all(batch_orm)
                         await session.flush()
@@ -236,7 +245,7 @@ class ValidationRunRepository:
             if batch_orm:
                 session.add_all(batch_orm)
                 await session.flush()
-        elif persist_rows and mismatches.height > 0:
+        if persist_rows and rows_persisted == 0 and mismatches.height > 0:
             rows = mismatches.to_dicts()
             batch_size = 2_000
             for i in range(0, len(rows), batch_size):
@@ -256,12 +265,35 @@ class ValidationRunRepository:
                     ]
                 )
                 await session.flush()
+            rows_persisted = len(rows)
+
+        if persist_rows and rows_persisted == 0 and mismatches.height <= 0:
+            logger.warning(
+                "Validation run %s has %d mismatch records but no rows were persisted "
+                "(artifact=%s mismatches_frame=%d)",
+                run_id,
+                total_mismatch,
+                artifact_path,
+                mismatches.height,
+            )
+
+        if artifact_path is not None and _artifact_has_rows(artifact_path):
+            existing_footer = dict(run.footer_validation or {})
+            persistence = dict(existing_footer.get("_persistence") or {})
+            persistence["mismatch_rows_persisted"] = rows_persisted > 0
+            persistence["mismatch_artifact_path"] = str(artifact_path)
+            job_id = (job_meta or {}).get("job_id")
+            if job_id:
+                persistence["validation_job_id"] = str(job_id)
+            existing_footer["_persistence"] = persistence
+            run.footer_validation = existing_footer
 
         await session.flush()
         logger.info(
-            "Completed validation run id=%s mismatches_stored=%d",
+            "Completed validation run id=%s mismatches_stored=%d rows_persisted=%d",
             run_id,
             total_mismatch,
+            rows_persisted if persist_rows else 0,
         )
 
     @staticmethod
@@ -413,6 +445,16 @@ class ValidationRunRepository:
         stmt = ValidationRunRepository._apply_status_filter(stmt, statuses)
         total = await session.scalar(stmt)
         return int(total or 0)
+
+    @staticmethod
+    async def count_mismatch_reports(session: AsyncSession, run_id: uuid.UUID) -> int:
+        """Return how many mismatch rows are stored for a run."""
+        stmt = (
+            select(func.count())
+            .select_from(MismatchReport)
+            .where(MismatchReport.validation_run_id == run_id)
+        )
+        return int(await session.scalar(stmt) or 0)
 
     @staticmethod
     async def list_mismatches(

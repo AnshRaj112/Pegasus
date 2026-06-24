@@ -153,6 +153,24 @@ class FixedWidthField(BaseModel):
         default=None,
         description="Target-side date format when field_type is date (overrides date_format)",
     )
+    compare_enabled: bool = Field(
+        default=True,
+        description="When false, the field is excluded from value comparison (join key is always used)",
+    )
+    is_sensitive: bool = Field(
+        default=False,
+        description="Mask cell values in mismatch reports",
+    )
+    source_regex_pattern: str | None = Field(
+        default=None,
+        description="Optional regex applied to the source slice before compare",
+    )
+    source_regex_replacement: str = Field(default="", description="Replacement for source_regex_pattern")
+    target_regex_pattern: str | None = Field(
+        default=None,
+        description="Optional regex applied to the target slice before compare",
+    )
+    target_regex_replacement: str = Field(default="", description="Replacement for target_regex_pattern")
 
 
 class FixedWidthMatchStrategy(str, Enum):
@@ -440,10 +458,14 @@ class MismatchPersistenceNote(BaseModel):
     mismatch_rows_persisted: bool
     mismatch_artifact_path: str | None = None
     mismatch_row_cap: int | None = Field(default=None, ge=0)
+    validation_job_id: str | None = Field(
+        default=None,
+        description="Worker job directory id (differs from run_id) for on-disk mismatch NDJSON",
+    )
 
 
 _FOOTER_PERSISTENCE_KEYS = frozenset(
-    {"mismatch_rows_persisted", "mismatch_artifact_path", "mismatch_row_cap"},
+    {"mismatch_rows_persisted", "mismatch_artifact_path", "mismatch_row_cap", "validation_job_id"},
 )
 
 
@@ -521,15 +543,32 @@ class FixedWidthColumnPreview(BaseModel):
     target_start: int = Field(ge=0)
     target_end: int = Field(ge=0)
     field_type: str = "text"
+    width: int = Field(ge=0, default=0, description="Character width (end − start)")
+    source_sample: str = ""
+    target_sample: str = ""
+    date_format: str | None = Field(
+        default=None,
+        description="Inferred or user-edited friendly date format (e.g. DD/MM/YYYY)",
+    )
+    source_date_format: str | None = None
+    target_date_format: str | None = None
+    structured_order_sensitive: bool = False
+    compare_enabled: bool = True
+    is_sensitive: bool = False
+    source_regex_pattern: str | None = None
+    source_regex_replacement: str = ""
+    target_regex_pattern: str | None = None
+    target_regex_replacement: str = ""
 
 
 class FixedWidthLayoutPreviewResponse(BaseModel):
     """Detected columns and sample lines for the fixed-width mapping UI."""
 
     columns: list[FixedWidthColumnPreview] = Field(default_factory=list)
-    suggested_join_column: str = "id"
+    suggested_join_column: str = "record_id"
     source_sample: str = ""
     target_sample: str = ""
+    line_width: int = Field(ge=0, default=0)
 
 
 class FileDetectionStageResponse(BaseModel):

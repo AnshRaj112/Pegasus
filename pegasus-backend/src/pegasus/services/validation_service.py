@@ -19,6 +19,7 @@ from pegasus.core.workload_budget import plan_workload_budget
 from pegasus.schemas.validation import (
     CloudFileProfileResponse,
     ColumnMapping,
+    FixedWidthConfig,
     LitmusComparison,
     LitmusFileStats,
     ValidationTestMode,
@@ -385,6 +386,59 @@ class ValidationService:
         run_result.durations = ValidationRunDurations(validation_seconds=elapsed)
         return run_result
 
+    def validate_fixed_width_pair_sync(
+        self,
+        source_path: Path,
+        target_path: Path,
+        fixed_width_config: FixedWidthConfig | dict[str, Any],
+        *,
+        artifact_export_parent: Path | None = None,
+    ) -> ValidationRunResult:
+        """Compare two fixed-width files using explicit slice configuration."""
+        from pegasus.validation.fixed_width import read_fixed_width_records, validate_fixed_width_pair
+
+        source_path = source_path.resolve()
+        target_path = target_path.resolve()
+        if not source_path.is_file():
+            raise ValidationBadRequestError(f"Source file not found: {source_path}")
+        if not target_path.is_file():
+            raise ValidationBadRequestError(f"Target file not found: {target_path}")
+
+        config = (
+            fixed_width_config
+            if isinstance(fixed_width_config, FixedWidthConfig)
+            else FixedWidthConfig.model_validate(fixed_width_config)
+        )
+        report = validate_fixed_width_pair(source_path, target_path, config)
+        compared = [
+            f.field_name
+            for f in config.fields
+            if f.field_name != (config.uid_column or config.fields[0].field_name)
+        ]
+        source_count = len(read_fixed_width_records(source_path, config, side="source"))
+        target_count = len(read_fixed_width_records(target_path, config, side="target"))
+        artifact_path = None
+        if artifact_export_parent is not None and not report.mismatches.is_empty():
+            export_path = artifact_export_parent / "mismatches.ndjson"
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            report.mismatches.write_ndjson(export_path)
+            artifact_path = export_path
+        if artifact_path is not None:
+            report = MismatchReport(
+                mismatches=report.mismatches,
+                summary=report.summary,
+                mismatch_artifact_path=artifact_path,
+            )
+        return ValidationRunResult(
+            report=report,
+            source_row_count=source_count,
+            target_row_count=target_count,
+            compared_column_count=len(compared),
+            compared_columns=compared,
+            test_mode="full",
+            mismatch_artifact_path=artifact_path,
+        )
+
     def _validate_csv_pair_sync(
         self,
         source_path: Path,
@@ -410,6 +464,20 @@ class ValidationService:
 
         if test_mode == ValidationTestMode.LITMUS:
             return self.validate_csv_litmus_sync(source_path, target_path, delimiter=delimiter)
+
+        from pegasus.validation.empty_inputs import validate_delimited_degenerate_pair
+
+        degenerate = validate_delimited_degenerate_pair(
+            source_path=source_path,
+            target_path=target_path,
+            uid_column=uid_column,
+            delimiter=delimiter,
+            column_mappings=column_mappings,
+            has_header=has_header,
+            header_leading_rows=header_leading_rows,
+        )
+        if degenerate is not None:
+            return degenerate
 
         source = FileDelimitedAdapter(
             source_path, delimiter=delimiter, has_header=has_header, skip_rows=header_leading_rows
@@ -446,6 +514,13 @@ class ValidationService:
         file_format: str | None = None,
     ) -> dict[str, object]:
         from pegasus.validation.column_preview import build_column_preview_from_adapters
+        from pegasus.validation.file_format import normalize_file_format
+
+        fmt = normalize_file_format(file_format) if file_format else None
+        if fmt == "fixed-width":
+            raise ValueError(
+                "Fixed-width files use POST /validate/local/fixed-width-layout for column preview"
+            )
 
         sep = self._resolve_delimiter_for_inputs(delimiter, source, target)
         source = self._rebuild_delimited_adapter(
@@ -462,6 +537,26 @@ class ValidationService:
             has_header=has_header,
             file_format=file_format or "csv",
         )
+
+    def preview_fixed_width_layout_from_adapters(
+        self,
+        *,
+        source: FileDelimitedAdapter | GcsDelimitedAdapter,
+        target: FileDelimitedAdapter | GcsDelimitedAdapter,
+    ) -> dict[str, object]:
+        from pegasus.validation.fixed_width_layout import build_layout_preview, sample_lines_from_adapter
+
+        preview = build_layout_preview(
+            sample_lines_from_adapter(source),
+            sample_lines_from_adapter(target),
+        )
+        return {
+            "columns": preview["columns"],
+            "suggested_join_column": preview["suggested_join_column"],
+            "source_sample": preview["source_sample"],
+            "target_sample": preview["target_sample"],
+            "line_width": preview["line_width"],
+        }
 
     def profile_delimited_adapter(
         self,
