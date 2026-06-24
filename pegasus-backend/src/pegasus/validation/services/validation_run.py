@@ -12,7 +12,7 @@ import json
 import polars as pl
 
 from pegasus.services.validation_results import ValidationRunResult
-from pegasus.validation.comparators.models import MismatchReport, MismatchType, empty_mismatch_frame
+from pegasus.validation.comparators.models import MismatchReport, MismatchType, VALUE_MISMATCH_ROWS_SUMMARY_KEY, empty_mismatch_frame
 from pegasus.validation.pipeline.result import ColumnDifference, PipelineResult
 
 
@@ -55,6 +55,7 @@ def pipeline_result_to_run_result(result: PipelineResult) -> ValidationRunResult
             MismatchType.MISSING_IN_TARGET.value: result.missing_count,
             MismatchType.EXTRA_IN_TARGET.value: result.extra_count,
             MismatchType.VALUE_MISMATCH.value: max(result.changed_count, value_row_count),
+            VALUE_MISMATCH_ROWS_SUMMARY_KEY: result.changed_count,
         }
         return ValidationRunResult(
             report=MismatchReport(mismatches=frame, summary=summary),
@@ -128,6 +129,7 @@ def pipeline_result_to_run_result(result: PipelineResult) -> ValidationRunResult
         MismatchType.MISSING_IN_TARGET.value: result.missing_count,
         MismatchType.EXTRA_IN_TARGET.value: result.extra_count,
         MismatchType.VALUE_MISMATCH.value: max(result.changed_count, value_row_count),
+        VALUE_MISMATCH_ROWS_SUMMARY_KEY: result.changed_count,
     }
     return ValidationRunResult(
         report=MismatchReport(mismatches=frame, summary=summary),

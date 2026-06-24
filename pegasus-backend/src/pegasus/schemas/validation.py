@@ -109,7 +109,12 @@ class MismatchCounts(BaseModel):
 
     missing_in_target: int = Field(ge=0)
     extra_in_target: int = Field(ge=0)
-    value_mismatch: int = Field(ge=0)
+    value_mismatch: int = Field(ge=0, description="Total cell-level value mismatches")
+    value_mismatch_rows: int = Field(
+        ge=0,
+        default=0,
+        description="Distinct rows (UIDs) with at least one cell value mismatch",
+    )
 
 
 class MismatchSampleGroups(BaseModel):
@@ -976,12 +981,17 @@ class ValidationJobDetailResponse(BaseModel):
     )
 
 
-def build_mismatch_counts(summary_dict: dict[str, int]) -> MismatchCounts:
+def build_mismatch_counts(
+    summary_dict: dict[str, int],
+    *,
+    value_mismatch_rows: int | None = None,
+) -> MismatchCounts:
     """Normalize raw summary dict into a typed model with defaults."""
     return MismatchCounts(
         missing_in_target=int(summary_dict.get(MismatchType.MISSING_IN_TARGET.value, 0)),
         extra_in_target=int(summary_dict.get(MismatchType.EXTRA_IN_TARGET.value, 0)),
         value_mismatch=int(summary_dict.get(MismatchType.VALUE_MISMATCH.value, 0)),
+        value_mismatch_rows=int(value_mismatch_rows or 0),
     )
 
 

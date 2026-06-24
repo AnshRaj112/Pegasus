@@ -21,10 +21,37 @@ from pegasus.core.file_pair import compute_file_pair_key
 from pegasus.models import MismatchReport, ValidationRun
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.services.validation_service import ValidationRunDurations, ValidationRunResult
-from pegasus.validation.comparators.models import MismatchType
+from pegasus.validation.comparators.models import MismatchType, VALUE_MISMATCH_ROWS_SUMMARY_KEY
 from pegasus.core.delimiter_tokens import normalize_delimiter_for_storage
 
 logger = logging.getLogger(__name__)
+
+
+def _value_mismatch_row_count(*, mismatches, artifact: Path | None) -> int:
+    """Count distinct UIDs with at least one value_mismatch record."""
+    mtype = MismatchType.VALUE_MISMATCH.value
+    uids: set[str] = set()
+    if mismatches is not None and getattr(mismatches, "height", 0) > 0:
+        for row in mismatches.to_dicts():
+            if row.get("mismatch_type") == mtype:
+                uid = str(row.get("uid") or "")
+                if uid:
+                    uids.add(uid)
+    if not uids and artifact is not None and artifact.is_file():
+        with artifact.open(encoding="utf-8") as fp:
+            for line in fp:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("mismatch_type") == mtype:
+                    uid = str(record.get("uid") or "")
+                    if uid:
+                        uids.add(uid)
+    return len(uids)
 
 
 class ValidationRunRepository:
@@ -118,6 +145,14 @@ class ValidationRunRepository:
         run.missing_in_target_count = int(summary.get(MismatchType.MISSING_IN_TARGET.value, 0))
         run.extra_in_target_count = int(summary.get(MismatchType.EXTRA_IN_TARGET.value, 0))
         run.value_mismatch_count = int(summary.get(MismatchType.VALUE_MISMATCH.value, 0))
+        artifact_path = Path(artifact) if artifact is not None else None
+        value_mismatch_rows = int(summary.get(VALUE_MISMATCH_ROWS_SUMMARY_KEY, 0))
+        if value_mismatch_rows <= 0:
+            value_mismatch_rows = _value_mismatch_row_count(
+                mismatches=mismatches,
+                artifact=artifact_path if artifact_path and artifact_path.is_file() else None,
+            )
+        run.value_mismatch_row_count = value_mismatch_rows
         run.total_mismatch_records = total_mismatch
         run.source_row_count = result.source_row_count
         run.target_row_count = result.target_row_count

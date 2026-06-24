@@ -162,7 +162,8 @@ export const ExecutionHistory: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {runs.map((run, idx) => {
             const mc = run.mismatch_counts;
-            const totalMis = mc.missing_in_target + mc.extra_in_target + mc.value_mismatch;
+            const totalRowMismatched = mc.value_mismatch_rows != null ? mc.value_mismatch_rows : mc.value_mismatch;
+            const totalRowErrors = totalRowMismatched + mc.extra_in_target + mc.missing_in_target;
             return (
               <div key={run.run_id} style={{ backgroundColor: '#fff', border: '1px solid #e5e2e1', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', opacity: idx > 0 ? 0.85 : 1 }}>
                 <div style={{ backgroundColor: '#fcf9f8', borderBottom: '1px solid #e5e2e1', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -189,11 +190,13 @@ export const ExecutionHistory: React.FC = () => {
                   <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
                   <MetricItem label="Cell Mismatch" value={String(mc.value_mismatch)} color={mc.value_mismatch ? '#ba1a1a' : '#1b1b1c'} />
                   <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
+                  <MetricItem label="Total Row Mismatched" value={String(totalRowMismatched)} />
+                  <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
                   <MetricItem label="Extra Rows" value={String(mc.extra_in_target)} />
                   <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
                   <MetricItem label="Missing Rows" value={String(mc.missing_in_target)} />
                   <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
-                  <MetricItem label="Total Row Mismatched" value={String(totalMis)} />
+                  <MetricItem label="Total Row Errors" value={String(totalRowErrors)} />
                   <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
                   <MetricItem label="Mapped Cols" value={String(run.mapping_count)} />
                 </div>

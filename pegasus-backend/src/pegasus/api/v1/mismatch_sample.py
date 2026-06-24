@@ -16,6 +16,7 @@ import polars as pl
 from pegasus.validation.comparators.models import (
     MISMATCH_REPORT_SCHEMA,
     MismatchType,
+    VALUE_MISMATCH_ROWS_SUMMARY_KEY,
     empty_mismatch_frame,
 )
 
@@ -39,13 +40,26 @@ def normalize_mismatch_summary(summary: dict[str, Any] | None) -> dict[str, int]
         MismatchType.VALUE_MISMATCH.value: int(
             raw.get(
                 MismatchType.VALUE_MISMATCH.value,
-                raw.get(
-                    "changed",
-                    raw.get("value_mismatch", raw.get("value_mismatch_records", 0)),
-                ),
+                raw.get("value_mismatch", raw.get("value_mismatch_records", 0)),
+            )
+        ),
+        VALUE_MISMATCH_ROWS_SUMMARY_KEY: int(
+            raw.get(
+                VALUE_MISMATCH_ROWS_SUMMARY_KEY,
+                raw.get("changed_rows", raw.get("changed", 0)),
             )
         ),
     }
+
+
+def mismatch_record_total(summary: dict[str, Any] | None) -> int:
+    """Total long-form mismatch records (cells + presence rows), excluding row-level aggregates."""
+    normalized = normalize_mismatch_summary(summary)
+    return (
+        normalized[MismatchType.MISSING_IN_TARGET.value]
+        + normalized[MismatchType.EXTRA_IN_TARGET.value]
+        + normalized[MismatchType.VALUE_MISMATCH.value]
+    )
 
 
 def count_mismatch_types_ndjson(path: Path) -> dict[str, int]:
@@ -70,6 +84,26 @@ def count_mismatch_types_ndjson(path: Path) -> dict[str, int]:
     return counts
 
 
+def count_value_mismatch_rows_ndjson(path: Path) -> int:
+    """Count distinct UIDs with at least one value_mismatch record in NDJSON."""
+    uids: set[str] = set()
+    with path.open(encoding="utf-8") as fp:
+        for line in fp:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(obj.get("mismatch_type") or "") != MismatchType.VALUE_MISMATCH.value:
+                continue
+            uid = str(obj.get("uid") or "")
+            if uid:
+                uids.add(uid)
+    return len(uids)
+
+
 def reconcile_summary_with_artifact(
     summary: dict[str, Any] | None,
     artifact: Path | None,
@@ -79,9 +113,19 @@ def reconcile_summary_with_artifact(
     if artifact is None or not artifact.is_file():
         return merged
     from_file = count_mismatch_types_ndjson(artifact)
+    row_count = count_value_mismatch_rows_ndjson(artifact)
     return {
         key: max(int(merged.get(key, 0)), int(from_file.get(key, 0)))
-        for key in merged
+        for key in (
+            MismatchType.MISSING_IN_TARGET.value,
+            MismatchType.EXTRA_IN_TARGET.value,
+            MismatchType.VALUE_MISMATCH.value,
+        )
+    } | {
+        VALUE_MISMATCH_ROWS_SUMMARY_KEY: max(
+            int(merged.get(VALUE_MISMATCH_ROWS_SUMMARY_KEY, 0)),
+            row_count,
+        ),
     }
 
 

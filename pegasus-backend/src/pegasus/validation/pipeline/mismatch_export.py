@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pegasus.validation.comparators.models import MismatchType
+from pegasus.validation.comparators.models import MismatchType, VALUE_MISMATCH_ROWS_SUMMARY_KEY
 from pegasus.validation.pipeline.arrow_spill import partition_has_arrow, read_arrow_partition
 from pegasus.validation.pipeline.drilldown_cache import load_drilldown_lookup
 from pegasus.validation.pipeline.partition_reconcile import _column_values_match
@@ -24,6 +24,7 @@ class MismatchExportStats:
     missing_in_target: int = 0
     extra_in_target: int = 0
     value_mismatch: int = 0
+    value_mismatch_rows: int = 0
 
     @property
     def total(self) -> int:
@@ -34,6 +35,7 @@ class MismatchExportStats:
             MismatchType.MISSING_IN_TARGET.value: self.missing_in_target,
             MismatchType.EXTRA_IN_TARGET.value: self.extra_in_target,
             MismatchType.VALUE_MISMATCH.value: self.value_mismatch,
+            VALUE_MISMATCH_ROWS_SUMMARY_KEY: self.value_mismatch_rows,
         }
 
 
@@ -135,6 +137,7 @@ def _export_partitions_to_fp(
     missing = 0
     extra = 0
     value_mismatch = 0
+    value_mismatch_row_uids: set[str] = set()
     for pid in sorted(pids):
         src_path = workspace / "source" / f"part_{pid:05d}.bin"
         tgt_path = workspace / "target" / f"part_{pid:05d}.bin"
@@ -231,11 +234,13 @@ def _export_partitions_to_fp(
                     },
                 )
                 value_mismatch += 1
+                value_mismatch_row_uids.add(key)
 
     return MismatchExportStats(
         missing_in_target=missing,
         extra_in_target=extra,
         value_mismatch=value_mismatch,
+        value_mismatch_rows=len(value_mismatch_row_uids),
     )
 
 

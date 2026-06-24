@@ -22,7 +22,8 @@ from pegasus.core.json_util import dumps_bytes, loads_str
 from pegasus.schemas.validation import ColumnMapping, ValidationTestMode
 from pegasus.services.exceptions import format_validation_job_error
 from pegasus.services.validation_service import ValidationRunResult, ValidationService
-from pegasus.validation.comparators.models import MismatchType
+from pegasus.validation.comparators.models import MismatchType, VALUE_MISMATCH_ROWS_SUMMARY_KEY
+from pegasus.api.v1.mismatch_sample import mismatch_record_total
 from pegasus.validation.lifecycle_profiler import get_active_profiler, lifecycle_job, lifecycle_span
 from pegasus.validation.resource_profiler import (
     JobResourceProfiler,
@@ -57,6 +58,7 @@ def _merge_summary_counts(*summaries: dict[str, int]) -> dict[str, int]:
         MismatchType.MISSING_IN_TARGET.value: 0,
         MismatchType.EXTRA_IN_TARGET.value: 0,
         MismatchType.VALUE_MISMATCH.value: 0,
+        VALUE_MISMATCH_ROWS_SUMMARY_KEY: 0,
     }
     for summary in summaries:
         normalized = _normalize_summary(dict(summary))
@@ -699,7 +701,7 @@ def _run_job_body(
             reconcile_path or "unknown",
             result.source_row_count,
             result.target_row_count,
-            int(sum(_normalize_summary(dict(result.report.summary)).values())),
+            mismatch_record_total(result.report.summary),
         )
         lifecycle_summary = None
         if profiler is not None:
@@ -723,7 +725,7 @@ def _run_job_body(
                     "completed_at_epoch_s": time.time(),
                     "source_row_count": result.source_row_count,
                     "target_row_count": result.target_row_count,
-                    "total_mismatch_records": int(sum(_normalize_summary(dict(result.report.summary)).values())),
+                    "total_mismatch_records": mismatch_record_total(result.report.summary),
                     "validation_seconds": validation_duration,
                 },
             },

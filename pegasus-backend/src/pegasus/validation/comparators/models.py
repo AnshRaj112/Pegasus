@@ -21,6 +21,10 @@ class MismatchType(StrEnum):
     VALUE_MISMATCH = "value_mismatch"
 
 
+# Summary dict key: distinct UIDs with at least one value_mismatch cell (not a MismatchType).
+VALUE_MISMATCH_ROWS_SUMMARY_KEY = "value_mismatch_rows"
+
+
 MISMATCH_REPORT_SCHEMA: dict[str, pl.DataType] = {
     "uid": pl.String,
     "mismatch_type": pl.String,
