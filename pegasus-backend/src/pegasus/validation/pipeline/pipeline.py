@@ -512,7 +512,7 @@ class TabularReconciliationPipeline:
         missing = extra = changed = matching = 0
         mismatched_partitions = 0
         samples: list[MismatchSample] = []
-        sample_limit = 1000
+        sample_limit = self._config.mismatch_sample_limit
 
         active_pids = list_partition_ids(work, "source") | list_partition_ids(work, "target")
 

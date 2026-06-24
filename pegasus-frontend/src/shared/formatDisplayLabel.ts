@@ -3,15 +3,10 @@
  * to consistent UI strings. Chains use the backend separator ` -> ` (shown as →).
  */
 
-const SEGMENT_LABELS: Readonly<Record<string, string>> = {
-  // Delimited tabular
-  csv: 'CSV',
-  tsv: 'TSV',
-  psv: 'PSV',
-  dat: 'DAT',
-  tsc: 'TSC',
-  delimited: 'Delimited',
+/** Tabular delimiter flavors collapse to one user-facing label in the wizard overview. */
+const DELIMITED_FILE_SEGMENTS = new Set(['csv', 'tsv', 'psv', 'delimited', 'dat']);
 
+const SEGMENT_LABELS: Readonly<Record<string, string>> = {
   // Layout
   'fixed-width': 'Fixed Width',
   fixedwidth: 'Fixed Width',
@@ -67,6 +62,10 @@ export const formatDetectionSegmentLabel = (segment: string): string => {
   if (!raw) return '—';
 
   const normalized = normalizeSegment(raw);
+  if (DELIMITED_FILE_SEGMENTS.has(normalized)) {
+    return 'Delimited file';
+  }
+
   const mapped = SEGMENT_LABELS[normalized];
   if (mapped) return mapped;
 
@@ -86,7 +85,7 @@ export const formatDetectionSegmentLabel = (segment: string): string => {
 
 /**
  * Format a backend `file_format` / display label (plain or chained with ` -> `).
- * Examples: `csv` → CSV, `dat` → DAT, `zip -> csv` → ZIP → CSV
+ * Examples: `csv` → Delimited file, `psv` → Delimited file, `zip -> csv` → ZIP → Delimited file
  */
 export const formatDetectionLabel = (format: string | null | undefined): string => {
   if (!format || format === '—' || format === '…') return format ?? '—';

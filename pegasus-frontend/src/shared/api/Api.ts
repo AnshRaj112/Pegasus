@@ -48,6 +48,14 @@ export interface ValidateRequest {
   has_header?: boolean;
   file_format?: string;
   fixed_width_config?: FixedWidthConfig;
+  test_mode?: 'litmus' | 'full';
+  mismatch_snippet_limit?: number | null;
+}
+
+export interface ValidationOptionsResponse {
+  test_modes: ('litmus' | 'full')[];
+  mismatch_snippet_limit_default: number;
+  mismatch_snippet_limit_max: number;
 }
 
 export interface FixedWidthField {
@@ -313,6 +321,7 @@ export interface ValidationHistorySummary {
   completed_at?: string | null;
   source_row_count?: number | null;
   target_row_count?: number | null;
+  test_mode?: 'litmus' | 'full' | null;
 }
 
 export interface ValidationHistoryDetail extends ValidationHistorySummary {
@@ -388,6 +397,7 @@ const E = {
   validateLocal: '/validate/local',
   validateLocalBatch: '/validate/local/batch',
   validateLocalColumns: '/validate/local/columns',
+  validateOptions: '/validate/options',
   validateLocalFixedWidthLayout: '/validate/local/fixed-width-layout',
   validateCloudBrowse: '/validate/cloud/browse',
   validateCloudProfile: '/validate/cloud/profile',
@@ -455,6 +465,10 @@ export const Api = {
   /** POST /validate/local/columns — header preview (supports source_cloud / target_cloud) */
   previewValidationColumns: (body: ValidateRequest): Promise<AxiosResponse<LocalColumnPreviewResponse>> =>
     httpClient.post(E.validateLocalColumns, body),
+
+  /** GET /validate/options — wizard test modes and snippet limits */
+  getValidationOptions: (): Promise<AxiosResponse<ValidationOptionsResponse>> =>
+    httpClient.get(E.validateOptions),
 
   /** POST /validate/local/fixed-width-layout — infer slices and date formats */
   previewFixedWidthLayout: (body: ValidateRequest): Promise<AxiosResponse<FixedWidthLayoutPreviewResponse>> =>

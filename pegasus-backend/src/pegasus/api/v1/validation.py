@@ -49,6 +49,8 @@ from pegasus.schemas.validation import (
     UpdateQueueSettingsRequest,
     ValidationJobAcceptedResponse,
     ValidationJobDetailResponse,
+    ValidationOptionsResponse,
+    ValidationTestMode,
 )
 from pegasus.schemas.validation_history import (
     ValidationHistoryMismatchRow,
@@ -79,6 +81,8 @@ from pegasus.validation.local_browse import (
     resolve_local_dir_for_browse,
 )
 
+from pegasus.validation.test_mode_policy import clamp_snippet_limit
+
 from .validation_helpers import (
     build_validate_response,
     build_validate_response_summary_only,
@@ -93,6 +97,29 @@ from .validation_helpers import (
 )
 
 router = APIRouter(tags=["validation"])
+
+
+def _resolved_snippet_limit(
+    settings: AppSettings,
+    *,
+    test_mode: ValidationTestMode,
+    requested: int | None,
+) -> int | None:
+    if test_mode != ValidationTestMode.FULL:
+        return None
+    return clamp_snippet_limit(settings, requested=requested)
+
+
+@router.get(
+    "/validate/options",
+    response_model=ValidationOptionsResponse,
+    summary="Validation wizard options (test modes and snippet limits)",
+)
+async def validation_options(settings: AppSettings) -> ValidationOptionsResponse:
+    return ValidationOptionsResponse(
+        mismatch_snippet_limit_default=settings.validation_mismatch_snippet_limit_default,
+        mismatch_snippet_limit_max=settings.validation_mismatch_snippet_limit_max,
+    )
 
 
 def _preview_columns(
@@ -733,6 +760,11 @@ async def validate_csv_local_paths(
         "target_filename": target_input.display_name if target_input else resolved_target.name,
         "file_format": file_format,
         "test_mode": body.test_mode.value,
+        "mismatch_snippet_limit": _resolved_snippet_limit(
+            settings,
+            test_mode=body.test_mode,
+            requested=body.mismatch_snippet_limit,
+        ),
     }
     if body.fixed_width_config is not None:
         meta["fixed_width_config"] = body.fixed_width_config.model_dump()

@@ -36,6 +36,7 @@ class ValidationRunResult:
     mapping_format_checks: list[dict[str, Any]] | None = None
     footer_validation: dict[str, Any] | None = None
     test_mode: str = "full"
+    mismatch_snippet_limit: int | None = None
     litmus: dict[str, Any] | None = None
     pipeline_metadata: dict[str, Any] | None = None
     durations: ValidationRunDurations | None = None

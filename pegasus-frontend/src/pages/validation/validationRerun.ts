@@ -105,6 +105,10 @@ export const validateRequestFromForm = (
     delimiter: form.delimiter || 'auto',
     has_header: form.hasHeader,
     column_mappings: isFixedWidth ? [] : form.columnMappings,
+    test_mode: form.testMode,
+    ...(form.testMode === 'full' && form.mismatchSnippetLimit != null
+      ? { mismatch_snippet_limit: form.mismatchSnippetLimit }
+      : {}),
     ...(isFixedWidth
       ? {
         file_format: 'fixed-width',

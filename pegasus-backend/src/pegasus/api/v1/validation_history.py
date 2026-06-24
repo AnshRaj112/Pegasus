@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from pegasus.api.deps import AppSettings
 from pegasus.core.database import AsyncSessionLocal
+from pegasus.core.delimiter_tokens import normalize_delimiter_for_storage
 from pegasus.core.file_pair import compute_file_pair_key
 from pegasus.core.local_paths import (
     compute_file_pair_key_for_settings,
@@ -36,7 +37,7 @@ from pegasus.services.entity_inference_service import (
     infer_entity_from_filenames,
     normalize_entity_name,
 )
-from pegasus.core.delimiter_tokens import normalize_delimiter_for_storage
+from pegasus.validation.test_mode_policy import effective_run_is_match, read_footer_test_mode
 from pegasus.schemas.validation import (
     ColumnMapping,
     ColumnMappingFormatCheck,
@@ -132,6 +133,14 @@ def _summary_from_run(run, settings: AppSettings) -> ValidationHistorySummary:
     mappings = run.column_mappings if isinstance(run.column_mappings, list) else []
     source_path = to_display_path(run.source_path, settings) if run.source_path else None
     target_path = to_display_path(run.target_path, settings) if run.target_path else None
+    footer_raw = run.footer_validation if isinstance(run.footer_validation, dict) else None
+    test_mode = read_footer_test_mode(footer_raw)
+    mismatch_counts = _mismatch_counts_from_run(run)
+    total_mismatch = (
+        mismatch_counts.missing_in_target
+        + mismatch_counts.extra_in_target
+        + mismatch_counts.value_mismatch
+    )
     return ValidationHistorySummary(
         run_id=run.id,
         status=run.status.value if isinstance(run.status, ValidationRunStatus) else str(run.status),
@@ -141,14 +150,21 @@ def _summary_from_run(run, settings: AppSettings) -> ValidationHistorySummary:
         target_filename=run.target_filename,
         uid_column=run.uid_column,
         delimiter=run.delimiter,
-        is_match=run.is_match,
-        mismatch_counts=_mismatch_counts_from_run(run),
+        is_match=effective_run_is_match(
+            is_match=run.is_match,
+            test_mode=test_mode,
+            source_row_count=run.source_row_count,
+            target_row_count=run.target_row_count,
+            total_mismatch_records=total_mismatch,
+        ),
+        mismatch_counts=mismatch_counts,
         mapping_count=len(mappings),
         durations=_durations_from_run(run),
         created_at=run.created_at,
         completed_at=run.completed_at,
         source_row_count=run.source_row_count,
         target_row_count=run.target_row_count,
+        test_mode=test_mode,
     )
 
 

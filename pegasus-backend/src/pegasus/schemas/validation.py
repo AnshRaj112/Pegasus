@@ -75,7 +75,7 @@ class ValidationSummary(BaseModel):
 
 
 class ValidationTestMode(str, Enum):
-    """Execution depth for CSV validation."""
+    """Execution depth for file validation."""
 
     LITMUS = "litmus"
     FULL = "full"
@@ -309,8 +309,17 @@ class LocalPathValidateRequest(BaseModel):
     test_mode: ValidationTestMode = Field(
         default=ValidationTestMode.FULL,
         description=(
-            "litmus: quick structural checks only (name/type/size/rows/columns/headers); "
-            "full: complete UID-based row comparison."
+            "litmus: full reconciliation with no snippets; fails immediately when row counts differ; "
+            "full: full reconciliation with capped mismatch snippets (admin default, user-adjustable)."
+        ),
+    )
+    mismatch_snippet_limit: int | None = Field(
+        default=None,
+        ge=1,
+        le=50,
+        description=(
+            "Per-category snippet cap for full mode (missing, extra, and per-column value mismatches). "
+            "Defaults to the admin-configured value; cannot exceed validation_mismatch_snippet_limit_max."
         ),
     )
     uid_gte: str | None = Field(
@@ -690,6 +699,20 @@ class LocalPathBrowseConfigResponse(BaseModel):
         default=None,
         description="In-container mount path paired with host_path_prefix",
     )
+
+
+class ValidationOptionsResponse(BaseModel):
+    """Public validation wizard options (snippet caps and supported test modes)."""
+
+    test_modes: list[ValidationTestMode] = Field(
+        default_factory=lambda: [
+            ValidationTestMode.LITMUS,
+            ValidationTestMode.FULL,
+        ],
+        description="Test modes exposed in the validation wizard.",
+    )
+    mismatch_snippet_limit_default: int = Field(ge=1, le=50)
+    mismatch_snippet_limit_max: int = Field(ge=1, le=50)
 
 
 class ValidationDurations(BaseModel):

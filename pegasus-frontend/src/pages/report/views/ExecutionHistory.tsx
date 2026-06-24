@@ -164,24 +164,28 @@ export const ExecutionHistory: React.FC = () => {
             const mc = run.mismatch_counts;
             const totalRowMismatched = mc.value_mismatch_rows != null ? mc.value_mismatch_rows : mc.value_mismatch;
             const totalRowErrors = totalRowMismatched + mc.extra_in_target + mc.missing_in_target;
+            const isLitmus = run.test_mode === 'litmus';
+            const passed = run.is_match === true;
             return (
               <div key={run.run_id} style={{ backgroundColor: '#fff', border: '1px solid #e5e2e1', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', opacity: idx > 0 ? 0.85 : 1 }}>
                 <div style={{ backgroundColor: '#fcf9f8', borderBottom: '1px solid #e5e2e1', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
                     <span style={{ textTransform: 'uppercase', fontSize: '18px', fontWeight: 600, color: '#1b1b1c', fontFamily: 'var(--font-mono)' }}>{MAPPING_NAME}</span>
-                    <span style={{ fontWeight: 700, color: run.is_match ? '#16a34a' : '#ba1a1a' }}>{run.is_match ? 'P' : 'F'}</span>
+                    <span style={{ fontWeight: 700, color: passed ? '#16a34a' : '#ba1a1a' }}>{passed ? 'P' : 'F'}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px', color: '#64748b', fontSize: '12px' }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><ClockCircleOutlined /> {formatDuration(run.durations?.validation_seconds ?? run.durations?.total_seconds)}</span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><CalendarOutlined /> Ended: {formatEnd(run.completed_at ?? run.created_at)}</span>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => mappingId && navigate(`/reports/${mappingId}/history/${run.run_id}/snippet`)}
-                    style={{ backgroundColor: '#fff', border: '1px solid #c1c6d7', color: '#1b1b1c', padding: '6px 12px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}
-                  >
-                    <FileTextOutlined /> Snippet
-                  </button>
+                  {!isLitmus && (
+                    <button
+                      type="button"
+                      onClick={() => mappingId && navigate(`/reports/${mappingId}/history/${run.run_id}/snippet`)}
+                      style={{ backgroundColor: '#fff', border: '1px solid #c1c6d7', color: '#1b1b1c', padding: '6px 12px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}
+                    >
+                      <FileTextOutlined /> Snippet
+                    </button>
+                  )}
                 </div>
                 <div style={{ overflowX: 'auto', display: 'flex', padding: '16px 24px', gap: '24px' }}>
                   <MetricItem label="Source Rows" value={run.source_row_count != null ? run.source_row_count.toLocaleString() : '—'} />

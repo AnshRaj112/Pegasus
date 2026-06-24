@@ -22,6 +22,7 @@ from pegasus.models import MismatchReport, ValidationRun
 from pegasus.models.enums import ValidationRunStatus
 from pegasus.services.validation_service import ValidationRunDurations, ValidationRunResult
 from pegasus.validation.comparators.models import MismatchType, VALUE_MISMATCH_ROWS_SUMMARY_KEY
+from pegasus.validation.test_mode_policy import validation_run_is_match
 from pegasus.core.delimiter_tokens import normalize_delimiter_for_storage
 
 logger = logging.getLogger(__name__)
@@ -163,17 +164,30 @@ class ValidationRunRepository:
         run.target_row_count = result.target_row_count
         run.compared_column_count = result.compared_column_count
         run.compared_columns = list(result.compared_columns)
-        run.is_match = total_mismatch == 0
+        run.is_match = validation_run_is_match(
+            summary,
+            total_mismatch_records=total_mismatch,
+            test_mode=result.test_mode,
+            source_row_count=result.source_row_count,
+            target_row_count=result.target_row_count,
+        )
         run.completed_at = datetime.now(UTC)
         run.updated_at = datetime.now(UTC)
         run.error_detail = None
+
+        footer_blob = dict(run.footer_validation or {})
+        if result.footer_validation:
+            footer_blob.update(dict(result.footer_validation))
+        if result.test_mode:
+            footer_blob["test_mode"] = str(result.test_mode)
+        if result.litmus:
+            footer_blob["litmus"] = dict(result.litmus)
+        run.footer_validation = footer_blob
 
         if column_mappings is not None:
             run.column_mappings = column_mappings
         if result.mapping_format_checks is not None:
             run.mapping_format_checks = list(result.mapping_format_checks)
-        if result.footer_validation is not None:
-            run.footer_validation = dict(result.footer_validation)
 
         if result.durations is not None:
             run.upload_duration_seconds = result.durations.upload_seconds

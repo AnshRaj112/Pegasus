@@ -21,6 +21,7 @@ import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { isFixedWidthFormat } from '../fixedWidthFormat';
 import { FixedWidthLayoutPanel } from './FixedWidthLayoutPanel';
+import { ValidationModePanel } from './ValidationModePanel';
 
 const PAGE_SIZE = 10;
 
@@ -856,6 +857,8 @@ export const ConfigureMappingStep: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <ValidationModePanel />
 
     </div>
   );

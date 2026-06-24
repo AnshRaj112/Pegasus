@@ -222,6 +222,24 @@ def stratified_value_mismatch_sample(vm: pl.DataFrame, sample_limit: int) -> pl.
     return pl.concat(collected, how="vertical").head(sample_limit)
 
 
+def per_column_value_mismatch_sample(vm: pl.DataFrame, per_column_limit: int) -> pl.DataFrame:
+    """Return up to *per_column_limit* value_mismatch rows for each ``column_name``."""
+    if per_column_limit <= 0 or vm.height == 0:
+        return vm.slice(0, 0)
+
+    vm_named = vm.filter(pl.col("column_name").is_not_null())
+    parts: list[pl.DataFrame] = []
+    if vm_named.height > 0:
+        for col in sorted(vm_named["column_name"].unique().to_list()):
+            parts.append(vm_named.filter(pl.col("column_name") == col).head(per_column_limit))
+    vm_null = vm.filter(pl.col("column_name").is_null())
+    if vm_null.height > 0:
+        parts.append(vm_null.head(per_column_limit))
+    if not parts:
+        return vm.slice(0, 0)
+    return pl.concat(parts, how="vertical")
+
+
 def allocate_category_sample_limits(n_miss: int, n_ext: int, n_val: int, limit: int) -> tuple[int, int, int]:
     """Split *limit* across three buckets fairly, capped by category sizes.
 
@@ -355,6 +373,26 @@ def load_value_mismatch_sample_from_ndjson(
     return stratified_value_mismatch_sample(vm_partial, lv)
 
 
+def load_per_column_value_mismatch_sample_from_ndjson(
+    path: Path,
+    *,
+    n_val: int,
+    per_column_limit: int,
+) -> pl.DataFrame:
+    """Read a bounded prefix of value_mismatch lines, then keep up to *per_column_limit* per column."""
+    if per_column_limit <= 0:
+        return empty_mismatch_frame()
+    read_cap = min(n_val, max(per_column_limit * 64, 2048)) if n_val > 0 else max(per_column_limit * 64, 2048)
+    vm_partial = (
+        pl.scan_ndjson(str(path), schema=MISMATCH_REPORT_SCHEMA)
+        .filter(pl.col("mismatch_type") == pl.lit(MismatchType.VALUE_MISMATCH.value))
+        .head(read_cap)
+        .collect()
+    )
+    vm_partial = dedupe_value_mismatch_rows(vm_partial)
+    return per_column_value_mismatch_sample(vm_partial, per_column_limit)
+
+
 def paginate_mismatch_rows_from_ndjson(
     path: Path,
     *,
@@ -473,12 +511,13 @@ def build_grouped_mismatch_samples(
     *,
     category_counts: tuple[int, int, int] | None = None,
     presence_max_rows: int | None = None,
+    value_per_column_limit: int | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """Return sample frames for missing / extra / value mismatch categories.
 
     *missing_in_target* and *extra_in_target* include **all** rows from *mismatches* (up to
     *presence_max_rows* per side when that value is > 0). *sample_limit* applies only to
-    *value_mismatch* (stratified across ``column_name``).
+    *value_mismatch* (stratified across ``column_name``) unless *value_per_column_limit* is set.
 
     When *category_counts* ``(n_missing, n_extra, n_value)`` is provided (typically from
     the report summary), category sizes are taken without three full scans of *mismatches*,
@@ -494,37 +533,49 @@ def build_grouped_mismatch_samples(
 
     cap = presence_max_rows if presence_max_rows is not None else 0
 
+    def _value_sample(vm: pl.DataFrame, budget: int) -> pl.DataFrame:
+        if budget <= 0:
+            return empty
+        if value_per_column_limit is not None and value_per_column_limit > 0:
+            return per_column_value_mismatch_sample(vm, value_per_column_limit)
+        if sample_limit <= 0:
+            return dedupe_value_mismatch_rows(vm)
+        return stratified_value_mismatch_sample(vm, budget)
+
     if category_counts is None:
         miss = mismatches.filter(pl.col("mismatch_type") == miss_lit)
         ext = mismatches.filter(pl.col("mismatch_type") == ext_lit)
         vm = mismatches.filter(pl.col("mismatch_type") == val_lit)
         lm = miss.height if cap <= 0 else min(miss.height, cap)
         le = ext.height if cap <= 0 else min(ext.height, cap)
-        lv = vm.height if sample_limit <= 0 else min(vm.height, sample_limit)
+        if value_per_column_limit is not None and value_per_column_limit > 0:
+            lv = vm.height
+        else:
+            lv = vm.height if sample_limit <= 0 else min(vm.height, sample_limit)
         miss_s = miss.head(lm) if lm else empty
         ext_s = ext.head(le) if le else empty
-        if lv and sample_limit <= 0:
-            val_s = dedupe_value_mismatch_rows(vm)
-        else:
-            val_s = stratified_value_mismatch_sample(vm, lv) if lv else empty
+        val_s = _value_sample(vm, lv) if lv else empty
         return miss_s, ext_s, val_s
 
     n_miss, n_ext, n_val = category_counts
     lm = n_miss if cap <= 0 else min(n_miss, cap)
     le = n_ext if cap <= 0 else min(n_ext, cap)
-    lv = n_val if sample_limit <= 0 else min(n_val, sample_limit)
+    if value_per_column_limit is not None and value_per_column_limit > 0:
+        lv = n_val
+    else:
+        lv = n_val if sample_limit <= 0 else min(n_val, sample_limit)
     lf = mismatches.lazy()
     miss_s = lf.filter(pl.col("mismatch_type") == miss_lit).head(lm).collect() if lm else empty
     ext_s = lf.filter(pl.col("mismatch_type") == ext_lit).head(le).collect() if le else empty
     if lv > 0:
-        if sample_limit <= 0:
-            val_s = dedupe_value_mismatch_rows(
-                lf.filter(pl.col("mismatch_type") == val_lit).collect(),
-            )
+        if value_per_column_limit is not None and value_per_column_limit > 0:
+            vm_cap = min(n_val, max(value_per_column_limit * 64, 2048))
+        elif sample_limit <= 0:
+            vm_cap = n_val
         else:
             vm_cap = min(n_val, max(sample_limit * 64, 2048))
-            vm_partial = lf.filter(pl.col("mismatch_type") == val_lit).head(vm_cap).collect()
-            val_s = stratified_value_mismatch_sample(vm_partial, lv)
+        vm_partial = lf.filter(pl.col("mismatch_type") == val_lit).head(vm_cap).collect()
+        val_s = _value_sample(vm_partial, lv)
     else:
         val_s = empty
     return miss_s, ext_s, val_s

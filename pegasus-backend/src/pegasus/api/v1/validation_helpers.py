@@ -38,10 +38,18 @@ from pegasus.schemas.validation import (
 from pegasus.services.validation_results import ValidationRunDurations, ValidationRunResult
 from pegasus.validation.comparators.models import MismatchReport, MismatchType, empty_mismatch_frame
 
+from pegasus.validation.test_mode_policy import (
+    clamp_snippet_limit,
+    effective_run_is_match,
+    normalize_test_mode,
+    validation_run_is_match,
+)
+
 from .mismatch_sample import (
     build_grouped_mismatch_samples,
     count_mismatch_types_ndjson,
     load_mismatch_polars_for_api,
+    load_per_column_value_mismatch_sample_from_ndjson,
     load_value_mismatch_sample_from_ndjson,
     mismatch_record_total,
     normalize_mismatch_summary,
@@ -201,10 +209,32 @@ def run_result_from_job_dir(job_dir: Path) -> tuple[ValidationRunResult, uuid.UU
         mapping_format_checks=list(format_checks_raw) if format_checks_raw else None,
         footer_validation=dict(footer_raw) if isinstance(footer_raw, dict) else None,
         test_mode=str(res.get("test_mode") or "full"),
+        mismatch_snippet_limit=(
+            int(res["mismatch_snippet_limit"])
+            if res.get("mismatch_snippet_limit") is not None
+            else None
+        ),
         litmus=dict(res.get("litmus")) if isinstance(res.get("litmus"), dict) else None,
         durations=durations_from_result_json(res),
     )
     return vr, run_uuid, meta
+
+
+def _validation_is_match(
+    summary_dict: dict,
+    total_records: int,
+    *,
+    run_result: ValidationRunResult | None = None,
+) -> bool:
+    if run_result is None:
+        return validation_run_is_match(summary_dict, total_mismatch_records=total_records)
+    return validation_run_is_match(
+        summary_dict,
+        total_mismatch_records=total_records,
+        test_mode=run_result.test_mode,
+        source_row_count=run_result.source_row_count,
+        target_row_count=run_result.target_row_count,
+    )
 
 
 def build_validate_response_summary_only(
@@ -224,7 +254,7 @@ def build_validate_response_summary_only(
         target_row_count=run_result.target_row_count,
         compared_column_count=run_result.compared_column_count,
         total_mismatch_records=total_records,
-        is_match=total_records == 0,
+        is_match=_validation_is_match(summary_dict, total_records, run_result=run_result),
     )
 
     format_checks = [
@@ -396,6 +426,18 @@ def schedule_persist_completed_job(
     loop.create_task(_persist())
 
 
+def resolve_response_sample_caps(
+    settings: Settings,
+    run_result: ValidationRunResult,
+) -> tuple[int, int, int | None]:
+    """Return (presence_cap, value_sample_limit, value_per_column_limit) for API snippets."""
+    mode = normalize_test_mode(run_result.test_mode or ValidationTestMode.FULL.value)
+    if mode == ValidationTestMode.LITMUS:
+        return 0, 0, None
+    cap = clamp_snippet_limit(settings, requested=run_result.mismatch_snippet_limit)
+    return cap, 0, cap
+
+
 def build_validate_response(
     *,
     settings: Settings,
@@ -410,9 +452,10 @@ def build_validate_response(
         counts_model.missing_in_target + counts_model.extra_in_target + counts_model.value_mismatch
     )
 
-    presence_cap = settings.validation_presence_mismatch_response_max_rows
-    raw_sample_limit = settings.validation_mismatch_sample_limit
-    sample_limit = raw_sample_limit if raw_sample_limit > 0 else 0
+    presence_cap, sample_limit, value_per_column_limit = resolve_response_sample_caps(
+        settings,
+        run_result,
+    )
     category_counts = (
         counts_model.missing_in_target,
         counts_model.extra_in_target,
@@ -420,14 +463,23 @@ def build_validate_response(
     )
 
     mismatch_stats_frame = run_result.report.mismatches
-    if artifact is not None and artifact.is_file() and total_records > 0:
+    if str(run_result.test_mode or "").strip().lower() == ValidationTestMode.LITMUS.value:
+        sample_groups = MismatchSampleGroups()
+    elif artifact is not None and artifact.is_file() and total_records > 0:
         miss_rows, ext_rows = stream_presence_mismatch_rows_from_ndjson(
             artifact,
             n_miss=counts_model.missing_in_target,
             n_ext=counts_model.extra_in_target,
             presence_max_rows=presence_cap,
         )
-        if sample_limit <= 0:
+        if value_per_column_limit is not None and value_per_column_limit > 0:
+            val_df = load_per_column_value_mismatch_sample_from_ndjson(
+                artifact,
+                n_val=counts_model.value_mismatch,
+                per_column_limit=value_per_column_limit,
+            )
+            val_rows = val_df.to_dicts()
+        elif sample_limit <= 0:
             val_n = counts_model.value_mismatch
             if val_n <= 0:
                 val_n = count_mismatch_types_ndjson(artifact).get(MismatchType.VALUE_MISMATCH.value, 0)
@@ -457,7 +509,8 @@ def build_validate_response(
             mismatch_stats_frame,
             sample_limit,
             category_counts=category_counts,
-            presence_max_rows=presence_cap,
+            presence_max_rows=presence_cap if presence_cap > 0 else None,
+            value_per_column_limit=value_per_column_limit,
         )
         sample_groups = MismatchSampleGroups(
             missing_in_target=miss_df.to_dicts(),
@@ -490,7 +543,7 @@ def build_validate_response(
         target_row_count=run_result.target_row_count,
         compared_column_count=run_result.compared_column_count,
         total_mismatch_records=total_records,
-        is_match=total_records == 0,
+        is_match=_validation_is_match(summary_dict, total_records, run_result=run_result),
     )
 
     format_checks = [
@@ -619,12 +672,25 @@ async def maybe_persist_completed_job(
             return 0.0
         if run.status not in (ValidationRunStatus.RUNNING, ValidationRunStatus.COMPLETED):
             return 0.0
+        from pegasus.validation.test_mode_policy import resolve_mismatch_collection_policy
+
+        collection_policy = resolve_mismatch_collection_policy(
+            settings,
+            test_mode=str(run_result.test_mode or "full"),
+            mismatch_snippet_limit=run_result.mismatch_snippet_limit,
+            compare_column_count=len(run_result.compared_columns or []),
+        )
+        persist_cap = (
+            collection_policy.persistence_row_cap
+            if collection_policy.persistence_row_cap > 0
+            else settings.validation_persistence_max_mismatch_rows
+        )
         await ValidationRunRepository.complete_success(
             session,
             run_id,
             run_result,
             column_mappings=column_mappings or None,
-            max_mismatch_rows=settings.validation_persistence_max_mismatch_rows,
+            max_mismatch_rows=persist_cap,
             job_meta=job_meta,
         )
         await session.commit()

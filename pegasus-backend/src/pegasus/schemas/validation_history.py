@@ -42,6 +42,10 @@ class ValidationHistorySummary(BaseModel):
     completed_at: datetime | None = None
     source_row_count: int | None = Field(default=None, ge=0)
     target_row_count: int | None = Field(default=None, ge=0)
+    test_mode: str | None = Field(
+        default=None,
+        description="Validation depth for this run (litmus or full).",
+    )
 
 
 class ValidationDailyStatRow(BaseModel):

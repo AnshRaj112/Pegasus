@@ -299,6 +299,10 @@ def run_job_directory(job_dir: Path) -> int:
     has_header = bool(meta.get("has_header", True))
     header_leading_rows = int(meta.get("header_leading_rows") or 0)
     test_mode = str(meta.get("test_mode") or "full").strip().lower()
+    raw_snippet_limit = meta.get("mismatch_snippet_limit")
+    mismatch_snippet_limit = (
+        int(raw_snippet_limit) if raw_snippet_limit is not None else None
+    )
     file_format = str(meta.get("file_format") or "csv").lower()
 
     from pegasus.validation.cloud_input import delimited_input_from_meta
@@ -377,6 +381,7 @@ def run_job_directory(job_dir: Path) -> int:
                 has_header=has_header,
                 header_leading_rows=header_leading_rows,
                 test_mode=test_mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
                 file_format=file_format,
                 source_input=source_input,
                 target_input=target_input,
@@ -422,6 +427,7 @@ def _run_job_body(
     has_header: bool,
     header_leading_rows: int,
     test_mode: str,
+    mismatch_snippet_limit: int | None,
     file_format: str,
     source_input: object,
     target_input: object,
@@ -523,14 +529,12 @@ def _run_job_body(
 
         raw_policy = meta.get("resource_policy")
         resource_policy = raw_policy if isinstance(raw_policy, dict) else None
+        try:
+            mode = ValidationTestMode(test_mode)
+        except ValueError:
+            mode = ValidationTestMode.FULL
 
-        if test_mode == ValidationTestMode.LITMUS.value:
-            result = service.validate_csv_litmus_sync(
-                source_path=src,
-                target_path=tgt,
-                delimiter=delimiter,
-            )
-        elif file_format == "fixed-width":
+        if file_format == "fixed-width":
             from pegasus.schemas.validation import FixedWidthConfig
 
             raw_fw = meta.get("fixed_width_config")
@@ -541,6 +545,8 @@ def _run_job_body(
                 tgt,
                 FixedWidthConfig.model_validate(raw_fw),
                 artifact_export_parent=job_dir,
+                test_mode=mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
             )
         elif file_format in _COLUMNAR_FORMATS:
             result = service.validate_columnar_pair_sync(
@@ -549,6 +555,9 @@ def _run_job_body(
                 uid_column=uid_column,
                 file_format=file_format,
                 artifact_export_parent=job_dir,
+                test_mode=mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
+                resource_policy=resource_policy,
             )
         elif uses_cloud:
             result = service._validate_delimited_adapters_sync(  # noqa: SLF001
@@ -565,6 +574,8 @@ def _run_job_body(
                 header_leading_rows=header_leading_rows,
                 file_format=file_format,
                 resource_policy=resource_policy,
+                test_mode=mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
             )
         else:
             result = service._validate_csv_pair_sync(  # noqa: SLF001
@@ -579,6 +590,8 @@ def _run_job_body(
                 header_leading_rows=header_leading_rows,
                 file_format=file_format,
                 resource_policy=resource_policy,
+                test_mode=mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
             )
 
         end = time.time()
@@ -598,14 +611,15 @@ def _run_job_body(
             if pipeline_path is None:
                 pipeline_path = (getattr(result, "pipeline_metadata", None) or {}).get("path")
             compared_cols = list(result.compared_columns or [])
-            if wave_export.is_file():
+            skip_artifact_export = mode == ValidationTestMode.LITMUS
+            if not skip_artifact_export and wave_export.is_file():
                 try:
                     export_path.write_bytes(wave_export.read_bytes())
                     artifact = export_path
                     logger.info("Using wave-exported mismatches from %s", wave_export)
                 except OSError:
                     logger.exception("Failed to copy wave mismatch export")
-            elif workspace.is_dir() and compared_cols:
+            elif not skip_artifact_export and workspace.is_dir() and compared_cols:
                 try:
                     from pegasus.validation.comparators.policy import compare_policy_context
                     from pegasus.validation.pipeline.mismatch_export import export_workspace_mismatches_ndjson
@@ -707,6 +721,32 @@ def _run_job_body(
                     dict(result.report.summary),
                     artifact,
                 )
+            if skip_artifact_export:
+                artifact = None
+                result.mismatch_artifact_path = None
+            elif mode == ValidationTestMode.FULL and artifact is not None and artifact.is_file():
+                from pegasus.api.v1.mismatch_sample import build_grouped_mismatch_samples
+                from pegasus.validation.comparators.models import MISMATCH_REPORT_SCHEMA
+                from pegasus.validation.test_mode_policy import resolve_mismatch_collection_policy
+
+                import polars as pl
+
+                collection_policy = resolve_mismatch_collection_policy(
+                    settings,
+                    test_mode=mode,
+                    mismatch_snippet_limit=mismatch_snippet_limit,
+                    compare_column_count=len(compared_cols),
+                )
+                full_frame = pl.read_ndjson(str(artifact), schema=MISMATCH_REPORT_SCHEMA)
+                miss_df, ext_df, val_df = build_grouped_mismatch_samples(
+                    full_frame,
+                    0,
+                    value_per_column_limit=collection_policy.value_per_column_cap,
+                    presence_max_rows=collection_policy.presence_snippet_cap,
+                )
+                parts = [df for df in (miss_df, ext_df, val_df) if df.height > 0]
+                capped = pl.concat(parts, how="vertical") if parts else full_frame.slice(0, 0)
+                capped.write_ndjson(artifact)
         artifact_rel = None
         artifact_abs = None
         if artifact is not None and artifact.is_file():
@@ -727,6 +767,7 @@ def _run_job_body(
             "mapping_format_checks": result.mapping_format_checks,
             "footer_validation": result.footer_validation,
             "test_mode": result.test_mode,
+            "mismatch_snippet_limit": result.mismatch_snippet_limit,
             "litmus": result.litmus,
             "durations": {
                 "upload_seconds": 0.0,

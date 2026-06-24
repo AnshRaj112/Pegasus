@@ -107,8 +107,21 @@ class Settings(BaseSettings):
         ge=0,
         description=(
             "Max value_mismatch sample rows in mismatch_sample_groups.value_mismatch "
-            "(stratified across columns when > 0). 0 returns every value mismatch."
+            "(stratified across columns when > 0). 0 returns every value mismatch. "
+            "Used for legacy unlimited-sample runs; full mode uses mismatch_snippet_limit on the request."
         ),
+    )
+    validation_mismatch_snippet_limit_default: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Default per-category snippet cap for test_mode=full when the request omits mismatch_snippet_limit.",
+    )
+    validation_mismatch_snippet_limit_max: int = Field(
+        default=50,
+        ge=1,
+        le=50,
+        description="Maximum per-category snippet cap users may request for test_mode=full.",
     )
     validation_presence_mismatch_response_max_rows: int = Field(
         default=2_000_000,
