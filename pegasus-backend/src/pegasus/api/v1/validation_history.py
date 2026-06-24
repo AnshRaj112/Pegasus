@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-23T17:14:16+05:30
+# Last edited: 2026-06-24T05:01:15Z
 # --- END GENERATED FILE METADATA ---
 
 """Persisted validation history (mappings, reports, durations)."""
@@ -123,6 +123,7 @@ def _mismatch_counts_from_run(run) -> MismatchCounts:
         missing_in_target=run.missing_in_target_count,
         extra_in_target=run.extra_in_target_count,
         value_mismatch=run.value_mismatch_count,
+        value_mismatch_rows=int(getattr(run, "value_mismatch_row_count", 0) or 0),
     )
 
 
