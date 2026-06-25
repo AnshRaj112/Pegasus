@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { type TaskItem } from '../Dashboard.interface';
+import { TaskItem } from '../Dashboard.interface';
 import { TaskRow } from './TaskRow';
 import styles from '../Dashboard.module.scss';
 

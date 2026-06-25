@@ -2,7 +2,7 @@ import React from 'react';
 import { HistoryOutlined, FileOutlined } from '@ant-design/icons';
 import { useAppSelector } from '../../../redux/store';
 // ⚡ FIX: Import the types from your interface file
-import { type ReportItem, type ReportBadge } from '../Report.interface';
+import { ReportItem, ReportBadge } from '../Report.interface';
 import { useNavigate } from 'react-router-dom';
 
 export const Completed: React.FC = () => {

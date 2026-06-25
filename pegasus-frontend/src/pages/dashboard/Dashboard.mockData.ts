@@ -1,4 +1,4 @@
-import { type DashboardDataResponse } from './Dashboard.interface';
+import { DashboardDataResponse } from './Dashboard.interface';
 
 export const mockDashboardData: DashboardDataResponse = {
   runningTasksCount: 0,

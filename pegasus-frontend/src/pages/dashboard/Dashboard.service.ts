@@ -1,14 +1,14 @@
-import { type AxiosResponse } from 'axios';
+import { AxiosResponse } from 'axios';
 
 import {
   Api,
-  type DailyStatRow,
-  type EntityInsight,
-  type QueueJobSnapshot,
-  type QueueStatusResponse,
+ DailyStatRow,
+ EntityInsight,
+ QueueJobSnapshot,
+ QueueStatusResponse,
 } from '../../shared/api/Api';
 
-import { type DashboardDataResponse, type TaskItem } from './Dashboard.interface';
+import { DashboardDataResponse, TaskItem } from './Dashboard.interface';
 
 const mapJobState = (state: string): TaskItem['status'] => {
   if (state === 'running') return 'Running';

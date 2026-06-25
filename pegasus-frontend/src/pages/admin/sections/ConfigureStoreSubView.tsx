@@ -21,7 +21,7 @@ import styles from '../Admin.module.scss';
 import { useAppSelector, useAppDispatch } from '../../../redux/store';
 import { adminActions } from '../Admin.reducer';
 import { ConnectStorageModal } from './ConnectStorageModal';
-import { type StorageProviderItem } from '../Admin.interface';
+import { StorageProviderItem } from '../Admin.interface';
 
 export const ConfigureStoreSubView: React.FC = () => {
   const dispatch = useAppDispatch();

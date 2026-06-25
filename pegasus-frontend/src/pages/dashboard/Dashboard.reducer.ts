@@ -1,8 +1,8 @@
-import { type PayloadAction, createSlice } from '@reduxjs/toolkit';
+import { PayloadAction, createSlice } from '@reduxjs/toolkit';
 
 import { initializeNullState } from '../../shared/constants/common.constant';
 
-import { type DashboardDataResponse, type DashboardReducerState } from './Dashboard.interface';
+import { DashboardDataResponse, DashboardReducerState } from './Dashboard.interface';
 
 export const initialState: DashboardReducerState = {
   dashboardDataState: initializeNullState,

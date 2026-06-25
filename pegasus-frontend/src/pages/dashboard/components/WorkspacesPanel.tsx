@@ -1,7 +1,7 @@
 import React from 'react';
 import { Lock, FolderHeart } from 'lucide-react';
 
-import type { EntityInsight } from '../../../shared/api/Api';
+import { EntityInsight } from '../../../shared/api/Api';
 import styles from '../Dashboard.module.scss';
 
 interface WorkspacesPanelProps {

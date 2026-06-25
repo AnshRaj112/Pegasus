@@ -2,7 +2,7 @@
  * Central API client for Pegasus dashboard + validation features.
  * Base URL: `${VITE_API_BASE}/api/v1` (empty VITE_API_BASE → same-origin /api via nginx).
  */
-import { type AxiosResponse } from 'axios';
+import { AxiosResponse } from 'axios';
 
 import { isTransientPollError } from './apiError';
 import { httpClient } from './httpClient';

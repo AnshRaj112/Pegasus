@@ -1,3 +1,24 @@
+:root {
+  /* Surface & Background Colors */
+  --surface-bright: #fcf9f8;
+  --surface-container-lowest: #fcf9f8;
+  
+  /* Text Colors */
+  --on-surface: #1b1b1c;
+  --on-surface-variant: #414755;
+  --on-primary: #ffffff;
+  
+  /* Brand & Status Colors */
+  --color-onyx-red: #E06B67;
+  --color-onyx-red-deep: #952622;
+  --color-onyx-red-light: rgba(224, 107, 103, 0.25);
+  --status-fail: #ba1a1a;
+  
+  /* Borders & Outlines */
+  --outline: #727786;
+  --outline-variant: #c1c6d7;
+}
+
 .authWrapper {
   min-height: 100vh;
   width: 100%;
@@ -8,6 +29,7 @@
   background-color: var(--surface-bright, #fcf9f8);
   color: var(--on-surface, #1b1b1c);
   font-family: 'Inter', sans-serif;
+  position: relative;
 }
 
 .glassBackground {
@@ -16,29 +38,14 @@
     radial-gradient(at 100% 0%, rgba(149, 38, 34, 0.04) 0px, transparent 50%);
 }
 
-.authHeader {
-  width: 100%;
-  height: 64px;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  display: flex;
-  border-bottom: 1px solid var(--outline-variant, #c1c6d7);
-  background-color: var(--surface, #fcf9f8);
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-}
-
-.authLogo {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--color-onyx-red-deep);
-}
-
-.authHelpIcon {
-  font-size: 20px;
-  color: var(--on-surface-variant, #414755);
-  cursor: pointer;
+.watermarkBg {
+  position: fixed;
+  bottom: -5vh;
+  left: -10vw;
+  height: 85vh;
+  opacity: 0.15; // Faded pink effect
+  pointer-events: none;
+  z-index: 0;
 }
 
 .authMain {
@@ -48,6 +55,17 @@
   justify-content: center;
   padding: 24px;
   flex-direction: column;
+  position: relative;
+  z-index: 1;
+}
+
+.onixLogoContainer {
+  margin-top: 12px;
+}
+
+.onixLogo {
+  height: 80px;
+  object-fit: contain;
 }
 
 .authCard {
@@ -56,46 +74,48 @@
   background-color: var(--surface-container-lowest, #ffffff);
   border: 1px solid var(--outline-variant, #c1c6d7);
   border-radius: 12px;
-  padding: 32px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  padding: 40px 32px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
 }
 
-.authCardHeader {
-  margin-bottom: 32px;
-  text-align: center;
+.cardBrandIcon {
+  height: 56px;
+  object-fit: contain;
 }
 
 .authCardTitle {
-  font-size: 30px;
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 700;
   color: var(--on-surface, #1b1b1c);
-  margin: 0 0 4px 0;
+  margin: 0;
+  line-height: 1.2;
 }
 
 .authCardSubtitle {
-  font-size: 14px;
-  color: var(--on-surface-variant, #414755);
+  font-size: 11px;
+  color: var(--on-surface, #1b1b1c);
   margin: 0;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .authForm {
   display: flex;
   flex-direction: column;
-  gap: 24px;
 }
 
 .authFormLabel {
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--on-surface, #1b1b1c);
 }
 
 .authFormForgotLink {
   font-size: 12px;
-  color: var(--color-onyx-red-deep);
+  color: var(--color-onyx-red-deep, #1b73e8); // Kept default link color from reference or map to vars
   text-decoration: none;
+  
   &:hover {
-    color: var(--color-onyx-red);
     text-decoration: underline;
   }
 }
@@ -104,10 +124,6 @@
   margin: 0;
   font-size: 13px;
   color: var(--status-fail, #ba1a1a);
-}
-
-.signupCard {
-  max-width: 480px;
 }
 
 .inputWrapper {
@@ -140,7 +156,7 @@
   padding: 10px 16px 10px 36px;
   background-color: var(--surface-container-lowest, #ffffff);
   border: 1px solid var(--outline-variant, #c1c6d7);
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 14px;
   outline: none;
   transition: all 0.2s;
@@ -153,10 +169,10 @@
 
 .submitBtn {
   width: 100%;
-  background-color: var(--color-onyx-red-deep, #952622);
+  background-color: var(--color-onyx-red, #E06B67);
   color: var(--on-primary, #ffffff);
-  padding: 12px;
-  border-radius: 8px;
+  padding: 10px;
+  border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
   border: none;
@@ -164,27 +180,21 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 8px;
   transition: all 0.2s;
 
   &:hover {
-    background-color: var(--color-onyx-red, #E06B67);
+    background-color: var(--color-onyx-red-deep, #952622);
   }
+  
   &:active {
     transform: scale(0.98);
   }
 }
 
-.strengthBarContainer {
-  height: 4px;
-  width: 100%;
-  background-color: var(--surface-container-high, #eae7e7);
-  border-radius: 999px;
-  overflow: hidden;
-  margin-top: 8px;
-}
-
-.strengthBarFill {
-  height: 100%;
-  transition: width 0.3s ease, background-color 0.3s ease;
+.authFooter {
+  text-align: center;
+  padding: 24px;
+  font-size: 12px;
+  position: relative;
+  z-index: 1;
 }

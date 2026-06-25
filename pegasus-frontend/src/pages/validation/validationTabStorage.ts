@@ -1,4 +1,4 @@
-import type { OverviewProfileCache, ValidationFormState } from './Validation.interface';
+import { OverviewProfileCache, ValidationFormState } from './Validation.interface';
 
 const STORAGE_KEY = 'pegasus.validation.tabSession';
 

@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { useDispatch } from 'react-redux';
 import { Row, Col, Flex } from 'antd';
 import styles from './Profile.module.scss';
-import { type UserProfile } from './Profile.interface';
+import { UserProfile } from './Profile.interface';
 
 const mockUser: UserProfile = {
   firstName: 'Super User',
@@ -138,7 +138,7 @@ const Profile: React.FC = () => {
       </section>
 
       <footer className={styles.footer}>
-        © 2026 Pelican Systems • Administrative Profile Management Interface
+        © 2026 Pegasus Systems • Administrative Profile Management Interface
       </footer>
     </main>
   );

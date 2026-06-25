@@ -4,19 +4,21 @@ import {
   LockOutlined, 
   EyeOutlined, 
   EyeInvisibleOutlined, 
-  LoginOutlined, 
-  QuestionCircleOutlined
 } from '@ant-design/icons';
-import styles from './Auth.module.scss';
 import { useNavigate } from 'react-router-dom';
-import { useAppDispatch } from '../../redux/store';
+
+import { useAppDispatch } from '~/redux/store';
 import { authActions } from './Auth.reducer';
-import { adminLogin } from '../../shared/api/adminAuth';
-import { getApiErrorMessage } from '../../shared/api/apiError';
+import { adminLogin } from '~/shared/api/adminAuth';
+import { getApiErrorMessage } from '~/shared/api/apiError';
+
+import loginIcon from '~/assets/login_icon.png';
+import onixLogo from '~/assets/logo.png';
+import styles from './Auth.module.scss';
 
 export const Login: React.FC = () => {
-  const navigate = useNavigate(); // ⚡ Initialize router
-  const dispatch = useAppDispatch(); // ⚡ Initialize Redux
+  const navigate = useNavigate();
+  const dispatch = useAppDispatch();
   
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
@@ -41,66 +43,101 @@ export const Login: React.FC = () => {
 
   return (
     <div className={`${styles.authWrapper} ${styles.glassBackground}`}>
-      <header className={styles.authHeader}>
-        <div className={styles.authLogo}>Pegasus</div>
-        <QuestionCircleOutlined className={styles.authHelpIcon} />
-      </header>
+      {/* Background Watermark */}
+      <img 
+        src={loginIcon} 
+        alt="Pegasus Watermark" 
+        className={styles.watermarkBg} 
+        aria-hidden="true"
+      />
 
       <main className={styles.authMain}>
+        {/* Onix Top Logo */}
+        <div className={`text-center mb-5 ${styles.onixLogoContainer}`}>
+          <img src={onixLogo} alt="Onix Logo" className={styles.onixLogo} />
+        </div>
+
         <div className={styles.authCard}>
-          <div className={styles.authCardHeader}>
-            <h1 className={styles.authCardTitle}>Welcome Back</h1>
-            <p className={styles.authCardSubtitle}>Enter your credentials to access your data audits</p>
+          <div className="d-flex justify-content-center align-items-center mb-4">
+            <img src={loginIcon} alt="Pegasus The Validator" className={`me-3 ${styles.cardBrandIcon}`} />
+            <div className="text-start">
+              <h1 className={styles.authCardTitle}>Pegasus</h1>
+              <p className={`fw-bold ${styles.authCardSubtitle}`}>The Validator</p>
+            </div>
           </div>
 
-          <form onSubmit={handleSubmit} className={styles.authForm}>
-            <div>
-              <label className={styles.authFormLabel}>Email Address</label>
+          <form onSubmit={handleSubmit} className={styles.authForm} data-testid="login-form">
+            <div className="mb-3">
+              <label className={styles.authFormLabel} htmlFor="email">
+                <span className="text-danger">*</span> User
+              </label>
               <div className={styles.inputWrapper}>
                 <MailOutlined className={styles.inputIcon} />
                 <input 
+                  className={styles.authInput} 
                   type="email" 
+                  id="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className={styles.authInput} 
-                  placeholder="name@company.com" 
+                  placeholder="User" 
                   required
                   autoComplete="username"
+                  data-testid="input-email"
                 />
               </div>
             </div>
 
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label className={styles.authFormLabel}>Password</label>
-                <a href="#" className={styles.authFormForgotLink}>Forgot password?</a>
+            <div className="mb-4">
+              <div className="d-flex justify-content-between align-items-center mb-1">
+                <label className={styles.authFormLabel} htmlFor="password">
+                  <span className="text-danger">*</span> Password
+                </label>
               </div>
               <div className={styles.inputWrapper}>
                 <LockOutlined className={styles.inputIcon} />
                 <input 
+                  className={`pe-5 ${styles.authInput}`} 
                   type={showPassword ? "text" : "password"} 
+                  id="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className={styles.authInput} 
-                  style={{ paddingRight: '40px' }}
-                  placeholder="••••••••" 
+                  placeholder="Password" 
                   required
                   autoComplete="current-password"
+                  data-testid="input-password"
                 />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className={styles.actionIcon}>
+                <button 
+                  className={styles.actionIcon}
+                  type="button" 
+                  onClick={() => setShowPassword(!showPassword)} 
+                  aria-label="Toggle password visibility"
+                  data-testid="btn-toggle-password"
+                >
                   {showPassword ? <EyeOutlined /> : <EyeInvisibleOutlined />}
                 </button>
               </div>
+              <div className="mt-2">
+                <a href="#" className={styles.authFormForgotLink}>Forgot Password?</a>
+              </div>
             </div>
 
-            {error && <p className={styles.authFormError}>{error}</p>}
+            {error && <p className={styles.authFormError} data-testid="login-error-message">{error}</p>}
 
-            <button type="submit" className={styles.submitBtn} disabled={isSubmitting}>
-              {isSubmitting ? 'Signing in...' : <>Sign In <LoginOutlined style={{ fontSize: '18px' }} /></>}
+            <button 
+              className={`mt-2 ${styles.submitBtn}`}
+              type="submit" 
+              disabled={isSubmitting}
+              data-testid="btn-submit-login"
+            >
+              {isSubmitting ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
         </div>
       </main>
+
+      <footer className={styles.authFooter}>
+        <p className="m-0 text-muted">© 2026 <strong>Onix</strong>. All rights reserved.</p>
+      </footer>
     </div>
   );
 };

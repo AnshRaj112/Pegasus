@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 
-import type { DailyStatRow } from '../../../shared/api/Api';
+import { DailyStatRow } from '../../../shared/api/Api';
 import styles from '../Dashboard.module.scss';
 
 interface PerformanceChartPanelProps {
