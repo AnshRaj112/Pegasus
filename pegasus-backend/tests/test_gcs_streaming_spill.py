@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T11:22:54Z
+# Last edited: 2026-06-25T11:27:19Z
 # --- END GENERATED FILE METADATA ---
 
 """GCS objects use PyArrow batch streaming (never full-object load or dict round-trip)."""

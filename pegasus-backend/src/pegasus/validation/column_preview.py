@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T11:22:54Z
+# Last edited: 2026-06-25T11:27:19Z
 # --- END GENERATED FILE METADATA ---
 
 """Column header preview and auto-mapping for the mapping UI."""
