@@ -60,12 +60,13 @@
 }
 
 .brandIcon {
-  height: 46px;
+  height: 48px;
   width: auto;
   align-self: flex-end;
   object-fit: contain;
   /* Adjusts the icon to sit flush against the red border */
-  transform: translateY(2px); 
+  transform: translateY(-1px); 
+  
 }
 
 .navLinks {
@@ -96,15 +97,17 @@
 }
 
 .navLinkActive {
-  /* Only changes color now, no underline */
-  color: var(--color-onyx-red-deep);
+  color: var(--color-onyx-red);
   font-family: var(--font-label-md);
   font-size: var(--label-md);
   text-decoration: none;
-  font-weight: 600; /* Slightly bolder to emphasize the active state */
+  font-weight: 600;
   height: 100%;
   display: flex;
   align-items: center;
+  &:hover {
+    color: var(--color-onyx-red);
+  }
 }
 
 .quickActions {

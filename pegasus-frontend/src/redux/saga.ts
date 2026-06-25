@@ -5,7 +5,7 @@ import validationSaga from '../pages/validation/Validation.saga';
 import adminSaga from '../pages/admin/Admin.saga';
 import { reportSaga } from '../pages/report/Report.saga';
 import { watchProfileSagas } from '../pages/profile/Profile.saga';
-import {settingSaga} from '../pages/setting/Setting.saga';
+import {settingSaga} from '../pages/admin/sections/setting/Setting.saga';
 
 
 export default function* rootSaga() {

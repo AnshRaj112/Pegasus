@@ -1,20 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Spin } from 'antd';
-import { SafetyCertificateOutlined, AppstoreOutlined, ApiOutlined, LogoutOutlined } from '@ant-design/icons';
-import { useAppSelector, useAppDispatch } from '../../redux/store';
-import { adminActions } from './Admin.reducer';
+import { SafetyCertificateOutlined, AppstoreOutlined, ApiOutlined, LogoutOutlined, SettingOutlined } from '@ant-design/icons';
+import { useAppDispatch } from '../../redux/store';
 import { adminLogout, fetchAdminMe } from '../../shared/api/adminAuth';
 import { authActions } from '../auth/Auth.reducer';
 import { resetValidationOnLogout } from '../validation/resetValidationOnLogout';
-
-import { AdminLoginPanel } from './AdminLoginPanel';
-import { ConfigureStoreSubView } from './sections/ConfigureStoreSubView';
-import { WorkspaceMgmtSubView } from './sections/WorkspaceMgmtSubView';
 import styles from './Admin.module.scss'; // ⚡ Import Module
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 
 export const AdminView: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const dispatch = useAppDispatch();
-  const activeSubSection = useAppSelector((state) => state.admin.activeSubSection);
   const [adminEmail, setAdminEmail] = useState<string | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
 
@@ -52,10 +49,6 @@ export const AdminView: React.FC = () => {
     );
   }
 
-  if (!adminEmail) {
-    return <AdminLoginPanel onSuccess={setAdminEmail} />;
-  }
-
   return (
     <div className={styles.adminLayout}>
       <aside className={styles.adminSidebar}>
@@ -71,23 +64,31 @@ export const AdminView: React.FC = () => {
         </div>
 
         <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px', flexGrow: 1 }}>
-          <button 
-            onClick={() => dispatch(adminActions.setSubSection('workspace'))} 
-            className={`${styles.navButton} ${activeSubSection === 'workspace' ? styles.navButtonActive : ''}`}
+          <button
+            onClick={() => navigate('/admin/workspace-management')}
+            className={`${styles.navButton} ${location.pathname.includes('/workspace-management') ? styles.navButtonActive : ''}`}
           >
             <AppstoreOutlined style={{ fontSize: '18px' }} />
             Workspace Management
           </button>
-          
-          <button 
-            onClick={() => dispatch(adminActions.setSubSection('store'))} 
-            className={`${styles.navButton} ${activeSubSection === 'store' ? styles.navButtonActive : ''}`}
+
+          <button
+            onClick={() => navigate('/admin/configure-store')}
+            className={`${styles.navButton} ${location.pathname.includes('/configure-store') ? styles.navButtonActive : ''}`}
           >
             <ApiOutlined style={{ fontSize: '18px' }} />
             Configure Store
           </button>
+
+          <button
+            onClick={() => navigate('/admin/settings')}
+            className={`${styles.navButton} ${location.pathname.includes('/settings') ? styles.navButtonActive : ''}`}
+          >
+            <SettingOutlined style={{ fontSize: '18px' }} />
+            Configure Settings
+          </button>
         </nav>
-        
+
         <button
           type="button"
           onClick={() => void handleAdminLogout()}
@@ -100,7 +101,7 @@ export const AdminView: React.FC = () => {
 
       <main className={styles.mainPanel}>
         <div className={styles.contentMaxWidth}>
-          {activeSubSection === 'store' ? <ConfigureStoreSubView /> : <WorkspaceMgmtSubView />}
+          <Outlet />
         </div>
       </main>
     </div>
