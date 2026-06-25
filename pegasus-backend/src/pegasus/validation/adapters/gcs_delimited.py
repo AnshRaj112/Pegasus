@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T16:43:03+05:30
+# Last edited: 2026-06-25T11:13:21Z
 # --- END GENERATED FILE METADATA ---
 
 """Stream delimited objects from GCS — no full-object download or local materialization."""
