@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T11:22:54Z
+# Last edited: 2026-06-25T11:27:19Z
 # --- END GENERATED FILE METADATA ---
 
 """Async SQLAlchemy engine and session factory (PostgreSQL + asyncpg)."""

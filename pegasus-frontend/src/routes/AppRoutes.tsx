@@ -14,6 +14,7 @@ import Profile from '../pages/profile/Profile';
 import { WorkspaceMgmtSubView } from '../pages/admin/sections/WorkspaceMgmtSubView';
 import { ConfigureStoreSubView } from '../pages/admin/sections/ConfigureStoreSubView';
 import Setting from '~/pages/admin/sections/setting/Setting';
+import { SnippetComparison } from '../pages/report/views/SnippetComparison';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -28,10 +29,6 @@ export const AppRoutes: React.FC = () => {
               <Route path="/validations/*" element={<ValidationWizardView />} />
               <Route path="/reports" element={<Report />} />
               <Route path="/reports/:mappingId/history" element={<ExecutionHistory />} />
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 604d758450025adfe4d3a16adf118e9d8cb1237a
               <Route path="/reports/:mappingId/history/:runId/snippet" element={<SnippetComparison />} />
               <Route path="/admin" element={<AdminView />}>
                 {/* Default redirect to workspace management */}
@@ -40,15 +37,10 @@ export const AppRoutes: React.FC = () => {
                 <Route path="configure-store" element={<ConfigureStoreSubView />} />
                 <Route path="settings" element={<Setting />} />
               </Route>
-<<<<<<< HEAD
-=======
               <Route path="/reports/:mappingId/history/:runId/snippet" element={<SnippetViewRouter />} />
               <Route path="/admin" element={<AdminView />} />
->>>>>>> c0515f3447ea4533b0da953b0b8d59ed6f5a8852
-=======
               <Route path="/reports/:mappingId/history/:runId/snippet" element={<SnippetViewRouter />} />
               <Route path="/admin" element={<AdminView />} />
->>>>>>> 604d758450025adfe4d3a16adf118e9d8cb1237a
               <Route path="/profile" element={<Profile />} />
               <Route path="/setting" element={<Setting />} />
               <Route path="*" element={<div style={{ color: 'var(--on-surface)', padding: 'var(--lg)' }}>404 Error: Section View Not Found</div>} />

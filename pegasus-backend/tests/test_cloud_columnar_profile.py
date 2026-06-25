@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T11:22:54Z
+# Last edited: 2026-06-25T11:27:19Z
 # --- END GENERATED FILE METADATA ---
 
 """Cloud columnar profile and preview for Parquet objects on GCS."""
