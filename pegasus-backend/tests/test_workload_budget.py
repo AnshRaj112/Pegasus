@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T11:33:45Z
+# Last edited: 2026-06-24T11:38:03Z
 # --- END GENERATED FILE METADATA ---
 
 from pegasus.core.workload_budget import plan_workload_budget
