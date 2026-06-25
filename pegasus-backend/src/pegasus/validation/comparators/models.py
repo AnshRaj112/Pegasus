@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:26:33Z
+# Last edited: 2026-06-25T15:55:54+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Structured mismatch report types (retained for API/history compatibility)."""
@@ -19,6 +19,7 @@ class MismatchType(StrEnum):
     MISSING_IN_TARGET = "missing_in_target"
     EXTRA_IN_TARGET = "extra_in_target"
     VALUE_MISMATCH = "value_mismatch"
+    VALUE_MATCH = "value_match"
 
 
 # Summary dict key: distinct UIDs with at least one value_mismatch cell (not a MismatchType).

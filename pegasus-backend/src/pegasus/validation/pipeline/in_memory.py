@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:26:33Z
+# Last edited: 2026-06-25T15:55:54+05:30
 # --- END GENERATED FILE METADATA ---
 
 """In-memory reconciliation for datasets that fit in RAM (fast path)."""
@@ -499,6 +499,7 @@ def try_in_memory_reconcile(
     enable_column_drilldown: bool,
     auto_in_memory_max_bytes: int = _DEFAULT_AUTO_IN_MEMORY_MAX_BYTES,
     sample_limit: int = 1000,
+    match_per_column_limit: int = 10,
 ) -> PipelineResult | None:
     """Return a :class:`PipelineResult` when both sides fit in memory; else ``None``."""
     if not _should_use_in_memory(
@@ -648,6 +649,22 @@ def try_in_memory_reconcile(
             enable_column_drilldown=enable_column_drilldown,
             pol=pol,
         )
+        if (
+            full_mismatches.is_empty()
+            and missing_df.height == 0
+            and extra_df.height == 0
+            and changed_df.height == 0
+        ):
+            from pegasus.validation.match_sample import build_match_sample_frame
+
+            full_mismatches = build_match_sample_frame(
+                src=src,
+                tgt=tgt,
+                identity_columns=identity_columns,
+                compare_columns=compare_columns,
+                per_column_limit=match_per_column_limit,
+                pol=pol,
+            )
 
         elapsed = time.perf_counter() - t0
         extra_stats: dict[str, Any] = {"path": "in_memory_polars"}

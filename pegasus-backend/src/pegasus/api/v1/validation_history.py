@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:26:33Z
+# Last edited: 2026-06-25T15:24:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Persisted validation history (mappings, reports, durations)."""
@@ -411,9 +411,7 @@ async def list_validation_history_mismatches(
                         offset=offset,
                         limit=limit,
                     )
-            response_total = db_total
-            if response_total <= 0:
-                response_total = mismatch_record_total(mismatch_totals_from_run(run))
+            response_total = db_total if db_total > 0 else len(rows)
             return ValidationHistoryMismatchesResponse(
                 run_id=run_id,
                 items=[

@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:26:33Z
+# Last edited: 2026-06-25T15:55:54+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Six-stage tabular reconciliation pipeline."""
@@ -260,6 +260,8 @@ class TabularReconciliationPipeline:
                     memory_budget_bytes=self._config.memory_budget_bytes,
                     auto_in_memory_max_bytes=self._config.auto_in_memory_max_bytes,
                     enable_column_drilldown=self._config.enable_column_drilldown,
+                    sample_limit=self._config.mismatch_sample_limit,
+                    match_per_column_limit=self._config.match_per_column_limit,
                 )
             if in_memory is not None:
                 in_memory.extra_stats["path"] = "in_memory_polars"
@@ -294,6 +296,8 @@ class TabularReconciliationPipeline:
                     memory_budget_bytes=self._config.memory_budget_bytes,
                     auto_in_memory_max_bytes=self._config.auto_in_memory_max_bytes,
                     enable_column_drilldown=self._config.enable_column_drilldown,
+                    sample_limit=self._config.mismatch_sample_limit,
+                    match_per_column_limit=self._config.match_per_column_limit,
                 )
             if direct is not None:
                 direct.extra_stats["path"] = "polars_direct"

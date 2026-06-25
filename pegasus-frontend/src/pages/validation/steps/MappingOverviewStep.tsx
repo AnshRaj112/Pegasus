@@ -9,8 +9,10 @@ import { Api, CloudFileProfileResponse, FixedWidthColumnPreview, GoogleCloudStor
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { OverviewFilePreview } from './OverviewFilePreview';
+import { OverviewJsonPreview } from './OverviewJsonPreview';
 import { assessEmptyValidationFiles, isValidationFileEmpty } from '../validationEmptyFiles';
 import { isFixedWidthFormat } from '../fixedWidthFormat';
+import { isJsonFileName, profileLooksJson } from '../jsonFormat';
 import { FixedWidthLayoutPanel } from './FixedWidthLayoutPanel';
 import { formatDetectionLabel } from '../../../shared/formatDisplayLabel';
 
@@ -29,6 +31,18 @@ const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string => cloud
 const formatBoolean = (val: boolean | null | undefined) => {
   if (val === true) return 'Yes';
   if (val === false) return 'No';
+  return '—';
+};
+
+const resolveCloudFormatLabel = (
+  profile: CloudFileProfileResponse | null,
+  fileName: string | null,
+  empty: boolean,
+): string => {
+  if (empty) return formatDetectionLabel('empty');
+  const raw = profile?.suggested_file_format ?? profile?.file_format;
+  if (raw) return formatDetectionLabel(raw);
+  if (isJsonFileName(fileName)) return formatDetectionLabel('json');
   return '—';
 };
 
@@ -161,7 +175,8 @@ export const MappingOverviewStep: React.FC = () => {
   const sourceKey = cloudObjectKey(form.sourceCloud);
   const targetKey = cloudObjectKey(form.targetCloud);
   const previewPairKey = `${sourceKey}|${targetKey}|${form.delimiter || 'auto'}|${form.hasHeader}`;
-  const cacheHit = cache?.sourceKey === sourceKey && cache?.targetKey === targetKey;
+  const cacheHit = cache?.sourceKey === sourceKey && cache?.targetKey === targetKey
+    && !cache.sourceError && !cache.targetError;
 
   const sourceProfile: FileProfileState = !form.sourceCloud ? emptyProfileState : cacheHit ? { profile: cache.source, loading: false, error: cache.sourceError } : { profile: null, loading: true, error: false };
   const targetProfile: FileProfileState = !form.targetCloud ? emptyProfileState : cacheHit ? { profile: cache.target, loading: false, error: cache.targetError } : { profile: null, loading: true, error: false };
@@ -180,6 +195,18 @@ export const MappingOverviewStep: React.FC = () => {
     isFixedWidthFormat(sourceProfile.profile?.suggested_file_format ?? sourceProfile.profile?.file_format)
     || isFixedWidthFormat(targetProfile.profile?.suggested_file_format ?? targetProfile.profile?.file_format)
   );
+  const sourceLooksJson = profileLooksJson(sourceProfile.profile, form.sourceFileName);
+  const targetLooksJson = profileLooksJson(targetProfile.profile, form.targetFileName);
+  const isJson = !sourceEmpty && !targetEmpty && !isFixedWidth && sourceLooksJson && targetLooksJson;
+
+  useEffect(() => {
+    if (!isJson || isFetching) return;
+    dispatch(validationActions.setValidationForm({
+      detectedFileFormat: 'json',
+      uidColumn: form.uidColumn || 'document',
+      columnMappings: [],
+    }));
+  }, [isJson, isFetching, dispatch, form.uidColumn]);
 
   useEffect(() => {
     if (!isFixedWidth || isFetching) return;
@@ -252,18 +279,23 @@ export const MappingOverviewStep: React.FC = () => {
     const nextCache = { sourceKey, targetKey, source: null as CloudFileProfileResponse | null, target: null as CloudFileProfileResponse | null, sourceError: false, targetError: false };
     const commit = () => { if (!cancelled) dispatch(validationActions.setOverviewProfileCache({ ...nextCache })); };
 
-    Promise.all([
+    Promise.allSettled([
       Api.profileCloudFile({ cloud: form.sourceCloud, delimiter: form.delimiter || 'auto', has_header: form.hasHeader }),
       Api.profileCloudFile({ cloud: form.targetCloud, delimiter: form.delimiter || 'auto', has_header: form.hasHeader }),
     ])
-      .then(([sourceRes, targetRes]) => { nextCache.source = sourceRes.data; nextCache.target = targetRes.data; commit(); })
-      .catch(() => { nextCache.sourceError = true; nextCache.targetError = true; commit(); });
+      .then(([sourceResult, targetResult]) => {
+        if (sourceResult.status === 'fulfilled') nextCache.source = sourceResult.value.data;
+        else nextCache.sourceError = true;
+        if (targetResult.status === 'fulfilled') nextCache.target = targetResult.value.data;
+        else nextCache.targetError = true;
+        commit();
+      });
 
     return () => { cancelled = true; };
   }, [form.sourceCloud, form.targetCloud, sourceKey, targetKey, cacheHit, dispatch, form.delimiter, form.hasHeader]);
 
   useEffect(() => {
-    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || isFixedWidth || isFetching) {
+    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || isFixedWidth || isJson || isFetching) {
       setPreviewData(null);
       setPreviewError(null);
       setPreviewLoading(false);
@@ -301,7 +333,7 @@ export const MappingOverviewStep: React.FC = () => {
       });
 
     return () => { cancelled = true; };
-  }, [form.sourceCloud, form.targetCloud, form.uidColumn, form.delimiter, form.hasHeader, previewPairKey, sourceKey, targetKey, isFixedWidth, isFetching]);
+  }, [form.sourceCloud, form.targetCloud, form.uidColumn, form.delimiter, form.hasHeader, previewPairKey, sourceKey, targetKey, isFixedWidth, isJson, isFetching]);
 
   useEffect(() => {
     setPreviewOpen(false);
@@ -311,37 +343,58 @@ export const MappingOverviewStep: React.FC = () => {
     setPreviewOpen(true);
   }, []);
 
-  const previewControl = previewData
-    ? <PreviewButton onClick={openPreview} />
-    : previewLoading
-      ? <SkeletonBlock width="36px" height="32px" />
-      : '—';
+  const jsonPreviewReady = Boolean(
+    sourceProfile.profile?.json_preview && targetProfile.profile?.json_preview,
+  );
+
+  const previewControl = isJson
+    ? (jsonPreviewReady
+      ? <PreviewButton onClick={openPreview} />
+      : isFetching
+        ? <SkeletonBlock width="36px" height="32px" />
+        : '—')
+    : previewData
+      ? <PreviewButton onClick={openPreview} />
+      : previewLoading
+        ? <SkeletonBlock width="36px" height="32px" />
+        : '—';
 
   const inferredColumnCount = isFixedWidth
     ? (form.fixedWidthColumns.length || sourceProfile.profile?.column_count || null)
-    : (sourceProfile.profile?.column_count ?? null);
+    : isJson
+      ? (sourceProfile.profile?.column_count ?? 1)
+      : (sourceProfile.profile?.column_count ?? null);
+
+  const inferredRowCount = (profile: CloudFileProfileResponse | null, empty: boolean) => {
+    if (empty) return 0;
+    if (isJson) return profile?.row_count ?? 1;
+    return profile?.row_count ?? null;
+  };
+
+  const headerFooterLabel = (profile: CloudFileProfileResponse | null) =>
+    isJson ? 'N/A' : formatBoolean(profile?.has_header);
 
   const sourceStats = {
     name: form.sourceFileName ?? '—',
     path: gsPath(form.sourceCloud?.bucket ?? null, form.sourceCloud?.object_name ?? null),
-    format: formatDetectionLabel(sourceEmpty ? 'empty' : sourceProfile.profile?.file_format),
+    format: resolveCloudFormatLabel(sourceProfile.profile, form.sourceFileName, sourceEmpty),
     sizeBytes: sourceProfile.profile?.file_size_bytes ?? form.sourceFileSize,
     columnCount: sourceEmpty ? 0 : inferredColumnCount,
-    rowCount: sourceEmpty ? 0 : sourceProfile.profile?.row_count ?? null,
-    header: formatBoolean(sourceProfile.profile?.has_header),
-    footer: formatBoolean((sourceProfile.profile as { has_footer?: boolean })?.has_footer),
+    rowCount: inferredRowCount(sourceProfile.profile, sourceEmpty),
+    header: headerFooterLabel(sourceProfile.profile),
+    footer: isJson ? 'N/A' : formatBoolean((sourceProfile.profile as { has_footer?: boolean })?.has_footer),
     preview: previewControl,
   };
 
   const targetStats = {
     name: form.targetFileName ?? '—',
     path: gsPath(form.targetCloud?.bucket ?? null, form.targetCloud?.object_name ?? null),
-    format: formatDetectionLabel(targetEmpty ? 'empty' : targetProfile.profile?.file_format),
+    format: resolveCloudFormatLabel(targetProfile.profile, form.targetFileName, targetEmpty),
     sizeBytes: targetProfile.profile?.file_size_bytes ?? form.targetFileSize,
-    columnCount: targetEmpty ? 0 : (isFixedWidth ? inferredColumnCount : targetProfile.profile?.column_count ?? null),
-    rowCount: targetEmpty ? 0 : targetProfile.profile?.row_count ?? null,
-    header: formatBoolean(targetProfile.profile?.has_header),
-    footer: formatBoolean((targetProfile.profile as { has_footer?: boolean })?.has_footer),
+    columnCount: targetEmpty ? 0 : (isFixedWidth ? inferredColumnCount : isJson ? (targetProfile.profile?.column_count ?? 1) : targetProfile.profile?.column_count ?? null),
+    rowCount: inferredRowCount(targetProfile.profile, targetEmpty),
+    header: headerFooterLabel(targetProfile.profile),
+    footer: isJson ? 'N/A' : formatBoolean((targetProfile.profile as { has_footer?: boolean })?.has_footer),
     preview: previewControl,
   };
 
@@ -433,12 +486,21 @@ export const MappingOverviewStep: React.FC = () => {
       </div>
 
       <OverviewFilePreview
-        open={previewOpen}
+        open={previewOpen && !isJson}
         preview={previewData}
         sourceLabel={sourceStats.name}
         targetLabel={targetStats.name}
         loading={previewLoading}
         error={previewError}
+        onClose={() => setPreviewOpen(false)}
+      />
+
+      <OverviewJsonPreview
+        open={previewOpen && isJson}
+        sourcePreview={sourceProfile.profile?.json_preview ?? null}
+        targetPreview={targetProfile.profile?.json_preview ?? null}
+        sourceLabel={sourceStats.name}
+        targetLabel={targetStats.name}
         onClose={() => setPreviewOpen(false)}
       />
 

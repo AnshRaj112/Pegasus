@@ -10,6 +10,7 @@ import { ValidationFormState } from './Validation.interface';
 import { gcsUri } from '../report/reportPairId';
 import { fixedWidthConfigFromColumns } from './fixedWidthConfig';
 import { isFixedWidthFormat } from './fixedWidthFormat';
+import { isJsonFormat } from './jsonFormat';
 
 export const parseGsUri = (uri: string): GoogleCloudStorageConfig | null => {
   const trimmed = uri.trim();
@@ -75,15 +76,17 @@ export const loadValidationRunForm = async (
 export const formFromHistory = (detail: ValidationHistoryDetail): Partial<ValidationFormState> => {
   const sourceCloud = cloudFromPath(detail.source_path);
   const targetCloud = cloudFromPath(detail.target_path);
+  const isJson = (detail.delimiter ?? '').trim().toLowerCase() === 'json';
   return {
     sourceCloud,
     targetCloud,
     sourceFileName: detail.source_filename,
     targetFileName: detail.target_filename,
-    uidColumn: detail.uid_column,
+    uidColumn: isJson ? (detail.uid_column || 'document') : detail.uid_column,
     delimiter: detail.delimiter || 'auto',
     hasHeader: true,
     columnMappings: (detail.column_mappings ?? []) as ColumnMapping[],
+    detectedFileFormat: isJson ? 'json' : null,
   };
 };
 
@@ -96,23 +99,29 @@ export const validateRequestFromForm = (
   pathOverride?: { source_path?: string | null; target_path?: string | null },
 ): ValidateRequest => {
   const isFixedWidth = isFixedWidthFormat(form.detectedFileFormat);
+  const isJson = isJsonFormat(form.detectedFileFormat);
   const uidColumn = isFixedWidth && form.fixedWidthColumns.length > 0
     ? (form.uidColumn || form.fixedWidthColumns[0]?.field_name || 'record_id')
-    : form.uidColumn;
+    : isJson
+      ? (form.uidColumn || 'document')
+      : form.uidColumn;
 
   const base: ValidateRequest = {
     uid_column: uidColumn,
-    delimiter: form.delimiter || 'auto',
+    delimiter: isJson ? 'json' : (form.delimiter || 'auto'),
     has_header: form.hasHeader,
     column_mappings: isFixedWidth ? [] : form.columnMappings,
-    test_mode: form.testMode,
-    ...(form.testMode === 'full' && form.mismatchSnippetLimit != null
-      ? { mismatch_snippet_limit: form.mismatchSnippetLimit }
-      : {}),
+    test_mode: 'full',
     ...(isFixedWidth
       ? {
         file_format: 'fixed-width',
         fixed_width_config: fixedWidthConfigFromColumns(form.fixedWidthColumns, uidColumn),
+      }
+      : {}),
+    ...(isJson
+      ? {
+        file_format: 'json',
+        json_order_sensitive: form.structuredOrderSensitive,
       }
       : {}),
   };

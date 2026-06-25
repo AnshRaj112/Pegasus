@@ -708,7 +708,7 @@ export const FileSelectionStep: React.FC = () => {
               <span>{breadcrumb}</span>
               {isBrowsing && <SyncOutlined spin style={{ color: browsingForColor, fontSize: '14px' }} />}
               {parentPrefix != null && !isBrowsing && (
-                <button type="button" onClick={() => { cancelInFlightBrowse(); setActiveBrowse({ prefix: parentPrefix }); }} style={{ marginLeft: '8px', border: 'none', background: '#f0f0f0', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontSize: '12px' }}><ArrowUpOutlined /> Up</button>
+                <button type="button" onClick={() => { cancelInFlightBrowse(); setActiveBrowse({ prefix: parentPrefix }); }} style={{ marginLeft: '8px', border: 'none', background: '#f0f0f0', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontSize: '12px' }}><ArrowUpOutlined /> Back</button>
               )}
               {isMultiBucketConnection && browse.bucket && !browse.prefix && parentPrefix == null && !isBrowsing && (
                 <button type="button" onClick={() => { cancelInFlightBrowse(); setActiveBrowse({ bucket: '' }); }} style={{ marginLeft: '8px', border: 'none', background: '#f0f0f0', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontSize: '12px' }}><ArrowUpOutlined /> Buckets</button>

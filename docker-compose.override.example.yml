@@ -6,6 +6,9 @@
 #
 # Local CSV paths: set PEGASUS_HOST_HOME in repo-root .env to your real home (passwd),
 # especially when using snap Docker — otherwise ${HOME} may point at ~/snap/docker/... .
+#
+# Mismatch NDJSON artifacts are stored in the named volume `pegasus-validation-jobs`
+# (see docker-compose.yml) so snippet data survives container restarts.
 
 services:
   backend:

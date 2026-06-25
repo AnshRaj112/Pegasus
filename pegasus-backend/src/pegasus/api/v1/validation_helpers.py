@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:26:33Z
+# Last edited: 2026-06-25T15:55:54+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Shared helpers for validation API endpoints and job polling."""
@@ -672,29 +672,41 @@ async def maybe_persist_completed_job(
             return 0.0
         if run.status not in (ValidationRunStatus.RUNNING, ValidationRunStatus.COMPLETED):
             return 0.0
-        from pegasus.validation.test_mode_policy import resolve_mismatch_collection_policy
-
-        collection_policy = resolve_mismatch_collection_policy(
-            settings,
-            test_mode=str(run_result.test_mode or "full"),
-            mismatch_snippet_limit=run_result.mismatch_snippet_limit,
-            compare_column_count=len(run_result.compared_columns or []),
-        )
-        persist_cap = (
-            collection_policy.persistence_row_cap
-            if collection_policy.persistence_row_cap > 0
-            else settings.validation_persistence_max_mismatch_rows
-        )
         await ValidationRunRepository.complete_success(
             session,
             run_id,
             run_result,
             column_mappings=column_mappings or None,
-            max_mismatch_rows=persist_cap,
+            max_mismatch_rows=settings.validation_persistence_max_mismatch_rows,
             job_meta=job_meta,
         )
         await session.commit()
     return time.perf_counter() - t0
+
+
+def persist_completed_job_blocking(
+    settings: Settings,
+    *,
+    run_id: uuid.UUID | None,
+    run_result: ValidationRunResult,
+    job_meta: dict[str, object] | None,
+) -> None:
+    """Persist mismatch rows synchronously (validation worker subprocess)."""
+    if not settings.enable_validation_persistence or run_id is None:
+        return
+    import asyncio
+
+    try:
+        asyncio.run(
+            maybe_persist_completed_job(
+                settings,
+                run_id=run_id,
+                run_result=run_result,
+                job_meta=job_meta,
+            )
+        )
+    except Exception:
+        logger.exception("Synchronous mismatch persistence failed for run %s", run_id)
 
 
 async def backfill_mismatch_rows_for_run(
@@ -711,31 +723,50 @@ async def backfill_mismatch_rows_for_run(
         if await ValidationRunRepository.count_mismatch_reports(session, run_id) > 0:
             return False
         if mismatch_record_total(mismatch_totals_from_run(run)) <= 0:
-            return False
-    job_dir = find_job_dir_for_run(settings, run_id)
-    if job_dir is None:
-        return False
-    try:
-        workspace = job_dir / "reconcile_workspace"
-        export_path = job_dir / "mismatches.ndjson"
-        result_json = loads_str((job_dir / "result.json").read_text(encoding="utf-8"))
-        compared_cols = list(result_json.get("compared_columns") or [])
-        if (
-            workspace.is_dir()
-            and compared_cols
-            and (not export_path.is_file() or export_path.stat().st_size == 0)
-        ):
-            from pegasus.validation.pipeline.mismatch_export import export_workspace_mismatches_ndjson
+            artifact = resolve_history_mismatch_artifact(settings, run)
+            if artifact is None or not artifact.is_file():
+                return False
+            from pegasus.api.v1.mismatch_sample import count_value_match_rows_ndjson
 
-            export_workspace_mismatches_ndjson(
-                workspace,
-                export_path,
-                compare_columns=compared_cols,
-            )
-        run_result, _, job_meta = run_result_from_job_dir(job_dir)
-    except (OSError, ValueError, TypeError):
-        logger.warning("Could not load job artifacts for run %s from %s", run_id, job_dir, exc_info=True)
-        return False
+            if count_value_match_rows_ndjson(artifact) <= 0:
+                return False
+    job_dir = find_job_dir_for_run(settings, run_id)
+    run_result: ValidationRunResult | None = None
+    job_meta: dict[str, object] | None = None
+    if job_dir is not None:
+        try:
+            workspace = job_dir / "reconcile_workspace"
+            export_path = job_dir / "mismatches.ndjson"
+            result_json = loads_str((job_dir / "result.json").read_text(encoding="utf-8"))
+            compared_cols = list(result_json.get("compared_columns") or [])
+            if (
+                workspace.is_dir()
+                and compared_cols
+                and (not export_path.is_file() or export_path.stat().st_size == 0)
+            ):
+                from pegasus.validation.pipeline.mismatch_export import export_workspace_mismatches_ndjson
+
+                export_workspace_mismatches_ndjson(
+                    workspace,
+                    export_path,
+                    compare_columns=compared_cols,
+                )
+            run_result, _, job_meta = run_result_from_job_dir(job_dir)
+        except (OSError, ValueError, TypeError):
+            logger.warning("Could not load job artifacts for run %s from %s", run_id, job_dir, exc_info=True)
+    if run_result is None:
+        async with AsyncSessionLocal() as session:
+            run = await ValidationRunRepository.get_run(session, run_id)
+            if run is None:
+                return False
+            artifact = resolve_history_mismatch_artifact(settings, run)
+        if artifact is None:
+            return False
+        try:
+            run_result, _, job_meta = run_result_from_job_dir(artifact.parent)
+        except (OSError, ValueError, TypeError):
+            logger.warning("Could not load mismatch artifact for run %s at %s", run_id, artifact, exc_info=True)
+            return False
     artifact = run_result.mismatch_artifact_path or run_result.report.mismatch_artifact_path
     if (artifact is None or not Path(artifact).is_file()) and run_result.report.mismatches.height <= 0:
         return False
