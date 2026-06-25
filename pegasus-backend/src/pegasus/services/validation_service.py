@@ -95,16 +95,16 @@ class ValidationService:
         from pegasus.core.workload_budget import _estimated_row_bytes
         from pegasus.validation.readers import native_multichar
 
-        policy = resource_policy or {}
+        resource = resource_policy or {}
         memory_budget = int(
-            policy.get("memory_budget_bytes") or self._settings.validation_memory_budget_bytes
+            resource.get("memory_budget_bytes") or self._settings.validation_memory_budget_bytes
         )
         target_duration = int(
-            policy.get("target_duration_seconds") or self._settings.validation_target_duration_seconds
+            resource.get("target_duration_seconds") or self._settings.validation_target_duration_seconds
         )
         cpu_cores = os.cpu_count() or 1
-        stamped_effective = policy.get("effective_threads_per_job")
-        raw_threads = policy.get("threads_per_job")
+        stamped_effective = resource.get("effective_threads_per_job")
+        raw_threads = resource.get("threads_per_job")
         if stamped_effective is not None and int(stamped_effective) > 0:
             requested_max_workers = int(stamped_effective)
         elif raw_threads is not None and int(raw_threads) > 0:
@@ -151,14 +151,14 @@ class ValidationService:
         reconcile_workers = self._settings.validation_partition_reconcile_workers
         if reconcile_workers <= 0:
             reconcile_workers = budget.max_parallel_workers
-        policy = collection_policy or resolve_mismatch_collection_policy(
+        collection = collection_policy or resolve_mismatch_collection_policy(
             self._settings,
             test_mode=ValidationTestMode.FULL,
             compare_column_count=compare_column_count,
         )
         stream_to_disk = (
             self._settings.validation_stream_mismatches_to_disk
-            and policy.export_mismatch_artifact
+            and collection.export_mismatch_artifact
         )
         return TabularPipelineConfig(
             chunk_rows=budget.chunk_rows,
@@ -169,7 +169,7 @@ class ValidationService:
             auto_in_memory_max_bytes=self._settings.validation_auto_in_memory_max_bytes,
             memory_budget_bytes=memory_budget,
             disk_headroom_multiplier=float(
-                policy.get("disk_headroom_multiplier")
+                resource.get("disk_headroom_multiplier")
                 or self._settings.validation_reconciliation_disk_headroom_multiplier
             ),
             enable_merkle_fast_path=self._settings.validation_enable_merkle_fast_path,
@@ -187,7 +187,7 @@ class ValidationService:
             distributed_redis_url=self._settings.validation_redis_url,
             distributed_min_bytes=self._settings.validation_distributed_min_bytes,
             stream_mismatches_to_disk=stream_to_disk,
-            mismatch_sample_limit=policy.pipeline_sample_limit,
+            mismatch_sample_limit=collection.pipeline_sample_limit,
         )
 
     def _resolve_delimiter(
