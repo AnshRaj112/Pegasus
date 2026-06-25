@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T10:40:16+05:30
+# Last edited: 2026-06-25T05:10:34Z
 # --- END GENERATED FILE METADATA ---
 
 """Stream columnar objects from GCS — bounded download for schema/profile/preview."""

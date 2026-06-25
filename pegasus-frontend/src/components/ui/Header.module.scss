@@ -1,70 +1,82 @@
 :root {
-  /* Surface & Background Colors */
-  --surface-bright: #fcf9f8;
-  --surface-container-lowest: #ffffff;
-  
-  /* Text Colors */
-  --on-surface: #1b1b1c;
-  --on-surface-variant: #414755;
-  --on-primary: #ffffff;
-  
-  /* Brand & Status Colors */
+  --gutter: 32px;
+  --xl: 32px;
+  --lg: 24px;
+  --md: 16px;
+  --xs: 8px;
+
+  --font-h2: 'Inter', sans-serif;
+  --font-label-md: 'Inter', sans-serif;
+  --label-md: 14px;
+
   --color-onyx-red: #E06B67;
   --color-onyx-red-deep: #952622;
-  --color-onyx-red-light: rgba(224, 107, 103, 0.25);
-  --status-fail: #ba1a1a;
-  
-  /* Borders & Outlines */
-  --outline: #727786;
-  --outline-variant: #c1c6d7;
+  --color-midnight-green: #234B5F;
+  --color-midnight-green-light: #f8f9fb;
+
+  --surface-variant: #e0e3e5;
+  --on-surface-variant: #414755;
 }
+
 .header {
   background: #ffffff;
-  border-bottom: 1px solid var(--surface-variant);
-  position: sticky;
+  /* Thick red line spanning the full bottom of the header */
+  border-bottom: 2px solid var(--color-onyx-red-deep);
+  
+  /* Restored to sticky positioning */
+  position: sticky; 
   top: 0;
-  z-index: 999;
   width: 100%;
+  height: 52px;
+  z-index: 1000;
   box-sizing: border-box;
-  flex-shrink: 0;
 }
 
 .inner {
+  position: relative; /* Acts as the anchor for centering the nav links */
   display: flex;
-  justify-content: space-between;
+  justify-content: space-between; /* Pushes brand to left, profile to right */
   align-items: center;
   width: 100%;
+  max-width: 100%;
   padding: 0 var(--gutter);
-  max-width: var(--container-max);
-  margin: 0 auto;
-  height: 64px;
+  height: 100%;
   box-sizing: border-box;
 }
 
-.brandGroup {
+.brandIdentity {
   display: flex;
   align-items: center;
-  gap: var(--xl);
+  height: 100%;
 }
 
 .brandTitle {
   font-family: var(--font-h2);
-  font-size: var(--h2);
+  font-size: 18px;
   font-weight: 900;
   color: var(--color-onyx-red-deep);
   letter-spacing: -0.5px;
-  text-decoration: none;
+  margin-right: 8px;
 }
 
 .brandIcon {
-  height: 28px;
+  height: 46px;
+  width: auto;
+  align-self: flex-end;
   object-fit: contain;
+  /* Adjusts the icon to sit flush against the red border */
+  transform: translateY(2px); 
 }
 
 .navLinks {
+  /* Absolute positioning forces perfect center alignment */
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   gap: var(--lg);
   align-items: center;
+  height: 100%;
 }
 
 .navLink {
@@ -73,9 +85,10 @@
   font-size: var(--label-md);
   text-decoration: none;
   font-weight: 500;
-  padding-bottom: 4px;
-  border-bottom: 2px solid transparent;
-  transition: color 0.2s ease, border-color 0.2s ease;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  transition: color 0.2s ease;
 
   &:hover {
     color: var(--color-onyx-red);
@@ -83,13 +96,15 @@
 }
 
 .navLinkActive {
+  /* Only changes color now, no underline */
   color: var(--color-onyx-red-deep);
   font-family: var(--font-label-md);
   font-size: var(--label-md);
   text-decoration: none;
-  font-weight: 500;
-  padding-bottom: 4px; 
-  border-bottom: 2px solid var(--color-onyx-red-deep);
+  font-weight: 600; /* Slightly bolder to emphasize the active state */
+  height: 100%;
+  display: flex;
+  align-items: center;
 }
 
 .quickActions {
@@ -108,20 +123,6 @@
   &:hover {
     color: var(--color-midnight-green);
     background-color: var(--color-midnight-green-light);
-  }
-}
-
-.avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 1px solid var(--surface-variant);
-  object-fit: cover;
-  cursor: pointer;
-  transition: border-color 0.2s;
-
-  &:hover {
-    border-color: var(--color-midnight-green);
   }
 }
 
@@ -154,7 +155,7 @@
 
 .dropdownMenu {
   position: absolute;
-  top: calc(100% + 12px);
+  top: calc(100% + 10px);
   right: 0;
   width: 160px;
   background-color: #ffffff;
@@ -187,9 +188,7 @@
     color: #234B5F;
   }
 
-  svg {
-    font-size: 16px;
-  }
+  svg { font-size: 16px; }
 }
 
 .dropdownDivider {

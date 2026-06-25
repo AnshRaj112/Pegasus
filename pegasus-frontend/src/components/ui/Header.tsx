@@ -36,19 +36,21 @@ export const Header: React.FC = () => {
     <nav className={styles.header}>
       <div className={styles.inner}>
         
-        <div className={styles.brandGroup}>
-          <div className="d-flex align-items-center">
-            <span className={styles.brandTitle}>Pegasus</span>
-            <img src={headerIcon} alt="Pegasus Icon" className={`ms-2 ${styles.brandIcon}`} />
-          </div>
-          <div className={styles.navLinks}>
-            <Link to="/" className={getLinkClass('/')}>Dashboard</Link>
-            <Link to="/validations" className={getLinkClass('/validations')}>Validations</Link>
-            <Link to="/admin" className={getLinkClass('/admin')}>Admin</Link>
-            <Link to="/reports" className={getLinkClass('/reports')}>Reports</Link>
-          </div>
+        {/* Left Side: Brand Identity */}
+        <div className={styles.brandIdentity}>
+          <span className={styles.brandTitle}>Pegasus</span>
+          <img src={headerIcon} alt="Pegasus Icon" className={styles.brandIcon} />
         </div>
 
+        {/* Center: Nav Links */}
+        <div className={styles.navLinks}>
+          <Link to="/" className={getLinkClass('/')}>Dashboard</Link>
+          <Link to="/validations" className={getLinkClass('/validations')}>Validations</Link>
+          <Link to="/admin" className={getLinkClass('/admin')}>Admin</Link>
+          <Link to="/reports" className={getLinkClass('/reports')}>Reports</Link>
+        </div>
+
+        {/* Right Side: Quick Actions */}
         <div className={styles.quickActions}>
           <span
             className={`material-symbols-outlined ${styles.iconButton}`}
@@ -113,6 +115,7 @@ export const Header: React.FC = () => {
             )}
           </div>
         </div>
+        
       </div>
     </nav>
   );

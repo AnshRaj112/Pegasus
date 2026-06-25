@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T04:45:06Z
+# Last edited: 2026-06-25T05:10:34Z
 # --- END GENERATED FILE METADATA ---
 
 """GCS streaming I/O — connection reuse, chunked reads, no full-object materialization."""
