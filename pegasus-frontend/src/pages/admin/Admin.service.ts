@@ -101,7 +101,7 @@ class AdminService {
       connection_id: connectionId,
       bucket: bucket?.trim() ? bucket : null,
       prefix: '',
-      file_format: 'csv',
+      file_format: 'auto',
     });
     return { status: 'success' };
   }
