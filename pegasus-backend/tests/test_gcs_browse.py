@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T11:38:03Z
+# Last edited: 2026-06-25T10:40:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """GCS browse helpers — extension matching and object size metadata."""
