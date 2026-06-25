@@ -1,27 +1,27 @@
 :root {
-  /* Surface & Background Colors */
   --surface-bright: #fcf9f8;
-  --surface-container-lowest: #fcf9f8;
-  
-  /* Text Colors */
+  --surface-container-lowest: #ffffff;
   --on-surface: #1b1b1c;
   --on-surface-variant: #414755;
   --on-primary: #ffffff;
-  
-  /* Brand & Status Colors */
   --color-onyx-red: #E06B67;
   --color-onyx-red-deep: #952622;
   --color-onyx-red-light: rgba(224, 107, 103, 0.25);
   --status-fail: #ba1a1a;
-  
-  /* Borders & Outlines */
   --outline: #727786;
   --outline-variant: #c1c6d7;
 }
 
+/* Force kills the browser's default white border stripe */
+:global(body), :global(html) {
+  margin: 0 !important;
+  padding: 0 !important;
+  background-color: var(--surface-bright, #fcf9f8);
+}
+
 .authWrapper {
   min-height: 100vh;
-  width: 100%;
+  width: 100vw;
   box-sizing: border-box;
   overflow-x: hidden;
   display: flex;
@@ -41,11 +41,27 @@
 .watermarkBg {
   position: fixed;
   bottom: -5vh;
-  left: -10vw;
+  left: -2vw; /* Shifted slightly right to reveal the horse */
   height: 85vh;
-  opacity: 0.15; // Faded pink effect
+  opacity: 0.15;
   pointer-events: none;
   z-index: 0;
+}
+
+/* Placed near top edge */
+.onixLogoWrapper {
+  position: absolute;
+  top: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  text-align: center;
+  z-index: 2;
+}
+
+.onixLogo {
+  height: 48px;
+  object-fit: contain;
 }
 
 .authMain {
@@ -59,43 +75,40 @@
   z-index: 1;
 }
 
-.onixLogoContainer {
-  margin-top: 12px;
-}
-
-.onixLogo {
-  height: 80px;
-  object-fit: contain;
-}
-
 .authCard {
   width: 100%;
   max-width: 420px;
   background-color: var(--surface-container-lowest, #ffffff);
   border: 1px solid var(--outline-variant, #c1c6d7);
   border-radius: 12px;
-  padding: 40px 32px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  padding: 36px 32px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  margin-top: 40px; /* offset space for absolute logo */
 }
 
+/* Pegasus Logo - Made Bigger */
 .cardBrandIcon {
-  height: 56px;
+  height: 68px; 
+  width: auto;
   object-fit: contain;
 }
 
+/* Title text - Made Smaller */
 .authCardTitle {
-  font-size: 24px;
-  font-weight: 700;
+  font-size: 20px; 
+  font-weight: 800;
   color: var(--on-surface, #1b1b1c);
-  margin: 0;
-  line-height: 1.2;
+  margin: 0 0 2px 0;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
 }
 
 .authCardSubtitle {
-  font-size: 11px;
-  color: var(--on-surface, #1b1b1c);
+  font-size: 10px; 
+  font-weight: 700;
+  color: var(--on-surface-variant, #414755);
   margin: 0;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
   text-transform: uppercase;
 }
 
@@ -112,7 +125,7 @@
 
 .authFormForgotLink {
   font-size: 12px;
-  color: var(--color-onyx-red-deep, #1b73e8); // Kept default link color from reference or map to vars
+  color: #1b73e8; 
   text-decoration: none;
   
   &:hover {

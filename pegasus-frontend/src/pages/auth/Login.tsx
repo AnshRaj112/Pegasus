@@ -3,7 +3,7 @@ import {
   MailOutlined, 
   LockOutlined, 
   EyeOutlined, 
-  EyeInvisibleOutlined, 
+  EyeInvisibleOutlined 
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 
@@ -43,7 +43,7 @@ export const Login: React.FC = () => {
 
   return (
     <div className={`${styles.authWrapper} ${styles.glassBackground}`}>
-      {/* Background Watermark */}
+      {/* Background Watermark - Shifted Right */}
       <img 
         src={loginIcon} 
         alt="Pegasus Watermark" 
@@ -51,18 +51,19 @@ export const Login: React.FC = () => {
         aria-hidden="true"
       />
 
-      <main className={styles.authMain}>
-        {/* Onix Top Logo */}
-        <div className={`text-center mb-5 ${styles.onixLogoContainer}`}>
-          <img src={onixLogo} alt="Onix Logo" className={styles.onixLogo} />
-        </div>
+      {/* Onix Top Logo - Pushed near the top */}
+      <div className={styles.onixLogoWrapper}>
+        <img src={onixLogo} alt="Onix Logo" className={styles.onixLogo} />
+      </div>
 
+      <main className={styles.authMain}>
         <div className={styles.authCard}>
+          {/* Card Brand Header */}
           <div className="d-flex justify-content-center align-items-center mb-4">
-            <img src={loginIcon} alt="Pegasus The Validator" className={`me-3 ${styles.cardBrandIcon}`} />
-            <div className="text-start">
+            <img src={loginIcon} alt="Pegasus Logo" className={`me-3 ${styles.cardBrandIcon}`} />
+            <div className="text-start d-flex flex-column justify-content-center">
               <h1 className={styles.authCardTitle}>Pegasus</h1>
-              <p className={`fw-bold ${styles.authCardSubtitle}`}>The Validator</p>
+              <span className={styles.authCardSubtitle}>The Validator</span>
             </div>
           </div>
 
@@ -116,7 +117,7 @@ export const Login: React.FC = () => {
                   {showPassword ? <EyeOutlined /> : <EyeInvisibleOutlined />}
                 </button>
               </div>
-              <div className="mt-2">
+              <div className="mt-2 text-start">
                 <a href="#" className={styles.authFormForgotLink}>Forgot Password?</a>
               </div>
             </div>
