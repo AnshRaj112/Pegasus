@@ -176,6 +176,8 @@ def validate_fixed_width_pair(
     source_path: Path,
     target_path: Path,
     config: FixedWidthConfig | dict[str, Any],
+    *,
+    match_per_column_limit: int = 10,
 ) -> MismatchReport:
     """Compare two fixed-width files and return a mismatch report."""
     if not isinstance(config, FixedWidthConfig):
@@ -255,7 +257,20 @@ def validate_fixed_width_pair(
     if mismatch_rows:
         frame = pl.DataFrame(mismatch_rows, schema=MISMATCH_REPORT_SCHEMA)
     else:
-        frame = empty_mismatch_frame()
+        from pegasus.validation.match_sample import build_match_sample_rows_from_uid_maps
+
+        match_rows = build_match_sample_rows_from_uid_maps(
+            source_by_uid=source_by_uid,
+            target_by_uid=target_by_uid,
+            compare_columns=[f.field_name for f in compare_fields],
+            per_column_limit=match_per_column_limit,
+            mask_sensitive={f.field_name: f.is_sensitive for f in compare_fields},
+        )
+        frame = (
+            pl.DataFrame(match_rows, schema=MISMATCH_REPORT_SCHEMA)
+            if match_rows
+            else empty_mismatch_frame()
+        )
 
     missing = sum(1 for r in mismatch_rows if r["mismatch_type"] == MismatchType.MISSING_IN_TARGET.value)
     extra = sum(1 for r in mismatch_rows if r["mismatch_type"] == MismatchType.EXTRA_IN_TARGET.value)

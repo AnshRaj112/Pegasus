@@ -59,8 +59,6 @@ const defaultValidationForm: ValidationFormState = {
   detectedFileFormat: null,
   fixedWidthColumns: [],
   fixedWidthLineWidth: null,
-  testMode: 'full',
-  mismatchSnippetLimit: null,
 };
 
 export const initialState: ValidationReducerState = {

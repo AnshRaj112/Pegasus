@@ -19,6 +19,7 @@ class MismatchType(StrEnum):
     MISSING_IN_TARGET = "missing_in_target"
     EXTRA_IN_TARGET = "extra_in_target"
     VALUE_MISMATCH = "value_mismatch"
+    VALUE_MATCH = "value_match"
 
 
 # Summary dict key: distinct UIDs with at least one value_mismatch cell (not a MismatchType).

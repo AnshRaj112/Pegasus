@@ -723,7 +723,13 @@ async def backfill_mismatch_rows_for_run(
         if await ValidationRunRepository.count_mismatch_reports(session, run_id) > 0:
             return False
         if mismatch_record_total(mismatch_totals_from_run(run)) <= 0:
-            return False
+            artifact = resolve_history_mismatch_artifact(settings, run)
+            if artifact is None or not artifact.is_file():
+                return False
+            from pegasus.api.v1.mismatch_sample import count_value_match_rows_ndjson
+
+            if count_value_match_rows_ndjson(artifact) <= 0:
+                return False
     job_dir = find_job_dir_for_run(settings, run_id)
     run_result: ValidationRunResult | None = None
     job_meta: dict[str, object] | None = None

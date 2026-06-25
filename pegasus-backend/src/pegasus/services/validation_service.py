@@ -188,6 +188,7 @@ class ValidationService:
             distributed_min_bytes=self._settings.validation_distributed_min_bytes,
             stream_mismatches_to_disk=stream_to_disk,
             mismatch_sample_limit=collection.pipeline_sample_limit,
+            match_per_column_limit=collection.value_per_column_cap,
         )
 
     def _resolve_delimiter(
@@ -473,26 +474,42 @@ class ValidationService:
                 compared_columns=compared,
             )
 
-        report = validate_fixed_width_pair(source_path, target_path, config)
+        report = validate_fixed_width_pair(
+            source_path,
+            target_path,
+            config,
+            match_per_column_limit=collection_policy.value_per_column_cap,
+        )
         artifact_path = None
         sample_frame = report.mismatches
         if not report.mismatches.is_empty() and collection_policy.export_mismatch_artifact:
-            miss_df, ext_df, val_df = build_grouped_mismatch_samples(
-                report.mismatches,
-                0,
-                value_per_column_limit=(
-                    collection_policy.value_per_column_cap
-                    if collection_policy.value_per_column_cap > 0
-                    else None
-                ),
-                presence_max_rows=(
-                    collection_policy.presence_snippet_cap
-                    if collection_policy.presence_snippet_cap > 0
-                    else None
-                ),
+            from pegasus.validation.comparators.models import MismatchType
+
+            mismatch_only = report.mismatches.filter(
+                pl.col("mismatch_type") != pl.lit(MismatchType.VALUE_MATCH.value)
             )
-            parts = [df for df in (miss_df, ext_df, val_df) if df.height > 0]
-            sample_frame = pl.concat(parts, how="vertical") if parts else report.mismatches.slice(0, 0)
+            match_only = report.mismatches.filter(
+                pl.col("mismatch_type") == pl.lit(MismatchType.VALUE_MATCH.value)
+            )
+            if mismatch_only.height > 0:
+                miss_df, ext_df, val_df = build_grouped_mismatch_samples(
+                    mismatch_only,
+                    0,
+                    value_per_column_limit=(
+                        collection_policy.value_per_column_cap
+                        if collection_policy.value_per_column_cap > 0
+                        else None
+                    ),
+                    presence_max_rows=(
+                        collection_policy.presence_snippet_cap
+                        if collection_policy.presence_snippet_cap > 0
+                        else None
+                    ),
+                )
+                parts = [df for df in (miss_df, ext_df, val_df) if df.height > 0]
+                sample_frame = pl.concat(parts, how="vertical") if parts else report.mismatches.slice(0, 0)
+            else:
+                sample_frame = match_only
             if artifact_export_parent is not None and sample_frame.height > 0:
                 export_path = artifact_export_parent / "mismatches.ndjson"
                 export_path.parent.mkdir(parents=True, exist_ok=True)
