@@ -1,12 +1,12 @@
 import { call, delay, fork, put, select, takeLatest } from 'redux-saga/effects';
 import { notification } from 'antd';
 
-import { Api, type ValidationJobAcceptedResponse } from '../../shared/api/Api';
+import { Api, ValidationJobAcceptedResponse } from '../../shared/api/Api';
 import { getApiErrorMessage, isTransientPollError, pollRecoveryHint } from '../../shared/api/apiError';
 import { reportActions } from '../report/Report.reducer';
 import { gcsUri } from '../report/reportPairId';
 
-import { type ValidationDataResponse, type ValidationReducerState } from './Validation.interface';
+import { ValidationDataResponse, ValidationReducerState } from './Validation.interface';
 import { validationActions } from './Validation.reducer';
 import {
   removeActiveSession,

@@ -16,7 +16,7 @@ import {
   UnorderedListOutlined,
 } from '@ant-design/icons';
 
-import { Api, type ColumnMapping, type FixedWidthColumnPreview, type GoogleCloudStorageConfig } from '../../../shared/api/Api';
+import { Api, ColumnMapping, FixedWidthColumnPreview, GoogleCloudStorageConfig } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { isFixedWidthFormat } from '../fixedWidthFormat';

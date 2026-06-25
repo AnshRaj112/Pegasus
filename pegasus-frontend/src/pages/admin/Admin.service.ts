@@ -1,15 +1,15 @@
 import {
   Api,
-  type CloudConnection,
-  type CloudConnectionCreateRequest,
-  type CloudConnectionUpdateRequest,
+ CloudConnection,
+ CloudConnectionCreateRequest,
+ CloudConnectionUpdateRequest,
 } from '../../shared/api/Api';
 
 import {
-  type CreateStorageProviderPayload,
-  type StorageProviderItem,
-  type StorageProviderPayload,
-  type StorageProviderType,
+ CreateStorageProviderPayload,
+ StorageProviderItem,
+ StorageProviderPayload,
+ StorageProviderType,
 } from './Admin.interface';
 
 const PROVIDER_LABELS: Record<string, StorageProviderType> = {

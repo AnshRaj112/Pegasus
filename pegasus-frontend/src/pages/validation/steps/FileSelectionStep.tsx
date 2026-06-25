@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMe
 import { Link } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
-import { Api, type CloudConnection, type CloudBrowseEntry, type GoogleCloudStorageConfig } from '../../../shared/api/Api';
+import { Api, CloudConnection, CloudBrowseEntry, GoogleCloudStorageConfig } from '../../../shared/api/Api';
 import {
   getConnectionBrowsePath,
   isBrowsePathFresh,

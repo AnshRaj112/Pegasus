@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { SearchOutlined } from '@ant-design/icons';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
 import { reportActions } from './Report.reducer';
-import { type TabType } from './Report.interface';
+import { TabType } from './Report.interface';
 import { Active } from './step/Active';
 import { Completed } from './step/Completed';
 import { Saved } from './step/Saved';

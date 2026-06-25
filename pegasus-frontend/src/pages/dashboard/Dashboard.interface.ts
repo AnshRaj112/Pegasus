@@ -1,4 +1,4 @@
-import type { DailyStatRow, EntityInsight } from '../../shared/api/Api';
+import { DailyStatRow, EntityInsight } from '../../shared/api/Api';
 
 export interface TaskItem {
   id: string;

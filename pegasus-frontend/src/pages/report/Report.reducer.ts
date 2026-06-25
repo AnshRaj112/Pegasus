@@ -1,5 +1,5 @@
-import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { type ReportState, type TabType, type ReportItem } from './Report.interface';
+import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { ReportState, TabType, ReportItem } from './Report.interface';
 
 const initialState: ReportState = {
   activeTab: 'Active',

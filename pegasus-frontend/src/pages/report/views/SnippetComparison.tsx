@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { DownloadOutlined, RightOutlined, DatabaseOutlined, LeftOutlined } from '@ant-design/icons';
-import { Api, type MismatchSampleRow } from '../../../shared/api/Api';
+import { Api, MismatchSampleRow } from '../../../shared/api/Api';
 import { downloadSnippetCsv, downloadSnippetPdf, downloadSnippetXlsx } from '../snippetExport';
 
 type RowStatus = 'match' | 'mismatch' | 'extra_source' | 'missing_target';

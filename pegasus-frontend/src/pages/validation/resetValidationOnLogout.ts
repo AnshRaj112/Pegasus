@@ -1,4 +1,4 @@
-import type { AppDispatch } from '../../redux/store';
+import { AppDispatch } from '../../redux/store';
 import { clearConnectionBrowseCache } from './browseCacheStorage';
 import { validationActions } from './Validation.reducer';
 import { clearAllActiveSessions } from './validationSessionStorage';

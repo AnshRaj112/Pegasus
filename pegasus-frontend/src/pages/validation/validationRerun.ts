@@ -1,4 +1,4 @@
-import type {
+import {
   CloudConnection,
   ColumnMapping,
   GoogleCloudStorageConfig,
@@ -6,7 +6,7 @@ import type {
   ValidationHistoryDetail,
 } from '../../shared/api/Api';
 import { Api } from '../../shared/api/Api';
-import type { ValidationFormState } from './Validation.interface';
+import { ValidationFormState } from './Validation.interface';
 import { gcsUri } from '../report/reportPairId';
 import { fixedWidthConfigFromColumns } from './fixedWidthConfig';
 import { isFixedWidthFormat } from './fixedWidthFormat';
