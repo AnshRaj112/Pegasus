@@ -548,6 +548,17 @@ def _run_job_body(
                 test_mode=mode,
                 mismatch_snippet_limit=mismatch_snippet_limit,
             )
+        elif file_format == "json":
+            result = service.validate_json_pair_sync(
+                src,
+                tgt,
+                uid_column=uid_column,
+                order_sensitive=bool(meta.get("json_order_sensitive", False)),
+                parent_mappings=column_mappings,
+                artifact_export_parent=job_dir,
+                test_mode=mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
+            )
         elif file_format in _COLUMNAR_FORMATS:
             result = service.validate_columnar_pair_sync(
                 src,

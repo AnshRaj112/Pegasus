@@ -8,7 +8,7 @@ import { Report } from '../pages/report/Report';
 import { AdminView } from '../pages/admin/AdminView';
 import { Login } from '../pages/auth/Login';
 import { ProtectedRoute } from './ProtectedRoute';
-import { SnippetComparison } from '../pages/report/views/SnippetComparison';
+import { SnippetViewRouter } from '../pages/report/views/SnippetViewRouter';
 import { ExecutionHistory } from '../pages/report/views/ExecutionHistory';
 import Profile from '../pages/profile/Profile';
 import Setting from '~/pages/setting/Setting';
@@ -26,7 +26,7 @@ export const AppRoutes: React.FC = () => {
               <Route path="/validations/*" element={<ValidationWizardView />} />
               <Route path="/reports" element={<Report />} />
               <Route path="/reports/:mappingId/history" element={<ExecutionHistory />} />
-              <Route path="/reports/:mappingId/history/:runId/snippet" element={<SnippetComparison />} />
+              <Route path="/reports/:mappingId/history/:runId/snippet" element={<SnippetViewRouter />} />
               <Route path="/admin" element={<AdminView />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/setting" element={<Setting />} />

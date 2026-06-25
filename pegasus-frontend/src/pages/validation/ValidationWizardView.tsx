@@ -23,6 +23,7 @@ import { MappingOverviewStep } from './steps/MappingOverviewStep';
 import { ConfigureMappingStep } from './steps/ConfigureMappingStep';
 import { Api } from '../../shared/api/Api';
 import { isFixedWidthFormat } from './fixedWidthFormat';
+import { resolveWizardJsonMode } from './jsonFormat';
 
 import styles from './Validation.module.scss';
 
@@ -121,6 +122,19 @@ export const ValidationWizardView: React.FC = () => {
       || isFixedWidthFormat(overviewCache?.target?.suggested_file_format ?? overviewCache?.target?.file_format);
   }, [overviewCache, validationForm.detectedFileFormat]);
 
+  const overviewIsJson = useMemo(() => resolveWizardJsonMode({
+    detectedFileFormat: validationForm.detectedFileFormat,
+    sourceFileName: validationForm.sourceFileName,
+    targetFileName: validationForm.targetFileName,
+    sourceProfile: overviewCache?.source,
+    targetProfile: overviewCache?.target,
+  }), [
+    overviewCache,
+    validationForm.detectedFileFormat,
+    validationForm.sourceFileName,
+    validationForm.targetFileName,
+  ]);
+
   const overviewBlocksMapping = useMemo(() => {
     if (currentStep !== 2 || isStep2Loading || loadingRun) return false;
     if (!validationForm.sourceCloud || !validationForm.targetCloud) return true;
@@ -149,11 +163,20 @@ export const ValidationWizardView: React.FC = () => {
   ]);
 
   const isFixedWidth = isFixedWidthFormat(validationForm.detectedFileFormat);
+  const isJson = resolveWizardJsonMode({
+    detectedFileFormat: validationForm.detectedFileFormat,
+    sourceFileName: validationForm.sourceFileName,
+    targetFileName: validationForm.targetFileName,
+    sourceProfile: overviewCache?.source,
+    targetProfile: overviewCache?.target,
+  });
   const isStep3Loading = currentStep === 3 && (
     loadingRun
     || (isFixedWidth
       ? validationForm.fixedWidthColumns.length === 0
-      : !validationForm.columnMappings || validationForm.columnMappings.length === 0)
+      : isJson
+        ? false
+        : !validationForm.columnMappings || validationForm.columnMappings.length === 0)
   );
 
   const isActuallyLoading = isFetching || advancing || isStep2Loading || isStep3Loading;
@@ -189,6 +212,12 @@ export const ValidationWizardView: React.FC = () => {
 
     if (currentStep === 2) {
       if (!runId || overviewBlocksMapping) return;
+      if (overviewIsJson) {
+        dispatch(validationActions.setValidationForm({
+          detectedFileFormat: 'json',
+          delimiter: 'json',
+        }));
+      }
       navigate(validationMappingPath(runId));
       return;
     }
@@ -265,7 +294,9 @@ export const ValidationWizardView: React.FC = () => {
     : currentStep === 2
       ? overviewBlocksMapping
         ? 'Cannot proceed — empty file'
-        : 'Proceed to Mapping'
+        : overviewIsJson
+          ? 'Proceed to JSON Mapping'
+          : 'Proceed to Mapping'
       : 'Proceed to Overview';
 
   return (
@@ -290,7 +321,9 @@ export const ValidationWizardView: React.FC = () => {
           </div>
           <div className={`${styles.stepTabItem} ${currentStep === 3 ? styles.stepTabActive : styles.stepTabInactive}`} style={{ cursor: 'default' }}>
             <span className={`${styles.stepNumberBadge} ${currentStep === 3 ? styles.stepNumberActive : styles.stepNumberInactive}`}>3</span>
-            <span style={{ fontSize: '14px', fontWeight: 600 }}>File Mapping</span>
+            <span style={{ fontSize: '14px', fontWeight: 600 }}>
+              {overviewIsJson || isJson ? 'JSON Mapping' : 'File Mapping'}
+            </span>
           </div>
         </div>
       </div>

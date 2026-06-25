@@ -90,7 +90,6 @@ const validationSlice = createSlice({
         ? {
           fixedWidthColumns: [] as ValidationFormState['fixedWidthColumns'],
           fixedWidthLineWidth: null,
-          detectedFileFormat: action.payload.detectedFileFormat ?? null,
         }
         : {};
       return {

@@ -544,6 +544,141 @@ class ValidationService:
             )
         )
 
+    def validate_json_pair_sync(
+        self,
+        source_path: Path | object,
+        target_path: Path | object,
+        *,
+        uid_column: str = "document",
+        order_sensitive: bool = False,
+        parent_mappings: list[dict[str, Any]] | None = None,
+        artifact_export_parent: Path | None = None,
+        test_mode: ValidationTestMode = ValidationTestMode.FULL,
+        mismatch_snippet_limit: int | None = None,
+    ) -> ValidationRunResult:
+        """Compare two JSON documents using hierarchical path diff."""
+        from pegasus.api.v1.mismatch_sample import build_grouped_mismatch_samples
+        from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
+        from pegasus.validation.json_compare import JSON_DOCUMENT_UID, load_json_payload, validate_json_pair
+
+        def _resolve_local_path(side: str, src: Path | object) -> Path:
+            if isinstance(src, Path):
+                resolved = src.resolve()
+            elif isinstance(src, GcsDelimitedAdapter):
+                resolved = src.materialize_to_temp_file()
+            else:
+                raise ValidationBadRequestError(f"Unsupported {side} input for JSON validation")
+            if not resolved.is_file():
+                raise ValidationBadRequestError(f"{side.capitalize()} file not found: {resolved}")
+            return resolved
+
+        local_source = _resolve_local_path("source", source_path)
+        local_target = _resolve_local_path("target", target_path)
+
+        src_mode, src_payload = load_json_payload(local_source)
+        tgt_mode, tgt_payload = load_json_payload(local_target)
+        if src_mode != tgt_mode:
+            raise ValidationBadRequestError("Source and target must both be JSON documents or both be NDJSON")
+
+        if src_mode == "document":
+            source_count = 1
+            target_count = 1
+            compared = [JSON_DOCUMENT_UID]
+        else:
+            source_count = len(src_payload)
+            target_count = len(tgt_payload)
+            compared = sorted({
+                key
+                for rec in src_payload + tgt_payload
+                for key in rec.keys()
+                if key != uid_column
+            })
+
+        collection_policy = resolve_mismatch_collection_policy(
+            self._settings,
+            test_mode=test_mode,
+            mismatch_snippet_limit=mismatch_snippet_limit,
+            compare_column_count=max(len(compared), 1),
+        )
+        if collection_policy.fail_on_row_count_mismatch and source_count != target_count:
+            return build_litmus_row_count_failure(
+                source_row_count=source_count,
+                target_row_count=target_count,
+                compared_columns=compared,
+            )
+
+        report = validate_json_pair(
+            local_source,
+            local_target,
+            uid_column=uid_column,
+            order_sensitive=order_sensitive,
+            match_per_column_limit=collection_policy.value_per_column_cap,
+            parent_mappings=parent_mappings,
+        )
+        artifact_path = None
+        sample_frame = report.mismatches
+        if not report.mismatches.is_empty() and collection_policy.export_mismatch_artifact:
+            from pegasus.validation.comparators.models import MismatchType
+
+            mismatch_only = report.mismatches.filter(
+                pl.col("mismatch_type") != pl.lit(MismatchType.VALUE_MATCH.value)
+            )
+            match_only = report.mismatches.filter(
+                pl.col("mismatch_type") == pl.lit(MismatchType.VALUE_MATCH.value)
+            )
+            if mismatch_only.height > 0:
+                miss_df, ext_df, val_df = build_grouped_mismatch_samples(
+                    mismatch_only,
+                    0,
+                    value_per_column_limit=(
+                        collection_policy.value_per_column_cap
+                        if collection_policy.value_per_column_cap > 0
+                        else None
+                    ),
+                    presence_max_rows=(
+                        collection_policy.presence_snippet_cap
+                        if collection_policy.presence_snippet_cap > 0
+                        else None
+                    ),
+                )
+                parts = [df for df in (miss_df, ext_df, val_df) if df.height > 0]
+                sample_frame = pl.concat(parts, how="vertical") if parts else report.mismatches.slice(0, 0)
+            else:
+                sample_frame = match_only
+            if artifact_export_parent is not None and sample_frame.height > 0:
+                export_path = artifact_export_parent / "mismatches.ndjson"
+                export_path.parent.mkdir(parents=True, exist_ok=True)
+                sample_frame.write_ndjson(export_path)
+                artifact_path = export_path
+        elif test_mode == ValidationTestMode.LITMUS:
+            sample_frame = report.mismatches.slice(0, 0)
+
+        if artifact_path is not None:
+            report = MismatchReport(
+                mismatches=sample_frame,
+                summary=report.summary,
+                mismatch_artifact_path=artifact_path,
+            )
+        else:
+            report = MismatchReport(mismatches=sample_frame, summary=report.summary)
+
+        return finalize_litmus_run_result(
+            ValidationRunResult(
+                report=report,
+                source_row_count=source_count,
+                target_row_count=target_count,
+                compared_column_count=len(compared),
+                compared_columns=compared,
+                test_mode=test_mode.value,
+                mismatch_snippet_limit=(
+                    clamp_snippet_limit(self._settings, requested=mismatch_snippet_limit)
+                    if test_mode == ValidationTestMode.FULL
+                    else None
+                ),
+                mismatch_artifact_path=artifact_path,
+            )
+        )
+
     def _validate_csv_pair_sync(
         self,
         source_path: Path,
@@ -713,7 +848,16 @@ class ValidationService:
         has_header: bool = True,
         skip_rows: int = 0,
     ) -> CloudFileProfileResponse:
-        from pegasus.validation.cloud_profile import build_delimited_profile
+        from pegasus.validation.cloud_profile import build_delimited_profile, is_json_delimited_adapter
+
+        if is_json_delimited_adapter(adapter, object_name=object_name):
+            return build_delimited_profile(
+                adapter,
+                object_name=object_name,
+                gcs_uri=gcs_uri,
+                resolved_delimiter="json",
+                has_header=has_header,
+            )
 
         sep = self._resolve_delimiter_for_inputs(delimiter, adapter, adapter)
         adapter = self._rebuild_delimited_adapter(
@@ -725,6 +869,36 @@ class ValidationService:
             gcs_uri=gcs_uri,
             resolved_delimiter=sep,
             has_header=has_header,
+        )
+
+    def preview_json_parent_mapping(
+        self,
+        source: Path | object,
+        target: Path | object,
+        *,
+        uid_column: str = "document",
+    ) -> dict[str, Any]:
+        """Discover top-level JSON parents and suggest source→target pairings."""
+        from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
+        from pegasus.validation.json_parent_preview import build_json_parent_preview
+
+        def _resolve_local_path(side: str, src: Path | object) -> Path:
+            if isinstance(src, Path):
+                resolved = src.resolve()
+            elif isinstance(src, GcsDelimitedAdapter):
+                resolved = src.materialize_to_temp_file()
+            else:
+                raise ValidationBadRequestError(f"Unsupported {side} input for JSON parent preview")
+            if not resolved.is_file():
+                raise ValidationBadRequestError(f"{side.capitalize()} file not found: {resolved}")
+            return resolved
+
+        local_source = _resolve_local_path("source", source)
+        local_target = _resolve_local_path("target", target)
+        return build_json_parent_preview(
+            local_source,
+            local_target,
+            uid_column=uid_column,
         )
 
     def validate_columnar_pair_sync(
