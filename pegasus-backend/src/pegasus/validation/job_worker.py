@@ -721,6 +721,19 @@ def _run_job_body(
                     dict(result.report.summary),
                     artifact,
                 )
+            rid_raw = meta.get("run_id")
+            if rid_raw and settings.enable_validation_persistence and artifact is not None and artifact.is_file():
+                import uuid as _uuid
+
+                from pegasus.api.v1.validation_helpers import persist_completed_job_blocking
+
+                result.mismatch_artifact_path = artifact
+                persist_completed_job_blocking(
+                    settings,
+                    run_id=_uuid.UUID(str(rid_raw)),
+                    run_result=result,
+                    job_meta={**meta, "job_id": job_id},
+                )
             if skip_artifact_export:
                 artifact = None
                 result.mismatch_artifact_path = None

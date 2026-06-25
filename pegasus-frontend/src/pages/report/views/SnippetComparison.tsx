@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { DownloadOutlined, RightOutlined, DatabaseOutlined, LeftOutlined } from '@ant-design/icons';
+import { DownloadOutlined, RightOutlined, DatabaseOutlined, LeftOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { Api, MismatchSampleRow } from '../../../shared/api/Api';
 import { downloadSnippetCsv, downloadSnippetPdf, downloadSnippetXlsx } from '../snippetExport';
 
@@ -118,6 +118,15 @@ const rowHasAnyIssue = (row: SnippetRow): boolean => {
   return row.status === 'mismatch';
 };
 
+/** Column values agree on both sides and are not flagged as a mismatch. */
+const isMatchedCell = (row: SnippetRow, col: string): boolean => {
+  if (row.mismatchColumns.has(col)) return false;
+  if (row.status === 'extra_source' || row.status === 'missing_target') return false;
+  const src = row.source[col] ?? EMPTY;
+  const tgt = row.target[col] ?? EMPTY;
+  return src === tgt;
+};
+
 export const SnippetComparison: React.FC = () => {
   const navigate = useNavigate();
   const { mappingId, runId } = useParams<{ mappingId: string; runId: string }>();
@@ -134,6 +143,7 @@ export const SnippetComparison: React.FC = () => {
   const [rowPage, setRowPage] = useState(0);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [downloadOpen, setDownloadOpen] = useState(false);
+  const [showMatchedOnly, setShowMatchedOnly] = useState(false);
   const sourceRef = useRef<HTMLDivElement>(null);
   const targetRef = useRef<HTMLDivElement>(null);
 
@@ -203,16 +213,35 @@ export const SnippetComparison: React.FC = () => {
 
   const issueRows = useMemo(() => allRows.filter(rowHasAnyIssue), [allRows]);
 
-  const totalColPages = Math.max(1, Math.ceil(columns.length / COLS_PER_PAGE));
-  const visibleCols = columns.slice(colPage * COLS_PER_PAGE, (colPage + 1) * COLS_PER_PAGE);
+  const displayColumns = useMemo(() => {
+    if (!showMatchedOnly) return columns;
+    return columns.filter((col) => !issueRows.some((row) => row.mismatchColumns.has(col)));
+  }, [columns, issueRows, showMatchedOnly]);
+
+  const displayIssueRows = useMemo(() => {
+    if (!showMatchedOnly) return issueRows;
+    return issueRows.filter(
+      (row) =>
+        row.status !== 'extra_source'
+        && row.status !== 'missing_target'
+        && columns.some((col) => isMatchedCell(row, col)),
+    );
+  }, [issueRows, columns, showMatchedOnly]);
+
+  const totalColPages = Math.max(1, Math.ceil(displayColumns.length / COLS_PER_PAGE));
+  const visibleCols = displayColumns.slice(colPage * COLS_PER_PAGE, (colPage + 1) * COLS_PER_PAGE);
   const displayCols = ['uid', ...visibleCols];
 
-  const totalRowPages = Math.max(1, Math.ceil(issueRows.length / itemsPerPage));
-  const pageRows = issueRows.slice(rowPage * itemsPerPage, (rowPage + 1) * itemsPerPage);
+  const totalRowPages = Math.max(1, Math.ceil(displayIssueRows.length / itemsPerPage));
+  const pageRows = displayIssueRows.slice(rowPage * itemsPerPage, (rowPage + 1) * itemsPerPage);
 
   useEffect(() => {
     setRowPage(0);
-  }, [colPage, itemsPerPage]);
+  }, [colPage, itemsPerPage, showMatchedOnly]);
+
+  useEffect(() => {
+    setColPage(0);
+  }, [showMatchedOnly]);
 
   useEffect(() => {
     if (rowPage >= totalRowPages) setRowPage(Math.max(0, totalRowPages - 1));
@@ -328,12 +357,37 @@ export const SnippetComparison: React.FC = () => {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '12px', color: '#64748b' }}>
-          Columns {columns.length ? colPage * COLS_PER_PAGE + 1 : 0}–{Math.min((colPage + 1) * COLS_PER_PAGE, columns.length)} of {columns.length}
+          Columns {displayColumns.length ? colPage * COLS_PER_PAGE + 1 : 0}–{Math.min((colPage + 1) * COLS_PER_PAGE, displayColumns.length)} of {displayColumns.length}
+          {showMatchedOnly && columns.length !== displayColumns.length ? ` (${columns.length} total)` : ''}
         </span>
         <button type="button" disabled={colPage <= 0} onClick={() => setColPage((p) => p - 1)} style={{ padding: '4px 10px', fontSize: '12px', cursor: colPage <= 0 ? 'not-allowed' : 'pointer' }}>← Prev cols</button>
         <button type="button" disabled={colPage >= totalColPages - 1} onClick={() => setColPage((p) => p + 1)} style={{ padding: '4px 10px', fontSize: '12px', cursor: colPage >= totalColPages - 1 ? 'not-allowed' : 'pointer' }}>Next cols →</button>
+        <button
+          type="button"
+          onClick={() => setShowMatchedOnly((v) => !v)}
+          style={{
+            padding: '4px 12px',
+            fontSize: '12px',
+            fontWeight: 500,
+            cursor: 'pointer',
+            borderRadius: '6px',
+            border: showMatchedOnly ? '1px solid #166534' : '1px solid #e2e8f0',
+            backgroundColor: showMatchedOnly ? '#dcfce7' : '#fff',
+            color: showMatchedOnly ? '#166534' : '#414755',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <CheckCircleOutlined />
+          {showMatchedOnly ? 'Showing matched only' : 'Show matched only'}
+        </button>
         <span style={{ fontSize: '12px', color: '#64748b' }}>
-          {isDataLoading ? 'Loading…' : `${issueRows.length.toLocaleString()} UID(s) with issues · red cells are mismatches in the visible column window`}
+          {isDataLoading
+            ? 'Loading…'
+            : showMatchedOnly
+              ? `${displayIssueRows.length.toLocaleString()} UID(s) with matched values · ${displayColumns.length} matched column(s)`
+              : `${issueRows.length.toLocaleString()} UID(s) with issues · red cells are mismatches in the visible column window`}
         </span>
       </div>
 
@@ -367,13 +421,17 @@ export const SnippetComparison: React.FC = () => {
                 ) : pageRows.length === 0 ? (
                   <tr><td colSpan={displayCols.length || 1} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
                     {allItems.length === 0 && expectedMismatchTotal > 0
-                      ? 'Mismatch rows are still being saved or could not be loaded. Refresh in a few seconds.'
+                      ? 'Mismatch rows were not saved for this run. Re-run validation to regenerate the snippet, or check that the database is reachable.'
                       : issueRows.length === 0
                         ? 'No mismatches for this validation run.'
-                        : 'No issues in the current column window. Use “Next cols” to inspect other columns.'}
+                        : showMatchedOnly
+                          ? displayColumns.length === 0
+                            ? 'No matched columns in this validation run.'
+                            : 'No matched values in the current column window. Use “Next cols” to inspect other columns.'
+                          : 'No issues in the current column window. Use “Next cols” to inspect other columns.'}
                   </td></tr>
                 ) : pageRows.map((row) => (
-                  <tr key={`src-${row.uid}`} style={{ backgroundColor: rowBg(row), borderBottom: '1px solid #f1f5f9' }}>
+                  <tr key={`src-${row.uid}`} style={{ backgroundColor: showMatchedOnly ? '#fff' : rowBg(row), borderBottom: '1px solid #f1f5f9' }}>
                     {renderCells(row, 'source')}
                   </tr>
                 ))}
@@ -404,13 +462,17 @@ export const SnippetComparison: React.FC = () => {
                 ) : pageRows.length === 0 ? (
                   <tr><td colSpan={displayCols.length || 1} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
                     {allItems.length === 0 && expectedMismatchTotal > 0
-                      ? 'Mismatch rows are still being saved or could not be loaded. Refresh in a few seconds.'
+                      ? 'Mismatch rows were not saved for this run. Re-run validation to regenerate the snippet, or check that the database is reachable.'
                       : issueRows.length === 0
                         ? 'No mismatches for this validation run.'
-                        : 'No issues in the current column window. Use “Next cols” to inspect other columns.'}
+                        : showMatchedOnly
+                          ? displayColumns.length === 0
+                            ? 'No matched columns in this validation run.'
+                            : 'No matched values in the current column window. Use “Next cols” to inspect other columns.'
+                          : 'No issues in the current column window. Use “Next cols” to inspect other columns.'}
                   </td></tr>
                 ) : pageRows.map((row) => (
-                  <tr key={`tgt-${row.uid}`} style={{ backgroundColor: rowBg(row), borderBottom: '1px solid #f1f5f9' }}>
+                  <tr key={`tgt-${row.uid}`} style={{ backgroundColor: showMatchedOnly ? '#fff' : rowBg(row), borderBottom: '1px solid #f1f5f9' }}>
                     {renderCells(row, 'target')}
                   </tr>
                 ))}
@@ -436,7 +498,7 @@ export const SnippetComparison: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', backgroundColor: '#f0eded', padding: '4px 8px', borderRadius: '6px' }}>
             <LeftOutlined style={{ fontSize: '12px', color: rowPage <= 0 ? '#a0aabf' : '#414755', cursor: rowPage <= 0 ? 'not-allowed' : 'pointer' }} onClick={() => rowPage > 0 && setRowPage((p) => p - 1)} />
             <span style={{ fontSize: '13px', fontWeight: 600 }}>
-              {isDataLoading ? '—' : (issueRows.length ? rowPage + 1 : 0)}
+              {isDataLoading ? '—' : (displayIssueRows.length ? rowPage + 1 : 0)}
               <span style={{ color: '#a0aabf', margin: '0 4px', fontWeight: 400 }}>/</span>
               {isDataLoading ? '—' : totalRowPages}
             </span>

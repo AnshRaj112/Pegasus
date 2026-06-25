@@ -18,7 +18,10 @@ services:
     volumes:
       # Bind-mount the real host home (not snap Docker's rewritten $HOME). Set PEGASUS_HOST_HOME in .env.
       - ${PEGASUS_HOST_HOME:-${HOME}}:${PEGASUS_HOST_HOME:-${HOME}}:ro
+      # Persist validation job artifacts (mismatch NDJSON) across container restarts.
+      - pegasus-validation-jobs:/var/lib/pegasus/validation-jobs
     environment:
+      PEGASUS_VALIDATION_JOBS_DIRECTORY: /var/lib/pegasus/validation-jobs
       PEGASUS_VALIDATION_ALLOW_LOCAL_PATHS: "true"
       PEGASUS_VALIDATION_LOCAL_PATH_HOST_PREFIX: ""
       PEGASUS_VALIDATION_LOCAL_PATH_CONTAINER_PREFIX: ""
@@ -76,3 +79,6 @@ services:
 networks:
   pegasus:
     driver: bridge
+
+volumes:
+  pegasus-validation-jobs:
