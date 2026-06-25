@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T11:33:45Z
+# Last edited: 2026-06-25T10:40:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Validation service — routes tabular full validation through Category-1 pipeline."""
@@ -36,6 +36,7 @@ from pegasus.validation.test_mode_policy import (
     resolve_mismatch_collection_policy,
 )
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter
 from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter, create_delimited_adapter
 from pegasus.validation.comparators.models import MismatchReport, empty_mismatch_frame
 from pegasus.validation.delimiter_resolve import resolve_delimiter_for_adapters, resolve_delimiter_for_paths
@@ -588,6 +589,27 @@ class ValidationService:
             mismatch_snippet_limit=mismatch_snippet_limit,
         )
 
+    def preview_column_headers_from_columnar_adapters(
+        self,
+        *,
+        source: GcsColumnarAdapter,
+        target: GcsColumnarAdapter,
+        uid_column: str,
+        file_format: str,
+    ) -> dict[str, object]:
+        from pegasus.validation.column_preview import build_column_preview_from_columnar_adapters
+
+        try:
+            return build_column_preview_from_columnar_adapters(
+                source=source,
+                target=target,
+                uid_column=uid_column,
+                file_format=file_format,
+            )
+        finally:
+            source.cleanup()
+            target.cleanup()
+
     def preview_column_headers_from_adapters(
         self,
         *,
@@ -643,6 +665,26 @@ class ValidationService:
             "target_sample": preview["target_sample"],
             "line_width": preview["line_width"],
         }
+
+    def profile_columnar_adapter(
+        self,
+        adapter: GcsColumnarAdapter,
+        *,
+        object_name: str,
+        gcs_uri: str,
+        file_format: str,
+    ) -> CloudFileProfileResponse:
+        from pegasus.validation.cloud_profile import build_columnar_profile
+
+        try:
+            return build_columnar_profile(
+                adapter,
+                object_name=object_name,
+                gcs_uri=gcs_uri,
+                file_format=file_format,
+            )
+        finally:
+            adapter.cleanup()
 
     def profile_delimited_adapter(
         self,

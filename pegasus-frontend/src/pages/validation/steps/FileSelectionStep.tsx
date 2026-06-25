@@ -305,7 +305,7 @@ export const FileSelectionStep: React.FC = () => {
       connection_id: connectionId,
       bucket: ctx.bucket.trim() ? ctx.bucket : null,
       prefix: ctx.prefix,
-      file_format: 'csv',
+      file_format: 'auto',
     })
       .then((res) => {
         if (requestId !== browseRequestIdRef.current) return;

@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T11:33:45Z
+# Last edited: 2026-06-25T10:40:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Column header preview and auto-mapping for the mapping UI."""
@@ -15,6 +15,7 @@ import polars as pl
 
 from pegasus.validation.adapters.file_columnar import FileColumnarAdapter
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter
 from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
 from pegasus.validation.comparators.core import _lit
 from pegasus.validation.csv_header import infer_csv_has_header, infer_has_header_from_text_prefix
@@ -22,6 +23,7 @@ from pegasus.validation.csv_header import infer_csv_has_header, infer_has_header
 _COMPLEX_TYPES = (list, dict, tuple)
 from pegasus.validation.delimited_sample import read_delimited_sample_frame
 from pegasus.validation.delimiter_resolve import resolve_delimiter_for_paths
+from pegasus.validation.file_format import infer_file_format_from_path, is_columnar_format, normalize_file_format
 from pegasus.validation.pipeline.fingerprint import parse_identity_columns
 
 _MAPPING_PREVIEW_SAMPLE_ROWS = 6
@@ -136,6 +138,65 @@ def _sample_delimited_frame(
         if len(rows) >= sample_rows:
             break
     return pl.DataFrame(rows[:sample_rows]) if rows else pl.DataFrame()
+
+
+def _sample_columnar_frame(
+    adapter: FileColumnarAdapter | GcsColumnarAdapter,
+    *,
+    sample_rows: int,
+) -> pl.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for chunk in adapter.stream_records(sample_rows):
+        rows.extend(chunk)
+        if len(rows) >= sample_rows:
+            break
+    return pl.DataFrame(rows[:sample_rows]) if rows else pl.DataFrame()
+
+
+def build_column_preview_from_columnar_adapters(
+    *,
+    source: FileColumnarAdapter | GcsColumnarAdapter,
+    target: FileColumnarAdapter | GcsColumnarAdapter,
+    uid_column: str,
+    file_format: str,
+) -> dict[str, Any]:
+    """Return headers and sample values for columnar files (local or GCS)."""
+    uid_cols = set(parse_identity_columns(uid_column))
+    sample_rows = _MAPPING_PREVIEW_SAMPLE_ROWS
+    source_columns = source.get_schema().column_names
+    target_columns = target.get_schema().column_names
+    source_frame = _sample_columnar_frame(source, sample_rows=sample_rows)
+    target_frame = _sample_columnar_frame(target, sample_rows=sample_rows)
+
+    compare_columns = [c for c in source_columns if c not in uid_cols]
+    compare_targets = [c for c in target_columns if c not in uid_cols]
+    auto_mappings = auto_map_columns(compare_columns, compare_targets)
+    matched_sources = {m["source_column"] for m in auto_mappings}
+    matched_targets = {m["target_column"] for m in auto_mappings}
+
+    source_frame = _align_frame_columns(source_frame, source_columns)
+    target_frame = _align_frame_columns(target_frame, target_columns)
+    source_samples = _sample_column_values(source_frame, source_columns)
+    target_samples = _sample_column_values(target_frame, target_columns)
+    complex_columns = _detect_complex_columns(source_samples, target_samples, compare_columns)
+    fmt = normalize_file_format(file_format)
+    return {
+        "source_columns": source_columns,
+        "target_columns": target_columns,
+        "compare_columns": compare_columns,
+        "auto_mappings": auto_mappings,
+        "unmatched_source_columns": [c for c in source_columns if c not in matched_sources],
+        "unmatched_target_columns": [c for c in target_columns if c not in matched_targets],
+        "delimiter": fmt,
+        "has_header": True,
+        "inferred_has_header": None,
+        "source_samples": source_samples,
+        "target_samples": target_samples,
+        "complex_columns": complex_columns,
+        "needs_order_preference": bool(complex_columns),
+        "sample_row_count": sample_rows,
+        "file_format": fmt,
+    }
 
 
 def build_column_preview_from_adapters(

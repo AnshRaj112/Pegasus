@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T11:33:45Z
+# Last edited: 2026-06-25T04:45:06Z
 # --- END GENERATED FILE METADATA ---
 
 """Scale throughput gates (1M+ rows). Run with PEGASUS_RUN_SCALE_TESTS=1."""

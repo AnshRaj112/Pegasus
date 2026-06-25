@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T11:33:45Z
+# Last edited: 2026-06-25T10:40:16+05:30
 # --- END GENERATED FILE METADATA ---
 
 """CSV validation endpoints (local paths, browse, job polling)."""
@@ -72,7 +72,9 @@ from pegasus.validation.cloud_input import (
     resolve_cloud_config_with_saved_connection,
     resolve_delimited_input,
 )
-from pegasus.validation.gcs_object import cloud_config_to_meta
+from pegasus.validation.cloud_profile import resolve_gcs_columnar_format
+from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter
+from pegasus.validation.gcs_object import cloud_config_to_meta, gcs_object_ref_from_config
 from pegasus.validation.gcs_browse import browse_gcs_prefix, list_gcs_buckets, list_gcs_files_under_prefix
 from pegasus.validation.local_browse import (
     build_local_browse_response,
@@ -284,6 +286,52 @@ async def preview_local_csv_columns_body(
     )
     source_cloud = await ensure_resolved_cloud_config(session, source_cloud)
     target_cloud = await ensure_resolved_cloud_config(session, target_cloud)
+    from pegasus.validation.file_format import normalize_file_format
+
+    requested_fmt = normalize_file_format(body.file_format) if body.file_format else None
+    if requested_fmt == "fixed-width":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Use POST /validate/local/fixed-width-layout for fixed-width files",
+        )
+
+    source_columnar_fmt: str | None = None
+    target_columnar_fmt: str | None = None
+    if source_cloud is not None and target_cloud is not None:
+        try:
+            source_ref = gcs_object_ref_from_config(source_cloud)
+            target_ref = gcs_object_ref_from_config(target_cloud)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        source_columnar_fmt = resolve_gcs_columnar_format(source_ref)
+        target_columnar_fmt = resolve_gcs_columnar_format(target_ref)
+        if source_columnar_fmt is not None and target_columnar_fmt is not None:
+            if source_columnar_fmt != target_columnar_fmt:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Source format ({source_columnar_fmt}) and target format "
+                        f"({target_columnar_fmt}) must match"
+                    ),
+                )
+            source_adapter = GcsColumnarAdapter(source_ref, file_format=source_columnar_fmt)
+            target_adapter = GcsColumnarAdapter(target_ref, file_format=target_columnar_fmt)
+            try:
+                preview = service.preview_column_headers_from_columnar_adapters(
+                    source=source_adapter,
+                    target=target_adapter,
+                    uid_column=body.uid_column,
+                    file_format=source_columnar_fmt,
+                )
+                return LocalColumnPreviewResponse(**preview)
+            except ValueError as exc:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if (source_columnar_fmt is not None) != (target_columnar_fmt is not None):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Source and target must both be columnar or both be delimited text files",
+            )
+
     source_input = resolve_delimited_input(
         settings=settings,
         label="source",
@@ -302,14 +350,6 @@ async def preview_local_csv_columns_body(
         has_header=body.has_header,
         skip_rows=body.header_leading_rows,
     )
-    from pegasus.validation.file_format import normalize_file_format
-
-    requested_fmt = normalize_file_format(body.file_format) if body.file_format else None
-    if requested_fmt == "fixed-width":
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail="Use POST /validate/local/fixed-width-layout for fixed-width files",
-        )
     try:
         preview = service.preview_column_headers_from_adapters(
             source=source_input.adapter,
@@ -464,6 +504,26 @@ async def profile_cloud_file(
     """Run file-type detection and profile shape stats from GCS metadata + prefix sample."""
     cloud = await resolve_cloud_config_with_saved_connection(body.cloud, session=session)
     cloud = await ensure_resolved_cloud_config(session, cloud)
+    try:
+        ref = gcs_object_ref_from_config(cloud)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    columnar_format = resolve_gcs_columnar_format(ref)
+    if columnar_format is not None:
+        adapter = GcsColumnarAdapter(ref, file_format=columnar_format)
+        try:
+            return service.profile_columnar_adapter(
+                adapter,
+                object_name=cloud.object_name,
+                gcs_uri=ref.uri,
+                file_format=columnar_format,
+            )
+        except ValidationBadRequestError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     resolved = resolve_delimited_input(
         settings=settings,
         label="source",
