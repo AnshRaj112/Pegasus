@@ -1,3 +1,8 @@
+# --- BEGIN GENERATED FILE METADATA ---
+# Authors: Ansh Raj
+# Last edited: 2026-06-25T15:55:54+05:30
+# --- END GENERATED FILE METADATA ---
+
 """Match snippet samples when validation finds no errors."""
 
 from __future__ import annotations
