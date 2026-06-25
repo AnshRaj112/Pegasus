@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-24T06:44:56Z
+# Last edited: 2026-06-25T04:45:06Z
 # --- END GENERATED FILE METADATA ---
 
 """Layer 1: extension hints (low confidence, never trusted alone)."""
