@@ -8,7 +8,7 @@ import { Report } from '../pages/report/Report';
 import { AdminView } from '../pages/admin/AdminView';
 import { Login } from '../pages/auth/Login';
 import { ProtectedRoute } from './ProtectedRoute';
-import { SnippetComparison } from '../pages/report/views/SnippetComparison';
+import { SnippetViewRouter } from '../pages/report/views/SnippetViewRouter';
 import { ExecutionHistory } from '../pages/report/views/ExecutionHistory';
 import Profile from '../pages/profile/Profile';
 import { WorkspaceMgmtSubView } from '../pages/admin/sections/WorkspaceMgmtSubView';
@@ -36,6 +36,8 @@ export const AppRoutes: React.FC = () => {
                 <Route path="configure-store" element={<ConfigureStoreSubView />} />
                 <Route path="settings" element={<Setting />} />
               </Route>
+              <Route path="/reports/:mappingId/history/:runId/snippet" element={<SnippetViewRouter />} />
+              <Route path="/admin" element={<AdminView />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/setting" element={<Setting />} />
               <Route path="*" element={<div style={{ color: 'var(--on-surface)', padding: 'var(--lg)' }}>404 Error: Section View Not Found</div>} />

@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:27:35Z
+# Last edited: 2026-06-25T15:55:54+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Stratified sampling of mismatch rows for API responses."""
@@ -82,6 +82,36 @@ def count_mismatch_types_ndjson(path: Path) -> dict[str, int]:
             if mtype in counts:
                 counts[mtype] += 1
     return counts
+
+
+def count_value_match_rows_ndjson(path: Path) -> int:
+    """Count value_match snippet rows in an NDJSON artifact."""
+    count = 0
+    with path.open(encoding="utf-8") as fp:
+        for line in fp:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(obj.get("mismatch_type") or "") == MismatchType.VALUE_MATCH.value:
+                count += 1
+    return count
+
+
+def snippet_rows_total(
+    summary: dict[str, Any] | None,
+    artifact: Path | None,
+) -> int:
+    """Rows available in the snippet view (mismatches, or match samples when clean)."""
+    mismatch_total = mismatch_record_total(summary)
+    if mismatch_total > 0:
+        return mismatch_total
+    if artifact is not None and artifact.is_file():
+        return count_value_match_rows_ndjson(artifact)
+    return 0
 
 
 def count_value_mismatch_rows_ndjson(path: Path) -> int:
@@ -414,6 +444,8 @@ def paginate_mismatch_rows_from_ndjson(
             total = int(from_file.get(mismatch_type, 0))
         else:
             total = mismatch_record_total(from_file)
+            if total <= 0:
+                total = count_value_match_rows_ndjson(path)
 
     if not path.is_file():
         return [], total
@@ -427,7 +459,10 @@ def paginate_mismatch_rows_from_ndjson(
             else mismatch_record_total(from_file)
         )
         if file_total <= 0 or offset >= file_total:
-            return [], file_total
+            match_total = count_value_match_rows_ndjson(path) if not mismatch_type else 0
+            if match_total <= 0 or offset >= match_total:
+                return [], file_total
+            total = match_total
         total = file_total
 
     items: list[dict[str, Any]] = []

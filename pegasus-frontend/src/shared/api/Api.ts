@@ -48,6 +48,7 @@ export interface ValidateRequest {
   has_header?: boolean;
   file_format?: string;
   fixed_width_config?: FixedWidthConfig;
+  json_order_sensitive?: boolean;
   test_mode?: 'litmus' | 'full';
   mismatch_snippet_limit?: number | null;
 }
@@ -113,6 +114,27 @@ export interface FixedWidthLayoutPreviewResponse {
   line_width: number;
 }
 
+export interface JsonParentField {
+  key: string;
+  value_type: string;
+}
+
+export interface JsonParentMappingRow {
+  source_parent: string | null;
+  target_parent: string | null;
+  ignored?: boolean;
+  source_type?: string | null;
+  target_type?: string | null;
+}
+
+export interface JsonParentPreviewResponse {
+  document_mode: 'document' | 'ndjson' | string;
+  source_parents: JsonParentField[];
+  target_parents: JsonParentField[];
+  suggested_mappings: JsonParentMappingRow[];
+  suggested_uid_field?: string | null;
+}
+
 export interface CloudBrowseRequest {
   bucket?: string | null;
   prefix?: string;
@@ -158,6 +180,7 @@ export interface CloudFileProfileResponse {
   row_count: number;
   delimiter?: string | null;
   has_header?: boolean;
+  json_preview?: string | null;
 }
 
 export interface CloudConnection {
@@ -399,6 +422,7 @@ const E = {
   validateLocalColumns: '/validate/local/columns',
   validateOptions: '/validate/options',
   validateLocalFixedWidthLayout: '/validate/local/fixed-width-layout',
+  validateLocalJsonParentPreview: '/validate/local/json-parent-preview',
   validateCloudBrowse: '/validate/cloud/browse',
   validateCloudProfile: '/validate/cloud/profile',
   cloudConnections: '/admin/cloud-connections',
@@ -473,6 +497,9 @@ export const Api = {
   /** POST /validate/local/fixed-width-layout — infer slices and date formats */
   previewFixedWidthLayout: (body: ValidateRequest): Promise<AxiosResponse<FixedWidthLayoutPreviewResponse>> =>
     httpClient.post(E.validateLocalFixedWidthLayout, body),
+
+  previewJsonParentMapping: (body: ValidateRequest): Promise<AxiosResponse<JsonParentPreviewResponse>> =>
+    httpClient.post(E.validateLocalJsonParentPreview, body),
 
   /** POST /validate/local — queue validation job (202); use source_cloud + target_cloud for GCS */
   submitValidation: (body: ValidateRequest): Promise<AxiosResponse<ValidationJobAcceptedResponse>> =>

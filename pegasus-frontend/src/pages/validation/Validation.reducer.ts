@@ -59,8 +59,6 @@ const defaultValidationForm: ValidationFormState = {
   detectedFileFormat: null,
   fixedWidthColumns: [],
   fixedWidthLineWidth: null,
-  testMode: 'full',
-  mismatchSnippetLimit: null,
 };
 
 export const initialState: ValidationReducerState = {
@@ -92,7 +90,6 @@ const validationSlice = createSlice({
         ? {
           fixedWidthColumns: [] as ValidationFormState['fixedWidthColumns'],
           fixedWidthLineWidth: null,
-          detectedFileFormat: action.payload.detectedFileFormat ?? null,
         }
         : {};
       return {

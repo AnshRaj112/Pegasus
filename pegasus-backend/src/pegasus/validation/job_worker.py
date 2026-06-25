@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:27:35Z
+# Last edited: 2026-06-25T16:43:03+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Subprocess / pool entrypoint: run one validation job from files under *job_dir*."""
@@ -548,6 +548,17 @@ def _run_job_body(
                 test_mode=mode,
                 mismatch_snippet_limit=mismatch_snippet_limit,
             )
+        elif file_format == "json":
+            result = service.validate_json_pair_sync(
+                src,
+                tgt,
+                uid_column=uid_column,
+                order_sensitive=bool(meta.get("json_order_sensitive", False)),
+                parent_mappings=column_mappings,
+                artifact_export_parent=job_dir,
+                test_mode=mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
+            )
         elif file_format in _COLUMNAR_FORMATS:
             result = service.validate_columnar_pair_sync(
                 src,
@@ -714,12 +725,104 @@ def _run_job_body(
                     logger.info("Using in-memory mismatch export with column detail at %s", rich)
             if artifact is None or not artifact.is_file():
                 artifact = _resolve_job_mismatch_artifact(job_dir, result, artifact)
+            if (
+                not skip_artifact_export
+                and mismatch_record_total(result.report.summary) <= 0
+                and result.report.mismatches.is_empty()
+                and compared_cols
+                and (artifact is None or not artifact.is_file())
+            ):
+                from pegasus.validation.match_sample import (
+                    build_match_sample_frame,
+                    build_match_sample_rows_from_uid_maps,
+                )
+                from pegasus.validation.pipeline.fingerprint import parse_identity_columns
+                from pegasus.validation.test_mode_policy import resolve_mismatch_collection_policy
+
+                collection_policy = resolve_mismatch_collection_policy(
+                    settings,
+                    test_mode=mode,
+                    mismatch_snippet_limit=mismatch_snippet_limit,
+                    compare_column_count=len(compared_cols),
+                )
+                per_col = collection_policy.value_per_column_cap
+                identity_columns = parse_identity_columns(uid_column) or [uid_column.strip()]
+                match_frame = None
+                try:
+                    from pegasus.validation.pipeline.in_memory import _load_frame
+
+                    src_frame = _load_frame(
+                        src,
+                        identity_columns=identity_columns,
+                        compare_columns=compared_cols,
+                    )
+                    tgt_frame = _load_frame(
+                        tgt,
+                        identity_columns=identity_columns,
+                        compare_columns=compared_cols,
+                    )
+                    if src_frame is not None and tgt_frame is not None:
+                        match_frame = build_match_sample_frame(
+                            src=src_frame,
+                            tgt=tgt_frame,
+                            identity_columns=identity_columns,
+                            compare_columns=compared_cols,
+                            per_column_limit=per_col,
+                        )
+                except Exception:
+                    logger.debug("Could not build match samples from in-memory frames", exc_info=True)
+                if match_frame is None or match_frame.is_empty():
+                    src_lookup, tgt_lookup = _build_mismatch_lookups(
+                        src,
+                        tgt,
+                        identity_columns=identity_columns,
+                        compare_columns=compared_cols,
+                        delimiter=delimiter,
+                        has_header=has_header,
+                        header_leading_rows=header_leading_rows,
+                    )
+                    match_rows = build_match_sample_rows_from_uid_maps(
+                        source_by_uid=src_lookup,
+                        target_by_uid=tgt_lookup,
+                        compare_columns=compared_cols,
+                        per_column_limit=per_col,
+                    )
+                    if match_rows:
+                        import polars as pl
+
+                        from pegasus.validation.comparators.models import MISMATCH_REPORT_SCHEMA
+
+                        match_frame = pl.DataFrame(match_rows, schema=MISMATCH_REPORT_SCHEMA)
+                if match_frame is not None and not match_frame.is_empty():
+                    result.report.mismatches = match_frame
+                    export_path = job_dir / "mismatches.ndjson"
+                    export_path.parent.mkdir(parents=True, exist_ok=True)
+                    match_frame.write_ndjson(export_path)
+                    artifact = export_path
+                    logger.info(
+                        "Exported %d match sample rows to %s (no mismatches)",
+                        match_frame.height,
+                        export_path,
+                    )
             if artifact is not None and artifact.is_file():
                 from pegasus.api.v1.mismatch_sample import reconcile_summary_with_artifact
 
                 result.report.summary = reconcile_summary_with_artifact(
                     dict(result.report.summary),
                     artifact,
+                )
+            rid_raw = meta.get("run_id")
+            if rid_raw and settings.enable_validation_persistence and artifact is not None and artifact.is_file():
+                import uuid as _uuid
+
+                from pegasus.api.v1.validation_helpers import persist_completed_job_blocking
+
+                result.mismatch_artifact_path = artifact
+                persist_completed_job_blocking(
+                    settings,
+                    run_id=_uuid.UUID(str(rid_raw)),
+                    run_result=result,
+                    job_meta={**meta, "job_id": job_id},
                 )
             if skip_artifact_export:
                 artifact = None
@@ -738,14 +841,24 @@ def _run_job_body(
                     compare_column_count=len(compared_cols),
                 )
                 full_frame = pl.read_ndjson(str(artifact), schema=MISMATCH_REPORT_SCHEMA)
+                match_df = full_frame.filter(
+                    pl.col("mismatch_type") == pl.lit(MismatchType.VALUE_MATCH.value)
+                )
                 miss_df, ext_df, val_df = build_grouped_mismatch_samples(
-                    full_frame,
+                    full_frame.filter(
+                        pl.col("mismatch_type") != pl.lit(MismatchType.VALUE_MATCH.value)
+                    ),
                     0,
                     value_per_column_limit=collection_policy.value_per_column_cap,
                     presence_max_rows=collection_policy.presence_snippet_cap,
                 )
                 parts = [df for df in (miss_df, ext_df, val_df) if df.height > 0]
-                capped = pl.concat(parts, how="vertical") if parts else full_frame.slice(0, 0)
+                if parts:
+                    capped = pl.concat(parts, how="vertical")
+                elif match_df.height > 0:
+                    capped = match_df
+                else:
+                    capped = full_frame.slice(0, 0)
                 capped.write_ndjson(artifact)
         artifact_rel = None
         artifact_abs = None

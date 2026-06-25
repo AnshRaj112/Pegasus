@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:27:35Z
+# Last edited: 2026-06-25T16:43:03+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Cloud file profile: detection and row/column counts."""
@@ -13,6 +13,58 @@ from pegasus.services.validation_service import ValidationService
 from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
 from pegasus.validation.cloud_profile import build_delimited_profile, count_adapter_rows
 from pegasus.validation.gcs_object import GcsObjectRef
+
+
+def test_build_profile_json_document(tmp_path: Path) -> None:
+    path = tmp_path / "doc.json"
+    path.write_text('{"items": ["a"], "meta": {"x": 1}}', encoding="utf-8")
+    from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+
+    adapter = FileDelimitedAdapter(path, delimiter=",", has_header=True)
+    profile = build_delimited_profile(
+        adapter,
+        object_name="doc.json",
+        gcs_uri="gs://bucket/doc.json",
+        resolved_delimiter=",",
+    )
+    assert profile.suggested_file_format == "json"
+    assert profile.column_count == 1
+    assert profile.row_count == 1
+    assert profile.json_preview is not None
+    assert '"items"' in profile.json_preview
+
+
+def test_profile_json_skips_auto_delimiter(tmp_path: Path) -> None:
+    path = tmp_path / "doc.json"
+    path.write_text('{"items": ["a"], "meta": {"x": 1}}', encoding="utf-8")
+    from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+
+    adapter = FileDelimitedAdapter(path, delimiter="auto", has_header=True)
+    profile = ValidationService(get_settings()).profile_delimited_adapter(
+        adapter,
+        object_name="doc.json",
+        gcs_uri="gs://bucket/doc.json",
+        delimiter="auto",
+    )
+    assert profile.suggested_file_format == "json"
+    assert profile.json_preview is not None
+
+
+def test_resolve_cloud_pair_file_format_declared_json() -> None:
+    from pegasus.schemas.validation import GoogleCloudStorageConfig
+    from pegasus.validation.cloud_profile import resolve_cloud_pair_file_format
+
+    source = GoogleCloudStorageConfig(
+        bucket="b",
+        object_name="source.json",
+        credentials_json='{"type":"service_account"}',
+    )
+    target = GoogleCloudStorageConfig(
+        bucket="b",
+        object_name="target.json",
+        credentials_json='{"type":"service_account"}',
+    )
+    assert resolve_cloud_pair_file_format(source, target, declared="json") == "json"
 
 
 def test_count_adapter_rows_from_local_file(tmp_path: Path) -> None:

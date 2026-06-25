@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:27:35Z
+# Last edited: 2026-06-25T16:43:03+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Request/response models for the validation API."""
@@ -306,6 +306,13 @@ class LocalPathValidateRequest(BaseModel):
         default=None,
         description="Detailed configuration when file_format is 'fixed-width'",
     )
+    json_order_sensitive: bool = Field(
+        default=False,
+        description=(
+            "When file_format is json: require list element order and dict key order to match. "
+            "When false, reordered lists and dict keys still match."
+        ),
+    )
     test_mode: ValidationTestMode = Field(
         default=ValidationTestMode.FULL,
         description=(
@@ -578,6 +585,33 @@ class FixedWidthLayoutPreviewResponse(BaseModel):
     source_sample: str = ""
     target_sample: str = ""
     line_width: int = Field(ge=0, default=0)
+
+
+class JsonParentField(BaseModel):
+    """One top-level JSON parent key discovered in a document or NDJSON records."""
+
+    key: str
+    value_type: str = Field(description="Coarse JSON type: object, array, string, number, boolean, null")
+
+
+class JsonParentMappingRow(BaseModel):
+    """Suggested or user-edited mapping between source and target JSON parents."""
+
+    source_parent: str | None = None
+    target_parent: str | None = None
+    ignored: bool = False
+    source_type: str | None = None
+    target_type: str | None = None
+
+
+class JsonParentPreviewResponse(BaseModel):
+    """Top-level JSON parent keys and auto-suggested mappings for the wizard."""
+
+    document_mode: str = Field(description="document or ndjson")
+    source_parents: list[JsonParentField] = Field(default_factory=list)
+    target_parents: list[JsonParentField] = Field(default_factory=list)
+    suggested_mappings: list[JsonParentMappingRow] = Field(default_factory=list)
+    suggested_uid_field: str | None = None
 
 
 class FileDetectionStageResponse(BaseModel):
@@ -950,6 +984,10 @@ class CloudFileProfileResponse(BaseModel):
     row_count: int = Field(ge=0)
     delimiter: str | None = None
     has_header: bool = True
+    json_preview: str | None = Field(
+        default=None,
+        description="Pretty-printed JSON prefix for overview preview (JSON documents only).",
+    )
 
 
 class CloudMatchFilePairsRequest(BaseModel):

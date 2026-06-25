@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:27:35Z
+# Last edited: 2026-06-25T16:43:03+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Stream delimited objects from GCS — no full-object download or local materialization."""
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -25,6 +26,7 @@ from pegasus.validation.readers.pyarrow_io import batch_to_dicts, pyarrow_suppor
 
 _HEADER_PREFIX_BYTES = 256 * 1024
 _SAMPLE_PREFIX_BYTES = 512 * 1024
+_JSON_MATERIALIZE_MAX_BYTES = 64 * 1024 * 1024
 
 
 def inherit_gcs_metadata(
@@ -198,6 +200,30 @@ class GcsDelimitedAdapter:
     def ensure_object_cached(self, *, max_cache_bytes: int = 0) -> None:
         """No-op — retained for callers that previously prefetched full objects."""
         self.warm_metadata()
+
+    def materialize_to_temp_file(self, *, max_bytes: int = _JSON_MATERIALIZE_MAX_BYTES) -> Path:
+        """Download the full GCS object to a local temp file (JSON / small document compare)."""
+        size = self.get_size_bytes()
+        if size > max_bytes:
+            raise ValueError(
+                f"GCS object {self._ref.uri} is {size:,} bytes; "
+                f"JSON validation supports objects up to {max_bytes:,} bytes"
+            )
+        session = self._stream_session()
+        cached = session.cached_object_body()
+        if cached is None:
+            t0 = time.perf_counter()
+            with session.open_binary(read_ahead=False) as handle:
+                data = handle.read()
+            self._network_transfer_seconds += time.perf_counter() - t0
+            session.store_cached_object_body(data)
+            cached = data
+        else:
+            self._sync_network_stats()
+        suffix = Path(self._ref.object_name).suffix or ".json"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(cached)
+            return Path(tmp.name)
 
     def _ensure_prefix_bytes(self, limit: int) -> bytes:
         """Single cached prefix fetch shared by header and delimiter sampling."""

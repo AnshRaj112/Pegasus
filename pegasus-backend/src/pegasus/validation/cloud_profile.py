@@ -1,12 +1,13 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:27:35Z
+# Last edited: 2026-06-25T16:43:03+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Profile GCS delimited objects: format detection, column count, row count."""
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from pegasus.validation.file_detection import detect_file
 from pegasus.validation.file_detection.display_label import build_format_display_label
 from pegasus.validation.file_detection.types import FileDetectionReport
 from pegasus.validation.file_format import infer_file_format_from_path, is_columnar_format, normalize_file_format
-from pegasus.validation.gcs_object import GcsObjectRef, read_gcs_prefix
+from pegasus.validation.gcs_object import GcsObjectRef, gcs_object_ref_from_config, read_gcs_prefix
 
 
 def format_display_label(
@@ -60,6 +61,119 @@ def resolve_gcs_columnar_format(ref: GcsObjectRef) -> str | None:
     if is_columnar_format(ext_fmt):
         return ext_fmt
     return None
+
+
+def resolve_gcs_json_format(ref: GcsObjectRef) -> bool:
+    """Return whether a GCS object sample is detected as JSON."""
+    report = detect_gcs_object_format(ref)
+    fmt = normalize_file_format(report.suggested_file_format)
+    if fmt == "json":
+        return True
+    ext_fmt = infer_file_format_from_path(Path(ref.object_name), "auto")
+    return ext_fmt == "json"
+
+
+def resolve_cloud_pair_file_format(
+    source_cloud: object,
+    target_cloud: object,
+    *,
+    declared: str | None,
+) -> str:
+    """Resolve canonical format for a GCS source/target pair."""
+    from pegasus.schemas.validation import GoogleCloudStorageConfig
+
+    if not isinstance(source_cloud, GoogleCloudStorageConfig) or not isinstance(target_cloud, GoogleCloudStorageConfig):
+        raise ValueError("source_cloud and target_cloud are required")
+
+    declared_norm = normalize_file_format(declared) if declared else "auto"
+    if declared_norm == "json":
+        return "json"
+    if declared_norm == "fixed-width":
+        return "fixed-width"
+    if declared_norm not in {"auto", "csv"}:
+        return declared_norm
+
+    src_ref = gcs_object_ref_from_config(source_cloud)
+    tgt_ref = gcs_object_ref_from_config(target_cloud)
+    src_json = resolve_gcs_json_format(src_ref)
+    tgt_json = resolve_gcs_json_format(tgt_ref)
+    if src_json or tgt_json:
+        if src_json != tgt_json:
+            raise ValueError("Source and target must both be JSON documents")
+        return "json"
+
+    src_ext = infer_file_format_from_path(Path(src_ref.object_name), "auto")
+    tgt_ext = infer_file_format_from_path(Path(tgt_ref.object_name), "auto")
+    if src_ext != tgt_ext:
+        raise ValueError("Source and target must use the same file format")
+    if src_ext == "json":
+        return "json"
+    return "csv"
+
+
+def _json_profile_detected(
+    report: FileDetectionReport,
+    *,
+    object_name: str,
+    detect_path: Path,
+) -> bool:
+    if report.suggested_file_format == "json":
+        return True
+    if infer_file_format_from_path(Path(object_name), "auto") == "json":
+        return True
+    return infer_file_format_from_path(detect_path, "auto") == "json"
+
+
+def build_json_preview_sample(
+    adapter: FileDelimitedAdapter | GcsDelimitedAdapter,
+    *,
+    max_bytes: int = 64 * 1024,
+    max_chars: int = 8000,
+) -> str | None:
+    """Return a pretty-printed JSON prefix for overview preview."""
+    try:
+        if isinstance(adapter, FileDelimitedAdapter):
+            raw = adapter.path.read_bytes()[:max_bytes]
+        else:
+            adapter.warm_metadata()
+            size = int(adapter.get_size_bytes())
+            raw = adapter._ensure_prefix_bytes(min(size, max_bytes))
+        text = raw.decode("utf-8", errors="replace").strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+            pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
+        except json.JSONDecodeError:
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()][:5]
+            parts: list[str] = []
+            for line in lines:
+                try:
+                    parts.append(json.dumps(json.loads(line), indent=2, ensure_ascii=False))
+                except json.JSONDecodeError:
+                    parts.append(line)
+            pretty = "\n\n".join(parts)
+        if len(pretty) > max_chars:
+            return pretty[:max_chars].rstrip() + "\n…"
+        return pretty
+    except Exception:
+        return None
+
+
+def is_json_delimited_adapter(
+    adapter: FileDelimitedAdapter | GcsDelimitedAdapter,
+    *,
+    object_name: str | None = None,
+) -> bool:
+    """Return whether an adapter points at a JSON document (sample or extension)."""
+    if isinstance(adapter, GcsDelimitedAdapter):
+        adapter.warm_metadata()
+    detect_path = adapter.path if isinstance(adapter, FileDelimitedAdapter) else Path(object_name or adapter.path)
+    name = object_name or detect_path.name
+    if infer_file_format_from_path(Path(name), "auto") == "json":
+        return True
+    report = detect_format_from_adapter(adapter)
+    return _json_profile_detected(report, object_name=name, detect_path=detect_path)
 
 
 def detect_format_from_adapter(
@@ -130,6 +244,26 @@ def build_delimited_profile(
             )
 
     report = detect_format_from_adapter(adapter)
+    detect_path = adapter.path if isinstance(adapter, FileDelimitedAdapter) else Path(object_name)
+    if _json_profile_detected(report, object_name=object_name, detect_path=detect_path):
+        return CloudFileProfileResponse(
+            object_name=object_name,
+            gcs_uri=gcs_uri,
+            file_size_bytes=size_bytes,
+            file_format=format_display_label(
+                report,
+                object_name=object_name,
+                path=detect_path,
+            ),
+            suggested_file_format="json",
+            dataset_model=report.dataset_model or "hierarchical",
+            column_count=1,
+            row_count=1,
+            delimiter=resolved_delimiter,
+            has_header=has_header,
+            json_preview=build_json_preview_sample(adapter),
+        )
+
     schema = adapter.get_schema()
     column_count = len(schema.columns)
     if report.suggested_file_format == "fixed-width":
@@ -140,8 +274,6 @@ def build_delimited_profile(
         if inferred:
             column_count = len(inferred)
     row_count = count_adapter_rows(adapter)
-
-    detect_path = adapter.path if isinstance(adapter, FileDelimitedAdapter) else Path(object_name)
 
     return CloudFileProfileResponse(
         object_name=object_name,

@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:27:35Z
+# Last edited: 2026-06-25T16:43:03+05:30
 # --- END GENERATED FILE METADATA ---
 
 """CSV validation endpoints (local paths, browse, job polling)."""
@@ -38,6 +38,7 @@ from pegasus.schemas.validation import (
     FileDetectionResponse,
     FilePairMatch,
     FixedWidthLayoutPreviewResponse,
+    JsonParentPreviewResponse,
     LocalBrowseResponse,
     LocalColumnPreviewResponse,
     LocalPathBrowseConfigResponse,
@@ -72,7 +73,7 @@ from pegasus.validation.cloud_input import (
     resolve_cloud_config_with_saved_connection,
     resolve_delimited_input,
 )
-from pegasus.validation.cloud_profile import resolve_gcs_columnar_format
+from pegasus.validation.cloud_profile import resolve_gcs_columnar_format, resolve_gcs_json_format
 from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter
 from pegasus.validation.gcs_object import cloud_config_to_meta, gcs_object_ref_from_config
 from pegasus.validation.gcs_browse import browse_gcs_prefix, list_gcs_buckets, list_gcs_files_under_prefix
@@ -294,6 +295,11 @@ async def preview_local_csv_columns_body(
             status.HTTP_400_BAD_REQUEST,
             detail="Use POST /validate/local/fixed-width-layout for fixed-width files",
         )
+    if requested_fmt == "json":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Use POST /validate/local/json-parent-preview for JSON files",
+        )
 
     source_columnar_fmt: str | None = None
     target_columnar_fmt: str | None = None
@@ -330,6 +336,11 @@ async def preview_local_csv_columns_body(
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
                 detail="Source and target must both be columnar or both be delimited text files",
+            )
+        if resolve_gcs_json_format(source_ref) and resolve_gcs_json_format(target_ref):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Use POST /validate/local/json-parent-preview for JSON files",
             )
 
     source_input = resolve_delimited_input(
@@ -426,6 +437,110 @@ async def preview_fixed_width_layout_body(
             target=target_input.adapter,
         )
         return FixedWidthLayoutPreviewResponse(**preview)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post(
+    "/validate/local/json-parent-preview",
+    response_model=JsonParentPreviewResponse,
+    summary="Discover top-level JSON parents and suggest mappings",
+)
+async def preview_json_parent_mapping(
+    service: ValidationServiceDep,
+    settings: AppSettings,
+    session: DbSession,
+    body: Annotated[LocalPathValidateRequest, Body()],
+) -> JsonParentPreviewResponse:
+    """Return top-level JSON parent keys for source/target and auto-suggested pairings."""
+    source_cloud, source_path = await coerce_cloud_storage_reference(
+        session,
+        label="source",
+        path=body.source_path,
+        cloud=(
+            await resolve_cloud_config_with_saved_connection(body.source_cloud, session=session)
+            if body.source_cloud is not None
+            else None
+        ),
+    )
+    target_cloud, target_path = await coerce_cloud_storage_reference(
+        session,
+        label="target",
+        path=body.target_path,
+        cloud=(
+            await resolve_cloud_config_with_saved_connection(body.target_cloud, session=session)
+            if body.target_cloud is not None
+            else None
+        ),
+    )
+    source_cloud = await ensure_resolved_cloud_config(session, source_cloud)
+    target_cloud = await ensure_resolved_cloud_config(session, target_cloud)
+
+    if source_cloud is not None and target_cloud is not None:
+        try:
+            source_ref = gcs_object_ref_from_config(source_cloud)
+            target_ref = gcs_object_ref_from_config(target_cloud)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if not (resolve_gcs_json_format(source_ref) and resolve_gcs_json_format(target_ref)):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Source and target must both be JSON documents",
+            )
+        source_input = resolve_delimited_input(
+            settings=settings,
+            label="source",
+            path=None,
+            cloud=source_cloud,
+            delimiter="json",
+            has_header=body.has_header,
+            skip_rows=body.header_leading_rows,
+        )
+        target_input = resolve_delimited_input(
+            settings=settings,
+            label="target",
+            path=None,
+            cloud=target_cloud,
+            delimiter="json",
+            has_header=body.has_header,
+            skip_rows=body.header_leading_rows,
+        )
+    else:
+        require_local_path_access(settings)
+        resolved_source = resolve_local_path_on_disk(source_path or "", settings, must_be_file=True)
+        resolved_target = resolve_local_path_on_disk(target_path or "", settings, must_be_file=True)
+        if infer_file_format_from_path(resolved_source, "auto") != "json":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Source file must be JSON")
+        if infer_file_format_from_path(resolved_target, "auto") != "json":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Target file must be JSON")
+        source_input = resolve_delimited_input(
+            settings=settings,
+            label="source",
+            path=str(resolved_source),
+            cloud=None,
+            delimiter="json",
+            has_header=body.has_header,
+            skip_rows=body.header_leading_rows,
+        )
+        target_input = resolve_delimited_input(
+            settings=settings,
+            label="target",
+            path=str(resolved_target),
+            cloud=None,
+            delimiter="json",
+            has_header=body.has_header,
+            skip_rows=body.header_leading_rows,
+        )
+
+    try:
+        preview = service.preview_json_parent_mapping(
+            source_input.adapter,
+            target_input.adapter,
+            uid_column=body.uid_column,
+        )
+        return JsonParentPreviewResponse(**preview)
+    except ValidationBadRequestError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -730,7 +845,21 @@ async def validate_csv_local_paths(
         )
         resolved_source = source_input.adapter.path
         resolved_target = target_input.adapter.path
-        file_format = "csv"
+        from pegasus.validation.cloud_profile import resolve_cloud_pair_file_format
+
+        try:
+            file_format = resolve_cloud_pair_file_format(
+                source_cloud,
+                target_cloud,
+                declared=body.file_format,
+            )
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if file_format == "fixed-width":
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Use POST /validate/local/fixed-width-layout for fixed-width files",
+            )
     else:
         require_local_path_access(settings)
         resolved_source = resolve_local_path_on_disk(source_path, settings, must_be_file=True)
@@ -787,6 +916,14 @@ async def validate_csv_local_paths(
         if target_input is not None:
             tgt_display = target_input.display_name
 
+    from pegasus.core.delimiter_tokens import JSON_DELIMITER, normalize_delimiter_for_storage
+
+    stored_delimiter = (
+        JSON_DELIMITER
+        if file_format == "json"
+        else normalize_delimiter_for_storage(body.delimiter)
+    )
+
     run_id: uuid.UUID | None = None
     if settings.enable_validation_persistence:
         run = await ValidationRunRepository.create_running(
@@ -794,7 +931,7 @@ async def validate_csv_local_paths(
             source_filename=source_input.display_name if source_input else resolved_source.name,
             target_filename=target_input.display_name if target_input else resolved_target.name,
             uid_column=body.uid_column.strip(),
-            delimiter=body.delimiter,
+            delimiter=stored_delimiter,
             source_path=src_display,
             target_path=tgt_display,
             file_pair_key=pair_key,
@@ -807,7 +944,7 @@ async def validate_csv_local_paths(
 
     meta = {
         "uid_column": body.uid_column.strip(),
-        "delimiter": body.delimiter,
+        "delimiter": stored_delimiter,
         "column_mappings": [m.model_dump() for m in body.column_mappings],
         "validate_header_formats": body.validate_header_formats,
         "validate_footers": body.validate_footers,
@@ -828,6 +965,8 @@ async def validate_csv_local_paths(
     }
     if body.fixed_width_config is not None:
         meta["fixed_width_config"] = body.fixed_width_config.model_dump()
+    if file_format == "json":
+        meta["json_order_sensitive"] = body.json_order_sensitive
     if source_input is not None and source_input.is_cloud:
         meta["source_cloud"] = cloud_config_to_meta(source_cloud)  # type: ignore[arg-type]
     else:
