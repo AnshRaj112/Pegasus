@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T05:27:35Z
+# Last edited: 2026-06-25T11:17:42Z
 # --- END GENERATED FILE METADATA ---
 
 """Delimited file reader utilities."""
