@@ -13,9 +13,10 @@ export const Header: React.FC = () => {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const getLinkClass = (path: string): string => {
-    const active = path === '/validations'
-      ? currentPath === '/validations' || currentPath.startsWith('/validations/')
-      : currentPath === path;
+    if (path === '/') {
+      return currentPath === '/' ? styles.navLinkActive : styles.navLink;
+    }
+    const active = currentPath === path || currentPath.startsWith(`${path}/`);
     return active ? styles.navLinkActive : styles.navLink;
   };
 

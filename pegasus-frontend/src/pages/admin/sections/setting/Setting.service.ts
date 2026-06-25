@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-import { PELICAN_BASE_PATH, SERVICE_ENDPOINT } from '../../shared/constants/service-endpoints.constants'
+import { PELICAN_BASE_PATH, SERVICE_ENDPOINT } from '../../../../shared/constants/service-endpoints.constants'
 
 import { ValidationSettings, ValidationSettingsResponse } from './Setting.interface'
 

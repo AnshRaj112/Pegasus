@@ -8,7 +8,6 @@ import {
 } from './Admin.interface';
 
 export const initialState: AdminReducerState = {
-  activeSubSection: 'workspace',
   workspaces: {
     data: [
       { id: 'w1', name: 'Global Workspace', isDefault: true, createdDate: 'Jan 12, 2023', userCount: 842, status: 'Active' },
@@ -38,10 +37,6 @@ const adminSlice = createSlice({
   name: 'admin',
   initialState,
   reducers: {
-    setSubSection: (state, action: PayloadAction<'store' | 'workspace'>) => ({
-      ...state,
-      activeSubSection: action.payload,
-    }),
 
     fetchWorkspacesRequest: (state) => {
       state.workspaces.isFetching = true;

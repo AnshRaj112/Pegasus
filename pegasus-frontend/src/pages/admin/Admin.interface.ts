@@ -43,7 +43,6 @@ export interface StorageProviderPayload {
 }
 
 export interface AdminReducerState {
-  activeSubSection: 'store' | 'workspace';
   workspaces: {
     data: WorkspaceItem[];
     isFetching: boolean;
