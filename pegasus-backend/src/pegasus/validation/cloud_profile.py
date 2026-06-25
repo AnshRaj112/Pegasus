@@ -11,11 +11,15 @@ import tempfile
 from pathlib import Path
 
 from pegasus.schemas.validation import CloudFileProfileResponse
+from pegasus.validation.adapters.file_columnar import FileColumnarAdapter
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter, columnar_row_count
 from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
 from pegasus.validation.file_detection import detect_file
 from pegasus.validation.file_detection.display_label import build_format_display_label
 from pegasus.validation.file_detection.types import FileDetectionReport
+from pegasus.validation.file_format import infer_file_format_from_path, is_columnar_format, normalize_file_format
+from pegasus.validation.gcs_object import GcsObjectRef, read_gcs_prefix
 
 
 def format_display_label(
@@ -31,6 +35,31 @@ def format_display_label(
         path=resolved_path,
         object_name=object_name,
     )
+
+
+def detect_gcs_object_format(ref: GcsObjectRef) -> FileDetectionReport:
+    """Run the detection pipeline on a bounded GCS prefix sample."""
+    prefix = read_gcs_prefix(ref, max_bytes=64 * 1024)
+    suffix = Path(ref.object_name).suffix or ".csv"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(prefix)
+        tmp_path = Path(tmp.name)
+    try:
+        return detect_file(tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def resolve_gcs_columnar_format(ref: GcsObjectRef) -> str | None:
+    """Return a canonical columnar format token when the GCS object is columnar."""
+    report = detect_gcs_object_format(ref)
+    fmt = normalize_file_format(report.suggested_file_format)
+    if is_columnar_format(fmt):
+        return fmt
+    ext_fmt = infer_file_format_from_path(Path(ref.object_name), "auto")
+    if is_columnar_format(ext_fmt):
+        return ext_fmt
+    return None
 
 
 def detect_format_from_adapter(
@@ -129,4 +158,66 @@ def build_delimited_profile(
         row_count=row_count,
         delimiter=resolved_delimiter,
         has_header=has_header,
+    )
+
+
+def build_columnar_profile(
+    adapter: GcsColumnarAdapter | FileColumnarAdapter,
+    *,
+    object_name: str,
+    gcs_uri: str,
+    file_format: str,
+) -> CloudFileProfileResponse:
+    """Build a cloud file profile from a columnar adapter (local or GCS)."""
+    if isinstance(adapter, GcsColumnarAdapter):
+        adapter.warm_metadata()
+        size_bytes = adapter.get_size_bytes()
+    elif isinstance(adapter, FileColumnarAdapter):
+        size_bytes = adapter.path.stat().st_size
+    else:
+        size_bytes = 0
+    fmt = normalize_file_format(file_format)
+    if size_bytes == 0:
+        return CloudFileProfileResponse(
+            object_name=object_name,
+            gcs_uri=gcs_uri,
+            file_size_bytes=0,
+            file_format="empty",
+            suggested_file_format="empty",
+            dataset_model="columnar",
+            column_count=0,
+            row_count=0,
+            delimiter=None,
+            has_header=True,
+        )
+
+    schema = adapter.get_schema()
+    row_count = (
+        adapter.get_row_count()
+        if isinstance(adapter, GcsColumnarAdapter)
+        else columnar_row_count(adapter.path, fmt)
+    )
+    if isinstance(adapter, GcsColumnarAdapter):
+        assert adapter._local_path is not None
+        report = detect_file(adapter._local_path)
+        detect_path = Path(object_name)
+    else:
+        report = detect_file(adapter.path)
+        detect_path = adapter.path
+
+    return CloudFileProfileResponse(
+        object_name=object_name,
+        gcs_uri=gcs_uri,
+        file_size_bytes=size_bytes,
+        file_format=format_display_label(
+            report,
+            object_name=object_name,
+            path=detect_path,
+        ),
+        suggested_file_format=report.suggested_file_format or fmt,
+        dataset_model=report.dataset_model or "columnar",
+        column_count=len(schema.columns),
+        row_count=int(row_count),
+        delimiter=None,
+        has_header=True,
     )

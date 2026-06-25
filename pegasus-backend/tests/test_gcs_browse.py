@@ -36,6 +36,19 @@ def test_file_allowed_delegates_to_object_name_matches_format() -> None:
     assert not _file_allowed("notes.pdf", allowed)
 
 
+def test_auto_format_includes_txt_and_dat() -> None:
+    allowed = extensions_for_format("auto")
+    assert object_name_matches_format("payroll.dat", allowed)
+    assert object_name_matches_format("export.txt", allowed)
+    assert object_name_matches_format("export.txt.gz", allowed)
+    assert object_name_matches_format("data.csv", allowed)
+    assert not _file_allowed("notes.pdf", allowed)
+
+
+def test_any_format_alias_matches_auto() -> None:
+    assert extensions_for_format("any") == extensions_for_format("auto")
+
+
 def test_coerce_gcs_object_size_accepts_large_values() -> None:
     over_500mb = 600 * 1024 * 1024
     assert coerce_gcs_object_size(over_500mb) == over_500mb

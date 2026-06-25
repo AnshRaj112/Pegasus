@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_AUTO_ALIASES = frozenset({"auto", "detect", "unknown"})
+_AUTO_ALIASES = frozenset({"auto", "any", "detect", "unknown"})
 _JSON_ALIASES = frozenset({"json", "ndjson"})
 _FIXED_WIDTH_ALIASES = frozenset({"fixed-width", "fixedwidth", "fixed", "fw"})
 _COLUMNAR_ALIASES = frozenset({"parquet", "orc", "avro", "excel", "xlsx", "xls"})
@@ -105,5 +105,9 @@ def extensions_for_format(file_format: str | None) -> frozenset[str]:
     if fmt == "excel":
         return frozenset({".xlsx", ".xls"})
     if fmt == "auto":
-        return frozenset(_SUFFIX_TO_FORMAT.keys()) | frozenset({".zip"})
+        return (
+            frozenset(_SUFFIX_TO_FORMAT.keys())
+            | _AMBIGUOUS_TABULAR_SUFFIXES
+            | frozenset({".zip", ".fw", ".fixed"})
+        )
     return frozenset({".csv", ".tsv", ".txt", ".dat"})
