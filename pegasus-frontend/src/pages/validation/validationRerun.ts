@@ -11,6 +11,7 @@ import { gcsUri } from '../report/reportPairId';
 import { fixedWidthConfigFromColumns } from './fixedWidthConfig';
 import { isFixedWidthFormat } from './fixedWidthFormat';
 import { isJsonFormat } from './jsonFormat';
+import { resolveWizardArchiveMode } from './archiveFormat';
 
 export const parseGsUri = (uri: string): GoogleCloudStorageConfig | null => {
   const trimmed = uri.trim();
@@ -100,6 +101,11 @@ export const validateRequestFromForm = (
 ): ValidateRequest => {
   const isFixedWidth = isFixedWidthFormat(form.detectedFileFormat);
   const isJson = isJsonFormat(form.detectedFileFormat);
+  const archiveKind = resolveWizardArchiveMode({
+    detectedFileFormat: form.detectedFileFormat,
+    sourceFileName: form.sourceFileName,
+    targetFileName: form.targetFileName,
+  });
   const uidColumn = isFixedWidth && form.fixedWidthColumns.length > 0
     ? (form.uidColumn || form.fixedWidthColumns[0]?.field_name || 'record_id')
     : isJson
@@ -122,6 +128,12 @@ export const validateRequestFromForm = (
       ? {
         file_format: 'json',
         json_order_sensitive: form.structuredOrderSensitive,
+      }
+      : {}),
+    ...(archiveKind
+      ? {
+        file_format: archiveKind,
+        column_mappings: [],
       }
       : {}),
   };

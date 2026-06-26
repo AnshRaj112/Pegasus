@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T09:32:01Z
+# Last edited: 2026-06-26T15:09:23+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Profile GCS delimited objects: format detection, column count, row count."""
@@ -17,9 +17,18 @@ from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
 from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter, columnar_row_count
 from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
 from pegasus.validation.file_detection import detect_file
-from pegasus.validation.file_detection.display_label import build_format_display_label
+from pegasus.validation.file_detection.display_label import (
+    build_format_display_label,
+    format_display_label_from_archive_members,
+)
 from pegasus.validation.file_detection.types import FileDetectionReport
-from pegasus.validation.file_format import infer_file_format_from_path, is_columnar_format, normalize_file_format
+from pegasus.validation.file_format import (
+    infer_archive_format_from_name,
+    infer_file_format_from_path,
+    is_archive_format,
+    is_columnar_format,
+    normalize_file_format,
+)
 from pegasus.validation.gcs_object import GcsObjectRef, gcs_object_ref_from_config, read_gcs_prefix
 
 
@@ -73,6 +82,112 @@ def resolve_gcs_json_format(ref: GcsObjectRef) -> bool:
     return ext_fmt == "json"
 
 
+def resolve_gcs_archive_format(ref: GcsObjectRef) -> str | None:
+    """Return zip or tar when the GCS object is an archive container."""
+    by_name = infer_archive_format_from_name(ref.object_name)
+    if by_name:
+        return by_name
+    report = detect_gcs_object_format(ref)
+    fmt = normalize_file_format(report.suggested_file_format)
+    if is_archive_format(fmt):
+        return fmt
+    if report.dataset_model == "container":
+        container = report.container.detected_type if report.container else ""
+        if container == "zip":
+            return "zip"
+        if container in {"tar", "tgz"}:
+            return "tar"
+    return infer_archive_format_from_name(ref.object_name)
+
+
+def build_archive_profile(
+    *,
+    local_path: Path | None,
+    gcs_adapter: GcsDelimitedAdapter | None,
+    object_name: str,
+    gcs_uri: str,
+    file_format: str,
+    settings: object,
+) -> CloudFileProfileResponse:
+    """Build profile for ZIP/TAR archives using header metadata only."""
+    from pegasus.core.config import Settings
+    from pegasus.validation.archive_compare import (
+        archive_side_from_gcs_adapter,
+        archive_side_from_path,
+        profile_archive_entries,
+    )
+
+    cfg = settings if isinstance(settings, Settings) else Settings()
+    fmt = normalize_file_format(file_format)
+    if local_path is not None:
+        side = archive_side_from_path(local_path, archive_format=fmt, object_name=object_name)
+        size_bytes = side.size_bytes
+        report = detect_file(local_path)
+        detect_path = local_path
+    elif gcs_adapter is not None:
+        gcs_adapter.warm_metadata()
+        side = archive_side_from_gcs_adapter(gcs_adapter, archive_format=fmt, object_name=object_name)
+        size_bytes = side.size_bytes
+        report = detect_format_from_adapter(gcs_adapter)
+        detect_path = Path(object_name)
+    else:
+        raise ValueError("build_archive_profile requires local_path or gcs_adapter")
+
+    if size_bytes == 0:
+        return CloudFileProfileResponse(
+            object_name=object_name,
+            gcs_uri=gcs_uri,
+            file_size_bytes=0,
+            file_format="empty",
+            suggested_file_format="empty",
+            dataset_model="container",
+            column_count=0,
+            row_count=0,
+            delimiter=None,
+            has_header=False,
+            archive_entry_count=0,
+            archive_entries_sample=[],
+            archive_manifest_supported=False,
+            archive_warnings=[],
+        )
+
+    entry_count, sample, warnings = profile_archive_entries(
+        side,
+        max_declared_bytes=cfg.validation_archive_max_declared_bytes,
+        max_compression_ratio=cfg.validation_archive_max_compression_ratio,
+        max_nest_depth=cfg.validation_archive_max_nest_depth,
+        max_nested_member_bytes=cfg.validation_archive_max_nested_member_bytes,
+    )
+
+    nested_label = format_display_label_from_archive_members(
+        sample,
+        outer=fmt,
+        object_name=object_name,
+    )
+    display_label = nested_label or format_display_label(
+        report,
+        object_name=object_name,
+        path=detect_path,
+    )
+
+    return CloudFileProfileResponse(
+        object_name=object_name,
+        gcs_uri=gcs_uri,
+        file_size_bytes=size_bytes,
+        file_format=display_label,
+        suggested_file_format=fmt,
+        dataset_model="container",
+        column_count=len(("compressed_size", "uncompressed_size", "crc32", "compress_type")),
+        row_count=entry_count,
+        delimiter=None,
+        has_header=False,
+        archive_entry_count=entry_count,
+        archive_entries_sample=sample,
+        archive_manifest_supported=side.manifest_supported,
+        archive_warnings=warnings,
+    )
+
+
 def resolve_cloud_pair_file_format(
     source_cloud: object,
     target_cloud: object,
@@ -86,6 +201,8 @@ def resolve_cloud_pair_file_format(
         raise ValueError("source_cloud and target_cloud are required")
 
     declared_norm = normalize_file_format(declared) if declared else "auto"
+    if is_archive_format(declared_norm):
+        return declared_norm
     if declared_norm == "json":
         return "json"
     if declared_norm == "fixed-width":
@@ -95,6 +212,14 @@ def resolve_cloud_pair_file_format(
 
     src_ref = gcs_object_ref_from_config(source_cloud)
     tgt_ref = gcs_object_ref_from_config(target_cloud)
+
+    src_archive = resolve_gcs_archive_format(src_ref)
+    tgt_archive = resolve_gcs_archive_format(tgt_ref)
+    if src_archive or tgt_archive:
+        if src_archive != tgt_archive:
+            raise ValueError("Source and target must both be archives of the same kind")
+        if src_archive:
+            return src_archive
 
     src_ext = infer_file_format_from_path(Path(src_ref.object_name), "auto")
     tgt_ext = infer_file_format_from_path(Path(tgt_ref.object_name), "auto")

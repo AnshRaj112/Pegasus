@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T09:32:01Z
+# Last edited: 2026-06-26T15:09:23+05:30
 # --- END GENERATED FILE METADATA ---
 
 """GCS object references and bounded streaming reads (no full download)."""
@@ -158,6 +158,32 @@ def read_gcs_prefix(
     from pegasus.validation.gcs_stream import get_gcs_stream_session
 
     return get_gcs_stream_session(ref).read_prefix(max_bytes=max_bytes)
+
+
+def read_gcs_range(
+    ref: GcsObjectRef,
+    *,
+    start: int,
+    end: int,
+) -> bytes:
+    """Read inclusive byte range ``[start, end]`` from a GCS object."""
+    if start < 0 or end < start:
+        return b""
+    blob = _blob(ref)
+    return blob.download_as_bytes(start=start, end=end)
+
+
+def read_gcs_suffix(
+    ref: GcsObjectRef,
+    *,
+    max_bytes: int = 256 * 1024,
+) -> bytes:
+    """Read the trailing *max_bytes* of an object (for ZIP EOCD / central directory)."""
+    size = gcs_blob_size(ref)
+    if size <= 0:
+        return b""
+    start = max(0, size - max_bytes)
+    return read_gcs_range(ref, start=start, end=size - 1)
 
 
 def read_gcs_object_bytes(ref: GcsObjectRef) -> bytes:

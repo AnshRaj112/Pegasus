@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T09:32:01Z
+# Last edited: 2026-06-26T15:09:23+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Subprocess / pool entrypoint: run one validation job from files under *job_dir*."""
@@ -34,6 +34,7 @@ from pegasus.validation.resource_profiler import (
 logger = logging.getLogger(__name__)
 
 _COLUMNAR_FORMATS = frozenset({"parquet", "orc", "avro"})
+_ARCHIVE_FORMATS = frozenset({"zip", "tar"})
 
 
 def _write_json(path: Path, obj: object, *, indent: bool = False) -> None:
@@ -315,7 +316,7 @@ def run_job_directory(job_dir: Path) -> int:
         columnar_input_from_meta,
         delimited_input_from_meta,
     )
-    from pegasus.validation.file_format import is_columnar_format
+    from pegasus.validation.file_format import is_columnar_format, is_archive_format
 
     if is_columnar_format(file_format):
         source_input = columnar_input_from_meta(meta, side="source", file_format=file_format)
@@ -572,6 +573,17 @@ def _run_job_body(
                 artifact_export_parent=job_dir,
                 test_mode=mode,
                 mismatch_snippet_limit=mismatch_snippet_limit,
+            )
+        elif file_format in _ARCHIVE_FORMATS or is_archive_format(file_format):
+            result = service.validate_archive_pair_sync(
+                src,
+                tgt,
+                file_format=file_format,
+                artifact_export_parent=job_dir,
+                test_mode=mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
+                source_object_name=str(meta.get("source_filename") or ""),
+                target_object_name=str(meta.get("target_filename") or ""),
             )
         elif file_format in _COLUMNAR_FORMATS:
             result = service.validate_columnar_pair_sync(

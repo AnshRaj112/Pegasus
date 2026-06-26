@@ -181,6 +181,10 @@ export interface CloudFileProfileResponse {
   delimiter?: string | null;
   has_header?: boolean;
   json_preview?: string | null;
+  archive_entry_count?: number | null;
+  archive_entries_sample?: string[] | null;
+  archive_manifest_supported?: boolean | null;
+  archive_warnings?: string[] | null;
 }
 
 export interface CloudConnection {

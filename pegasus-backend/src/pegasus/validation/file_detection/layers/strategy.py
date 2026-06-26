@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T09:32:01Z
+# Last edited: 2026-06-26T15:09:23+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Layer 9: validation strategy and dataset model selection."""
@@ -104,13 +104,15 @@ def select_validation_strategy(
         return stage, "binary_asset", None, None, warnings
 
     if best_kind in _CONTAINERS or (container and container.detected_type not in {"none", ""}):
+        container_kind = container.detected_type if container and container.detected_type not in {"none", ""} else best_kind
+        archive_fmt = "tar" if container_kind in {"tar", "tgz"} else "zip" if container_kind == "zip" else container_kind
         stage = DetectionStage(
             "container",
             max(best_conf, container.confidence if container else 0),
-            evidence=["archive container — inspect entries before validation"],
+            evidence=["archive container — metadata validation route"],
             metadata=container.metadata if container else {},
         )
-        return stage, "container", None, None, warnings
+        return stage, "container", archive_fmt if archive_fmt in {"zip", "tar"} else None, None, warnings
 
     if best_kind in _COLUMNAR or is_columnar_format(best_kind):
         fmt = "excel" if best_kind in {"excel-ole", "xlsx"} else best_kind
