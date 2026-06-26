@@ -47,6 +47,7 @@ export const Header: React.FC = () => {
           <Link to="/" className={getLinkClass('/')}>Dashboard</Link>
           <Link to="/validations" className={getLinkClass('/validations')}>Validations</Link>
           <Link to="/reports" className={getLinkClass('/reports')}>Reports</Link>
+          <Link to="/tests" className={getLinkClass('/test')}>Tests</Link>
           <Link to="/admin" className={getLinkClass('/admin')}>Admin</Link>
         </div>
 

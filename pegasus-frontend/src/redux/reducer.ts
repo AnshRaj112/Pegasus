@@ -7,6 +7,7 @@ import adminReducer from '../pages/admin/Admin.reducer';
 import { reportReducer } from '../pages/report/Report.reducer';
 import { profileReducer } from '../pages/profile/Profile.reducer';
 import  settingReducer  from '../pages/admin/sections/setting/Setting.reducer';
+import testReducer from '../pages/test/Test.reducer';
 
 const rootReducer = combineReducers({
   dashboard: dashboardReducer,
@@ -15,7 +16,8 @@ const rootReducer = combineReducers({
   admin: adminReducer,
   report: reportReducer,
   profile: profileReducer,
-  setting: settingReducer
+  setting: settingReducer,
+  test: testReducer,
 });
 
 export default rootReducer;

@@ -14,6 +14,7 @@ import Profile from '../pages/profile/Profile';
 import { WorkspaceMgmtSubView } from '../pages/admin/sections/WorkspaceMgmtSubView';
 import { ConfigureStoreSubView } from '../pages/admin/sections/ConfigureStoreSubView';
 import Setting from '~/pages/admin/sections/setting/Setting';
+import TestView from '~/pages/test/TestView';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -35,6 +36,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="configure-store" element={<ConfigureStoreSubView />} />
                 <Route path="settings" element={<Setting />} />
               </Route>
+              <Route path="/test" element={<TestView />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/setting" element={<Setting />} />
               <Route path="*" element={<div style={{ color: 'var(--on-surface)', padding: 'var(--lg)' }}>404 Error: Section View Not Found</div>} />

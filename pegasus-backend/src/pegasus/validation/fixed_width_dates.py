@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T07:47:43Z
+# Last edited: 2026-06-26T07:48:09Z
 # --- END GENERATED FILE METADATA ---
 
 """Date parsing and cross-format equality for fixed-width field slices."""
