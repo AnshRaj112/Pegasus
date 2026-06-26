@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T09:32:35Z
+# Last edited: 2026-06-26T09:39:41Z
 # --- END GENERATED FILE METADATA ---
 
 """Layer 2: magic-byte and MIME detection (bounded prefix)."""
