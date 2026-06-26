@@ -102,3 +102,37 @@ export const formatDetectionLabel = (format: string | null | undefined): string 
 
   return formatDetectionSegmentLabel(normalized);
 };
+
+export type FormatChainDisplay = {
+  short: string;
+  middle: string | null;
+  full: string;
+};
+
+/** Collapse long chains to `TAR → … → Delimited file` with middle segments for tooltips. */
+export const formatDetectionChainDisplay = (format: string | null | undefined): FormatChainDisplay => {
+  if (!format || format === '—' || format === '…') {
+    const fallback = format ?? '—';
+    return { short: fallback, middle: null, full: fallback };
+  }
+
+  const normalized = format.trim();
+  if (!normalized.includes('->')) {
+    const label = formatDetectionLabel(normalized);
+    return { short: label, middle: null, full: label };
+  }
+
+  const segments = normalized.split('->').map((part) => part.trim()).filter(Boolean);
+  const labels = segments.map((part) => formatDetectionSegmentLabel(part));
+  const full = labels.join(' → ');
+  if (labels.length <= 3) {
+    return { short: full, middle: null, full };
+  }
+
+  const middle = labels.slice(1, -1).join(' → ');
+  return {
+    short: `${labels[0]} → … → ${labels[labels.length - 1]}`,
+    middle,
+    full,
+  };
+};

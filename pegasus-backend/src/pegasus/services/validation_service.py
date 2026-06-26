@@ -680,6 +680,167 @@ class ValidationService:
             )
         )
 
+    def validate_archive_pair_sync(
+        self,
+        source_path: Path | object,
+        target_path: Path | object,
+        *,
+        file_format: str,
+        artifact_export_parent: Path | None = None,
+        test_mode: ValidationTestMode = ValidationTestMode.FULL,
+        mismatch_snippet_limit: int | None = None,
+        source_object_name: str = "",
+        target_object_name: str = "",
+    ) -> ValidationRunResult:
+        """Compare two ZIP/TAR archives without decompressing member payloads."""
+        from pegasus.api.v1.mismatch_sample import build_grouped_mismatch_samples
+        from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
+        from pegasus.validation.archive_compare import (
+            archive_side_from_gcs_adapter,
+            archive_side_from_path,
+            profile_archive_entries,
+            validate_archive_pair,
+        )
+        from pegasus.validation.file_format import is_archive_format, normalize_archive_format
+
+        fmt = normalize_archive_format(file_format)
+        if not is_archive_format(fmt):
+            raise ValidationBadRequestError(f"Unsupported archive file_format: {file_format!r}")
+
+        def _resolve_side(side: str, src: Path | object, object_name: str) -> object:
+            if isinstance(src, Path):
+                resolved = src.resolve()
+                if not resolved.is_file():
+                    raise ValidationBadRequestError(f"{side.capitalize()} file not found: {resolved}")
+                return archive_side_from_path(resolved, archive_format=fmt, object_name=object_name or resolved.name)
+            if isinstance(src, GcsDelimitedAdapter):
+                src.warm_metadata()
+                return archive_side_from_gcs_adapter(
+                    src,
+                    archive_format=fmt,
+                    object_name=object_name or src.path.name,
+                )
+            raise ValidationBadRequestError(f"Unsupported {side} input for archive validation")
+
+        source_side = _resolve_side("source", source_path, source_object_name)
+        target_side = _resolve_side("target", target_path, target_object_name)
+
+        src_count, _, _ = profile_archive_entries(
+            source_side,
+            max_declared_bytes=self._settings.validation_archive_max_declared_bytes,
+            max_compression_ratio=self._settings.validation_archive_max_compression_ratio,
+            max_nest_depth=self._settings.validation_archive_max_nest_depth,
+            max_nested_member_bytes=self._settings.validation_archive_max_nested_member_bytes,
+        )
+        tgt_count, _, _ = profile_archive_entries(
+            target_side,
+            max_declared_bytes=self._settings.validation_archive_max_declared_bytes,
+            max_compression_ratio=self._settings.validation_archive_max_compression_ratio,
+            max_nest_depth=self._settings.validation_archive_max_nest_depth,
+            max_nested_member_bytes=self._settings.validation_archive_max_nested_member_bytes,
+        )
+        compared = list(("compressed_size", "uncompressed_size", "crc32", "compress_type"))
+
+        collection_policy = resolve_mismatch_collection_policy(
+            self._settings,
+            test_mode=test_mode,
+            mismatch_snippet_limit=mismatch_snippet_limit,
+            compare_column_count=len(compared),
+        )
+        if collection_policy.fail_on_row_count_mismatch and src_count != tgt_count:
+            return build_litmus_row_count_failure(
+                source_row_count=src_count,
+                target_row_count=tgt_count,
+                compared_columns=compared,
+            )
+
+        report = validate_archive_pair(
+            source_side,
+            target_side,
+            max_declared_bytes=self._settings.validation_archive_max_declared_bytes,
+            max_compression_ratio=self._settings.validation_archive_max_compression_ratio,
+            max_nest_depth=self._settings.validation_archive_max_nest_depth,
+            max_nested_member_bytes=self._settings.validation_archive_max_nested_member_bytes,
+        )
+
+        artifact_path = None
+        sample_frame = report.mismatches
+        if not report.mismatches.is_empty() and collection_policy.export_mismatch_artifact:
+            from pegasus.validation.comparators.models import MismatchType
+
+            mismatch_only = report.mismatches.filter(
+                pl.col("mismatch_type") != pl.lit(MismatchType.VALUE_MATCH.value)
+            )
+            match_only = report.mismatches.filter(
+                pl.col("mismatch_type") == pl.lit(MismatchType.VALUE_MATCH.value)
+            )
+            if mismatch_only.height > 0:
+                miss_df, ext_df, val_df = build_grouped_mismatch_samples(
+                    mismatch_only,
+                    0,
+                    value_per_column_limit=(
+                        collection_policy.value_per_column_cap
+                        if collection_policy.value_per_column_cap > 0
+                        else None
+                    ),
+                    presence_max_rows=(
+                        collection_policy.presence_snippet_cap
+                        if collection_policy.presence_snippet_cap > 0
+                        else None
+                    ),
+                )
+                parts = [df for df in (miss_df, ext_df, val_df) if df.height > 0]
+                sample_frame = pl.concat(parts, how="vertical") if parts else report.mismatches.slice(0, 0)
+            else:
+                sample_frame = match_only
+            if artifact_export_parent is not None and sample_frame.height > 0:
+                export_path = artifact_export_parent / "mismatches.ndjson"
+                export_path.parent.mkdir(parents=True, exist_ok=True)
+                sample_frame.write_ndjson(export_path)
+                artifact_path = export_path
+        elif test_mode == ValidationTestMode.LITMUS:
+            sample_frame = report.mismatches.slice(0, 0)
+
+        report = MismatchReport(mismatches=sample_frame, summary=report.summary, mismatch_artifact_path=artifact_path)
+
+        return finalize_litmus_run_result(
+            ValidationRunResult(
+                report=report,
+                source_row_count=src_count,
+                target_row_count=tgt_count,
+                compared_column_count=len(compared),
+                compared_columns=compared,
+                test_mode=test_mode.value,
+                mismatch_snippet_limit=(
+                    clamp_snippet_limit(self._settings, requested=mismatch_snippet_limit)
+                    if test_mode == ValidationTestMode.FULL
+                    else None
+                ),
+                mismatch_artifact_path=artifact_path,
+                pipeline_metadata={"path": "archive_compare"},
+            )
+        )
+
+    def profile_archive_adapter(
+        self,
+        adapter: FileDelimitedAdapter | GcsDelimitedAdapter | None,
+        *,
+        local_path: Path | None,
+        object_name: str,
+        gcs_uri: str,
+        file_format: str,
+    ) -> CloudFileProfileResponse:
+        from pegasus.validation.cloud_profile import build_archive_profile
+
+        return build_archive_profile(
+            local_path=local_path,
+            gcs_adapter=adapter if isinstance(adapter, GcsDelimitedAdapter) else None,
+            object_name=object_name,
+            gcs_uri=gcs_uri,
+            file_format=file_format,
+            settings=self._settings,
+        )
+
     def _validate_csv_pair_sync(
         self,
         source_path: Path,

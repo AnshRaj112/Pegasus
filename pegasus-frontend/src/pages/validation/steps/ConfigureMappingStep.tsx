@@ -21,7 +21,9 @@ import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { isFixedWidthFormat } from '../fixedWidthFormat';
 import { resolveWizardJsonMode } from '../jsonFormat';
+import { resolveWizardArchiveMode } from '../archiveFormat';
 import { FixedWidthLayoutPanel } from './FixedWidthLayoutPanel';
+import { ArchiveValidationStep } from './ArchiveValidationStep';
 import { JsonParentMappingStep } from './JsonParentMappingStep';
 
 const PAGE_SIZE = 10;
@@ -255,6 +257,13 @@ export const ConfigureMappingStep: React.FC = () => {
     sourceProfile: overviewCache?.source,
     targetProfile: overviewCache?.target,
   });
+  const isArchive = Boolean(resolveWizardArchiveMode({
+    detectedFileFormat: validationForm.detectedFileFormat,
+    sourceFileName: validationForm.sourceFileName,
+    targetFileName: validationForm.targetFileName,
+    sourceProfile: overviewCache?.source,
+    targetProfile: overviewCache?.target,
+  }));
 
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -282,7 +291,7 @@ export const ConfigureMappingStep: React.FC = () => {
   const [fixedWidthLoading, setFixedWidthLoading] = useState(false);
   const [fixedWidthError, setFixedWidthError] = useState<string | null>(null);
 
-  const loadingPreview = !isFixedWidth && !isJson && Boolean(
+  const loadingPreview = !isFixedWidth && !isJson && !isArchive && Boolean(
     validationForm.sourceCloud && validationForm.targetCloud && columnsMatrix.length === 0 && !previewError,
   );
 
@@ -355,7 +364,7 @@ export const ConfigureMappingStep: React.FC = () => {
   ]);
 
   useEffect(() => {
-    if (!validationForm.sourceCloud || !validationForm.targetCloud || isFixedWidth || isJson) return;
+    if (!validationForm.sourceCloud || !validationForm.targetCloud || isFixedWidth || isJson || isArchive) return;
     if (hydratedMappingsRef.current) return;
 
     if (validationForm.columnMappings.length > 0) {
@@ -471,7 +480,7 @@ export const ConfigureMappingStep: React.FC = () => {
       });
 
     return () => { cancelled = true; };
-  }, [validationForm.sourceCloud, validationForm.targetCloud, validationForm.uidColumn, validationForm.delimiter, validationForm.hasHeader, validationForm.columnMappings.length, dispatch, isFixedWidth, isJson]);
+  }, [validationForm.sourceCloud, validationForm.targetCloud, validationForm.uidColumn, validationForm.delimiter, validationForm.hasHeader, validationForm.columnMappings.length, dispatch, isFixedWidth, isJson, isArchive]);
 
   const handleFixedWidthChange = (columns: FixedWidthColumnPreview[]) => {
     dispatch(validationActions.setValidationForm({ fixedWidthColumns: columns }));
@@ -483,6 +492,10 @@ export const ConfigureMappingStep: React.FC = () => {
 
   if (isJson) {
     return <JsonParentMappingStep />;
+  }
+
+  if (isArchive) {
+    return <ArchiveValidationStep />;
   }
 
   if (isFixedWidth) {

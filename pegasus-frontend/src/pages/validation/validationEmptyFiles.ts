@@ -15,6 +15,10 @@ export function isValidationFileEmpty(
   profile: CloudFileProfileResponse | null,
   profileError: boolean,
 ): boolean {
+  if (profile?.dataset_model === 'container') {
+    if ((profile.archive_entry_count ?? profile.row_count ?? 0) > 0) return false;
+    if (profile.file_size_bytes > 0 && profile.archive_manifest_supported === false) return false;
+  }
   if (formSizeBytes === 0) return true;
   if (profile?.file_size_bytes === 0) return true;
   if (profile && profile.row_count === 0 && profile.column_count === 0) return true;
