@@ -60,6 +60,13 @@ const formatDate = (dateString?: string | null): string => {
   return new Date(dateString).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+const stripGcsUserPrefix = (value: string | null | undefined): string => {
+  const text = value?.trim();
+  if (!text) return '—';
+  const stripped = text.replace(/^user-/i, '');
+  return stripped || '—';
+};
+
 const toExplorerItem = (entry: CloudBrowseEntry): FileExplorerItem => ({
   id: entry.path,
   name: entry.name,
@@ -70,8 +77,8 @@ const toExplorerItem = (entry: CloudBrowseEntry): FileExplorerItem => ({
   createdAt: formatDate(entry.created_at),
   // ⚡ Added (entry as any) to bypass the TypeScript strict type check
   modifiedAt: formatDate(entry.updated_at || (entry as any).modified_at),
-  owner: entry.owner?.trim() || '—',
-  createdBy: entry.created_by?.trim() || '—',
+  owner: stripGcsUserPrefix(entry.owner),
+  createdBy: stripGcsUserPrefix(entry.created_by),
   // ⚡ Added (entry as any) here as well
   rawModifiedAt: new Date(entry.updated_at || (entry as any).modified_at || 0).getTime(),
 });
@@ -161,27 +168,23 @@ const BrowseSkeletonRows: React.FC<{ rows?: number }> = ({ rows = 8 }) => (
   </>
 );
 
-// ⚡ Custom component for long file names in the display cards
-const TruncatableName: React.FC<{ text: string }> = ({ text }) => {
-  const [expanded, setExpanded] = useState(false);
+const MAX_DISPLAY_NAME_LENGTH = 30;
+
+const truncateWithEllipsis = (text: string, maxLength = MAX_DISPLAY_NAME_LENGTH): string => {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+};
+
+const TruncatableName: React.FC<{ text: string; maxLength?: number; style?: React.CSSProperties }> = ({
+  text,
+  maxLength = MAX_DISPLAY_NAME_LENGTH,
+  style,
+}) => {
+  const display = truncateWithEllipsis(text, maxLength);
+  const isTruncated = display !== text;
   return (
-    <span
-      title={text}
-      onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
-      style={{
-        fontSize: '13px',
-        fontWeight: 600,
-        maxWidth: '180px',
-        display: 'inline-block',
-        whiteSpace: expanded ? 'normal' : 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        wordBreak: expanded ? 'break-all' : 'normal',
-        verticalAlign: 'bottom',
-        cursor: 'pointer'
-      }}
-    >
-      {text}
+    <span title={isTruncated ? text : undefined} style={style}>
+      {display}
     </span>
   );
 };
@@ -603,7 +606,10 @@ export const FileSelectionStep: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <CheckOutlined style={{ color: '#234B5F' }} />
                 {/* ⚡ Replaced plain name with truncatable component */}
-                <TruncatableName text={sourceFile.name} />
+                <TruncatableName
+                  text={sourceFile.name}
+                  style={{ fontSize: '13px', fontWeight: 600, maxWidth: '180px', display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                />
                 <button type="button" onClick={(e) => { e.stopPropagation(); setSourceFile(null); setSelectingFor('source'); }} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ba1a1a' }}><DeleteOutlined /></button>
               </div>
               <span style={{ fontSize: '11px', color: '#64748b', paddingLeft: '22px' }}>
@@ -618,7 +624,7 @@ export const FileSelectionStep: React.FC = () => {
           )}
         </div>
 
-        <ArrowRightOutlined style={{ fontSize: '24px', color: '#727786', alignSelf: 'center' }} />
+        <ArrowRightOutlined style={{ fontSize: '24px', color: '#727786', alignSelf: 'center', flexShrink: 0 }} />
 
         <div onClick={() => handleSelectingFor('target')} style={{ flex: 1, padding: '16px', borderRadius: '8px', border: selectingFor === 'target' ? '2px solid #234B5F' : '1px dashed #727786', cursor: 'pointer' }}>
           <span style={{ fontSize: '12px', fontWeight: 700, color: '#234B5F' }}>2. Target ({targetFile ? 1 : 0})</span>
@@ -627,7 +633,10 @@ export const FileSelectionStep: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <CheckOutlined style={{ color: '#234B5F' }} />
                 {/* ⚡ Replaced plain name with truncatable component */}
-                <TruncatableName text={targetFile.name} />
+                <TruncatableName
+                  text={targetFile.name}
+                  style={{ fontSize: '13px', fontWeight: 600, maxWidth: '180px', display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                />
                 <button type="button" onClick={(e) => { e.stopPropagation(); setTargetFile(null); setSelectingFor('target'); }} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ba1a1a' }}><DeleteOutlined /></button>
               </div>
               <span style={{ fontSize: '11px', color: '#64748b', paddingLeft: '22px' }}>
@@ -705,7 +714,9 @@ export const FileSelectionStep: React.FC = () => {
           <div style={{ padding: '16px', borderBottom: '1px solid #d9d9d9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontFamily: 'var(--font-mono)', color: '#64748b' }}>
               <FolderOpenOutlined />
-              <span>{breadcrumb}</span>
+              <span title={breadcrumb.length > MAX_DISPLAY_NAME_LENGTH ? breadcrumb : undefined}>
+                {truncateWithEllipsis(breadcrumb)}
+              </span>
               {isBrowsing && <SyncOutlined spin style={{ color: browsingForColor, fontSize: '14px' }} />}
               {parentPrefix != null && !isBrowsing && (
                 <button type="button" onClick={() => { cancelInFlightBrowse(); setActiveBrowse({ prefix: parentPrefix }); }} style={{ marginLeft: '8px', border: 'none', background: '#f0f0f0', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontSize: '12px' }}><ArrowUpOutlined /> Back</button>
@@ -720,14 +731,14 @@ export const FileSelectionStep: React.FC = () => {
             </div>
           </div>
 
-          <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
+          <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
             {browseError && <p style={{ padding: '16px', color: '#ba1a1a', fontSize: '13px' }}>{browseError}</p>}
-            <table style={{ width: '100%', borderCollapse: 'collapse', whiteSpace: 'nowrap' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
               <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', fontSize: '11px', textTransform: 'uppercase', color: '#727786' }}>
                 <tr>
                   <th style={{ padding: '12px', width: 40, borderBottom: '1px solid #d9d9d9' }} />
                   {/* ⚡ Added Sortable Column Headers */}
-                  <th onClick={() => handleSort('name')} style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9', cursor: 'pointer' }}>
+                  <th onClick={() => handleSort('name')} style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9', cursor: 'pointer', width: '32%' }}>
                     Name <SortIcon columnKey="name" />
                   </th>
                   <th onClick={() => handleSort('size')} style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9', cursor: 'pointer' }}>
@@ -762,12 +773,12 @@ export const FileSelectionStep: React.FC = () => {
                           onMouseLeave={(e) => { if (!isSelected && !isDisabledFile) e.currentTarget.style.backgroundColor = 'transparent'; }}
                         >
                           <td style={{ padding: '12px' }}>{file.type === 'file' && <input type="checkbox" readOnly checked={isSelected} disabled={isDisabledFile} />}</td>
-                          <td style={{ padding: '12px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1b1b1c', fontWeight: 500 }}>
-                              {file.type === 'folder' ? <FolderFilled style={{ color: '#faad14', fontSize: '16px' }} /> : <FileTextOutlined style={{ color: '#64748b', fontSize: '16px' }} />}
-                              {file.name}
-                              {isSource && <span style={{ fontSize: '10px', backgroundColor: '#234B5F', color: '#fff', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>SOURCE</span>}
-                              {isTarget && <span style={{ fontSize: '10px', backgroundColor: '#234B5F', color: '#fff', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>TARGET</span>}
+                          <td style={{ padding: '12px', overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1b1b1c', fontWeight: 500, minWidth: 0 }}>
+                              {file.type === 'folder' ? <FolderFilled style={{ color: '#faad14', fontSize: '16px', flexShrink: 0 }} /> : <FileTextOutlined style={{ color: '#64748b', fontSize: '16px', flexShrink: 0 }} />}
+                              <TruncatableName text={file.name} style={{ fontSize: 'inherit', fontWeight: 500 }} />
+                              {isSource && <span style={{ fontSize: '10px', backgroundColor: '#234B5F', color: '#fff', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, flexShrink: 0 }}>SOURCE</span>}
+                              {isTarget && <span style={{ fontSize: '10px', backgroundColor: '#234B5F', color: '#fff', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, flexShrink: 0 }}>TARGET</span>}
                             </div>
                           </td>
                           <td style={{ padding: '12px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#414755' }}>{file.size}</td>

@@ -106,18 +106,30 @@ def _blob_metadata(blob: object) -> dict[str, str]:
     return {str(k): str(v) for k, v in raw.items() if v is not None and str(v).strip()}
 
 
+def _normalize_gcs_identity(value: str | None) -> str | None:
+    """Strip GCS ACL entity prefix (e.g. user-email@domain → email@domain)."""
+    if not value:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.lower().startswith("user-"):
+        text = text[5:]
+    return text or None
+
+
 def _blob_owner(blob: object) -> str | None:
     owner = getattr(blob, "owner", None)
     if isinstance(owner, dict):
         entity = owner.get("entity") or owner.get("entityId")
         if entity:
-            return str(entity)
+            return _normalize_gcs_identity(str(entity))
     if owner:
-        return str(owner)
+        return _normalize_gcs_identity(str(owner))
     metadata = _blob_metadata(blob)
     for key in ("owner", "Owner"):
         if metadata.get(key):
-            return metadata[key]
+            return _normalize_gcs_identity(metadata[key])
     return None
 
 
@@ -125,7 +137,7 @@ def _blob_created_by(blob: object) -> str | None:
     metadata = _blob_metadata(blob)
     for key in ("created_by", "createdBy", "CreatedBy", "creator", "Creator"):
         if metadata.get(key):
-            return metadata[key]
+            return _normalize_gcs_identity(metadata[key])
     return None
 
 

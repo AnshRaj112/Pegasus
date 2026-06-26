@@ -79,7 +79,7 @@ def test_entry_from_blob_maps_metadata_fields() -> None:
     assert entry.size_bytes == 42
     assert entry.created_at == created.isoformat()
     assert entry.updated_at == updated.isoformat()
-    assert entry.owner == "user-123@example.com"
+    assert entry.owner == "123@example.com"
     assert entry.created_by == "etl-service"
 
 
@@ -88,3 +88,12 @@ def test_blob_owner_and_created_by_fallbacks() -> None:
     assert _blob_owner(blob) == "team-a"
     assert _blob_created_by(blob) == "alice"
     assert _dt_iso(None) is None
+
+
+def test_gcs_identity_strips_user_prefix() -> None:
+    blob = _FakeBlob(
+        owner={"entity": "user-deepak.k@onixnet.com"},
+        metadata={"created_by": "user-deepak.k@onixnet.com"},
+    )
+    assert _blob_owner(blob) == "deepak.k@onixnet.com"
+    assert _blob_created_by(blob) == "deepak.k@onixnet.com"
