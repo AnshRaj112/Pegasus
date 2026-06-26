@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T07:47:43Z
+# Last edited: 2026-06-26T15:08:55+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Safe archive pair validation — metadata manifest diff and streaming byte digest (no decompress)."""
