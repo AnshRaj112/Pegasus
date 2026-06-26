@@ -35,6 +35,7 @@ from pegasus.validation.test_mode_policy import (
     finalize_litmus_run_result,
     resolve_mismatch_collection_policy,
 )
+from pegasus.validation.adapters.file_columnar import FileColumnarAdapter
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
 from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter
 from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter, create_delimited_adapter
@@ -903,8 +904,8 @@ class ValidationService:
 
     def validate_columnar_pair_sync(
         self,
-        source_path: Path,
-        target_path: Path,
+        source: Path | FileColumnarAdapter | GcsColumnarAdapter,
+        target: Path | FileColumnarAdapter | GcsColumnarAdapter,
         uid_column: str,
         file_format: str,
         *,
@@ -913,8 +914,8 @@ class ValidationService:
         test_mode: ValidationTestMode = ValidationTestMode.FULL,
         mismatch_snippet_limit: int | None = None,
     ) -> ValidationRunResult:
-        src_adapter = FileColumnarAdapter(source_path, file_format=file_format)
-        tgt_adapter = FileColumnarAdapter(target_path, file_format=file_format)
+        src_adapter = self._coerce_columnar_adapter(source, file_format=file_format)
+        tgt_adapter = self._coerce_columnar_adapter(target, file_format=file_format)
         schema = src_adapter.get_schema()
         identity_columns = parse_identity_columns(uid_column) or [uid_column.strip()]
         compare_columns = [c for c in schema.column_names if c not in identity_columns]
@@ -933,9 +934,11 @@ class ValidationService:
                     target_row_count=target_count,
                     compared_columns=compare_columns,
                 )
+        source_bytes = self._columnar_adapter_size_bytes(src_adapter)
+        target_bytes = self._columnar_adapter_size_bytes(tgt_adapter)
         cfg = self._pipeline_config(
-            source_bytes=source_path.stat().st_size,
-            target_bytes=target_path.stat().st_size,
+            source_bytes=source_bytes,
+            target_bytes=target_bytes,
             compare_column_count=len(compare_columns),
             identity_column_count=len(identity_columns),
             resource_policy=resource_policy,
@@ -954,11 +957,13 @@ class ValidationService:
         )
         result = pipeline.run(workspace=workspace)
         if artifact_export_parent is not None:
+            source_label = str(getattr(src_adapter, "gcs_uri", None) or src_adapter.path)
+            target_label = str(getattr(tgt_adapter, "gcs_uri", None) or tgt_adapter.path)
             write_validation_results(
                 artifact_export_parent / "VALIDATION_RESULTS.md",
                 result,
-                source_label=str(source_path),
-                target_label=str(target_path),
+                source_label=source_label,
+                target_label=target_label,
             )
         run_result = pipeline_result_to_run_result(result)
         run_result.test_mode = test_mode.value
@@ -968,6 +973,23 @@ class ValidationService:
             else None
         )
         return finalize_litmus_run_result(run_result)
+
+    @staticmethod
+    def _coerce_columnar_adapter(
+        source: Path | FileColumnarAdapter | GcsColumnarAdapter,
+        *,
+        file_format: str,
+    ) -> FileColumnarAdapter | GcsColumnarAdapter:
+        if isinstance(source, (FileColumnarAdapter, GcsColumnarAdapter)):
+            return source
+        return FileColumnarAdapter(Path(source), file_format=file_format)
+
+    @staticmethod
+    def _columnar_adapter_size_bytes(adapter: FileColumnarAdapter | GcsColumnarAdapter) -> int:
+        getter = getattr(adapter, "get_size_bytes", None)
+        if callable(getter):
+            return int(getter())
+        return int(adapter.path.stat().st_size)
 
     def preview_local_column_headers(
         self,

@@ -448,6 +448,57 @@ def _load_gcs_delimited_frame(
     return frame
 
 
+def _load_columnar_path_frame(
+    path: Path,
+    *,
+    file_format: str,
+    identity_columns: list[str] | None = None,
+    compare_columns: list[str] | None = None,
+    physical_columns: list[str] | None = None,
+) -> pl.DataFrame:
+    fmt = (file_format or "parquet").lower().strip().lstrip(".")
+    if fmt in ("parquet", "pq"):
+        frame = table_to_polars(read_parquet_table(path))
+    elif fmt == "orc":
+        frame = table_to_polars(read_orc_table(path))
+    elif fmt in ("excel", "xlsx", "xls"):
+        frame = pl.read_excel(path)
+    else:
+        frame = table_to_polars(read_parquet_table(path))
+    if identity_columns is not None and compare_columns is not None:
+        return _project_columns(
+            frame,
+            identity_columns=identity_columns,
+            compare_columns=compare_columns,
+            physical_columns=physical_columns,
+        )
+    return frame
+
+
+def _load_gcs_columnar_frame(
+    adapter: object,
+    *,
+    identity_columns: list[str] | None = None,
+    compare_columns: list[str] | None = None,
+    physical_columns: list[str] | None = None,
+) -> pl.DataFrame:
+    from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter
+
+    if not isinstance(adapter, GcsColumnarAdapter):
+        raise TypeError("expected GcsColumnarAdapter")
+
+    adapter._materialize()
+    if adapter._local_path is None:
+        raise ValueError(f"Could not materialize GCS columnar object {adapter.gcs_uri}")
+    return _load_columnar_path_frame(
+        adapter._local_path,
+        file_format=adapter.file_format,
+        identity_columns=identity_columns,
+        compare_columns=compare_columns,
+        physical_columns=physical_columns,
+    )
+
+
 def _load_frame(
     adapter: TabularSourceAdapter,
     *,
@@ -471,15 +522,51 @@ def _load_frame(
             compare_columns=compare_columns,
             physical_columns=physical_columns,
         )
+    if adapter_type == "GcsColumnarAdapter":
+        return _load_gcs_columnar_frame(
+            adapter,
+            identity_columns=identity_columns,
+            compare_columns=compare_columns,
+            physical_columns=physical_columns,
+        )
+
+    from pegasus.validation.adapters.file_columnar import FileColumnarAdapter
+
+    if isinstance(adapter, FileColumnarAdapter):
+        return _load_columnar_path_frame(
+            adapter.path,
+            file_format=adapter._file_format,
+            identity_columns=identity_columns,
+            compare_columns=compare_columns,
+            physical_columns=physical_columns,
+        )
 
     path = Path(adapter.path)
     fmt = getattr(adapter, "_file_format", "parquet")
     if fmt in ("parquet", "pq"):
-        return table_to_polars(read_parquet_table(path))
+        return _load_columnar_path_frame(
+            path,
+            file_format=fmt,
+            identity_columns=identity_columns,
+            compare_columns=compare_columns,
+            physical_columns=physical_columns,
+        )
     if fmt == "orc":
-        return table_to_polars(read_orc_table(path))
+        return _load_columnar_path_frame(
+            path,
+            file_format=fmt,
+            identity_columns=identity_columns,
+            compare_columns=compare_columns,
+            physical_columns=physical_columns,
+        )
     if fmt in ("excel", "xlsx", "xls"):
-        return pl.read_excel(path)
+        return _load_columnar_path_frame(
+            path,
+            file_format=fmt,
+            identity_columns=identity_columns,
+            compare_columns=compare_columns,
+            physical_columns=physical_columns,
+        )
     return None
 
 

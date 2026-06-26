@@ -17,8 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pegasus.core.config import Settings
 from pegasus.core.local_paths import resolve_local_path_on_disk, to_display_path
 from pegasus.schemas.validation import GoogleCloudStorageConfig
+from pegasus.validation.adapters.file_columnar import FileColumnarAdapter
 from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter, create_columnar_adapter
 from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter, create_delimited_adapter
+from pegasus.validation.file_format import normalize_file_format
 from pegasus.validation.cloud_credentials import load_cloud_connection_or_404
 from pegasus.repositories.cloud_connection_repository import CloudConnectionRepository
 from pegasus.validation.gcs_object import GcsObjectRef, gcs_object_ref_from_config, parse_gs_uri
@@ -28,6 +31,13 @@ from pegasus.validation.local_browse import require_local_path_access
 @dataclass(slots=True)
 class ResolvedDelimitedInput:
     adapter: FileDelimitedAdapter | GcsDelimitedAdapter
+    display_name: str
+    is_cloud: bool
+
+
+@dataclass(slots=True)
+class ResolvedColumnarInput:
+    adapter: FileColumnarAdapter | GcsColumnarAdapter
     display_name: str
     is_cloud: bool
 
@@ -193,6 +203,82 @@ def resolve_delimited_input(
         display_name=Path(to_display_path(resolved, settings)).name or resolved.name,
         is_cloud=False,
     )
+
+
+def resolve_columnar_input(
+    *,
+    settings: Settings,
+    label: str,
+    path: str | None,
+    cloud: GoogleCloudStorageConfig | None,
+    file_format: str,
+) -> ResolvedColumnarInput:
+    """Return a columnar adapter for a local path or GCS object."""
+    fmt = normalize_file_format(file_format)
+    if cloud is not None:
+        try:
+            ref = gcs_object_ref_from_config(cloud)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        adapter = create_columnar_adapter(path=None, ref=ref, file_format=fmt)
+        return ResolvedColumnarInput(adapter=adapter, display_name=ref.uri, is_cloud=True)
+
+    if path is None or not path.strip():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"{label.capitalize()} path or cloud reference is required",
+        )
+    require_local_path_access(settings)
+    resolved = resolve_local_path_on_disk(path, settings, must_be_file=True)
+    adapter = create_columnar_adapter(path=resolved, ref=None, file_format=fmt)
+    return ResolvedColumnarInput(
+        adapter=adapter,
+        display_name=Path(to_display_path(resolved, settings)).name or resolved.name,
+        is_cloud=False,
+    )
+
+
+def columnar_input_from_meta(
+    meta: dict[str, object],
+    *,
+    side: str,
+    file_format: str,
+) -> ResolvedColumnarInput | None:
+    fmt = normalize_file_format(file_format)
+    cloud_raw = meta.get(f"{side}_cloud")
+    path_raw = meta.get(f"{side}_path")
+    if isinstance(cloud_raw, dict):
+        from pegasus.validation.gcs_object import gcs_object_ref_from_meta
+
+        ref = gcs_object_ref_from_meta(cloud_raw)
+        adapter = create_columnar_adapter(path=None, ref=ref, file_format=fmt)
+        return ResolvedColumnarInput(adapter=adapter, display_name=ref.uri, is_cloud=True)
+    if path_raw:
+        path_str = str(path_raw).strip()
+        parsed = parse_gs_uri(path_str)
+        if parsed is not None:
+            bucket, object_name = parsed
+            if bucket and object_name:
+                creds_raw = meta.get(f"{side}_cloud_credentials_json") or meta.get("credentials_json")
+                if isinstance(creds_raw, str) and creds_raw.strip():
+                    ref = gcs_object_ref_from_meta(
+                        {
+                            "bucket": bucket,
+                            "object_name": object_name,
+                            "credentials_json": creds_raw,
+                            "project_id": meta.get("project_id"),
+                        }
+                    )
+                else:
+                    raise ValueError(
+                        f"Job metadata has GCS path {path_str!r} but no {side}_cloud credentials"
+                    )
+                adapter = create_columnar_adapter(path=None, ref=ref, file_format=fmt)
+                return ResolvedColumnarInput(adapter=adapter, display_name=ref.uri, is_cloud=True)
+        path = Path(path_str).resolve()
+        adapter = create_columnar_adapter(path=path, ref=None, file_format=fmt)
+        return ResolvedColumnarInput(adapter=adapter, display_name=path.name, is_cloud=False)
+    return None
 
 
 def delimited_input_from_meta(

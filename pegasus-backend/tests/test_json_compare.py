@@ -16,6 +16,7 @@ from pegasus.validation.json_compare import compare_json_documents, validate_jso
 
 REPO = Path(__file__).resolve().parents[2]
 FIXTURES = REPO / "test-data" / "json-compare"
+GENERATED_FIXTURES = REPO / "test-data" / "generated-test-json"
 
 
 class TestJsonOrderSensitivity:
@@ -81,5 +82,41 @@ class TestJsonFixtures:
         )
         assert total >= 3
         rows = report.mismatches.to_dicts()
+        paths = {r["column_name"] for r in rows}
+        assert "success" in paths
+
+
+@pytest.mark.skipif(not GENERATED_FIXTURES.is_dir(), reason="fixtures missing")
+class TestGeneratedTestJson:
+    """Scalable JSON pair from scripts/generate_json_file.py (500 records, 51 injected mismatches)."""
+
+    def test_order_sensitive_reports_position_and_value_mismatches(self) -> None:
+        report = validate_json_pair(
+            GENERATED_FIXTURES / "source.json",
+            GENERATED_FIXTURES / "target.json",
+            order_sensitive=True,
+        )
+        rows = report.mismatches.to_dicts()
+        assert report.summary.get(MismatchType.MISSING_IN_TARGET.value, 0) == 0
+        assert report.summary.get(MismatchType.EXTRA_IN_TARGET.value, 0) == 0
+        # Reversed errors array + mutated fields surface as per-index value mismatches.
+        assert len(rows) == 1001
+        assert report.summary.get(MismatchType.VALUE_MISMATCH.value, 0) == 1
+        assert all(r["mismatch_type"] == MismatchType.VALUE_MISMATCH.value for r in rows)
+        paths = {r["column_name"] for r in rows}
+        assert "success" in paths
+
+    @pytest.mark.performance
+    def test_order_insensitive_allows_list_reorder_but_finds_mutations(self) -> None:
+        report = validate_json_pair(
+            GENERATED_FIXTURES / "source.json",
+            GENERATED_FIXTURES / "target.json",
+            order_sensitive=False,
+        )
+        rows = report.mismatches.to_dicts()
+        assert report.summary.get(MismatchType.MISSING_IN_TARGET.value, 0) == 25
+        assert report.summary.get(MismatchType.EXTRA_IN_TARGET.value, 0) == 25
+        assert report.summary.get(MismatchType.VALUE_MISMATCH.value, 0) == 1
+        assert len(rows) == 51
         paths = {r["column_name"] for r in rows}
         assert "success" in paths

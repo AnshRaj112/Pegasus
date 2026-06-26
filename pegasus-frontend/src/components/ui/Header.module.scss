@@ -23,11 +23,11 @@
   /* Thick red line spanning the full bottom of the header */
   border-bottom: 2px solid var(--color-onyx-red-deep);
   
-  /* Restored to sticky positioning */
-  position: sticky; 
+  position: sticky;
   top: 0;
   width: 100%;
   height: 52px;
+  flex-shrink: 0;
   z-index: 1000;
   box-sizing: border-box;
 }

@@ -95,6 +95,22 @@ def resolve_cloud_pair_file_format(
 
     src_ref = gcs_object_ref_from_config(source_cloud)
     tgt_ref = gcs_object_ref_from_config(target_cloud)
+
+    src_ext = infer_file_format_from_path(Path(src_ref.object_name), "auto")
+    tgt_ext = infer_file_format_from_path(Path(tgt_ref.object_name), "auto")
+    if src_ext != tgt_ext:
+        raise ValueError("Source and target must use the same file format")
+    if is_columnar_format(src_ext):
+        return src_ext
+
+    src_columnar = resolve_gcs_columnar_format(src_ref)
+    tgt_columnar = resolve_gcs_columnar_format(tgt_ref)
+    if src_columnar or tgt_columnar:
+        if src_columnar != tgt_columnar:
+            raise ValueError("Source and target must both be columnar or both be delimited text files")
+        if src_columnar:
+            return src_columnar
+
     src_json = resolve_gcs_json_format(src_ref)
     tgt_json = resolve_gcs_json_format(tgt_ref)
     if src_json or tgt_json:
@@ -102,10 +118,6 @@ def resolve_cloud_pair_file_format(
             raise ValueError("Source and target must both be JSON documents")
         return "json"
 
-    src_ext = infer_file_format_from_path(Path(src_ref.object_name), "auto")
-    tgt_ext = infer_file_format_from_path(Path(tgt_ref.object_name), "auto")
-    if src_ext != tgt_ext:
-        raise ValueError("Source and target must use the same file format")
     if src_ext == "json":
         return "json"
     return "csv"

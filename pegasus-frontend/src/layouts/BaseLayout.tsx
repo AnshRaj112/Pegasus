@@ -16,7 +16,6 @@ export const BaseLayout: React.FC<BaseLayoutProps> = ({ children }) => {
       minHeight: '100%',
       display: 'flex',
       flexDirection: 'column',
-      overflowX: 'hidden' // ⚡ FIX: Safety catch to ensure no rogue children cause scrolling
     }}>
       {/* Dynamic persistent header layer */}
       <Header />
@@ -32,7 +31,9 @@ export const BaseLayout: React.FC<BaseLayoutProps> = ({ children }) => {
         display: 'flex',
         flexDirection: 'column',
         gap: 'var(--lg)',
-        boxSizing: 'border-box' // ⚡ FIX: Forces padding to stay inside the 100% width
+        boxSizing: 'border-box',
+        minWidth: 0,
+        overflowX: 'hidden',
       }}>
         {children}
       </main>

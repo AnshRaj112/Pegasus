@@ -53,6 +53,34 @@ const formatValue = (value: unknown): string => {
   return String(value);
 };
 
+const parseJsonValue = (raw: string | null): unknown => {
+  if (raw == null || raw === '—') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return raw;
+  }
+};
+
+const formatFieldValue = (value: unknown): string => {
+  if (value == null) return '—';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (Array.isArray(value)) return `[${value.length}]`;
+  if (typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>);
+    if (keys.length === 0) return '{}';
+    if (keys.length <= 2) {
+      return keys
+        .map((k) => `${k} ${formatFieldValue((value as Record<string, unknown>)[k])}`)
+        .join('  ');
+    }
+    return `{${keys.length}}`;
+  }
+  return String(value);
+};
+
 const splitPath = (path: string): string[] => {
   if (!path || path === '$') return [];
   const tokens: string[] = [];
@@ -62,6 +90,61 @@ const splitPath = (path: string): string[] => {
     tokens.push(match[1] ?? `[${match[2]}]`);
   }
   return tokens;
+};
+
+const leafKey = (jsonPath: string): string => {
+  const tokens = splitPath(jsonPath);
+  return tokens.length ? tokens[tokens.length - 1]! : '$';
+};
+
+type AlignedField = {
+  key: string;
+  source: string | null;
+  target: string | null;
+  highlight: boolean;
+};
+
+const objectFieldsForSide = (
+  row: JsonIssueRow,
+  side: 'source' | 'target',
+): Record<string, unknown> | null => {
+  const value = parseJsonValue(side === 'source' ? row.sourceValue : row.targetValue);
+  const parent = side === 'source' ? row.sourceParent : row.targetParent;
+  const isRoot = !row.parentPath || row.parentPath === '$';
+  const leaf = leafKey(row.jsonPath);
+
+  if (value != null && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (value != null && isRoot) {
+    return { [leaf]: value };
+  }
+  if (value != null && parent != null && typeof parent === 'object' && !Array.isArray(parent)) {
+    return parent as Record<string, unknown>;
+  }
+  return null;
+};
+
+const buildAlignedFieldRows = (row: JsonIssueRow): AlignedField[] => {
+  const srcObj = objectFieldsForSide(row, 'source');
+  const tgtObj = objectFieldsForSide(row, 'target');
+  const keys: string[] = [];
+  const addKeys = (obj: Record<string, unknown> | null) => {
+    if (!obj) return;
+    for (const k of Object.keys(obj)) {
+      if (!keys.includes(k)) keys.push(k);
+    }
+  };
+  addKeys(srcObj);
+  addKeys(tgtObj);
+  if (!keys.length) return [];
+
+  return keys.map((key) => {
+    const source = srcObj ? formatFieldValue(srcObj[key]) : null;
+    const target = tgtObj ? formatFieldValue(tgtObj[key]) : null;
+    const highlight = source !== target;
+    return { key, source, target, highlight };
+  });
 };
 
 const buildJsonIssues = (items: MismatchSampleRow[]): JsonIssueRow[] => {
@@ -89,16 +172,34 @@ const buildJsonIssues = (items: MismatchSampleRow[]): JsonIssueRow[] => {
   return rows;
 };
 
-const SiblingEllipsis: React.FC<{
+const PathContext: React.FC<{ path: string }> = ({ path }) => {
+  const tokens = splitPath(path);
+  if (!tokens.length) {
+    return <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#94a3b8' }}>$</span>;
+  }
+  return (
+    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#94a3b8' }}>
+      {tokens.join(' → ')}
+    </span>
+  );
+};
+
+const SiblingHint: React.FC<{
   keys: Array<string | number>;
   siblings: unknown[];
   side: 'source' | 'target';
 }> = ({ keys, siblings, side }) => {
-  if (!siblings.length) return null;
+  if (siblings.length <= 1) return null;
   const tooltip = siblings
     .map((value, idx) => {
       const key = keys[idx] ?? idx;
-      return `${key}: ${formatValue(value)}`;
+      if (value != null && typeof value === 'object' && !Array.isArray(value)) {
+        const fields = Object.entries(value as Record<string, unknown>)
+          .map(([k, v]) => `${k} ${formatFieldValue(v)}`)
+          .join('  ');
+        return `${key}: ${fields}`;
+      }
+      return `${key}: ${formatFieldValue(value)}`;
     })
     .join('\n');
 
@@ -106,100 +207,128 @@ const SiblingEllipsis: React.FC<{
     <span
       title={tooltip}
       style={{
+        fontSize: '11px',
         color: '#64748b',
         cursor: 'help',
         borderBottom: '1px dotted #94a3b8',
-        fontFamily: 'var(--font-mono)',
-        fontSize: '12px',
-        padding: '0 2px',
       }}
     >
-      … ({siblings.length} in {side})
+      … {siblings.length} items in {side}
     </span>
   );
 };
 
-const PathBreadcrumb: React.FC<{
-  path: string;
-  highlightLeaf?: boolean;
-  kind?: JsonIssueKind;
-}> = ({ path, highlightLeaf = false, kind }) => {
-  const tokens = splitPath(path);
-  if (!tokens.length) {
-    return <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#64748b' }}>$</span>;
-  }
+const FieldLine: React.FC<{
+  fieldKey: string;
+  value: string | null;
+  highlight: boolean;
+  absent?: boolean;
+}> = ({ fieldKey, value, highlight, absent = false }) => (
+  <div style={{
+    display: 'grid',
+    gridTemplateColumns: '72px 1fr',
+    gap: '12px',
+    padding: '5px 10px',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '12px',
+    lineHeight: 1.5,
+    backgroundColor: highlight ? '#fee2e2' : absent ? '#fff7ed' : 'transparent',
+    color: highlight ? '#991b1b' : absent ? '#c2410c' : '#1b1b1c',
+    fontWeight: highlight ? 600 : 400,
+    borderRadius: '4px',
+  }}
+  >
+    <span style={{ color: highlight ? '#991b1b' : '#64748b' }}>{fieldKey}</span>
+    <span>{value ?? '—'}</span>
+  </div>
+);
 
-  const leafStyle: React.CSSProperties = highlightLeaf
-    ? {
-      color: kind === 'value_mismatch' ? '#991b1b' : '#c2410c',
-      fontWeight: 700,
-      backgroundColor: kind === 'value_mismatch' ? '#fee2e2' : '#fff7ed',
-      padding: '1px 4px',
-      borderRadius: '4px',
-    }
-    : { color: '#1b1b1c', fontWeight: 600 };
-
-  return (
-    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', display: 'inline-flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
-      {tokens.map((token, idx) => (
-        <React.Fragment key={`${token}-${idx}`}>
-          {idx > 0 && <span style={{ color: '#94a3b8' }}>→</span>}
-          <span style={idx === tokens.length - 1 && highlightLeaf ? leafStyle : { color: '#414755' }}>
-            {token}
-          </span>
-        </React.Fragment>
-      ))}
-    </span>
-  );
-};
-
-const ParentContextLine: React.FC<{
-  row: JsonIssueRow;
-  side: 'source' | 'target';
-}> = ({ row, side }) => {
-  const parent = side === 'source' ? row.sourceParent : row.targetParent;
-  const siblingKeys = side === 'source' ? row.sourceSiblingKeys : row.targetSiblingKeys;
-  const siblings = side === 'source' ? row.sourceSiblings : row.targetSiblings;
-  const hasParent = parent != null;
-  const parentLabel = row.parentPath && row.parentPath !== '$' ? row.parentPath : '$';
+const JsonIssuePair: React.FC<{ row: JsonIssueRow }> = ({ row }) => {
+  const fields = buildAlignedFieldRows(row);
+  const siblingKeys = row.sourceSiblingKeys.length >= row.targetSiblingKeys.length
+    ? row.sourceSiblingKeys
+    : row.targetSiblingKeys;
+  const siblings = row.sourceSiblings.length >= row.targetSiblings.length
+    ? row.sourceSiblings
+    : row.targetSiblings;
+  const sourceAbsent = row.kind === 'extra_in_target';
+  const targetAbsent = row.kind === 'missing_in_target';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        <PathBreadcrumb path={parentLabel} />
-        {siblings.length > 1 && (
-          <>
-            <span style={{ color: '#94a3b8' }}>→</span>
-            <SiblingEllipsis keys={siblingKeys} siblings={siblings} side={side} />
-          </>
-        )}
-        <span style={{ color: '#94a3b8' }}>→</span>
-        <PathBreadcrumb path={row.jsonPath} highlightLeaf kind={row.kind} />
+    <div style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid #f1f5f9' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+        <span style={{ fontSize: '11px', color: '#64748b' }}>
+          UID: <span style={{ fontFamily: 'var(--font-mono)', color: '#1b1b1c' }}>{row.uid}</span>
+        </span>
+        <span style={{ color: '#cbd5e1' }}>|</span>
+        <PathContext path={row.jsonPath} />
+        <SiblingHint keys={siblingKeys} siblings={siblings} side="source" />
       </div>
-      {hasParent && (
-        <pre style={{
-          margin: 0,
-          padding: '10px 12px',
+
+      {fields.length === 0 ? (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{
+            padding: '10px 12px',
+            borderRadius: '6px',
+            border: '1px solid #fed7aa',
+            backgroundColor: sourceAbsent ? '#fff7ed' : '#f8fafc',
+            fontSize: '12px',
+            fontFamily: 'var(--font-mono)',
+            color: '#94a3b8',
+            fontStyle: 'italic',
+          }}
+          >
+            {sourceAbsent ? 'not present' : formatValue(row.sourceValue)}
+          </div>
+          <div style={{
+            padding: '10px 12px',
+            borderRadius: '6px',
+            border: '1px solid #fed7aa',
+            backgroundColor: targetAbsent ? '#fff7ed' : '#f8fafc',
+            fontSize: '12px',
+            fontFamily: 'var(--font-mono)',
+            color: '#94a3b8',
+            fontStyle: 'italic',
+          }}
+          >
+            {targetAbsent ? 'not present' : formatValue(row.targetValue)}
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: '12px',
           backgroundColor: '#f8fafc',
           borderRadius: '6px',
           border: '1px solid #e2e8f0',
-          fontSize: '12px',
-          fontFamily: 'var(--font-mono)',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          maxHeight: '160px',
-          overflow: 'auto',
+          padding: '6px 4px',
         }}
         >
-          {JSON.stringify(parent, null, 2)}
-        </pre>
+          <div>
+            {fields.map(({ key, source, highlight }) => (
+              <FieldLine
+                key={`src-${key}`}
+                fieldKey={key}
+                value={sourceAbsent ? null : source}
+                highlight={highlight}
+                absent={sourceAbsent}
+              />
+            ))}
+          </div>
+          <div>
+            {fields.map(({ key, target, highlight }) => (
+              <FieldLine
+                key={`tgt-${key}`}
+                fieldKey={key}
+                value={targetAbsent ? null : target}
+                highlight={highlight}
+                absent={targetAbsent}
+              />
+            ))}
+          </div>
+        </div>
       )}
-      <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
-        <span style={{ color: '#64748b' }}>At path: </span>
-        <strong style={{ color: side === 'source' ? '#1e293b' : '#414755' }}>
-          {side === 'source' ? (row.sourceValue ?? '—') : (row.targetValue ?? '—')}
-        </strong>
-      </div>
     </div>
   );
 };
@@ -287,52 +416,34 @@ export const JsonSnippetComparison: React.FC = () => {
       </div>
 
       <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', fontSize: '11px', color: '#64748b', flexWrap: 'wrap' }}>
-        <span><span style={{ color: '#991b1b', fontWeight: 600 }}>Red path</span> = value mismatch</span>
-        <span><span style={{ color: '#c2410c', fontWeight: 600 }}>Orange path</span> = missing / extra node</span>
-        <span>Hover <span style={{ fontFamily: 'var(--font-mono)' }}>…</span> to see sibling keys/items under the parent</span>
+        <span><span style={{ color: '#991b1b', fontWeight: 600 }}>Red row</span> = field value differs</span>
+        <span><span style={{ color: '#c2410c', fontWeight: 600 }}>Orange</span> = missing / extra node</span>
+        <span>Each field is shown on its own line, source aligned with target</span>
       </div>
 
-      <div style={{ display: 'flex', gap: '24px', flex: 1, minHeight: '400px', overflow: 'hidden' }}>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden', minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden', minHeight: '400px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
           <div style={{ backgroundColor: '#1e293b', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#fff' }}>
             <DatabaseOutlined /> <span style={{ fontSize: '14px', fontWeight: 600 }}>Source &gt; {sourceLabel}</span>
           </div>
-          <div style={{ overflow: 'auto', flex: 1, padding: '12px' }}>
-            {isLoading ? (
-              Array.from({ length: SKELETON_ROWS }, (_, i) => <div key={i} style={{ marginBottom: '12px' }}><SkeletonBlock /></div>)
-            ) : pageRows.length === 0 ? (
-              <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No JSON mismatches for this run.</div>
-            ) : pageRows.map((row) => (
-              <div key={`src-${row.uid}-${row.jsonPath}`} style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid #f1f5f9' }}>
-                <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '6px' }}>UID: <span style={{ fontFamily: 'var(--font-mono)', color: '#1b1b1c' }}>{row.uid}</span></div>
-                <ParentContextLine row={row} side="source" />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden', minWidth: 0 }}>
           <div style={{ backgroundColor: '#e2e8f0', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#1b1b1c' }}>
             <DatabaseOutlined /> <span style={{ fontSize: '14px', fontWeight: 600 }}>Target &gt; {targetLabel}</span>
           </div>
-          <div style={{ overflow: 'auto', flex: 1, padding: '12px' }}>
-            {isLoading ? (
-              Array.from({ length: SKELETON_ROWS }, (_, i) => <div key={i} style={{ marginBottom: '12px' }}><SkeletonBlock /></div>)
-            ) : pageRows.length === 0 ? (
-              <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No JSON mismatches for this run.</div>
-            ) : pageRows.map((row) => (
-              <div key={`tgt-${row.uid}-${row.jsonPath}`} style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid #f1f5f9' }}>
-                <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '6px' }}>UID: <span style={{ fontFamily: 'var(--font-mono)', color: '#1b1b1c' }}>{row.uid}</span></div>
-                <ParentContextLine row={row} side="target" />
-              </div>
-            ))}
-          </div>
+        </div>
+        <div style={{ overflow: 'auto', flex: 1, padding: '12px 16px' }}>
+          {isLoading ? (
+            Array.from({ length: SKELETON_ROWS }, (_, i) => <div key={i} style={{ marginBottom: '12px' }}><SkeletonBlock /></div>)
+          ) : pageRows.length === 0 ? (
+            <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No JSON mismatches for this run.</div>
+          ) : pageRows.map((row) => (
+            <JsonIssuePair key={`${row.uid}-${row.jsonPath}`} row={row} />
+          ))}
         </div>
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0', borderTop: '1px solid #e2e8f0', marginTop: '16px' }}>
         <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>
-          Parent path → … (hover) → mismatch path. Siblings under the parent are collapsed until hovered.
+          Each field on its own row — source on the left, target on the right, aligned one-to-one.
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#64748b' }}>

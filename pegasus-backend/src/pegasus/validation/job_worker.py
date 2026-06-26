@@ -201,15 +201,19 @@ def _maybe_enrich_mismatch_artifact(
         return
     from pegasus.validation.pipeline.mismatch_export import enrich_mismatch_ndjson_from_lookups
 
-    src_lookup, tgt_lookup = _build_mismatch_lookups(
-        src,
-        tgt,
-        identity_columns=identity_columns,
-        compare_columns=compare_columns,
-        delimiter=delimiter,
-        has_header=has_header,
-        header_leading_rows=header_leading_rows,
-    )
+    try:
+        src_lookup, tgt_lookup = _build_mismatch_lookups(
+            src,
+            tgt,
+            identity_columns=identity_columns,
+            compare_columns=compare_columns,
+            delimiter=delimiter,
+            has_header=has_header,
+            header_leading_rows=header_leading_rows,
+        )
+    except (OSError, ValueError, TypeError) as exc:
+        logger.warning("Skipping mismatch artifact enrichment: %s", exc)
+        return
     updated = enrich_mismatch_ndjson_from_lookups(
         artifact,
         compare_columns=compare_columns,
@@ -305,22 +309,32 @@ def run_job_directory(job_dir: Path) -> int:
     )
     file_format = str(meta.get("file_format") or "csv").lower()
 
-    from pegasus.validation.cloud_input import delimited_input_from_meta
+    from pegasus.validation.cloud_input import (
+        ResolvedColumnarInput,
+        ResolvedDelimitedInput,
+        columnar_input_from_meta,
+        delimited_input_from_meta,
+    )
+    from pegasus.validation.file_format import is_columnar_format
 
-    source_input = delimited_input_from_meta(
-        meta,
-        side="source",
-        delimiter=delimiter,
-        has_header=has_header,
-        skip_rows=header_leading_rows,
-    )
-    target_input = delimited_input_from_meta(
-        meta,
-        side="target",
-        delimiter=delimiter,
-        has_header=has_header,
-        skip_rows=header_leading_rows,
-    )
+    if is_columnar_format(file_format):
+        source_input = columnar_input_from_meta(meta, side="source", file_format=file_format)
+        target_input = columnar_input_from_meta(meta, side="target", file_format=file_format)
+    else:
+        source_input = delimited_input_from_meta(
+            meta,
+            side="source",
+            delimiter=delimiter,
+            has_header=has_header,
+            skip_rows=header_leading_rows,
+        )
+        target_input = delimited_input_from_meta(
+            meta,
+            side="target",
+            delimiter=delimiter,
+            has_header=has_header,
+            skip_rows=header_leading_rows,
+        )
     uses_cloud = bool(meta.get("source_cloud") or meta.get("target_cloud"))
 
     if source_input is None or target_input is None:
@@ -938,6 +952,13 @@ def _run_job_body(
             logger.debug("Could not write resource profile artifacts on failure", exc_info=True)
         raise exc
     finally:
+        if file_format in _COLUMNAR_FORMATS:
+            from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter
+
+            if isinstance(src, GcsColumnarAdapter):
+                src.cleanup()
+            if isinstance(tgt, GcsColumnarAdapter):
+                tgt.cleanup()
         if uses_cloud:
             from pegasus.validation.gcs_stream import clear_gcs_stream_sessions
 

@@ -67,6 +67,23 @@ def test_resolve_cloud_pair_file_format_declared_json() -> None:
     assert resolve_cloud_pair_file_format(source, target, declared="json") == "json"
 
 
+def test_resolve_cloud_pair_file_format_parquet_extension() -> None:
+    from pegasus.schemas.validation import GoogleCloudStorageConfig
+    from pegasus.validation.cloud_profile import resolve_cloud_pair_file_format
+
+    source = GoogleCloudStorageConfig(
+        bucket="b",
+        object_name="case2_src.parquet",
+        credentials_json='{"type":"service_account"}',
+    )
+    target = GoogleCloudStorageConfig(
+        bucket="b",
+        object_name="case2_tgt.parquet",
+        credentials_json='{"type":"service_account"}',
+    )
+    assert resolve_cloud_pair_file_format(source, target, declared="auto") == "parquet"
+
+
 def test_count_adapter_rows_from_local_file(tmp_path: Path) -> None:
     csv_path = tmp_path / "sample.csv"
     csv_path.write_text("id,name\n1,alice\n2,bob\n", encoding="utf-8")

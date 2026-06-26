@@ -66,11 +66,13 @@ from pegasus.services.job_size_estimate import enrich_meta_file_sizes
 from pegasus.services.validation_job_queue import get_validation_queue
 from pegasus.validation.cloud_credentials import resolve_gcs_auth
 from pegasus.validation.cloud_input import (
+    ResolvedColumnarInput,
     ResolvedDelimitedInput,
     coerce_cloud_storage_reference,
     delimited_input_from_meta,
     ensure_resolved_cloud_config,
     resolve_cloud_config_with_saved_connection,
+    resolve_columnar_input,
     resolve_delimited_input,
 )
 from pegasus.validation.cloud_profile import resolve_gcs_columnar_format, resolve_gcs_json_format
@@ -814,38 +816,12 @@ async def validate_csv_local_paths(
     if target_path is None and target_cloud is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="target_path or target_cloud is required")
 
-    source_input: ResolvedDelimitedInput | None = None
-    target_input: ResolvedDelimitedInput | None = None
+    source_input: ResolvedDelimitedInput | ResolvedColumnarInput | None = None
+    target_input: ResolvedDelimitedInput | ResolvedColumnarInput | None = None
     if source_cloud is not None or target_cloud is not None:
-        from pegasus.validation.file_format import is_columnar_format
-
-        normalized = normalize_file_format(body.file_format)
-        if is_columnar_format(normalized):
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                detail="Cloud streaming validation currently supports delimited CSV/TSV inputs only",
-            )
-        source_input = resolve_delimited_input(
-            settings=settings,
-            label="source",
-            path=source_path,
-            cloud=source_cloud,
-            delimiter=body.delimiter,
-            has_header=body.has_header,
-            skip_rows=body.header_leading_rows,
-        )
-        target_input = resolve_delimited_input(
-            settings=settings,
-            label="target",
-            path=target_path,
-            cloud=target_cloud,
-            delimiter=body.delimiter,
-            has_header=body.has_header,
-            skip_rows=body.header_leading_rows,
-        )
-        resolved_source = source_input.adapter.path
-        resolved_target = target_input.adapter.path
+        from pegasus.validation.cloud_input import ResolvedColumnarInput, resolve_columnar_input
         from pegasus.validation.cloud_profile import resolve_cloud_pair_file_format
+        from pegasus.validation.file_format import is_columnar_format
 
         try:
             file_format = resolve_cloud_pair_file_format(
@@ -860,6 +836,42 @@ async def validate_csv_local_paths(
                 status.HTTP_400_BAD_REQUEST,
                 detail="Use POST /validate/local/fixed-width-layout for fixed-width files",
             )
+        if is_columnar_format(file_format):
+            source_input = resolve_columnar_input(
+                settings=settings,
+                label="source",
+                path=source_path,
+                cloud=source_cloud,
+                file_format=file_format,
+            )
+            target_input = resolve_columnar_input(
+                settings=settings,
+                label="target",
+                path=target_path,
+                cloud=target_cloud,
+                file_format=file_format,
+            )
+        else:
+            source_input = resolve_delimited_input(
+                settings=settings,
+                label="source",
+                path=source_path,
+                cloud=source_cloud,
+                delimiter=body.delimiter,
+                has_header=body.has_header,
+                skip_rows=body.header_leading_rows,
+            )
+            target_input = resolve_delimited_input(
+                settings=settings,
+                label="target",
+                path=target_path,
+                cloud=target_cloud,
+                delimiter=body.delimiter,
+                has_header=body.has_header,
+                skip_rows=body.header_leading_rows,
+            )
+        resolved_source = source_input.adapter.path
+        resolved_target = target_input.adapter.path
     else:
         require_local_path_access(settings)
         resolved_source = resolve_local_path_on_disk(source_path, settings, must_be_file=True)

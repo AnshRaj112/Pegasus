@@ -147,9 +147,10 @@ def _compare_schemas(source: TabularSchema, target: TabularSchema) -> list[Schem
 
 
 def _adapter_uses_gcs(adapter: TabularSourceAdapter) -> bool:
+    from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter
     from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
 
-    return isinstance(adapter, GcsDelimitedAdapter)
+    return isinstance(adapter, (GcsDelimitedAdapter, GcsColumnarAdapter))
 
 
 def _delimiter_supports_fast_load(adapter: TabularSourceAdapter) -> bool:
@@ -526,6 +527,8 @@ class TabularReconciliationPipeline:
             and tgt_merkle is not None
             and src_rows == tgt_rows
             and src_rows > 0
+            and src_merkle.row_count == src_rows
+            and tgt_merkle.row_count == tgt_rows
             and src_merkle.identical_to(tgt_merkle, active_pids)
         ):
             timings.total_seconds = time.perf_counter() - t0
