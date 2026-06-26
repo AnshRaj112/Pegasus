@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T12:00:00Z
+# Last edited: 2026-06-26T16:47:12+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Detect and materialize tabular leaf members inside nested archives."""
