@@ -4,6 +4,7 @@ import {
   GoogleCloudStorageConfig,
   ValidateRequest,
   ValidationHistoryDetail,
+  type CloudFileProfileResponse,
 } from '../../shared/api/Api';
 import { Api } from '../../shared/api/Api';
 import { ValidationFormState } from './Validation.interface';
@@ -11,7 +12,7 @@ import { gcsUri } from '../report/reportPairId';
 import { fixedWidthConfigFromColumns } from './fixedWidthConfig';
 import { isFixedWidthFormat } from './fixedWidthFormat';
 import { isJsonFormat } from './jsonFormat';
-import { resolveWizardArchiveMode } from './archiveFormat';
+import { archiveUsesTabularValidation, resolveWizardArchiveMode } from './archiveFormat';
 
 export const parseGsUri = (uri: string): GoogleCloudStorageConfig | null => {
   const trimmed = uri.trim();
@@ -98,6 +99,10 @@ export const formFromHistory = (detail: ValidationHistoryDetail): Partial<Valida
 export const validateRequestFromForm = (
   form: ValidationFormState,
   pathOverride?: { source_path?: string | null; target_path?: string | null },
+  options?: {
+    sourceProfile?: CloudFileProfileResponse | null;
+    targetProfile?: CloudFileProfileResponse | null;
+  },
 ): ValidateRequest => {
   const isFixedWidth = isFixedWidthFormat(form.detectedFileFormat);
   const isJson = isJsonFormat(form.detectedFileFormat);
@@ -105,7 +110,16 @@ export const validateRequestFromForm = (
     detectedFileFormat: form.detectedFileFormat,
     sourceFileName: form.sourceFileName,
     targetFileName: form.targetFileName,
+    sourceProfile: options?.sourceProfile ?? null,
+    targetProfile: options?.targetProfile ?? null,
   });
+  const archiveTabular = archiveUsesTabularValidation({
+    detectedFileFormat: form.detectedFileFormat,
+    sourceFileName: form.sourceFileName,
+    targetFileName: form.targetFileName,
+    sourceProfile: options?.sourceProfile ?? null,
+    targetProfile: options?.targetProfile ?? null,
+  }) || (Boolean(archiveKind) && form.columnMappings.length > 0);
   const uidColumn = isFixedWidth && form.fixedWidthColumns.length > 0
     ? (form.uidColumn || form.fixedWidthColumns[0]?.field_name || 'record_id')
     : isJson
@@ -133,7 +147,7 @@ export const validateRequestFromForm = (
     ...(archiveKind
       ? {
         file_format: archiveKind,
-        column_mappings: [],
+        column_mappings: archiveTabular ? form.columnMappings : [],
       }
       : {}),
   };

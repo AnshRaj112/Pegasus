@@ -338,6 +338,9 @@ def refresh_run_result_for_persist(
     for job_dir in job_dirs:
         if not job_dir.is_dir():
             continue
+        result_path = job_dir / "result.json"
+        if not result_path.is_file():
+            continue
         try:
             fresh, _, meta = run_result_from_job_dir(job_dir)
         except (OSError, ValueError, TypeError):

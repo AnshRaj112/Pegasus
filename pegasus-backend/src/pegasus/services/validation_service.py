@@ -691,8 +691,15 @@ class ValidationService:
         mismatch_snippet_limit: int | None = None,
         source_object_name: str = "",
         target_object_name: str = "",
+        uid_column: str = "id",
+        delimiter: str = "auto",
+        column_mappings: list[ColumnMapping] | None = None,
+        has_header: bool = True,
+        header_leading_rows: int = 0,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        resource_policy: dict[str, Any] | None = None,
     ) -> ValidationRunResult:
-        """Compare two ZIP/TAR archives without decompressing member payloads."""
+        """Compare archives; when a nested tabular leaf exists, validate CSV rows/columns."""
         from pegasus.api.v1.mismatch_sample import build_grouped_mismatch_samples
         from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
         from pegasus.validation.archive_compare import (
@@ -725,20 +732,111 @@ class ValidationService:
         source_side = _resolve_side("source", source_path, source_object_name)
         target_side = _resolve_side("target", target_path, target_object_name)
 
-        src_count, _, _ = profile_archive_entries(
+        src_count, src_sample, _ = profile_archive_entries(
             source_side,
             max_declared_bytes=self._settings.validation_archive_max_declared_bytes,
             max_compression_ratio=self._settings.validation_archive_max_compression_ratio,
             max_nest_depth=self._settings.validation_archive_max_nest_depth,
             max_nested_member_bytes=self._settings.validation_archive_max_nested_member_bytes,
         )
-        tgt_count, _, _ = profile_archive_entries(
+        tgt_count, tgt_sample, _ = profile_archive_entries(
             target_side,
             max_declared_bytes=self._settings.validation_archive_max_declared_bytes,
             max_compression_ratio=self._settings.validation_archive_max_compression_ratio,
             max_nest_depth=self._settings.validation_archive_max_nest_depth,
             max_nested_member_bytes=self._settings.validation_archive_max_nested_member_bytes,
         )
+
+        from pegasus.validation.archive_leaf import (
+            archive_sample_has_tabular_leaf,
+            cleanup_work_dir,
+            materialize_archive_tabular_leaf,
+            materialize_gcs_archive_tabular_leaf,
+        )
+
+        if archive_sample_has_tabular_leaf(src_sample) and archive_sample_has_tabular_leaf(tgt_sample):
+            import tempfile
+
+            owns_work_dir = artifact_export_parent is None
+            if artifact_export_parent is not None:
+                work_dir = artifact_export_parent / "archive_leaf"
+                work_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                work_dir = Path(tempfile.mkdtemp(prefix="pegasus-archive-leaf-"))
+            try:
+                if source_side.local_path is not None:
+                    src_leaf = materialize_archive_tabular_leaf(
+                        source_side.local_path,
+                        settings=self._settings,
+                        work_dir=work_dir / "source",
+                    )
+                else:
+                    src_leaf = materialize_gcs_archive_tabular_leaf(
+                        source_side.gcs_ref,
+                        settings=self._settings,
+                        work_dir=work_dir / "source",
+                    )
+                if target_side.local_path is not None:
+                    tgt_leaf = materialize_archive_tabular_leaf(
+                        target_side.local_path,
+                        settings=self._settings,
+                        work_dir=work_dir / "target",
+                    )
+                else:
+                    tgt_leaf = materialize_gcs_archive_tabular_leaf(
+                        target_side.gcs_ref,
+                        settings=self._settings,
+                        work_dir=work_dir / "target",
+                    )
+            except (OSError, ValueError, TypeError) as exc:
+                if owns_work_dir:
+                    cleanup_work_dir(work_dir)
+                raise ValidationBadRequestError(
+                    f"Could not extract tabular leaf from archive pair: {exc}"
+                ) from exc
+
+            try:
+                result = self._validate_csv_pair_sync(
+                    src_leaf,
+                    tgt_leaf,
+                    uid_column,
+                    delimiter,
+                    column_mappings,
+                    artifact_export_parent=artifact_export_parent,
+                    progress_callback=progress_callback,
+                    has_header=has_header,
+                    header_leading_rows=header_leading_rows,
+                    file_format="csv",
+                    resource_policy=resource_policy,
+                    test_mode=test_mode,
+                    mismatch_snippet_limit=mismatch_snippet_limit,
+                )
+            finally:
+                if owns_work_dir:
+                    cleanup_work_dir(work_dir)
+
+            pipeline_meta = dict(result.pipeline_metadata or {})
+            pipeline_meta.update(
+                {
+                    "path": "archive_tabular_leaf",
+                    "source_leaf": str(src_sample[0]) if src_sample else None,
+                    "target_leaf": str(tgt_sample[0]) if tgt_sample else None,
+                    "source_leaf_local": str(src_leaf.resolve()),
+                    "target_leaf_local": str(tgt_leaf.resolve()),
+                }
+            )
+            return ValidationRunResult(
+                report=result.report,
+                source_row_count=result.source_row_count,
+                target_row_count=result.target_row_count,
+                compared_column_count=result.compared_column_count,
+                compared_columns=result.compared_columns,
+                test_mode=result.test_mode,
+                mismatch_snippet_limit=result.mismatch_snippet_limit,
+                mismatch_artifact_path=result.mismatch_artifact_path,
+                pipeline_metadata=pipeline_meta,
+            )
+
         compared = list(("compressed_size", "uncompressed_size", "crc32", "compress_type"))
 
         collection_policy = resolve_mismatch_collection_policy(
@@ -829,16 +927,78 @@ class ValidationService:
         object_name: str,
         gcs_uri: str,
         file_format: str,
+        delimiter: str = "auto",
+        has_header: bool = True,
     ) -> CloudFileProfileResponse:
-        from pegasus.validation.cloud_profile import build_archive_profile
+        import tempfile
 
-        return build_archive_profile(
+        from pegasus.validation.archive_leaf import (
+            archive_sample_has_tabular_leaf,
+            cleanup_work_dir,
+            materialize_archive_tabular_leaf,
+            materialize_gcs_archive_tabular_leaf,
+        )
+        from pegasus.validation.cloud_profile import build_archive_profile
+        from pegasus.validation.csv_header import infer_csv_has_header
+
+        profile = build_archive_profile(
             local_path=local_path,
             gcs_adapter=adapter if isinstance(adapter, GcsDelimitedAdapter) else None,
             object_name=object_name,
             gcs_uri=gcs_uri,
             file_format=file_format,
             settings=self._settings,
+        )
+        if not archive_sample_has_tabular_leaf(profile.archive_entries_sample):
+            return profile
+
+        work_dir = Path(tempfile.mkdtemp(prefix="pegasus-archive-profile-"))
+        try:
+            if local_path is not None:
+                leaf_path = materialize_archive_tabular_leaf(
+                    local_path,
+                    settings=self._settings,
+                    work_dir=work_dir / "leaf",
+                )
+            elif isinstance(adapter, GcsDelimitedAdapter):
+                leaf_path = materialize_gcs_archive_tabular_leaf(
+                    adapter,
+                    settings=self._settings,
+                    work_dir=work_dir / "leaf",
+                )
+            else:
+                return profile
+
+            probe = FileDelimitedAdapter(leaf_path, delimiter=",", has_header=True)
+            resolved_delimiter = self._resolve_delimiter_for_inputs(delimiter, probe, probe)
+            inferred_header = infer_csv_has_header(leaf_path, resolved_delimiter)
+            leaf_adapter = FileDelimitedAdapter(
+                leaf_path,
+                delimiter=resolved_delimiter,
+                has_header=inferred_header,
+            )
+            from pegasus.validation.row_count import _count_physical_lines
+
+            leaf_profile = self.profile_delimited_adapter(
+                leaf_adapter,
+                object_name=object_name,
+                gcs_uri=gcs_uri,
+                delimiter=resolved_delimiter,
+                has_header=inferred_header,
+            )
+            overview_row_count = _count_physical_lines(leaf_adapter)
+        except (OSError, ValueError, TypeError):
+            return profile
+        finally:
+            cleanup_work_dir(work_dir)
+
+        return profile.model_copy(
+            update={
+                "column_count": leaf_profile.column_count,
+                "row_count": overview_row_count,
+                "delimiter": leaf_profile.delimiter,
+                "has_header": leaf_profile.has_header,
+            }
         )
 
     def _validate_csv_pair_sync(

@@ -7,7 +7,7 @@ type Props = {
   style?: React.CSSProperties;
 };
 
-/** Renders `tar → … → csv`; hovering `…` shows the middle path (e.g. `tar → zip`). */
+/** Renders `TAR → TAR → ZIP → Delimited file`, or `TAR → … → Delimited file` when 5+ layers. */
 export const FormatDetectionChainLabel: React.FC<Props> = ({ format, style }) => {
   const { short, middle } = formatDetectionChainDisplay(format);
 
@@ -15,22 +15,9 @@ export const FormatDetectionChainLabel: React.FC<Props> = ({ format, style }) =>
     return <span style={style}>{short}</span>;
   }
 
-  const parts = short.split('…');
-  if (parts.length !== 2) {
-    return (
-      <Tooltip title={middle}>
-        <span style={style}>{short}</span>
-      </Tooltip>
-    );
-  }
-
   return (
     <Tooltip title={middle}>
-      <span style={style}>
-        {parts[0]}
-        <span style={{ cursor: 'help', textDecoration: 'underline dotted', textUnderlineOffset: '3px' }}>…</span>
-        {parts[1]}
-      </span>
+      <span style={style}>{short}</span>
     </Tooltip>
   );
 };

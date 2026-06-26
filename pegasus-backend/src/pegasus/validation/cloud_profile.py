@@ -20,6 +20,8 @@ from pegasus.validation.file_detection import detect_file
 from pegasus.validation.file_detection.display_label import (
     build_format_display_label,
     format_display_label_from_archive_members,
+    infer_format_chain_from_object_name,
+    _pick_richest_format_label,
 )
 from pegasus.validation.file_detection.types import FileDetectionReport
 from pegasus.validation.file_format import (
@@ -164,11 +166,13 @@ def build_archive_profile(
         outer=fmt,
         object_name=object_name,
     )
-    display_label = nested_label or format_display_label(
+    path_hint = infer_format_chain_from_object_name(object_name, outer=fmt)
+    fallback_label = format_display_label(
         report,
         object_name=object_name,
         path=detect_path,
     )
+    display_label = _pick_richest_format_label([nested_label, path_hint, fallback_label]) or fallback_label
 
     return CloudFileProfileResponse(
         object_name=object_name,

@@ -374,16 +374,78 @@ def format_display_label_from_archive_members(
 ) -> str | None:
     """Render a nested archive display label from expanded manifest member paths."""
     candidates = [path for path in member_paths if path and not path.endswith("/")]
-    if not candidates:
-        inner = _inner_suffix_chain_from_filename(object_name, skip_outer=outer)
-        if inner:
-            return " -> ".join([outer, *inner])
+    labels: list[str | None] = []
+    if candidates:
+        best = max(candidates, key=lambda path: (path.count("/"), len(path)))
+        chain = format_chain_from_archive_member_path(best, outer=outer)
+        if len(chain) >= 2:
+            labels.append(" -> ".join(chain))
+    path_hint = infer_format_chain_from_object_name(object_name, outer=outer)
+    if path_hint:
+        labels.append(path_hint)
+    return _pick_richest_format_label(labels)
+
+
+def infer_format_chain_from_object_name(object_name: str, *, outer: str | None = None) -> str | None:
+    """Infer ``tar -> tar -> zip -> csv`` from folder names like ``*_tar_containing_zip_containing_csv_file``."""
+    normalized = object_name.replace("\\", "/").strip("/")
+    if not normalized:
         return None
-    best = max(candidates, key=lambda path: (path.count("/"), len(path)))
-    chain = format_chain_from_archive_member_path(best, outer=outer)
-    if len(chain) < 2:
-        return None
-    return " -> ".join(chain)
+    for segment in reversed(normalized.split("/")):
+        chain = _chain_from_containing_segment(segment)
+        if len(chain) < 2:
+            continue
+        if outer and chain[0] != outer:
+            chain = [outer, *chain]
+        return " -> ".join(chain)
+    return None
+
+
+def _chain_from_containing_segment(name: str) -> list[str]:
+    """Parse ``generated_tar_containing_tar_containing_zip_containing_csv_file``."""
+    lower = Path(name).name.lower()
+    if "_containing_" not in lower:
+        return []
+    chain: list[str] = []
+    for token in lower.split("_containing_"):
+        token = token.removesuffix("_file").strip("_")
+        if not token:
+            continue
+        kind = _kind_token_from_containing_piece(token)
+        if kind:
+            chain.append(kind)
+    return chain
+
+
+def _kind_token_from_containing_piece(token: str) -> str | None:
+    if token.endswith("tar") or token == "tar":
+        return "tar"
+    if "zip" in token:
+        return "zip"
+    if any(token.endswith(leaf) or token == leaf for leaf in ("csv", "tsv", "psv", "json", "parquet")):
+        return token.rsplit("_", 1)[-1] if "_" in token else token
+    if token in {"csv", "tsv", "psv", "json", "parquet", "orc", "avro", "txt", "dat"}:
+        return token
+    return None
+
+
+def _format_label_depth(label: str | None) -> int:
+    if not label:
+        return 0
+    return label.count("->") + 1
+
+
+def _pick_richest_format_label(labels: list[str | None]) -> str | None:
+    best: str | None = None
+    best_depth = 0
+    for label in labels:
+        if not label:
+            continue
+        depth = _format_label_depth(label)
+        if depth > best_depth:
+            best = label
+            best_depth = depth
+    return best
 
 
 def _chain_from_entry_names(names: list[str]) -> list[str]:

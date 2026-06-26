@@ -149,6 +149,16 @@ def test_display_label_from_nested_archive_member_path() -> None:
     assert label == "tar -> tar -> zip -> csv"
 
 
+def test_infer_format_chain_from_case12_folder_name() -> None:
+    from pegasus.validation.file_detection.display_label import infer_format_chain_from_object_name
+
+    path = (
+        "test-data/Test_Files/generated_tar_containing_tar_containing_zip_containing_csv_file/"
+        "case12_src.tar"
+    )
+    assert infer_format_chain_from_object_name(path, outer="tar") == "tar -> tar -> zip -> csv"
+
+
 def test_display_label_from_object_name_when_archive_not_readable(tmp_path: Path) -> None:
     from pegasus.validation.file_detection.types import FileDetectionReport
     from pegasus.validation.file_detection.layers import container as container_layer
