@@ -1,0 +1,111 @@
+// @use '~/styles/token.css' as vars;
+
+.testContainer {
+  background-color: #ffffff;
+}
+
+.headerTitle {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #191c1e;
+}
+
+.tabs {
+  border-bottom: 1px solid #e0e3e5;
+}
+
+.tabBtn {
+  background: none;
+  border: none;
+  padding-bottom: 0.75rem;
+  font-weight: 500;
+  color: #41484c;
+  margin-right: 2rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &--active {
+    color: #191c1e;
+    font-weight: 600;
+    border-bottom: 2px solid #053447;
+  }
+
+  &:hover:not(.tabBtn--active) {
+    color: #053447;
+  }
+}
+
+.searchInput {
+  border-radius: 4px;
+  width: 250px;
+}
+
+.listRow {
+  border-bottom: 1px solid #e0e3e5;
+  padding: 1rem 1.5rem;
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background-color: #f8f9fb;
+  }
+}
+
+/* Pelican specific badges */
+.statusBadge {
+  border: 1px solid #72787d;
+  color: #191c1e;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+
+  &--pass {
+    border-color: #2e7d32;
+    color: #2e7d32;
+    background-color: #edf7ed;
+  }
+
+  &--fail {
+    border-color: #d32f2f;
+    color: #d32f2f;
+    background-color: #ffebee;
+  }
+
+  &--incoherent {
+    border-color: #d32f2f;
+    color: #d32f2f;
+    background-color: #ffebee;
+  }
+}
+
+.typeIcon {
+  border: 1px solid #72787d;
+  color: #2e7d32;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 2px;
+  margin-left: 4px;
+
+  &--red {
+    color: #d32f2f;
+  }
+}
+
+.snippetBtn {
+  border: 1px solid #41484c;
+  background: white;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  color: #191c1e;
+  cursor: pointer;
+
+  &:hover {
+    background-color: #f2f4f6;
+  }
+}
+
+.endedBlock {
+  min-width: 80px;
+}
