@@ -104,30 +104,86 @@ type AlignedField = {
   highlight: boolean;
 };
 
-const objectFieldsForSide = (
-  row: JsonIssueRow,
-  side: 'source' | 'target',
-): Record<string, unknown> | null => {
-  const value = parseJsonValue(side === 'source' ? row.sourceValue : row.targetValue);
-  const parent = side === 'source' ? row.sourceParent : row.targetParent;
-  const isRoot = !row.parentPath || row.parentPath === '$';
-  const leaf = leafKey(row.jsonPath);
+const IDENTITY_KEYS = ['field', 'id', 'key', 'name', 'uid'] as const;
 
+const objectFromRaw = (raw: string | null): Record<string, unknown> | null => {
+  const value = parseJsonValue(raw);
   if (value != null && typeof value === 'object' && !Array.isArray(value)) {
     return value as Record<string, unknown>;
   }
-  if (value != null && isRoot) {
-    return { [leaf]: value };
+  return null;
+};
+
+const findIdentityKey = (obj: Record<string, unknown>): string | null => {
+  for (const key of IDENTITY_KEYS) {
+    if (obj[key] != null && String(obj[key]) !== '') return key;
   }
-  if (value != null && parent != null && typeof parent === 'object' && !Array.isArray(parent)) {
+  return null;
+};
+
+const dictParent = (parent: unknown): Record<string, unknown> | null => {
+  if (parent != null && typeof parent === 'object' && !Array.isArray(parent)) {
     return parent as Record<string, unknown>;
   }
   return null;
 };
 
-const buildAlignedFieldRows = (row: JsonIssueRow): AlignedField[] => {
-  const srcObj = objectFieldsForSide(row, 'source');
-  const tgtObj = objectFieldsForSide(row, 'target');
+const resolveSideObject = (
+  row: JsonIssueRow,
+  side: 'source' | 'target',
+): Record<string, unknown> | null => {
+  const rawValue = side === 'source' ? row.sourceValue : row.targetValue;
+  const fromValue = objectFromRaw(rawValue);
+  if (fromValue) return fromValue;
+
+  const isRoot = !row.parentPath || row.parentPath === '$';
+  const leaf = leafKey(row.jsonPath);
+  const scalar = parseJsonValue(rawValue);
+  const parent = dictParent(side === 'source' ? row.sourceParent : row.targetParent);
+
+  if (scalar != null && (typeof scalar !== 'object' || Array.isArray(scalar))) {
+    if (isRoot) return { [leaf]: scalar };
+    if (parent) return parent;
+    return { [leaf]: scalar };
+  }
+
+  if (parent) return parent;
+  return null;
+};
+
+const findCounterpartInSiblings = (
+  row: JsonIssueRow,
+  fromSide: 'source' | 'target',
+  selfObj: Record<string, unknown>,
+): Record<string, unknown> | null => {
+  const toSide = fromSide === 'source' ? 'target' : 'source';
+  const siblings = toSide === 'source' ? row.sourceSiblings : row.targetSiblings;
+  if (!Array.isArray(siblings)) return null;
+
+  const idKey = findIdentityKey(selfObj);
+  if (!idKey) return null;
+  const idVal = String(selfObj[idKey]);
+  for (const sibling of siblings) {
+    if (sibling == null || typeof sibling !== 'object' || Array.isArray(sibling)) continue;
+    const candidate = sibling as Record<string, unknown>;
+    if (String(candidate[idKey]) === idVal) return candidate;
+  }
+  return null;
+};
+
+type AlignedResult = {
+  fields: AlignedField[];
+  hasSource: boolean;
+  hasTarget: boolean;
+};
+
+const buildAlignedFieldRows = (row: JsonIssueRow): AlignedResult => {
+  let srcObj = resolveSideObject(row, 'source');
+  let tgtObj = resolveSideObject(row, 'target');
+
+  if (srcObj && !tgtObj) tgtObj = findCounterpartInSiblings(row, 'source', srcObj);
+  if (tgtObj && !srcObj) srcObj = findCounterpartInSiblings(row, 'target', tgtObj);
+
   const keys: string[] = [];
   const addKeys = (obj: Record<string, unknown> | null) => {
     if (!obj) return;
@@ -137,14 +193,69 @@ const buildAlignedFieldRows = (row: JsonIssueRow): AlignedField[] => {
   };
   addKeys(srcObj);
   addKeys(tgtObj);
-  if (!keys.length) return [];
 
-  return keys.map((key) => {
+  if (!keys.length) return { fields: [], hasSource: false, hasTarget: false };
+
+  const fields = keys.map((key) => {
     const source = srcObj ? formatFieldValue(srcObj[key]) : null;
     const target = tgtObj ? formatFieldValue(tgtObj[key]) : null;
     const highlight = source !== target;
     return { key, source, target, highlight };
   });
+
+  return {
+    fields,
+    hasSource: srcObj != null,
+    hasTarget: tgtObj != null,
+  };
+};
+
+const rowIdentityKey = (row: JsonIssueRow): string | null => {
+  const obj = objectFromRaw(row.sourceValue) ?? objectFromRaw(row.targetValue);
+  if (!obj) return null;
+  const idKey = findIdentityKey(obj);
+  if (!idKey) return null;
+  return `${row.uid}::${row.parentPath}::${idKey}=${String(obj[idKey])}`;
+};
+
+const mergePairedIssues = (rows: JsonIssueRow[]): JsonIssueRow[] => {
+  const pending = new Map<string, JsonIssueRow>();
+  const merged: JsonIssueRow[] = [];
+
+  for (const row of rows) {
+    const identity = rowIdentityKey(row);
+    if (!identity || (row.kind !== 'missing_in_target' && row.kind !== 'extra_in_target')) {
+      merged.push(row);
+      continue;
+    }
+
+    const existing = pending.get(identity);
+    if (!existing) {
+      pending.set(identity, row);
+      continue;
+    }
+
+    const missing = existing.kind === 'missing_in_target' ? existing : row;
+    const extra = existing.kind === 'extra_in_target' ? existing : row;
+    merged.push({
+      uid: missing.uid,
+      kind: 'value_mismatch',
+      jsonPath: missing.jsonPath,
+      parentPath: missing.parentPath,
+      sourceValue: missing.sourceValue ?? extra.sourceValue,
+      targetValue: extra.targetValue ?? missing.targetValue,
+      sourceParent: missing.sourceParent ?? extra.sourceParent,
+      targetParent: missing.targetParent ?? extra.targetParent,
+      sourceSiblingKeys: missing.sourceSiblingKeys.length ? missing.sourceSiblingKeys : extra.sourceSiblingKeys,
+      targetSiblingKeys: missing.targetSiblingKeys.length ? missing.targetSiblingKeys : extra.targetSiblingKeys,
+      sourceSiblings: missing.sourceSiblings.length ? missing.sourceSiblings : extra.sourceSiblings,
+      targetSiblings: missing.targetSiblings.length ? missing.targetSiblings : extra.targetSiblings,
+    });
+    pending.delete(identity);
+  }
+
+  merged.push(...pending.values());
+  return merged;
 };
 
 const buildJsonIssues = (items: MismatchSampleRow[]): JsonIssueRow[] => {
@@ -169,7 +280,7 @@ const buildJsonIssues = (items: MismatchSampleRow[]): JsonIssueRow[] => {
       targetSiblings: Array.isArray(detail?.target_siblings) ? detail!.target_siblings as unknown[] : [],
     });
   }
-  return rows;
+  return mergePairedIssues(rows);
 };
 
 const PathContext: React.FC<{ path: string }> = ({ path }) => {
@@ -243,16 +354,28 @@ const FieldLine: React.FC<{
   </div>
 );
 
+const kindLabel: Record<JsonIssueKind, string> = {
+  value_mismatch: 'mismatch',
+  missing_in_target: 'missing in target',
+  extra_in_target: 'extra in target',
+};
+
+const kindColor: Record<JsonIssueKind, string> = {
+  value_mismatch: '#991b1b',
+  missing_in_target: '#c2410c',
+  extra_in_target: '#c2410c',
+};
+
 const JsonIssuePair: React.FC<{ row: JsonIssueRow }> = ({ row }) => {
-  const fields = buildAlignedFieldRows(row);
+  const { fields, hasSource, hasTarget } = buildAlignedFieldRows(row);
   const siblingKeys = row.sourceSiblingKeys.length >= row.targetSiblingKeys.length
     ? row.sourceSiblingKeys
     : row.targetSiblingKeys;
   const siblings = row.sourceSiblings.length >= row.targetSiblings.length
     ? row.sourceSiblings
     : row.targetSiblings;
-  const sourceAbsent = row.kind === 'extra_in_target';
-  const targetAbsent = row.kind === 'missing_in_target';
+  const sourceAbsent = !hasSource;
+  const targetAbsent = !hasTarget;
 
   return (
     <div style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid #f1f5f9' }}>
@@ -262,6 +385,19 @@ const JsonIssuePair: React.FC<{ row: JsonIssueRow }> = ({ row }) => {
         </span>
         <span style={{ color: '#cbd5e1' }}>|</span>
         <PathContext path={row.jsonPath} />
+        <span style={{
+          fontSize: '10px',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.04em',
+          color: kindColor[row.kind],
+          backgroundColor: row.kind === 'value_mismatch' ? '#fee2e2' : '#fff7ed',
+          padding: '2px 6px',
+          borderRadius: '4px',
+        }}
+        >
+          {kindLabel[row.kind]}
+        </span>
         <SiblingHint keys={siblingKeys} siblings={siblings} side="source" />
       </div>
 
