@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from 'antd';
-
 import { useAppDispatch, useAppSelector } from '../../redux/store';
 import { authActions } from './Auth.reducer';
 import { resetValidationOnLogout } from '../validation/resetValidationOnLogout';

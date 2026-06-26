@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { UserOutlined, LogoutOutlined, SettingOutlined } from '@ant-design/icons';
-
+import { UserOutlined, LogoutOutlined } from '@ant-design/icons';
 import headerIcon from '~/assets/icon.png';
 import styles from './Header.module.scss';
 
@@ -47,8 +46,8 @@ export const Header: React.FC = () => {
         <div className={styles.navLinks}>
           <Link to="/" className={getLinkClass('/')}>Dashboard</Link>
           <Link to="/validations" className={getLinkClass('/validations')}>Validations</Link>
-          <Link to="/admin" className={getLinkClass('/admin')}>Admin</Link>
           <Link to="/reports" className={getLinkClass('/reports')}>Reports</Link>
+          <Link to="/admin" className={getLinkClass('/admin')}>Admin</Link>
         </div>
 
         {/* Right Side: Quick Actions */}
@@ -90,21 +89,11 @@ export const Header: React.FC = () => {
                   <span>Profile</span>
                 </Link>
 
-                <Link 
-                  to="/setting" 
-                  className={styles.dropdownItem} 
-                  onClick={() => setIsDropdownOpen(false)}
-                >
-                  <SettingOutlined />
-                  <span>Setting</span>
-                </Link>
-
                 <div className={styles.dropdownDivider} />
 
                 <button
                   className={styles.dropdownItem}
                   onClick={() => {
-                    // TODO: Add your logout logic here
                     setIsDropdownOpen(false);
                   }}
                   data-testid="header-logout-btn"
@@ -112,11 +101,11 @@ export const Header: React.FC = () => {
                   <LogoutOutlined />
                   <span>Logout</span>
                 </button>
+
               </div>
             )}
           </div>
         </div>
-        
       </div>
     </nav>
   );
