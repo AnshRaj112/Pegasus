@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-25T11:27:19Z
+# Last edited: 2026-06-25T11:29:35Z
 # --- END GENERATED FILE METADATA ---
 
 """Validation run result types (shared by service and tabular pipeline)."""
