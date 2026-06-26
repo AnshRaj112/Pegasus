@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T15:09:23+05:30
+# Last edited: 2026-06-26T09:32:35Z
 # --- END GENERATED FILE METADATA ---
 
 """Human-readable format labels from file detection reports (e.g. zip -> csv)."""
@@ -347,43 +347,6 @@ def _archive_kind_from_name(name: str) -> str:
         if name.endswith(suffix):
             return kind
     return "unknown"
-
-
-def format_chain_from_archive_member_path(member_path: str, *, outer: str) -> list[str]:
-    """Build format tokens from a nested virtual path (e.g. ``inner.tar/bundle.zip/data.csv``)."""
-    normalized = member_path.replace("\\", "/").rstrip("/")
-    if not normalized:
-        return []
-    parts = [part for part in normalized.split("/") if part]
-    if not parts:
-        return []
-    chain: list[str] = [outer]
-    for part in parts[:-1]:
-        kind = _archive_kind_from_name(part.lower())
-        if kind != "unknown":
-            chain.append(kind)
-    chain.append(_leaf_type_from_member_name(parts[-1]))
-    return chain
-
-
-def format_display_label_from_archive_members(
-    member_paths: list[str],
-    *,
-    outer: str,
-    object_name: str = "",
-) -> str | None:
-    """Render a nested archive display label from expanded manifest member paths."""
-    candidates = [path for path in member_paths if path and not path.endswith("/")]
-    if not candidates:
-        inner = _inner_suffix_chain_from_filename(object_name, skip_outer=outer)
-        if inner:
-            return " -> ".join([outer, *inner])
-        return None
-    best = max(candidates, key=lambda path: (path.count("/"), len(path)))
-    chain = format_chain_from_archive_member_path(best, outer=outer)
-    if len(chain) < 2:
-        return None
-    return " -> ".join(chain)
 
 
 def _chain_from_entry_names(names: list[str]) -> list[str]:

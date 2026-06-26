@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T15:09:23+05:30
+# Last edited: 2026-06-26T09:32:35Z
 # --- END GENERATED FILE METADATA ---
 
 from functools import lru_cache
@@ -370,7 +370,7 @@ class Settings(BaseSettings):
         ),
     )
     validation_auto_extract_archives: bool = Field(
-        default=False,
+        default=True,
         description=(
             "When true, gzip/bzip2/zip/tar inputs are materialized to a bounded temp "
             "file under the job directory before validation runs."
@@ -380,27 +380,6 @@ class Settings(BaseSettings):
         default=512 * 1024 * 1024,
         ge=1024 * 1024,
         description="Maximum uncompressed bytes per archive member when auto-extracting.",
-    )
-    validation_archive_max_declared_bytes: int = Field(
-        default=50 * 1024 * 1024 * 1024,
-        ge=1024 * 1024,
-        description="Maximum sum of declared uncompressed sizes from archive headers.",
-    )
-    validation_archive_max_compression_ratio: float = Field(
-        default=1000.0,
-        ge=1.0,
-        description="Reject archive entries whose declared uncompressed/compressed ratio exceeds this.",
-    )
-    validation_archive_max_nest_depth: int = Field(
-        default=3,
-        ge=1,
-        le=8,
-        description="Maximum archive nesting depth for metadata manifest expansion (e.g. tar/zip/csv).",
-    )
-    validation_archive_max_nested_member_bytes: int = Field(
-        default=64 * 1024 * 1024,
-        ge=1024 * 1024,
-        description="Maximum uncompressed bytes per nested archive member expanded inline.",
     )
 
     @model_validator(mode="after")

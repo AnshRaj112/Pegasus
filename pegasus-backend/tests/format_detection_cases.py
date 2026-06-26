@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T15:09:23+05:30
+# Last edited: 2026-06-26T09:32:35Z
 # --- END GENERATED FILE METADATA ---
 
 """Fixture builders and expected outcomes for format-detection accuracy sweeps."""
@@ -486,27 +486,27 @@ ACCURACY_CASES: tuple[AccuracyCase, ...] = (
     _case("binary blob", "bin", "binary_blob", None, "binary"),
     _case("sqlite", "sqlite", "sqlite", None, "binary"),
     # Zip archives (13)
-    _case("zip -> csv", "zip -> csv", "zip_csv", "zip", "archive"),
-    _case("zip -> tsv", "zip -> tsv", "zip_tsv", "zip", "archive"),
-    _case("zip -> psv", "zip -> psv", "zip_psv", "zip", "archive"),
-    _case("zip -> json", "zip -> json", "zip_json", "zip", "archive"),
-    _case("zip -> parquet", "zip -> parquet", "zip_parquet", "zip", "archive"),
-    _case("zip -> orc", "zip -> orc", "zip_orc", "zip", "archive"),
-    _case("zip -> avro", "zip -> avro", "zip_avro", "zip", "archive"),
-    _case("zip -> png", "zip -> png", "zip_png", "zip", "archive"),
-    _case("zip -> pdf", "zip -> pdf", "zip_pdf", "zip", "archive"),
-    _case("zip -> xml", "zip -> xml", "zip_xml", "zip", "archive"),
-    _case("zip -> fixed-width", "zip -> fixed-width", "zip_fixed_width_txt", "zip", "archive"),
-    _case("zip -> delimited txt", "zip -> csv", "zip_delimited_txt", "zip", "archive"),
-    _case("zip -> plain txt", "zip -> txt", "zip_plain_txt", "zip", "archive"),
-    _case("zip -> zip -> csv", "zip -> zip -> csv", "zip_zip_csv", "zip", "archive"),
-    _case("zip -> zip -> zip -> csv", "zip -> zip -> zip -> csv", "zip_zip_zip_csv", "zip", "archive"),
+    _case("zip -> csv", "zip -> csv", "zip_csv", None, "archive"),
+    _case("zip -> tsv", "zip -> tsv", "zip_tsv", None, "archive"),
+    _case("zip -> psv", "zip -> psv", "zip_psv", None, "archive"),
+    _case("zip -> json", "zip -> json", "zip_json", None, "archive"),
+    _case("zip -> parquet", "zip -> parquet", "zip_parquet", None, "archive"),
+    _case("zip -> orc", "zip -> orc", "zip_orc", None, "archive"),
+    _case("zip -> avro", "zip -> avro", "zip_avro", None, "archive"),
+    _case("zip -> png", "zip -> png", "zip_png", None, "archive"),
+    _case("zip -> pdf", "zip -> pdf", "zip_pdf", None, "archive"),
+    _case("zip -> xml", "zip -> xml", "zip_xml", None, "archive"),
+    _case("zip -> fixed-width", "zip -> fixed-width", "zip_fixed_width_txt", None, "archive"),
+    _case("zip -> delimited txt", "zip -> csv", "zip_delimited_txt", None, "archive"),
+    _case("zip -> plain txt", "zip -> txt", "zip_plain_txt", None, "archive"),
+    _case("zip -> zip -> csv", "zip -> zip -> csv", "zip_zip_csv", None, "archive"),
+    _case("zip -> zip -> zip -> csv", "zip -> zip -> zip -> csv", "zip_zip_zip_csv", None, "archive"),
     # Tar archives (6)
-    _case("tar -> csv", "tar -> csv", "tar_csv", "tar", "archive"),
-    _case("tar -> tsv", "tar -> tsv", "tar_tsv", "tar", "archive"),
-    _case("tar -> json", "tar -> json", "tar_json", "tar", "archive"),
-    _case("tar -> parquet", "tar -> parquet", "tar_parquet", "tar", "archive"),
-    _case("tar -> fixed-width", "tar -> fixed-width", "tar_fixed_width_txt", "tar", "archive"),
+    _case("tar -> csv", "tar -> csv", "tar_csv", None, "archive"),
+    _case("tar -> tsv", "tar -> tsv", "tar_tsv", None, "archive"),
+    _case("tar -> json", "tar -> json", "tar_json", None, "archive"),
+    _case("tar -> parquet", "tar -> parquet", "tar_parquet", None, "archive"),
+    _case("tar -> fixed-width", "tar -> fixed-width", "tar_fixed_width_txt", None, "archive"),
     _case("tar.gz -> csv", "gzip -> tar -> csv", "tar_gz_csv", None, "archive"),
     _case("tgz -> csv", "gzip -> tar -> csv", "tgz_csv", None, "archive"),
     # Compression (4)
@@ -516,15 +516,15 @@ ACCURACY_CASES: tuple[AccuracyCase, ...] = (
     _case("bzip2 -> csv", "bzip2 -> csv", "bz2_csv", None, "compression"),
     _case("gzip -> tsv", "gzip -> tsv", "gzip_tsv", None, "compression"),
     # Extra coverage (10)
-    _case("zip -> zip -> json", "zip -> zip -> json", "json_in_zip_nested", "zip", "archive"),
+    _case("zip -> zip -> json", "zip -> zip -> json", "json_in_zip_nested", None, "archive"),
     _case("csv no header", "csv", "csv_no_header", "csv", "delimited"),
     _case("tsv no header", "tsv", "tsv_no_header", "tsv", "delimited"),
     _case("fixed-width no header", "fixed-width", "fixed_width_no_header", "fixed-width", "fixed-width"),
     _case("json array indented", "json", "json_array_pretty", "json", "json"),
-    _case("zip -> yaml", "zip -> yaml", "zip_yaml", "zip", "archive"),
-    _case("tar -> xml", "tar -> xml", "tar_xml", "tar", "archive"),
-    _case("tar -> png", "tar -> png", "tar_png", "tar", "archive"),
-    _case("zip -> jsonl", "zip -> json", "zip_jsonl", "zip", "archive"),
+    _case("zip -> yaml", "zip -> yaml", "zip_yaml", None, "archive"),
+    _case("tar -> xml", "tar -> xml", "tar_xml", None, "archive"),
+    _case("tar -> png", "tar -> png", "tar_png", None, "archive"),
+    _case("zip -> jsonl", "zip -> json", "zip_jsonl", None, "archive"),
     _case("log file .log", "txt", "log_file", None, "plain"),
     # Filename fallback (3)
     _case("name: report.csv.zip", "zip -> csv", "name_csv_zip", None, "fallback"),
