@@ -4,7 +4,6 @@ import { notification } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
 import { validationActions } from './Validation.reducer';
-import { reportActions } from '../report/Report.reducer';
 import { loadValidationRunForm } from './validationRerun';
 import {
   VALIDATIONS_BASE,
@@ -21,7 +20,6 @@ import { assessEmptyValidationFiles } from './validationEmptyFiles';
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
 import { ConfigureMappingStep } from './steps/ConfigureMappingStep';
-import { Api } from '../../shared/api/Api';
 import { resolveWizardArchiveMode } from './archiveFormat';
 import { isFixedWidthFormat } from './fixedWidthFormat';
 import { resolveWizardJsonMode } from './jsonFormat';
@@ -42,6 +40,7 @@ export const ValidationWizardView: React.FC = () => {
   const validationForm = useAppSelector((state) => state.validation.validationForm);
   const overviewCache = useAppSelector((state) => state.validation.overviewProfileCache);
   const wizardRunId = useAppSelector((state) => state.validation.wizardRunId);
+  const saveDraftState = useAppSelector((state) => state.validation.saveDraftState);
 
   const [savingDraft, setSavingDraft] = useState(false);
   const [advancing, setAdvancing] = useState(false);
@@ -110,6 +109,46 @@ export const ValidationWizardView: React.FC = () => {
       cancelled = true;
     };
   }, [runId, dispatch, navigate]);
+
+  const buildDraftPayload = () => ({
+    source_path: `gs://${validationForm.sourceCloud!.bucket}/${validationForm.sourceCloud!.object_name}`,
+    target_path: `gs://${validationForm.targetCloud!.bucket}/${validationForm.targetCloud!.object_name}`,
+    uid_column: validationForm.uidColumn,
+    delimiter: validationForm.delimiter || 'auto',
+    column_mappings: validationForm.columnMappings,
+  });
+
+  useEffect(() => {
+    if (!saveDraftState.data || saveDraftState.isFetching) return;
+
+    loadedRunIdRef.current = saveDraftState.data.run_id;
+
+    if (saveDraftState.intent === 'proceed') {
+      navigate(validationOverviewPath(saveDraftState.data.run_id));
+      setAdvancing(false);
+    } else if (saveDraftState.intent === 'save') {
+      if (currentStep === 2) {
+        navigate(validationOverviewPath(saveDraftState.data.run_id), { replace: true });
+      } else if (currentStep === 3) {
+        navigate(validationMappingPath(saveDraftState.data.run_id), { replace: true });
+      }
+      setSavingDraft(false);
+    }
+
+    dispatch(validationActions.clearSaveDraftState());
+  }, [saveDraftState, currentStep, navigate, dispatch]);
+
+  useEffect(() => {
+    if (!saveDraftState.error || saveDraftState.isFetching) return;
+
+    if (saveDraftState.intent === 'proceed') {
+      setAdvancing(false);
+    } else if (saveDraftState.intent === 'save') {
+      setSavingDraft(false);
+    }
+
+    dispatch(validationActions.clearSaveDraftState());
+  }, [saveDraftState.error, saveDraftState.intent, saveDraftState.isFetching, dispatch]);
 
   const isStep2Loading = currentStep === 2 && (
     loadingRun
@@ -194,29 +233,14 @@ export const ValidationWizardView: React.FC = () => {
     || (currentStep === 1 && !isStep1Valid)
     || (currentStep === 2 && overviewBlocksMapping);
 
-  const handleProceed = async () => {
+  const handleProceed = () => {
     if (currentStep === 1) {
       if (!isStep1Valid || !validationForm.sourceCloud || !validationForm.targetCloud) return;
       setAdvancing(true);
-      try {
-        const { data } = await Api.saveValidationDraft({
-          source_path: `gs://${validationForm.sourceCloud.bucket}/${validationForm.sourceCloud.object_name}`,
-          target_path: `gs://${validationForm.targetCloud.bucket}/${validationForm.targetCloud.object_name}`,
-          uid_column: validationForm.uidColumn,
-          delimiter: validationForm.delimiter || 'auto',
-          column_mappings: validationForm.columnMappings,
-        });
-        loadedRunIdRef.current = data.run_id;
-        dispatch(validationActions.setWizardRunId(data.run_id));
-        navigate(validationOverviewPath(data.run_id));
-      } catch (e) {
-        notification.error({
-          message: 'Could not start file overview',
-          description: e instanceof Error ? e.message : 'Failed to create validation run',
-        });
-      } finally {
-        setAdvancing(false);
-      }
+      dispatch(validationActions.saveDraftRequest({
+        draft: buildDraftPayload(),
+        intent: 'proceed',
+      }));
       return;
     }
 
@@ -262,37 +286,13 @@ export const ValidationWizardView: React.FC = () => {
     validationForm.sourceCloud?.object_name && validationForm.targetCloud?.object_name,
   );
 
-  const handleSaveDraft = async () => {
+  const handleSaveDraft = () => {
     if (!canSaveDraft || !validationForm.sourceCloud || !validationForm.targetCloud) return;
     setSavingDraft(true);
-    try {
-      const { data } = await Api.saveValidationDraft({
-        source_path: `gs://${validationForm.sourceCloud.bucket}/${validationForm.sourceCloud.object_name}`,
-        target_path: `gs://${validationForm.targetCloud.bucket}/${validationForm.targetCloud.object_name}`,
-        uid_column: validationForm.uidColumn,
-        delimiter: validationForm.delimiter || 'auto',
-        column_mappings: validationForm.columnMappings,
-      });
-      notification.success({
-        message: 'Draft saved',
-        description: 'Find it under Reports → Saved.',
-      });
-      loadedRunIdRef.current = data.run_id;
-      dispatch(validationActions.setWizardRunId(data.run_id));
-      if (currentStep === 2) {
-        navigate(validationOverviewPath(data.run_id), { replace: true });
-      } else if (currentStep === 3) {
-        navigate(validationMappingPath(data.run_id), { replace: true });
-      }
-      dispatch(reportActions.fetchReportsRequest());
-    } catch (e) {
-      notification.error({
-        message: 'Could not save draft',
-        description: e instanceof Error ? e.message : 'Save failed',
-      });
-    } finally {
-      setSavingDraft(false);
-    }
+    dispatch(validationActions.saveDraftRequest({
+      draft: buildDraftPayload(),
+      intent: 'save',
+    }));
   };
 
   const renderStepContent = () => {

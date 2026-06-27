@@ -7,6 +7,7 @@ import rootSaga from './saga';
 import { validationActions } from '../pages/validation/Validation.reducer';
 import { loadValidationTabSession } from '../pages/validation/validationTabStorage';
 import { isValidationsPath, parseValidationRoute } from '../pages/validation/validationRoutes';
+import { getRouterPath } from '../router/router.utils';
 
 // Initialize the saga middleware
 const sagaMiddleware = createSagaMiddleware();
@@ -23,11 +24,12 @@ export const store = configureStore({
 sagaMiddleware.run(rootSaga);
 
 const restoreValidationTabSession = () => {
-  if (typeof window === 'undefined' || !isValidationsPath(window.location.pathname)) return;
+  const routerPath = getRouterPath();
+  if (typeof window === 'undefined' || !isValidationsPath(routerPath)) return;
   const saved = loadValidationTabSession();
   if (!saved) return;
 
-  const { runId } = parseValidationRoute(window.location.pathname);
+  const { runId } = parseValidationRoute(routerPath);
   if (runId && saved.wizardRunId && runId !== saved.wizardRunId) return;
 
   store.dispatch(validationActions.restoreTabSession(saved));

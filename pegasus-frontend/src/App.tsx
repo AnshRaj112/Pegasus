@@ -1,16 +1,14 @@
 import React from 'react';
-import { BrowserRouter } from 'react-router-dom';
-import { AppRoutes } from './routes/AppRoutes.tsx';
-import { AuthSessionManager } from './pages/auth/AuthSessionManager.tsx';
-import './styles/tokens.css';
+import { RouterProvider } from 'react-router-dom';
 
-export const App: React.FC = () => {
-  return (
-    <BrowserRouter>
-      <AuthSessionManager />
-      <AppRoutes />
-    </BrowserRouter>
-  );
-};
+import { AuthSessionManager } from '~/pages/auth/AuthSessionManager';
+import { router } from '~/router/router';
+
+const App: React.FC = () => (
+  <>
+    <AuthSessionManager />
+    <RouterProvider router={router} />
+  </>
+);
 
 export default App;

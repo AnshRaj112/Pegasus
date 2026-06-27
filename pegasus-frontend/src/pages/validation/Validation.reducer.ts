@@ -5,8 +5,11 @@ import {
  ValidationFormState,
  ValidationReducerState,
  ValidationDataResponse,
+ BrowseCloudRequestPayload,
+ ProfileCloudFilesRequestPayload,
+ SaveDraftIntent,
 } from './Validation.interface';
-import { GoogleCloudStorageConfig } from '../../shared/api/Api';
+import { GoogleCloudStorageConfig, LocalColumnPreviewResponse, FixedWidthLayoutPreviewResponse, SaveDraftRequest, ValidationHistoryDetail } from '../../shared/api/Api';
 import { ValidationTabSession } from './validationTabStorage';
 
 const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string =>
@@ -69,6 +72,33 @@ export const initialState: ValidationReducerState = {
   overviewProfileCache: null,
   validationDataState: initializeNullState,
   pendingHistoryNavigation: null,
+  cloudConnectionsState: initializeNullState,
+  browseCloudState: {
+    pathId: null,
+    connectionId: null,
+    background: false,
+    isFetching: false,
+    data: null,
+    error: null,
+  },
+  previewColumnsState: {
+    pairKey: null,
+    data: null,
+    isFetching: false,
+    error: null,
+  },
+  previewFixedWidthState: {
+    pairKey: null,
+    data: null,
+    isFetching: false,
+    error: null,
+  },
+  saveDraftState: {
+    data: null,
+    intent: null,
+    isFetching: false,
+    error: null,
+  },
 };
 
 const validationSlice = createSlice({
@@ -116,6 +146,11 @@ const validationSlice = createSlice({
       overviewProfileCache: null,
       validationDataState: initializeNullState,
       pendingHistoryNavigation: null,
+      cloudConnectionsState: initializeNullState,
+      browseCloudState: initialState.browseCloudState,
+      previewColumnsState: initialState.previewColumnsState,
+      previewFixedWidthState: initialState.previewFixedWidthState,
+      saveDraftState: initialState.saveDraftState,
     }),
     restoreTabSession: (_state, action: PayloadAction<ValidationTabSession>) => ({
       currentStep: 1,
@@ -125,6 +160,11 @@ const validationSlice = createSlice({
       overviewProfileCache: action.payload.overviewProfileCache,
       validationDataState: initializeNullState,
       pendingHistoryNavigation: null,
+      cloudConnectionsState: initializeNullState,
+      browseCloudState: initialState.browseCloudState,
+      previewColumnsState: initialState.previewColumnsState,
+      previewFixedWidthState: initialState.previewFixedWidthState,
+      saveDraftState: initialState.saveDraftState,
     }),
     clearValidationRun: (state) => ({
       ...state,
@@ -159,6 +199,153 @@ const validationSlice = createSlice({
     runValidationFromHistoryRequest: (state, _action: PayloadAction<string>) => ({
       ...state,
       validationDataState: { ...initializeNullState, isFetching: true },
+    }),
+
+    listCloudConnectionsRequest: (state) => ({
+      ...state,
+      cloudConnectionsState: { ...initializeNullState, isFetching: true },
+    }),
+    listCloudConnectionsSuccess: (state, action: PayloadAction<import('../../shared/api/Api').CloudConnection[]>) => ({
+      ...state,
+      cloudConnectionsState: { ...initializeNullState, data: action.payload },
+    }),
+    listCloudConnectionsError: (state, action: PayloadAction<string>) => ({
+      ...state,
+      cloudConnectionsState: { ...initializeNullState, error: action.payload },
+    }),
+
+    browseCloudRequest: (state, action: PayloadAction<BrowseCloudRequestPayload>) => ({
+      ...state,
+      browseCloudState: {
+        pathId: action.payload.pathId,
+        connectionId: action.payload.connectionId,
+        background: Boolean(action.payload.background),
+        isFetching: !action.payload.background,
+        data: null,
+        error: null,
+      },
+    }),
+    browseCloudSuccess: (state, action: PayloadAction<{
+      pathId: string;
+      connectionId: string;
+      data: import('../../shared/api/Api').CloudBrowseResponse;
+    }>) => ({
+      ...state,
+      browseCloudState: {
+        ...state.browseCloudState,
+        pathId: action.payload.pathId,
+        connectionId: action.payload.connectionId,
+        isFetching: false,
+        data: action.payload.data,
+        error: null,
+      },
+    }),
+    browseCloudError: (state, action: PayloadAction<{ pathId: string; error: string }>) => ({
+      ...state,
+      browseCloudState: {
+        ...state.browseCloudState,
+        pathId: action.payload.pathId,
+        isFetching: false,
+        data: null,
+        error: action.payload.error,
+      },
+    }),
+
+    profileCloudFilesRequest: (state, _action: PayloadAction<ProfileCloudFilesRequestPayload>) => state,
+
+    previewValidationColumnsRequest: (state, action: PayloadAction<string>) => ({
+      ...state,
+      previewColumnsState: {
+        pairKey: action.payload,
+        data: null,
+        isFetching: true,
+        error: null,
+      },
+    }),
+    previewValidationColumnsSuccess: (state, action: PayloadAction<{
+      pairKey: string;
+      data: LocalColumnPreviewResponse;
+    }>) => ({
+      ...state,
+      previewColumnsState: {
+        pairKey: action.payload.pairKey,
+        data: action.payload.data,
+        isFetching: false,
+        error: null,
+      },
+    }),
+    previewValidationColumnsError: (state, action: PayloadAction<{ pairKey: string; error: string }>) => ({
+      ...state,
+      previewColumnsState: {
+        pairKey: action.payload.pairKey,
+        data: null,
+        isFetching: false,
+        error: action.payload.error,
+      },
+    }),
+
+    previewFixedWidthLayoutRequest: (state, action: PayloadAction<string>) => ({
+      ...state,
+      previewFixedWidthState: {
+        pairKey: action.payload,
+        data: null,
+        isFetching: true,
+        error: null,
+      },
+    }),
+    previewFixedWidthLayoutSuccess: (state, action: PayloadAction<{
+      pairKey: string;
+      data: FixedWidthLayoutPreviewResponse;
+    }>) => ({
+      ...state,
+      previewFixedWidthState: {
+        pairKey: action.payload.pairKey,
+        data: action.payload.data,
+        isFetching: false,
+        error: null,
+      },
+    }),
+    previewFixedWidthLayoutError: (state, action: PayloadAction<{ pairKey: string; error: string }>) => ({
+      ...state,
+      previewFixedWidthState: {
+        pairKey: action.payload.pairKey,
+        data: null,
+        isFetching: false,
+        error: action.payload.error,
+      },
+    }),
+
+    saveDraftRequest: (state, action: PayloadAction<{ draft: SaveDraftRequest; intent: SaveDraftIntent }>) => ({
+      ...state,
+      saveDraftState: {
+        data: null,
+        intent: action.payload.intent,
+        isFetching: true,
+        error: null,
+      },
+    }),
+    saveDraftSuccess: (state, action: PayloadAction<ValidationHistoryDetail>) => ({
+      ...state,
+      wizardRunId: action.payload.run_id,
+      saveDraftState: {
+        data: action.payload,
+        intent: state.saveDraftState.intent,
+        isFetching: false,
+        error: null,
+      },
+    }),
+    saveDraftError: (state, action: PayloadAction<string>) => ({
+      ...state,
+      saveDraftState: {
+        data: null,
+        intent: state.saveDraftState.intent,
+        isFetching: false,
+        error: action.payload,
+      },
+    }),
+    clearSaveDraftState: (state) => ({
+      ...state,
+      saveDraftState: initialState.saveDraftState,
     }),
   },
 });

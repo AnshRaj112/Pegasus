@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from 'antd';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
 import { authActions } from './Auth.reducer';
+import styles from './AuthSessionManager.module.scss';
 import { resetValidationOnLogout } from '../validation/resetValidationOnLogout';
 import {
   adminLogout,
@@ -16,7 +17,7 @@ const SESSION_POLL_MS = 30 * 1000;
 export const AuthSessionManager: React.FC = () => {
   const dispatch = useAppDispatch();
   const isAuthenticated = useAppSelector((state) => state.auth.isAuthenticated);
-  const isLoading = useAppSelector((state) => state.auth.isLoading);
+  const isFetching = useAppSelector((state) => state.auth.isFetching);
 
   const [expiresAtMs, setExpiresAtMs] = useState<number | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
@@ -120,7 +121,7 @@ export const AuthSessionManager: React.FC = () => {
 
   return (
     <Modal
-      open={!isLoading && isAuthenticated && showPrompt}
+      open={!isFetching && isAuthenticated && showPrompt}
       closable={false}
       maskClosable={false}
       title="Session expiring soon"
@@ -139,7 +140,7 @@ export const AuthSessionManager: React.FC = () => {
         void forceLogout();
       }}
     >
-      <p style={{ marginBottom: 0 }}>
+      <p className={styles.modalText}>
         Your session will end soon. Extend now to stay logged in, or you will be logged out automatically in {countdownLabel}.
       </p>
     </Modal>

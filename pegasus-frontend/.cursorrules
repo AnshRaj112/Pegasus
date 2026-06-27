@@ -1,0 +1,14 @@
+# Pegasus Frontend - Global Cursor Rules
+
+## 1. Context & Research Boundaries
+- **CODEBASE EXPLORATION ALLOWED:** You are authorized to scan, read, and analyze the local codebase files (e.g., `src/`, `docs/`) to gather necessary context for tasks and audits.
+- **NO WEB SEARCH:** You are strictly forbidden from performing external web searches or pulling external research. Rely exclusively on the local codebase and manual prompt instructions.
+- **RESTRICTED DIRECTORIES:** Do NOT enter, read, scan, or acknowledge the `.gsd/` or `.bg-shell/` directories under any circumstances.
+
+## 2. Strict Adherence to Guidelines
+- **CRITICAL:** You must read and follow `agent-instructions.md` as the ultimate source of truth for architectural and project rules.
+- Before writing code or suggesting fixes, always ensure compliance with the guidelines found in `docs/skills/`, `docs/font/`, and `docs/color/`.
+
+## 3. Tech Stack & Execution
+- **Stack:** React 18, TypeScript, Vite, React Router v6, Redux Toolkit + Redux Saga, Ant Design v5, SCSS Modules.
+- Strictly implement solutions that align with the existing project structure without introducing unauthorized libraries or patterns.

@@ -4,6 +4,6 @@ export interface AuthReducerState {
     fullName?: string;
     email?: string;
   } | null;
-  isLoading: boolean;
+  isFetching: boolean;
   error: string | null;
 }

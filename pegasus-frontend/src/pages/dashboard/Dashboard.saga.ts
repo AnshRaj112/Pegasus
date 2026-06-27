@@ -1,3 +1,4 @@
+import { PayloadAction } from '@reduxjs/toolkit';
 import { notification } from 'antd';
 import { AxiosError, AxiosResponse } from 'axios';
 import { all, call, put, takeLatest } from 'redux-saga/effects';
@@ -25,8 +26,26 @@ export function* fetchDashboardDataSaga() {
   }
 }
 
+export function* createEntitySaga(action: PayloadAction<{ display_name: string }>) {
+  try {
+    yield call(DashboardServiceApi.createEntity, action.payload);
+    yield put(dashboardActions.createEntitySuccess(`Entity "${action.payload.display_name}" saved`));
+    yield put(dashboardActions.fetchDashboardDataRequest());
+  } catch (error) {
+    const errorMessage = getApiErrorMessage(error, 'Could not save entity (persistence may be disabled)');
+    yield put(dashboardActions.createEntityError(errorMessage));
+    if (error instanceof AxiosError) {
+      notification.error({
+        message: NOTIFICATION_SERVICE_TYPES.ERROR,
+        description: errorMessage,
+      });
+    }
+  }
+}
+
 export function* dashboardSaga() {
   yield all([
     takeLatest(dashboardActions.fetchDashboardDataRequest.type, fetchDashboardDataSaga),
+    takeLatest(dashboardActions.createEntityRequest.type, createEntitySaga),
   ]);
 }

@@ -1,0 +1,6 @@
+@use '~/assets/styles/variables' as tokens;
+
+.loading {
+  padding: tokens.$spacing-lg;
+  color: tokens.$text-muted;
+}

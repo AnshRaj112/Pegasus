@@ -8,6 +8,7 @@ import {
 import { Api, ColumnMapping, GoogleCloudStorageConfig, JsonParentMappingRow } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
+import styles from './JsonParentMappingStep.module.scss';
 
 const getCloudLabel = (cloud: string | GoogleCloudStorageConfig | null | undefined): string => {
   if (!cloud) return 'Pending';
@@ -44,19 +45,7 @@ const OrderSensitivityButton: React.FC<{
         ? 'Strict order: list element order and dict key order must match.'
         : 'Ignore order: reordered lists and dict keys still match.'
     }
-    style={{
-      padding: '8px 12px',
-      borderRadius: '6px',
-      border: `1px solid ${strict ? '#0057c2' : '#d9d9d9'}`,
-      background: strict ? 'rgba(0, 87, 194, 0.1)' : '#fff',
-      color: strict ? '#0057c2' : '#414755',
-      cursor: 'pointer',
-      fontSize: '12px',
-      fontWeight: 600,
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '6px',
-    }}
+    className={`${styles.orderBtn} ${strict ? styles.orderBtnStrict : ''}`}
   >
     {strict ? <OrderedListOutlined /> : <UnorderedListOutlined />}
     {strict ? 'Order matters' : 'Order ignored'}
@@ -64,17 +53,7 @@ const OrderSensitivityButton: React.FC<{
 );
 
 const TypeBadge: React.FC<{ value?: string | null }> = ({ value }) => (
-  <span style={{
-    backgroundColor: '#f0eded',
-    border: '1px solid #d9d9d9',
-    padding: '2px 8px',
-    borderRadius: '999px',
-    fontSize: '11px',
-    fontWeight: 700,
-    color: '#727786',
-    textTransform: 'uppercase',
-  }}
-  >
+  <span className={styles.typeBadge}>
     {value || 'unknown'}
   </span>
 );
@@ -178,25 +157,25 @@ export const JsonParentMappingStep: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1080px', margin: '0 auto', width: '100%' }}>
+    <div className={styles.root}>
       <div>
-        <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#1b1b1c', margin: '0 0 8px 0', fontFamily: 'var(--font-mono)' }}>
+        <h2 className={styles.title}>
           Pegasus_JSON_Mapping
         </h2>
-        <div style={{ display: 'flex', gap: '16px', fontSize: '14px', color: '#414755', flexWrap: 'wrap' }}>
-          <span><strong>Source:</strong> <code style={{ backgroundColor: '#f6f3f2', padding: '2px 6px', borderRadius: '4px' }}>{getCloudLabel(validationForm.sourceCloud)}</code></span>
-          <span><strong>Target:</strong> <code style={{ backgroundColor: '#f6f3f2', padding: '2px 6px', borderRadius: '4px' }}>{getCloudLabel(validationForm.targetCloud)}</code></span>
+        <div className={styles.metaRow}>
+          <span><strong>Source:</strong> <code className={styles.codeChip}>{getCloudLabel(validationForm.sourceCloud)}</code></span>
+          <span><strong>Target:</strong> <code className={styles.codeChip}>{getCloudLabel(validationForm.targetCloud)}</code></span>
         </div>
       </div>
 
-      <div style={{ padding: '16px 20px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '14px', color: '#414755', lineHeight: 1.6 }}>
+      <div className={styles.infoBox}>
         Match top-level JSON parents between source and target. Nested fields under each matched parent are compared automatically.
         Use <strong>Order matters</strong> when list positions or dict key order must match exactly.
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontSize: '13px', fontWeight: 600, color: '#414755' }}>Comparison order</span>
+      <div className={styles.toolbar}>
+        <div className={styles.toolbarLeft}>
+          <span className={styles.toolbarLabel}>Comparison order</span>
           <OrderSensitivityButton
             strict={validationForm.structuredOrderSensitive}
             onToggle={() => dispatch(validationActions.setValidationForm({
@@ -204,42 +183,31 @@ export const JsonParentMappingStep: React.FC = () => {
             }))}
           />
         </div>
-        <span style={{ fontSize: '13px', color: '#727786' }}>
+        <span className={styles.mappedCount}>
           {mappedCount} parent{mappedCount === 1 ? '' : 's'} mapped
         </span>
       </div>
 
       {documentMode === 'ndjson' && (
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: '320px' }}>
-          <span style={{ fontSize: '13px', fontWeight: 600, color: '#414755' }}>Record UID field</span>
+        <label className={styles.uidLabel}>
+          <span className={styles.toolbarLabel}>Record UID field</span>
           <input
             type="text"
             value={validationForm.uidColumn}
             onChange={(e) => dispatch(validationActions.setValidationForm({ uidColumn: e.target.value || 'id' }))}
-            style={{ height: '36px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '0 12px', fontFamily: 'var(--font-mono)' }}
+            className={styles.uidInput}
           />
         </label>
       )}
 
       {error && (
-        <div style={{ padding: '12px', backgroundColor: '#fef2f2', color: '#dc2626', borderRadius: '8px', fontSize: '13px' }}>
+        <div className={styles.errorBanner}>
           {error}
         </div>
       )}
 
-      <div style={{ border: '1px solid #d9d9d9', borderRadius: '12px', overflow: 'hidden', backgroundColor: '#fff' }}>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '1.2fr 120px 40px 1.2fr 120px 72px',
-          gap: '12px',
-          padding: '12px 16px',
-          backgroundColor: '#234B5F',
-          color: '#fff',
-          fontSize: '12px',
-          fontWeight: 700,
-          textTransform: 'uppercase',
-        }}
-        >
+      <div className={styles.table}>
+        <div className={styles.tableHeader}>
           <span>Source parent</span>
           <span>Type</span>
           <span />
@@ -249,28 +217,19 @@ export const JsonParentMappingStep: React.FC = () => {
         </div>
 
         {loading ? (
-          <div style={{ padding: '32px', textAlign: 'center', color: '#727786' }}>Loading JSON parents…</div>
+          <div className={styles.tableMessage}>Loading JSON parents…</div>
         ) : rows.length === 0 ? (
-          <div style={{ padding: '32px', textAlign: 'center', color: '#727786' }}>No top-level parents found.</div>
+          <div className={styles.tableMessage}>No top-level parents found.</div>
         ) : rows.map((row) => (
           <div
             key={row.id}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1.2fr 120px 40px 1.2fr 120px 72px',
-              gap: '12px',
-              padding: '14px 16px',
-              alignItems: 'center',
-              borderTop: '1px solid #f0eded',
-              opacity: row.ignored ? 0.55 : 1,
-              backgroundColor: row.ignored ? '#fcf9f8' : '#fff',
-            }}
+            className={`${styles.tableRow} ${row.ignored ? styles.tableRowIgnored : ''}`}
           >
-            <code style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: '#1b1b1c' }}>
-              {row.source_parent || <span style={{ color: '#727786' }}>—</span>}
+            <code className={styles.rowCode}>
+              {row.source_parent || <span className={styles.rowCodeMuted}>—</span>}
             </code>
             <TypeBadge value={row.source_type} />
-            <ArrowRightOutlined style={{ color: '#727786', justifySelf: 'center' }} />
+            <ArrowRightOutlined className={styles.rowArrow} />
             {row.source_parent ? (
               <select
                 value={row.target_parent ?? ''}
@@ -278,15 +237,7 @@ export const JsonParentMappingStep: React.FC = () => {
                   target_parent: e.target.value || null,
                   ignored: !e.target.value,
                 })}
-                style={{
-                  height: '34px',
-                  borderRadius: '6px',
-                  border: '1px solid #d9d9d9',
-                  padding: '0 10px',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '13px',
-                  backgroundColor: '#fff',
-                }}
+                className={styles.targetSelect}
               >
                 <option value="">Unmapped</option>
                 {targetParents.map((parent) => (
@@ -294,7 +245,7 @@ export const JsonParentMappingStep: React.FC = () => {
                 ))}
               </select>
             ) : (
-              <code style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: '#727786' }}>
+              <code className={`${styles.rowCode} ${styles.rowCodeMuted}`}>
                 {row.target_parent || '—'}
               </code>
             )}
@@ -304,15 +255,7 @@ export const JsonParentMappingStep: React.FC = () => {
               disabled={!row.source_parent}
               onClick={() => updateRow(row.id, { ignored: !row.ignored })}
               title={row.ignored ? 'Include in comparison' : 'Ignore this parent'}
-              style={{
-                justifySelf: 'center',
-                padding: '6px',
-                borderRadius: '4px',
-                border: 'none',
-                background: row.ignored ? '#414755' : 'transparent',
-                color: row.ignored ? '#fff' : '#727786',
-                cursor: row.source_parent ? 'pointer' : 'not-allowed',
-              }}
+              className={`${styles.ignoreBtn} ${row.ignored ? styles.ignoreBtnActive : ''} ${!row.source_parent ? styles.ignoreBtnDisabled : ''}`}
             >
               <StopOutlined />
             </button>

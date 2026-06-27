@@ -5,7 +5,7 @@ import {
   HddOutlined, TableOutlined, BarcodeOutlined, BuildOutlined,
   EyeOutlined,
 } from '@ant-design/icons';
-import { Api, CloudFileProfileResponse, FixedWidthColumnPreview, GoogleCloudStorageConfig, LocalColumnPreviewResponse } from '../../../shared/api/Api';
+import { CloudFileProfileResponse, FixedWidthColumnPreview, GoogleCloudStorageConfig } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { OverviewFilePreview } from './OverviewFilePreview';
@@ -17,6 +17,7 @@ import { profileLooksArchive, resolveWizardArchiveMode } from '../archiveFormat'
 import { FixedWidthLayoutPanel } from './FixedWidthLayoutPanel';
 import { formatDetectionLabel } from '../../../shared/formatDisplayLabel';
 import { FormatDetectionChainLabel } from '../../../shared/FormatDetectionChainLabel';
+import styles from './MappingOverviewStep.module.scss';
 
 const formatBytes = (bytes: number | null) => {
   if (bytes == null) return '—';
@@ -51,52 +52,35 @@ const resolveCloudFormatRaw = (
 type FileProfileState = { profile: CloudFileProfileResponse | null; loading: boolean; error: boolean; };
 const emptyProfileState: FileProfileState = { profile: null, loading: false, error: false };
 
-const SkeletonBlock: React.FC<{ width?: string; height?: string }> = ({ width = '100%', height = '16px' }) => (
-  <div style={{ width, height, backgroundColor: '#e2e8f0', borderRadius: '4px', animation: 'skeleton-pulse 1.5s ease-in-out infinite' }} />
+type SkeletonSize = 'w36' | 'w48' | 'w60' | 'w90' | 'h16' | 'h24' | 'h32';
+
+const skeletonSizeClass: Record<SkeletonSize, string> = {
+  w36: styles.skeletonW36,
+  w48: styles.skeletonW48,
+  w60: styles.skeletonW60,
+  w90: styles.skeletonW90,
+  h16: styles.skeletonH16,
+  h24: styles.skeletonH24,
+  h32: styles.skeletonH32,
+};
+
+const SkeletonBlock: React.FC<{ sizes: SkeletonSize[] }> = ({ sizes }) => (
+  <div className={`${styles.skeleton} ${sizes.map((size) => skeletonSizeClass[size]).join(' ')}`} />
 );
 
-const PreviewButton: React.FC<{ onClick: () => void; disabled?: boolean }> = ({ onClick, disabled }) => {
-  const [isHovered, setIsHovered] = useState(false);
-  const [isActive, setIsActive] = useState(false);
-
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => {
-        setIsHovered(false);
-        setIsActive(false);
-      }}
-      onMouseDown={() => setIsActive(true)}
-      onMouseUp={() => setIsActive(false)}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '8px',
-        backgroundColor: disabled ? '#e5e2e1' : isHovered ? '#1a3847' : '#234B5F',
-        color: disabled ? '#727786' : '#ffffff',
-        border: disabled ? '1.5px solid #e5e2e1' : isHovered ? '1.5px solid #1a3847' : '1.5px solid #234B5F',
-        padding: '8px 10px',
-        borderRadius: '6px',
-        fontSize: '12px',
-        fontWeight: 500,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        transition: 'all 0.2s ease-in-out',
-        transform: isActive ? 'scale(0.98)' : 'scale(1)',
-        boxShadow: isHovered && !disabled ? '0 4px 6px -1px rgba(35, 75, 95, 0.2)' : 'none',
-      }}
-    >
-      <EyeOutlined style={{ fontSize: '16px' }} />
-    </button>
-  );
-};
+const PreviewButton: React.FC<{ onClick: () => void; disabled?: boolean }> = ({ onClick, disabled }) => (
+  <button
+    type="button"
+    disabled={disabled}
+    onClick={onClick}
+    className={styles.previewBtn}
+  >
+    <EyeOutlined className={styles.previewBtnIcon} />
+  </button>
+);
 
 const FileCard: React.FC<{
   label: string;
-  color: string;
   stats: {
     name: string;
     path: string;
@@ -112,29 +96,21 @@ const FileCard: React.FC<{
   loading: boolean;
   icon?: React.ReactNode;
   isEmpty?: boolean;
-}> = ({ label, color, stats, warn, loading, icon, isEmpty }) => (
-  <div style={{
-    flex: 1,
-    backgroundColor: '#fff',
-    border: `1px solid ${isEmpty ? '#fecaca' : '#d9d9d9'}`,
-    borderRadius: '12px',
-    padding: '24px',
-    minWidth: '300px',
-    boxShadow: isEmpty ? 'inset 0 0 0 1px #fee2e2' : undefined,
-  }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color }}>
+}> = ({ label, stats, warn, loading, icon, isEmpty }) => (
+  <div className={`${styles.fileCard} ${isEmpty ? styles.fileCardEmpty : ''}`}>
+    <div className={styles.fileCardHeader}>
       {icon ?? <FileTextOutlined />}
-      <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase' }}>{label}</span>
+      <span className={styles.fileCardLabel}>{label}</span>
     </div>
 
-    <h4 style={{ margin: '0 0 4px 0', fontSize: '18px', minHeight: '24px', color: isEmpty ? '#ba1a1a' : undefined }}>
-      {loading ? <SkeletonBlock width="60%" height="24px" /> : stats.name}
+    <h4 className={`${styles.fileCardName} ${isEmpty ? styles.fileCardNameEmpty : ''}`}>
+      {loading ? <SkeletonBlock sizes={['w60', 'h24']} /> : stats.name}
     </h4>
-    <div style={{ fontSize: '12px', color: '#727786', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', minHeight: '16px' }}>
-      {loading ? <SkeletonBlock width="90%" height="16px" /> : stats.path}
+    <div className={styles.fileCardPath}>
+      {loading ? <SkeletonBlock sizes={['w90', 'h16']} /> : stats.path}
     </div>
 
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
+    <div className={styles.fileCardStats}>
       <Row icon={<ProfileOutlined />} label="Format" value={isEmpty ? 'Empty' : stats.format} loading={loading} warn={isEmpty} />
       <Row icon={<HddOutlined />} label="Size" value={formatBytes(stats.sizeBytes)} warn={warn.size || isEmpty} loading={loading} />
       <Row icon={<TableOutlined />} label="Columns" value={formatCount(stats.columnCount)} warn={warn.columns} loading={loading} />
@@ -154,10 +130,10 @@ const Row: React.FC<{
   loading: boolean;
   isNode?: boolean;
 }> = ({ icon, label, value, warn, loading, isNode }) => (
-  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f0eded', paddingBottom: '8px', alignItems: 'center' }}>
-    <span style={{ fontSize: '13px', color: '#414755', display: 'flex', alignItems: 'center', gap: '6px' }}>{icon} {label}</span>
-    <span style={{ fontSize: '13px', fontWeight: 600, color: warn ? '#ba1a1a' : '#1b1b1c' }}>
-      {loading && !isNode ? <SkeletonBlock width="48px" height="16px" /> : value}
+  <div className={styles.statRow}>
+    <span className={styles.statLabel}>{icon} {label}</span>
+    <span className={`${styles.statValue} ${warn ? styles.statValueWarn : ''}`}>
+      {loading && !isNode ? <SkeletonBlock sizes={['w48', 'h16']} /> : value}
     </span>
   </div>
 );
@@ -166,17 +142,20 @@ export const MappingOverviewStep: React.FC = () => {
   const dispatch = useAppDispatch();
   const form = useAppSelector((s) => s.validation.validationForm);
   const cache = useAppSelector((s) => s.validation.overviewProfileCache);
+  const previewColumnsState = useAppSelector((s) => s.validation.previewColumnsState);
+  const previewFixedWidthState = useAppSelector((s) => s.validation.previewFixedWidthState);
 
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [previewData, setPreviewData] = useState<LocalColumnPreviewResponse | null>(null);
-  const [fixedWidthLoading, setFixedWidthLoading] = useState(false);
-  const [fixedWidthError, setFixedWidthError] = useState<string | null>(null);
 
   const sourceKey = cloudObjectKey(form.sourceCloud);
   const targetKey = cloudObjectKey(form.targetCloud);
-  const previewPairKey = `${sourceKey}|${targetKey}|${form.delimiter || 'auto'}|${form.hasHeader}`;
+  const previewPairKey = `${sourceKey}|${targetKey}|${form.uidColumn || 'id'}|${form.delimiter || 'auto'}|${form.hasHeader}`;
+  const fixedWidthPairKey = `${sourceKey}|${targetKey}|${form.uidColumn}|${form.delimiter || 'auto'}|${form.hasHeader}`;
+  const previewLoading = previewColumnsState.pairKey === previewPairKey && previewColumnsState.isFetching;
+  const previewError = previewColumnsState.pairKey === previewPairKey ? previewColumnsState.error : null;
+  const previewData = previewColumnsState.pairKey === previewPairKey ? previewColumnsState.data : null;
+  const fixedWidthLoading = previewFixedWidthState.pairKey === fixedWidthPairKey && previewFixedWidthState.isFetching;
+  const fixedWidthError = previewFixedWidthState.pairKey === fixedWidthPairKey ? previewFixedWidthState.error : null;
   const cacheHit = cache?.sourceKey === sourceKey && cache?.targetKey === targetKey
     && !cache.sourceError && !cache.targetError;
 
@@ -236,45 +215,16 @@ export const MappingOverviewStep: React.FC = () => {
   }, [isFixedWidth, isFetching, dispatch]);
 
   useEffect(() => {
-    if (!form.sourceCloud || !form.targetCloud || !isFixedWidth || form.fixedWidthColumns.length > 0) {
-      if (!isFixedWidth) {
-        setFixedWidthLoading(false);
-        setFixedWidthError(null);
-      }
+    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || cacheHit) return;
+    dispatch(validationActions.profileCloudFilesRequest({ sourceKey, targetKey }));
+  }, [form.sourceCloud, form.targetCloud, sourceKey, targetKey, cacheHit, dispatch]);
+
+  useEffect(() => {
+    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || !isFixedWidth || form.fixedWidthColumns.length > 0) {
       return;
     }
 
-    let cancelled = false;
-    setFixedWidthLoading(true);
-    setFixedWidthError(null);
-
-    Api.previewFixedWidthLayout({
-      source_cloud: form.sourceCloud,
-      target_cloud: form.targetCloud,
-      uid_column: form.uidColumn,
-      delimiter: form.delimiter || 'auto',
-      has_header: form.hasHeader,
-    })
-      .then((res) => {
-        if (cancelled) return;
-        const { columns, suggested_join_column: joinCol, line_width: lineWidth } = res.data;
-        dispatch(validationActions.setValidationForm({
-          fixedWidthColumns: columns,
-          fixedWidthLineWidth: lineWidth,
-          uidColumn: form.uidColumn || joinCol,
-          detectedFileFormat: 'fixed-width',
-        }));
-      })
-      .catch((err: { response?: { data?: { detail?: unknown } } }) => {
-        if (cancelled) return;
-        const detail = err.response?.data?.detail;
-        setFixedWidthError(typeof detail === 'string' ? detail : 'Could not infer fixed-width layout');
-      })
-      .finally(() => {
-        if (!cancelled) setFixedWidthLoading(false);
-      });
-
-    return () => { cancelled = true; };
+    dispatch(validationActions.previewFixedWidthLayoutRequest(fixedWidthPairKey));
   }, [
     form.sourceCloud,
     form.targetCloud,
@@ -282,9 +232,31 @@ export const MappingOverviewStep: React.FC = () => {
     form.delimiter,
     form.hasHeader,
     form.fixedWidthColumns.length,
+    fixedWidthPairKey,
     isFixedWidth,
+    sourceKey,
+    targetKey,
     dispatch,
   ]);
+
+  useEffect(() => {
+    if (!isFixedWidth || previewFixedWidthState.pairKey !== fixedWidthPairKey || !previewFixedWidthState.data) return;
+    const { columns, suggested_join_column: joinCol, line_width: lineWidth } = previewFixedWidthState.data;
+    dispatch(validationActions.setValidationForm({
+      fixedWidthColumns: columns,
+      fixedWidthLineWidth: lineWidth,
+      uidColumn: form.uidColumn || joinCol,
+      detectedFileFormat: 'fixed-width',
+    }));
+  }, [previewFixedWidthState, fixedWidthPairKey, isFixedWidth, form.uidColumn, dispatch]);
+
+  useEffect(() => {
+    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || isFixedWidth || isJson || isArchive || isFetching) {
+      return;
+    }
+
+    dispatch(validationActions.previewValidationColumnsRequest(previewPairKey));
+  }, [form.sourceCloud, form.targetCloud, form.uidColumn, form.delimiter, form.hasHeader, previewPairKey, sourceKey, targetKey, isFixedWidth, isJson, isArchive, isFetching, dispatch]);
 
   const handleFixedWidthChange = (columns: FixedWidthColumnPreview[]) => {
     dispatch(validationActions.setValidationForm({ fixedWidthColumns: columns }));
@@ -293,69 +265,6 @@ export const MappingOverviewStep: React.FC = () => {
   const handleJoinColumnChange = (joinColumn: string) => {
     dispatch(validationActions.setValidationForm({ uidColumn: joinColumn }));
   };
-
-  useEffect(() => {
-    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || cacheHit) return;
-
-    let cancelled = false;
-    const nextCache = { sourceKey, targetKey, source: null as CloudFileProfileResponse | null, target: null as CloudFileProfileResponse | null, sourceError: false, targetError: false };
-    const commit = () => { if (!cancelled) dispatch(validationActions.setOverviewProfileCache({ ...nextCache })); };
-
-    Promise.allSettled([
-      Api.profileCloudFile({ cloud: form.sourceCloud, delimiter: form.delimiter || 'auto', has_header: form.hasHeader }),
-      Api.profileCloudFile({ cloud: form.targetCloud, delimiter: form.delimiter || 'auto', has_header: form.hasHeader }),
-    ])
-      .then(([sourceResult, targetResult]) => {
-        if (sourceResult.status === 'fulfilled') nextCache.source = sourceResult.value.data;
-        else nextCache.sourceError = true;
-        if (targetResult.status === 'fulfilled') nextCache.target = targetResult.value.data;
-        else nextCache.targetError = true;
-        commit();
-      });
-
-    return () => { cancelled = true; };
-  }, [form.sourceCloud, form.targetCloud, sourceKey, targetKey, cacheHit, dispatch, form.delimiter, form.hasHeader]);
-
-  useEffect(() => {
-    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || isFixedWidth || isJson || isArchive || isFetching) {
-      setPreviewData(null);
-      setPreviewError(null);
-      setPreviewLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setPreviewLoading(true);
-    setPreviewError(null);
-
-    Api.previewValidationColumns({
-      source_cloud: form.sourceCloud,
-      target_cloud: form.targetCloud,
-      uid_column: form.uidColumn || 'id',
-      delimiter: form.delimiter || 'auto',
-      has_header: form.hasHeader,
-    })
-      .then((res) => {
-        if (cancelled) return;
-        setPreviewData(res.data);
-      })
-      .catch((err: { response?: { data?: { detail?: unknown } } }) => {
-        if (cancelled) return;
-        const detail = err.response?.data?.detail;
-        const message = typeof detail === 'string'
-          ? detail
-          : Array.isArray(detail)
-            ? detail.map((item) => (typeof item === 'object' && item && 'msg' in item ? String((item as { msg: string }).msg) : String(item))).join('; ')
-            : null;
-        setPreviewError(message ?? 'Could not load file preview from server');
-        setPreviewData(null);
-      })
-      .finally(() => {
-        if (!cancelled) setPreviewLoading(false);
-      });
-
-    return () => { cancelled = true; };
-  }, [form.sourceCloud, form.targetCloud, form.uidColumn, form.delimiter, form.hasHeader, previewPairKey, sourceKey, targetKey, isFixedWidth, isJson, isArchive, isFetching]);
 
   useEffect(() => {
     setPreviewOpen(false);
@@ -373,12 +282,12 @@ export const MappingOverviewStep: React.FC = () => {
     ? (jsonPreviewReady
       ? <PreviewButton onClick={openPreview} />
       : isFetching
-        ? <SkeletonBlock width="36px" height="32px" />
+        ? <SkeletonBlock sizes={['w36', 'h32']} />
         : '—')
     : previewData
       ? <PreviewButton onClick={openPreview} />
       : previewLoading
-        ? <SkeletonBlock width="36px" height="32px" />
+        ? <SkeletonBlock sizes={['w36', 'h32']} />
         : '—';
 
   const inferredColumnCount = isArchive
@@ -504,20 +413,25 @@ export const MappingOverviewStep: React.FC = () => {
   };
 
   const alert = runComparison();
-  const alertStyles = alert.status === 'success'
-    ? { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0', icon: <CheckCircleFilled style={{ color: '#16a34a', fontSize: '20px' }} /> }
+
+  const alertClass = alert.status === 'success'
+    ? styles.alertSuccess
     : alert.status === 'error'
-      ? { backgroundColor: '#fef2f2', borderColor: '#fecaca', icon: <CloseCircleFilled style={{ color: '#dc2626', fontSize: '20px' }} /> }
-      : { backgroundColor: '#fffbeb', borderColor: '#fde68a', icon: <WarningFilled style={{ color: '#d97706', fontSize: '20px' }} /> };
+      ? styles.alertError
+      : styles.alertWarning;
+
+  const alertIcon = alert.status === 'success'
+    ? <CheckCircleFilled className={styles.alertIconSuccess} />
+    : alert.status === 'error'
+      ? <CloseCircleFilled className={styles.alertIconError} />
+      : <WarningFilled className={styles.alertIconWarning} />;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-      <style>{`@keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
-
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px' }}>
-        <FileCard label="Source" color="#234B5F" stats={sourceStats} warn={alert.mismatches} loading={isFetching} isEmpty={sourceEmpty} />
-        <ArrowRightOutlined style={{ fontSize: '20px', color: '#727786' }} />
-        <FileCard label="Target" color="#234B5F" icon={<DatabaseOutlined />} stats={targetStats} warn={alert.mismatches} loading={isFetching} isEmpty={targetEmpty} />
+    <div className={styles.root}>
+      <div className={styles.cardsRow}>
+        <FileCard label="Source" stats={sourceStats} warn={alert.mismatches} loading={isFetching} isEmpty={sourceEmpty} />
+        <ArrowRightOutlined className={styles.arrowIcon} />
+        <FileCard label="Target" icon={<DatabaseOutlined />} stats={targetStats} warn={alert.mismatches} loading={isFetching} isEmpty={targetEmpty} />
       </div>
 
       <OverviewFilePreview
@@ -551,11 +465,11 @@ export const MappingOverviewStep: React.FC = () => {
         />
       )}
 
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '16px 20px', borderRadius: '8px', backgroundColor: alertStyles.backgroundColor, border: `1px solid ${alertStyles.borderColor}` }}>
-        {alertStyles.icon}
+      <div className={`${styles.alert} ${alertClass}`}>
+        {alertIcon}
         <div>
-          <h5 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700 }}>{alert.title}</h5>
-          <p style={{ margin: 0, fontSize: '13px' }}>{alert.message}</p>
+          <h5 className={styles.alertTitle}>{alert.title}</h5>
+          <p className={styles.alertMessage}>{alert.message}</p>
         </div>
       </div>
     </div>

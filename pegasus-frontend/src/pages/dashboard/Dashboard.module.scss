@@ -1,3 +1,5 @@
+@use '~/assets/styles/variables' as tokens;
+
 /* ==========================================================================
    DASHBOARD VIEW COMPONENTS & SYSTEM LAYOUTS
    ========================================================================== */
@@ -245,7 +247,7 @@
   left: 2px;
   width: 20px;
   height: 20px;
-  background-color: #ffffff;
+  background-color: tokens.$surface-container-lowest;
   border-radius: 50%;
   transition: transform 0.2s;
 }

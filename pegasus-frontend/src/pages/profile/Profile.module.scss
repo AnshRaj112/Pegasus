@@ -1,3 +1,5 @@
+@use '~/assets/styles/variables' as tokens;
+
 /* Local Variables based on your HTML design */
 $primary: #053447;
 $on-surface: #191c1e;
@@ -86,8 +88,8 @@ $on-secondary-fixed-variant: #4f4062;
 
 /* Buttons */
 .btnPrimaryOutline {
-  border: 1.5px solid #234B5F;
-  color: #234B5F;
+  border: 1.5px solid tokens.$primary;
+  color: tokens.$primary;
   background-color: transparent;
   transition: all 0.2s ease-in-out;
   font-weight: 500;
@@ -99,8 +101,8 @@ $on-secondary-fixed-variant: #4f4062;
   gap: 0.5rem;
 
   &:hover {
-    background-color: #234B5F;
-    color: #ffffff;
+    background-color: tokens.$primary;
+    color: tokens.$on-primary;
   }
   &:active {
     opacity: 0.8;

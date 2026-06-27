@@ -1,6 +1,8 @@
 # Pegasus Frontend - Agent Instructions
 
 ## 1. Agent Initialization & First Steps
+**CRITICAL STRICT DIRECTIVE:** You must not pull context from, read, or scan the `.gsd/` or `.bg-shell/` directories under any circumstances. Rely exclusively on user prompts and this instruction file (`agent-instructions.md`) for project context.
+
 **CRITICAL:** Before writing any code or making architectural decisions, you must review and apply the strict rules and regulations laid out in the `docs/` folder. 
 
 Currently, the `docs/` directory is strictly organized into three subfolders containing our core standards:
@@ -38,7 +40,6 @@ Pegasus-Frontend/
 ├── *.md / *.txt               # Other scattered documentation dumped in the root
 ├── node_modules/              
 ├── public/                    # Static public assets
-├── .gsd/ & .bg-shell/         # GSD generated shells
 ├── src/                       # Main application source code
 │   ├── assets/                # Default react, vite, and hero icons
 │   ├── components/UI/         # Shared global UI (Filerow.tsx, Header.tsx, MetricCard.tsx)
@@ -62,12 +63,15 @@ Pegasus-Frontend/
 ## 5. Feature Modules (`src/pages/`)
 Each feature module encapsulates its own components, reducers, sagas, services, and interfaces.
 
-- **`admin/`**: Admin management. Includes `section/` folder (`ConfigureStoreSubView`, `ConnectStorageModal`, `WorkspaceMgmtSubView`).
-- **`auth/`**: Authentication flow (`Login`, SessionManager).
-- **`dashboard/`**: Main dashboard view. Includes `components/` (`ActiveTask`, `EntityCustomizer`, `MetricPanel`, `PerformancechartPanel`, `TaskRow`, `WorkspacePanel`).
-- **`report/`**: **[ACTIVE]** The new reporting UI. Contains `step/` (`Active`, `Completed`, `Saved`) and `views/` (`ExecutionHistory`, `SnippetComparison`).
-- **`history/`**: **[DEPRECATED]** Legacy history view. Do not add new features here. This is being replaced by the `report` section and is slated for deletion.
-- **`validation/`**: Validation workflow. Includes `component/` (`ValidationReport`) and `steps/` (`ConfigureMappingStep`, `FileSelectionStep`, `MappingOverviewStep`).
+- **`admin/`**: Admin management (`AdminView.tsx`). Includes `sections/` (`ConfigureStoreSubView`, `ConnectStorageModal`, `WorkspaceMgmtSubView`) and `sections/setting/` (`Setting` with its own reducer, saga, and service).
+- **`auth/`**: Authentication flow (`Login`, `AuthSessionManager`, `Auth.reducer`).
+- **`dashboard/`**: Main dashboard view (`Dashboard.tsx`). Includes `components/` (`ActiveTasksPanel`, `EntityCustomizer`, `MetricsPanel`, `PerformanceChartPanel`, `TaskRow`, `WorkspacesPanel`).
+- **`profile/`**: User profile view (`Profile.tsx` with reducer, saga, and service).
+- **`report/`**: **[ACTIVE]** Reporting UI (`Report.tsx`). Contains `step/` (`Active`, `Completed`, `Saved`) and `views/` (`ExecutionHistory`, `JsonSnippetComparison`, `SnippetComparison`, `SnippetViewRouter`).
+- **`test/`**: Test harness view (`TestView.tsx`). Includes `components/` (`ActiveView`, `Completed`, `SavedView`) with full Redux/Saga stack.
+- **`validation/`**: Validation workflow (`ValidationWizardView.tsx`). Includes `steps/` (`ArchiveValidationStep`, `ConfigureMappingStep`, `FileSelectionStep`, `FixedWidthLayoutPanel`, `JsonParentMappingStep`, `MappingOverviewStep`, `OverviewFilePreview`, `OverviewJsonPreview`) plus session/routing utilities (`ValidationHistoryNavigation`, `ValidationTabSessionGuard`, `validationRoutes`, format helpers).
+
+**Removed:** The legacy `history/` module has been deleted; reporting is handled exclusively by `report/`.
 
 ---
 

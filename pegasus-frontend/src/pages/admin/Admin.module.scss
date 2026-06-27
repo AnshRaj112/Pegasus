@@ -1,13 +1,15 @@
+@use '~/assets/styles/variables' as tokens;
+
 .adminLayout {
   display: flex;
   height: calc(100vh - 64px);
-  background-color: var(--surface-bright, #fcf9f8);
+  background-color: var(--surface-bright, #{tokens.$surface});
 }
 
 .adminSidebar {
   width: 256px;
-  background-color: var(--surface-container, #f0eded);
-  border-right: 1px solid var(--outline-variant, #c1c6d7);
+  background-color: var(--surface-container, #{tokens.$surface-container});
+  border-right: 1px solid var(--outline-variant, #{tokens.$outline-variant});
   padding: 24px 16px;
   display: flex;
   flex-direction: column;
@@ -27,7 +29,7 @@
   font-weight: 500;
   transition: all 0.2s;
   background-color: transparent;
-  color: var(--on-surface-variant, #414755);
+  color: var(--on-surface-variant, #{tokens.$on-surface-variant});
 
   &:hover {
     background-color: rgba(35, 75, 95, 0.1);
@@ -35,11 +37,11 @@
 }
 
 .navButtonActive {
-  background-color: var(--secondary-container, #234B5F);
-  color: #ffffff;
+  background-color: var(--secondary-container, #{tokens.$color-midnight-green});
+  color: tokens.$on-primary;
 
   &:hover {
-    background-color: var(--secondary-container, #234B5F);
+    background-color: var(--secondary-container, #{tokens.$color-midnight-green});
   }
 }
 
@@ -47,7 +49,7 @@
   flex: 1;
   overflow-y: auto;
   padding: 32px;
-  background-color: var(--surface-bright, #fcf9f8);
+  background-color: var(--surface-bright, #{tokens.$surface});
 }
 
 .contentMaxWidth {
@@ -63,8 +65,8 @@
 }
 
 .bentoCardLite {
-  background-color: #ffffff;
-  border: 1px solid var(--outline-variant, #c1c6d7);
+  background-color: tokens.$surface-container-lowest;
+  border: 1px solid var(--outline-variant, #{tokens.$outline-variant});
   padding: 16px;
   border-radius: 12px;
   display: flex;
@@ -74,53 +76,20 @@
 
 /* Reusable Table Shell */
 .tableShell {
-  background-color: #ffffff;
-  border: 1px solid var(--outline-variant, #c1c6d7);
+  background-color: tokens.$surface-container-lowest;
+  border: 1px solid var(--outline-variant, #{tokens.$outline-variant});
   border-radius: 12px;
   overflow: hidden;
 }
 
 .dataTableRow {
-  border-bottom: 1px solid var(--surface-variant, #e5e2e1);
+  border-bottom: 1px solid var(--surface-variant, #{tokens.$surface-variant});
   transition: background-color 0.2s;
   cursor: default;
 
   &:hover {
     background-color: #fafafa;
   }
-}
-
-/* Store Cards Grid */
-.storeGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 24px;
-}
-
-.storeCard {
-  background-color: #ffffff;
-  border: 1px solid #f0f0f0;
-  border-radius: 8px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
-
-  &:hover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-    border-color: var(--primary, #234B5F);
-  }
-}
-
-.emptyState {
-  grid-column: 1 / -1;
-  padding: 48px 24px;
-  text-align: center;
-  background-color: #ffffff;
-  border: 1px dashed #d9d9d9;
-  border-radius: 12px;
-  color: #414755;
 }
 
 .connectModalBody {
@@ -146,7 +115,7 @@
 }
 
 .providerCardSelected {
-  border-color: #234B5F;
+  border-color: tokens.$primary;
   background: rgba(35, 75, 95, 0.06);
   box-shadow: 0 0 0 1px rgba(35, 75, 95, 0.15);
 }
@@ -170,7 +139,7 @@
 .providerCardTitle {
   font-size: 14px;
   font-weight: 600;
-  color: #1b1b1c;
+  color: tokens.$on-surface;
 }
 
 .providerCardSubtitle {
@@ -191,7 +160,7 @@
   gap: 6px;
   font-size: 13px;
   font-weight: 500;
-  color: #414755;
+  color: tokens.$on-surface-variant;
 }
 
 .optionalTag {
@@ -211,9 +180,9 @@
 .connectError {
   padding: 10px 12px;
   border-radius: 8px;
-  background: #fff2f0;
-  border: 1px solid #ffccc7;
-  color: #cf1322;
+  background: tokens.$status-fail-bg;
+  border: 1px solid tokens.$error-container;
+  color: tokens.$status-fail;
   font-size: 13px;
 }
 

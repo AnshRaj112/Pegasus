@@ -6,6 +6,7 @@ import { TabType } from './Report.interface';
 import { Active } from './step/Active';
 import { Completed } from './step/Completed';
 import { Saved } from './step/Saved';
+import styles from './Report.module.scss';
 
 export const Report: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -21,7 +22,6 @@ export const Report: React.FC = () => {
     return () => clearInterval(timer);
   }, [activeTab, dispatch]);
 
-  // Dynamic component rendering based on tab
   const renderStep = () => {
     switch (activeTab) {
       case 'Active': return <Active />;
@@ -32,52 +32,40 @@ export const Report: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '1440px', margin: '0 auto' }}>
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 600, color: '#1b1b1c', margin: '0 0 8px 0' }}>Validation Reports</h1>
-        <p style={{ margin: 0, color: '#64748b', fontSize: '14px' }}>Manage and monitor your data validation tests.</p>
+    <div className={styles.page}>
+      <div className={styles.header}>
+        <h1 className={styles.title}>Validation Reports</h1>
+        <p className={styles.subtitle}>Manage and monitor your data validation tests.</p>
       </div>
 
-      <div style={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)', overflow: 'hidden' }}>
-        
-        {/* Navigation & Search Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', padding: '0 24px', flexWrap: 'wrap', gap: '16px' }}>
-          <div style={{ display: 'flex', gap: '24px' }}>
+      <div className={styles.card}>
+        <div className={styles.toolbar}>
+          <div className={styles.tabs}>
             {(['Active', 'Completed', 'Saved'] as TabType[]).map((tab) => (
               <button
                 key={tab}
+                type="button"
                 onClick={() => dispatch(reportActions.setTab(tab))}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  borderBottom: activeTab === tab ? '3px solid var(--primary)' : '3px solid transparent',
-                  padding: '16px 0',
-                  color: activeTab === tab ? '#1e293b' : '#64748b',
-                  fontWeight: activeTab === tab ? 600 : 500,
-                  fontSize: '14px',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
-                }}
+                className={`${styles.tabBtn} ${activeTab === tab ? styles.tabBtnActive : ''}`}
               >
                 {tab}
               </button>
             ))}
           </div>
 
-          <div style={{ position: 'relative', width: '100%', maxWidth: '320px', padding: '8px 0' }}>
+          <div className={styles.searchWrap}>
             <input
               type="text"
               placeholder="Search by Test or Group Name"
               value={searchQuery}
               onChange={(e) => dispatch(reportActions.setSearchQuery(e.target.value))}
-              style={{ width: '100%', padding: '8px 36px 8px 12px', borderRadius: '6px', border: '1px solid #d9d9d9', fontSize: '13px', color: '#1b1b1c', boxSizing: 'border-box', outline: 'none' }}
+              className={styles.searchInput}
             />
-            <SearchOutlined style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
+            <SearchOutlined className={styles.searchIcon} />
           </div>
         </div>
 
-        {/* Dynamic Step Content */}
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <div className={styles.content}>
           {renderStep()}
         </div>
       </div>
