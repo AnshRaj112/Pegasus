@@ -4,7 +4,7 @@ import { dashboardSaga } from '../pages/dashboard/Dashboard.saga';
 import validationSaga from '../pages/validation/Validation.saga';
 import adminSaga from '../pages/admin/Admin.saga';
 import { reportSaga } from '../pages/report/Report.saga';
-import { watchProfileSagas } from '../pages/profile/Profile.saga';
+import { profileSaga } from '../pages/profile/Profile.saga';
 import {settingSaga} from '../pages/admin/sections/setting/Setting.saga';
 import { testSaga } from '~/pages/test/Test.saga';
 
@@ -15,7 +15,7 @@ export default function* rootSaga() {
     validationSaga(),
     adminSaga(),
     reportSaga(),
-    watchProfileSagas(),
+    profileSaga(),
     settingSaga(),
     testSaga(),
   ]);

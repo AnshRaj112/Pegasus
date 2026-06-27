@@ -4,6 +4,7 @@ import { useAppSelector } from '../../../redux/store';
 import { resolveArchiveFormatChain } from '../../../shared/formatDisplayLabel';
 import { FormatDetectionChainLabel } from '../../../shared/FormatDetectionChainLabel';
 import { archiveKindFromProfile, resolveWizardArchiveMode } from '../archiveFormat';
+import styles from './ArchiveValidationStep.module.scss';
 
 const formatBytes = (bytes: number | null | undefined) => {
   if (bytes == null) return '—';
@@ -39,30 +40,21 @@ export const ArchiveValidationStep: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: '12px',
-        padding: '16px 20px',
-        backgroundColor: '#f0f9ff',
-        border: '1px solid #bae6fd',
-        borderRadius: '10px',
-      }}
-      >
-        <SafetyOutlined style={{ color: '#0369a1', fontSize: '20px', marginTop: '2px' }} />
+    <div className={styles.root}>
+      <div className={styles.infoBanner}>
+        <SafetyOutlined className={styles.infoIcon} />
         <div>
-          <div style={{ fontWeight: 600, color: '#0c4a6e', marginBottom: '4px' }}>
+          <div className={styles.infoTitle}>
             Archive validation (no decompression)
           </div>
-          <div style={{ fontSize: '13px', color: '#334155', lineHeight: 1.5 }}>
+          <div className={styles.infoBody}>
             Metadata manifest + streaming byte digest. Nested archives (e.g. csv inside zip
             inside tar) are expanded up to depth 3 using bounded member reads.
           </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+      <div className={styles.cardGrid}>
         {[
           {
             label: 'Source',
@@ -88,10 +80,10 @@ export const ArchiveValidationStep: React.FC = () => {
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', color: '#234B5F' }}>
               <FileZipOutlined />
-              <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase' }}>{label}</span>
+              <span className={styles.cardLabel}>{label}</span>
             </div>
-            <h4 style={{ margin: '0 0 8px 0' }}>{name ?? '—'}</h4>
-            <div style={{ fontSize: '13px', color: '#414755', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <h4 className={styles.cardTitle}>{name ?? '—'}</h4>
+            <div className={styles.cardDetails}>
               <div>
                 <strong>Format:</strong>
                 {' '}
@@ -111,7 +103,7 @@ export const ArchiveValidationStep: React.FC = () => {
               {profile?.archive_entries_sample && profile.archive_entries_sample.length > 0 && (
                 <div>
                   <strong>Sample paths:</strong>
-                  <ul style={{ margin: '4px 0 0 16px', padding: 0, fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
+                  <ul className={styles.sampleList}>
                     {profile.archive_entries_sample.slice(0, 5).map((entry) => (
                       <li key={entry}>{entry}</li>
                     ))}
@@ -119,25 +111,14 @@ export const ArchiveValidationStep: React.FC = () => {
                 </div>
               )}
               {profile?.archive_warnings?.map((warning) => (
-                <div key={warning} style={{ color: '#b45309', fontSize: '12px' }}>{warning}</div>
+                <div key={warning} className={styles.warningText}>{warning}</div>
               ))}
             </div>
           </div>
         ))}
       </div>
 
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px',
-        padding: '14px 16px',
-        backgroundColor: '#f0fdf4',
-        border: '1px solid #bbf7d0',
-        borderRadius: '8px',
-        fontSize: '13px',
-        color: '#166534',
-      }}
-      >
+      <div className={styles.readyBanner}>
         <CheckCircleOutlined />
         Ready to validate
         {' '}

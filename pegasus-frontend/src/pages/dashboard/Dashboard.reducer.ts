@@ -6,6 +6,7 @@ import { DashboardDataResponse, DashboardReducerState } from './Dashboard.interf
 
 export const initialState: DashboardReducerState = {
   dashboardDataState: initializeNullState,
+  createEntityState: initializeNullState,
 };
 
 const dashboardSlice = createSlice({
@@ -29,6 +30,27 @@ const dashboardSlice = createSlice({
     fetchDashboardDataError: (state, action: PayloadAction<string>) => ({
       ...state,
       dashboardDataState: {
+        ...initializeNullState,
+        error: action.payload,
+      },
+    }),
+    createEntityRequest: (state, _action: PayloadAction<{ display_name: string }>) => ({
+      ...state,
+      createEntityState: {
+        ...initializeNullState,
+        isFetching: true,
+      },
+    }),
+    createEntitySuccess: (state, action: PayloadAction<string>) => ({
+      ...state,
+      createEntityState: {
+        ...initializeNullState,
+        data: action.payload,
+      },
+    }),
+    createEntityError: (state, action: PayloadAction<string>) => ({
+      ...state,
+      createEntityState: {
         ...initializeNullState,
         error: action.payload,
       },

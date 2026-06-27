@@ -1,4 +1,6 @@
-import {  ReactNode } from 'react';
+import { ReactNode } from 'react';
+
+import type { MismatchSampleRow, ValidationHistoryDetail } from '../../shared/api/Api';
 
 export type TabType = 'Active' | 'Completed' | 'Saved';
 
@@ -24,12 +26,31 @@ export interface ReportItem {
   draftRunId?: string | null;
 }
 
+export interface AsyncListState<T> {
+  data: T[];
+  isFetching: boolean;
+  error: string | null;
+}
+
 export interface ReportState {
   activeTab: TabType;
   searchQuery: string;
-  activeReports: ReportItem[];
-  completedReports: ReportItem[];
-  savedReports: ReportItem[];
-  isLoading: boolean;
-  error: string | null;
+  activeReports: AsyncListState<ReportItem>;
+  completedReports: AsyncListState<ReportItem>;
+  savedReports: AsyncListState<ReportItem>;
+  historyRunState: {
+    runId: string | null;
+    data: ValidationHistoryDetail | null;
+    isFetching: boolean;
+    error: string | null;
+  };
+  mismatchesState: {
+    runId: string | null;
+    items: MismatchSampleRow[];
+    total: number;
+    isFetching: boolean;
+    isComplete: boolean;
+    progressMessage: string;
+    error: string | null;
+  };
 }

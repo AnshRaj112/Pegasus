@@ -1,0 +1,84 @@
+@use '~/assets/styles/variables' as tokens;
+
+.row {
+  border-bottom: 0.0625rem solid tokens.$surface-variant;
+}
+
+.cell {
+  padding: tokens.$spacing-md;
+}
+
+.taskName {
+  font-weight: 500;
+  color: tokens.$on-surface;
+}
+
+.taskTime {
+  font-family: tokens.$font-body-sm;
+  font-size: tokens.$text-body-sm;
+  color: tokens.$on-surface-variant;
+}
+
+.badge {
+  font-size: tokens.$text-body-sm;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.badgeCompleted {
+  color: tokens.$status-pass;
+}
+
+.badgeRunning {
+  display: flex;
+  align-items: center;
+  gap: tokens.$spacing-xs;
+  color: tokens.$status-running;
+  font-weight: 600;
+  font-size: tokens.$text-body-sm;
+}
+
+.badgeScheduled {
+  color: tokens.$on-surface-variant;
+}
+
+.badgeFailed {
+  color: tokens.$error;
+}
+
+.progressTrack {
+  width: 100%;
+  background: tokens.$surface-container;
+  border-radius: 9999px;
+  height: 0.375rem;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 0.375rem;
+  border-radius: 9999px;
+}
+
+.progressLabel {
+  font-size: 0.625rem;
+  margin-top: tokens.$spacing-xs;
+  color: tokens.$on-surface-variant;
+}
+
+.progressCompleted {
+  background-color: tokens.$status-pass;
+}
+
+.progressFailed {
+  background-color: tokens.$error;
+}
+
+.progressScheduled {
+  background-color: tokens.$surface-dim;
+}
+
+.progressDefault {
+  background-color: tokens.$primary;
+}

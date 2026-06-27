@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T09:39:41Z
+# Last edited: 2026-06-27T20:03:55+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Request/response models for the validation API."""
@@ -987,22 +987,6 @@ class CloudFileProfileResponse(BaseModel):
     json_preview: str | None = Field(
         default=None,
         description="Pretty-printed JSON prefix for overview preview (JSON documents only).",
-    )
-    archive_entry_count: int | None = Field(
-        default=None,
-        description="Number of file entries in an archive container.",
-    )
-    archive_entries_sample: list[str] | None = Field(
-        default=None,
-        description="Sample of archive member paths (first 20).",
-    )
-    archive_manifest_supported: bool | None = Field(
-        default=None,
-        description="Whether metadata-only manifest comparison is available.",
-    )
-    archive_warnings: list[str] | None = Field(
-        default=None,
-        description="Archive profiling or validation warnings.",
     )
 
 

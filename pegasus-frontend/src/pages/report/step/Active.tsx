@@ -1,59 +1,64 @@
 import React from 'react';
 import { TableOutlined, HistoryOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import { useAppSelector } from '../../../redux/store';
-// ⚡ FIX: Import the types from your interface file
 import { ReportItem, ReportBadge } from '../Report.interface';
-import { useNavigate } from 'react-router-dom'; // ⚡ 1. Add this import
+import styles from './ReportStep.module.scss';
+
+const renderBadges = (badges: ReportBadge[]) => badges.map((badge, bIdx) => (
+  <React.Fragment key={bIdx}>
+    {bIdx > 0 && <span className={styles.badgeSep}>|</span>}
+    {badge.type === 'box' ? (
+      <span className={styles.badgeBox}>{badge.content}</span>
+    ) : (
+      <span className={styles.badgeContent}>{badge.content}</span>
+    )}
+  </React.Fragment>
+));
 
 export const Active: React.FC = () => {
-  const { activeReports, searchQuery, isLoading } = useAppSelector((s) => s.report);
-  const navigate = useNavigate(); // ⚡ 2. Initialize the navigate function
-  
+  const { data: activeReports, isFetching } = useAppSelector((s) => s.report.activeReports);
+  const searchQuery = useAppSelector((s) => s.report.searchQuery);
+  const navigate = useNavigate();
 
-  // ⚡ FIX: Added (r: ReportItem)
-  const filtered = activeReports.filter((r: ReportItem) => 
-    r.jobTitle.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    r.sourceTitle.toLowerCase().includes(searchQuery.toLowerCase())
+  const filtered = activeReports.filter((r: ReportItem) =>
+    r.jobTitle.toLowerCase().includes(searchQuery.toLowerCase())
+    || r.sourceTitle.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  if (isLoading) return <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>Loading active reports...</div>;
-  if (filtered.length === 0) return <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>No active reports found.</div>;
+  if (isFetching) return <div className={styles.empty}>Loading active reports...</div>;
+  if (filtered.length === 0) return <div className={styles.empty}>No active reports found.</div>;
 
   return (
     <>
-      {/* ⚡ FIX: Added (report: ReportItem, index: number) */}
       {filtered.map((report: ReportItem, index: number) => (
-        <div key={report.id} onClick={() => navigate(`/reports/${report.id}/history`)} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px 24px', borderBottom: index !== filtered.length - 1 ? '1px solid #f1f5f9' : 'none', backgroundColor: '#fff', transition: 'background-color 0.2s', cursor: 'pointer' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}>
-          <div style={{ color: '#94a3b8', fontSize: '14px', width: '16px' }}>-</div>
+        <div
+          key={report.id}
+          onClick={() => navigate(`/reports/${report.id}/history`)}
+          className={`${styles.row} ${index !== filtered.length - 1 ? styles.rowBordered : ''}`}
+        >
+          <div className={styles.dash}>-</div>
 
-          <div style={{ flex: 1, minWidth: '200px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              <TableOutlined style={{ color: '#64748b', fontSize: '16px' }} />
-              <span style={{ fontWeight: 600, color: '#1b1b1c', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.02em' }}>{report.sourceTitle}</span>
+          <div className={styles.column}>
+            <div className={styles.titleRow}>
+              <TableOutlined className={styles.fileIcon} />
+              <span className={styles.sourceTitle}>{report.sourceTitle}</span>
             </div>
-            <div style={{ color: '#64748b', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{report.sourceSubtitle}</div>
+            <div className={styles.monoPath}>{report.sourceSubtitle}</div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', height: '40px', padding: '0 16px' }}>
-            <HistoryOutlined style={{ color: '#64748b' }} />
-            <div style={{ marginLeft: '16px', height: '100%', width: '1px', backgroundColor: '#f1f5f9' }} />
+          <div className={styles.dividerCol}>
+            <HistoryOutlined className={styles.historyIcon} />
+            <div className={styles.vDivider} />
           </div>
 
-          <div style={{ flex: 1, minWidth: '200px' }}>
-            <div style={{ color: '#1b1b1c', fontSize: '13px', fontWeight: 500, marginBottom: '4px' }}>{report.jobTitle}</div>
-            <div style={{ color: '#64748b', fontSize: '12px' }}>{report.jobSubtitle}</div>
+          <div className={styles.column}>
+            <div className={styles.jobTitle}>{report.jobTitle}</div>
+            <div className={styles.jobSubtitle}>{report.jobSubtitle}</div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: '280px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', border: '1px solid rgba(0, 87, 194, 0.3)', borderRadius: '999px', padding: '2px 8px', color: 'var(--primary)', fontSize: '11px', fontFamily: 'var(--font-mono)' }}>
-              {/* ⚡ FIX: Added (badge: ReportBadge, bIdx: number) */}
-              {report.badges.map((badge: ReportBadge, bIdx: number) => (
-                <React.Fragment key={bIdx}>
-                  {bIdx > 0 && <span style={{ margin: '0 6px', opacity: 0.4 }}>|</span>}
-                  {badge.type === 'box' ? <span style={{ border: '1px solid rgba(0, 87, 194, 0.4)', borderRadius: '4px', padding: '0 4px', fontWeight: 700 }}>{badge.content}</span> : <span style={{ display: 'flex', alignItems: 'center' }}>{badge.content}</span>}
-                </React.Fragment>
-              ))}
-            </div>
+          <div className={styles.badgesCol}>
+            <div className={styles.badgePill}>{renderBadges(report.badges)}</div>
           </div>
         </div>
       ))}

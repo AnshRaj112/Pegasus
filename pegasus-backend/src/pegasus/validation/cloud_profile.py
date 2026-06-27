@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T16:47:12+05:30
+# Last edited: 2026-06-27T20:03:55+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Profile GCS delimited objects: format detection, column count, row count."""
@@ -24,13 +24,7 @@ from pegasus.validation.file_detection.display_label import (
     _pick_richest_format_label,
 )
 from pegasus.validation.file_detection.types import FileDetectionReport
-from pegasus.validation.file_format import (
-    infer_archive_format_from_name,
-    infer_file_format_from_path,
-    is_archive_format,
-    is_columnar_format,
-    normalize_file_format,
-)
+from pegasus.validation.file_format import infer_file_format_from_path, is_columnar_format, normalize_file_format
 from pegasus.validation.gcs_object import GcsObjectRef, gcs_object_ref_from_config, read_gcs_prefix
 
 
@@ -205,8 +199,6 @@ def resolve_cloud_pair_file_format(
         raise ValueError("source_cloud and target_cloud are required")
 
     declared_norm = normalize_file_format(declared) if declared else "auto"
-    if is_archive_format(declared_norm):
-        return declared_norm
     if declared_norm == "json":
         return "json"
     if declared_norm == "fixed-width":
@@ -216,14 +208,6 @@ def resolve_cloud_pair_file_format(
 
     src_ref = gcs_object_ref_from_config(source_cloud)
     tgt_ref = gcs_object_ref_from_config(target_cloud)
-
-    src_archive = resolve_gcs_archive_format(src_ref)
-    tgt_archive = resolve_gcs_archive_format(tgt_ref)
-    if src_archive or tgt_archive:
-        if src_archive != tgt_archive:
-            raise ValueError("Source and target must both be archives of the same kind")
-        if src_archive:
-            return src_archive
 
     src_ext = infer_file_format_from_path(Path(src_ref.object_name), "auto")
     tgt_ext = infer_file_format_from_path(Path(tgt_ref.object_name), "auto")

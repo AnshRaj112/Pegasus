@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T16:47:12+05:30
+# Last edited: 2026-06-27T20:03:55+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Subprocess / pool entrypoint: run one validation job from files under *job_dir*."""
@@ -34,7 +34,6 @@ from pegasus.validation.resource_profiler import (
 logger = logging.getLogger(__name__)
 
 _COLUMNAR_FORMATS = frozenset({"parquet", "orc", "avro"})
-_ARCHIVE_FORMATS = frozenset({"zip", "tar"})
 
 
 def _write_json(path: Path, obj: object, *, indent: bool = False) -> None:
@@ -335,7 +334,7 @@ def run_job_directory(job_dir: Path) -> int:
         columnar_input_from_meta,
         delimited_input_from_meta,
     )
-    from pegasus.validation.file_format import is_columnar_format, is_archive_format
+    from pegasus.validation.file_format import is_columnar_format
 
     if is_columnar_format(file_format):
         source_input = columnar_input_from_meta(meta, side="source", file_format=file_format)

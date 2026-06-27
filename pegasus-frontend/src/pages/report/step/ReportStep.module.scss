@@ -1,0 +1,159 @@
+@use '~/assets/styles/variables' as tokens;
+
+.empty {
+  padding: tokens.$spacing-xl;
+  text-align: center;
+  color: tokens.$text-muted;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: tokens.$spacing-md;
+  padding: tokens.$spacing-md tokens.$spacing-lg;
+  background-color: tokens.$surface-container-lowest;
+  transition: background-color 0.2s;
+  cursor: pointer;
+
+  &:hover {
+    background-color: tokens.$row-hover;
+  }
+}
+
+.rowBordered {
+  border-bottom: 0.0625rem solid tokens.$border-subtle;
+}
+
+.rowStatic {
+  cursor: default;
+
+  &:hover {
+    background-color: tokens.$surface-container-lowest;
+  }
+}
+
+.rowInner {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: tokens.$spacing-md;
+  cursor: pointer;
+
+  &:hover {
+    opacity: 0.85;
+  }
+}
+
+.dash {
+  color: tokens.$text-icon;
+  font-size: tokens.$text-label-md;
+  width: 1rem;
+}
+
+.column {
+  flex: 1;
+  min-width: 12.5rem;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: tokens.$spacing-sm;
+  margin-bottom: 0.25rem;
+}
+
+.fileIcon {
+  color: tokens.$text-muted;
+  font-size: 1rem;
+}
+
+.sourceTitle {
+  font-weight: 600;
+  color: tokens.$on-surface;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.monoPath {
+  color: tokens.$text-muted;
+  font-size: tokens.$text-body-sm;
+  font-family: tokens.$font-mono;
+}
+
+.dividerCol {
+  display: flex;
+  align-items: center;
+  height: 2.5rem;
+  padding: 0 tokens.$spacing-md;
+}
+
+.historyIcon {
+  color: tokens.$text-muted;
+}
+
+.vDivider {
+  margin-left: tokens.$spacing-md;
+  height: 100%;
+  width: 0.0625rem;
+  background-color: tokens.$border-subtle;
+}
+
+.jobTitle {
+  color: tokens.$on-surface;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.jobSubtitle {
+  color: tokens.$text-muted;
+  font-size: tokens.$text-body-sm;
+}
+
+.badgesCol {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 17.5rem;
+}
+
+.badgePill {
+  display: flex;
+  align-items: center;
+  border: 0.0625rem solid rgba(0, 87, 194, 0.3);
+  border-radius: 999px;
+  padding: 0.125rem tokens.$spacing-sm;
+  color: tokens.$primary;
+  font-size: 0.6875rem;
+  font-family: tokens.$font-mono;
+}
+
+.badgeSep {
+  margin: 0 0.375rem;
+  opacity: 0.4;
+}
+
+.badgeBox {
+  border: 0.0625rem solid rgba(0, 87, 194, 0.4);
+  border-radius: 0.25rem;
+  padding: 0 0.25rem;
+  font-weight: 700;
+}
+
+.badgeContent {
+  display: flex;
+  align-items: center;
+}
+
+.runBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem tokens.$spacing-md;
+  border-radius: 0.375rem;
+  border: 0.0625rem solid tokens.$outline-variant;
+  background: tokens.$surface-container-lowest;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}

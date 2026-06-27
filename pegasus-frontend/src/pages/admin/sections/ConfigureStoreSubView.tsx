@@ -17,11 +17,45 @@ import {
   BulbOutlined,
   DeleteOutlined,
 } from '@ant-design/icons';
-import styles from '../Admin.module.scss';
+import styles from './ConfigureStoreSubView.module.scss';
 import { useAppSelector, useAppDispatch } from '../../../redux/store';
 import { adminActions } from '../Admin.reducer';
 import { ConnectStorageModal } from './ConnectStorageModal';
 import { StorageProviderItem } from '../Admin.interface';
+
+const providerIconClass = (type: string): string => {
+  switch (type) {
+    case 'Google Cloud Storage':
+      return styles.providerIconGcs;
+    case 'Amazon S3':
+      return styles.providerIconS3;
+    case 'Azure Blob Storage':
+      return styles.providerIconAzure;
+    default:
+      return styles.providerIconDefault;
+  }
+};
+
+const providerIcon = (type: string) => {
+  switch (type) {
+    case 'Google Cloud Storage':
+      return <GoogleOutlined />;
+    case 'Amazon S3':
+      return <AmazonOutlined />;
+    case 'Azure Blob Storage':
+      return <WindowsOutlined />;
+    default:
+      return <FolderOpenOutlined />;
+  }
+};
+
+const testBtnClass = (result: 'success' | 'failed' | null | undefined, disabled: boolean): string => {
+  const base = styles.testBtn;
+  if (disabled) return `${base} ${styles.testBtnDisabled} ${styles.testBtnDefault}`;
+  if (result === 'success') return `${base} ${styles.testBtnSuccess}`;
+  if (result === 'failed') return `${base} ${styles.testBtnFailed}`;
+  return `${base} ${styles.testBtnDefault}`;
+};
 
 export const ConfigureStoreSubView: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -105,178 +139,38 @@ export const ConfigureStoreSubView: React.FC = () => {
       prov.bucket.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  const getProviderIcon = (type: string) => {
-    switch (type) {
-      case 'Google Cloud Storage':
-        return (
-          <div
-            style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '8px',
-              backgroundColor: 'rgba(66, 133, 244, 0.1)',
-              color: '#4285F4',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '20px',
-            }}
-          >
-            <GoogleOutlined />
-          </div>
-        );
-      case 'Amazon S3':
-        return (
-          <div
-            style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '8px',
-              backgroundColor: 'rgba(255, 153, 0, 0.1)',
-              color: '#FF9900',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '20px',
-            }}
-          >
-            <AmazonOutlined />
-          </div>
-        );
-      case 'Azure Blob Storage':
-        return (
-          <div
-            style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '8px',
-              backgroundColor: 'rgba(0, 120, 212, 0.1)',
-              color: '#0078D4',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '20px',
-            }}
-          >
-            <WindowsOutlined />
-          </div>
-        );
-      default:
-        return (
-          <div
-            style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '8px',
-              backgroundColor: 'rgba(65, 71, 85, 0.1)',
-              color: '#414755',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '20px',
-            }}
-          >
-            <FolderOpenOutlined />
-          </div>
-        );
-    }
-  };
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+    <div className={styles.page}>
+      <div className={styles.header}>
         <div>
-          <h1 style={{ fontSize: '38px', fontWeight: 600, color: '#1b1b1c', margin: '0 0 4px 0', letterSpacing: '-0.02em' }}>
-            Configure Store
-          </h1>
-          <p style={{ fontSize: '14px', color: '#414755', margin: 0 }}>
+          <h1 className={styles.title}>Configure Store</h1>
+          <p className={styles.subtitle}>
             Manage your storage providers and bucket configurations for data validation workflows.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleOpenCreate}
-          style={{
-            backgroundColor: '#234B5F',
-            color: '#ffffff',
-            padding: '8px 24px',
-            borderRadius: '8px',
-            fontSize: '14px',
-            fontWeight: 500,
-            border: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            cursor: 'pointer',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-          }}
-        >
+        <button type="button" onClick={handleOpenCreate} className={styles.addBtn}>
           <PlusOutlined /> Add New Storage Bucket
         </button>
       </div>
 
-      <div style={{ display: 'flex', gap: '16px' }}>
-        <div style={{ position: 'relative', flexGrow: 1, maxWidth: '448px' }}>
-          <SearchOutlined
-            style={{
-              position: 'absolute',
-              left: '12px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: '#727786',
-              fontSize: '20px',
-            }}
-          />
+      <div className={styles.toolbar}>
+        <div className={styles.searchWrap}>
+          <SearchOutlined className={styles.searchIcon} />
           <input
             type="text"
             placeholder="Filter buckets by name or provider..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: '100%',
-              height: '40px',
-              boxSizing: 'border-box',
-              padding: '8px 16px 8px 40px',
-              borderRadius: '8px',
-              border: '1px solid #d9d9d9',
-              outline: 'none',
-              fontSize: '14px',
-              backgroundColor: '#ffffff',
-            }}
+            className={styles.searchInput}
           />
         </div>
-        <button
-          type="button"
-          style={{
-            padding: '8px 16px',
-            height: '40px',
-            borderRadius: '8px',
-            border: '1px solid #d9d9d9',
-            backgroundColor: '#ffffff',
-            fontSize: '14px',
-            fontWeight: 500,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            cursor: 'pointer',
-            color: '#1b1b1c',
-          }}
-        >
-          <FilterOutlined style={{ fontSize: '20px' }} />
+        <button type="button" className={styles.filterBtn}>
+          <FilterOutlined className={styles.filterIcon} />
         </button>
       </div>
 
       {error && (
-        <div
-          style={{
-            padding: '12px 16px',
-            borderRadius: '8px',
-            backgroundColor: '#fff2f0',
-            border: '1px solid #ffccc7',
-            color: '#cf1322',
-            fontSize: '14px',
-          }}
-        >
+        <div className={styles.errorBanner}>
           {error}
         </div>
       )}
@@ -285,118 +179,61 @@ export const ConfigureStoreSubView: React.FC = () => {
         {isFetching && storageProviders.length === 0 ? (
           <div className={styles.emptyState}>
             <Spin size="large" />
-            <p style={{ marginTop: 16 }}>Loading connected storage buckets…</p>
+            <p className={styles.emptyLoadingText}>Loading connected storage buckets…</p>
           </div>
         ) : filteredProviders.length === 0 ? (
           <div className={styles.emptyState}>
-            <GoogleOutlined style={{ fontSize: 32, color: '#4285F4', marginBottom: 12 }} />
-            <p style={{ margin: '0 0 8px', fontWeight: 600, color: '#1b1b1c' }}>No storage buckets connected</p>
-            <p style={{ margin: 0, fontSize: 14 }}>
+            <GoogleOutlined className={styles.emptyIcon} />
+            <p className={styles.emptyTitle}>No storage buckets connected</p>
+            <p className={styles.emptyDesc}>
               Connect a Google Cloud Storage bucket with a service account JSON key to use it in validation.
             </p>
           </div>
         ) : (
           filteredProviders.map((prov) => (
             <div key={prov.id} className={styles.storeCard}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  {getProviderIcon(prov.providerType)}
+              <div className={styles.cardHeader}>
+                <div className={styles.cardHeaderLeft}>
+                  <div className={`${styles.providerIcon} ${providerIconClass(prov.providerType)}`}>
+                    {providerIcon(prov.providerType)}
+                  </div>
                   <div>
-                    <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 500, color: '#1b1b1c' }}>{prov.name}</h3>
-                    <span style={{ fontSize: '12px', color: '#414755' }}>{prov.providerType}</span>
+                    <h3 className={styles.cardTitle}>{prov.name}</h3>
+                    <span className={styles.cardProvider}>{prov.providerType}</span>
                   </div>
                 </div>
                 {prov.status === 'Success' ? (
-                  <span
-                    style={{
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      backgroundColor: '#f6ffed',
-                      border: '1px solid #b7eb8f',
-                      color: '#52c41a',
-                      fontSize: '12px',
-                      fontWeight: 500,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                    }}
-                  >
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#52c41a' }} /> Active
+                  <span className={`${styles.statusBadge} ${styles.statusActive}`}>
+                    <span className={`${styles.statusDot} ${styles.statusDotActive}`} /> Active
                   </span>
                 ) : (
-                  <span
-                    style={{
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      backgroundColor: '#fffbe6',
-                      border: '1px solid #ffe58f',
-                      color: '#faad14',
-                      fontSize: '12px',
-                      fontWeight: 500,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                    }}
-                  >
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#faad14' }} /> Inactive
+                  <span className={`${styles.statusBadge} ${styles.statusInactive}`}>
+                    <span className={`${styles.statusDot} ${styles.statusDotInactive}`} /> Inactive
                   </span>
                 )}
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                  <span style={{ color: '#414755' }}>{prov.pathLabel}</span>
-                  <span style={{ color: '#1b1b1c', fontFamily: 'var(--font-mono)' }}>{prov.pathValue}</span>
+              <div className={styles.cardMeta}>
+                <div className={styles.cardMetaRow}>
+                  <span className={styles.cardMetaLabel}>{prov.pathLabel}</span>
+                  <span className={`${styles.cardMetaValue} ${styles.cardMetaMono}`}>{prov.pathValue}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                  <span style={{ color: '#414755' }}>Last Updated:</span>
-                  <span style={{ color: '#1b1b1c' }}>{prov.syncTime}</span>
+                <div className={styles.cardMetaRow}>
+                  <span className={styles.cardMetaLabel}>Last Updated:</span>
+                  <span className={styles.cardMetaValue}>{prov.syncTime}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                  <span style={{ color: '#414755' }}>{prov.regionLabel}</span>
-                  <span style={{ color: '#1b1b1c' }}>{prov.regionValue}</span>
+                <div className={styles.cardMetaRow}>
+                  <span className={styles.cardMetaLabel}>{prov.regionLabel}</span>
+                  <span className={styles.cardMetaValue}>{prov.regionValue}</span>
                 </div>
               </div>
 
-              <div
-                style={{
-                  display: 'flex',
-                  gap: '8px',
-                  marginTop: '4px',
-                  paddingTop: '16px',
-                  borderTop: '1px solid #f0f0f0',
-                }}
-              >
+              <div className={styles.cardActions}>
                 <button
                   type="button"
                   disabled={testingId !== null}
                   onClick={() => handleTestConnection(prov.id)}
-                  style={{
-                    flexGrow: 1,
-                    padding: '8px',
-                    border:
-                      testResult[prov.id] === 'success'
-                        ? '1px solid #52c41a'
-                        : testResult[prov.id] === 'failed'
-                          ? '1px solid #ff4d4f'
-                          : '1px solid #d9d9d9',
-                    borderRadius: '8px',
-                    backgroundColor: 'transparent',
-                    color:
-                      testResult[prov.id] === 'success'
-                        ? '#52c41a'
-                        : testResult[prov.id] === 'failed'
-                          ? '#ff4d4f'
-                          : '#1b1b1c',
-                    fontSize: '14px',
-                    fontWeight: 500,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    cursor: testingId ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.2s',
-                  }}
+                  className={testBtnClass(testResult[prov.id], testingId !== null)}
                 >
                   {testingId === prov.id ? (
                     <>
@@ -419,39 +256,15 @@ export const ConfigureStoreSubView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setSettingsTargetId(settingsTargetId === prov.id ? null : prov.id)}
-                  style={{
-                    padding: '8px',
-                    border: '1px solid #d9d9d9',
-                    borderRadius: '8px',
-                    backgroundColor: 'transparent',
-                    cursor: 'pointer',
-                    color: '#1b1b1c',
-                  }}
+                  className={styles.settingsBtn}
                 >
-                  <SettingOutlined style={{ fontSize: '18px' }} />
+                  <SettingOutlined className={styles.settingsIcon} />
                 </button>
               </div>
 
               {settingsTargetId === prov.id && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenEdit(prov)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 8,
-                      padding: '8px',
-                      border: '1px solid #d9d9d9',
-                      borderRadius: '8px',
-                      backgroundColor: '#ffffff',
-                      color: '#1b1b1c',
-                      fontSize: '13px',
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                    }}
-                  >
+                <div className={styles.settingsMenu}>
+                  <button type="button" onClick={() => handleOpenEdit(prov)} className={styles.editBtn}>
                     <EditOutlined />
                     Edit connection
                   </button>
@@ -459,20 +272,7 @@ export const ConfigureStoreSubView: React.FC = () => {
                     type="button"
                     disabled={isDeletingId === prov.id}
                     onClick={() => handleDelete(prov.id)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 8,
-                      padding: '8px',
-                      border: '1px solid #ffccc7',
-                      borderRadius: '8px',
-                      backgroundColor: '#fff2f0',
-                      color: '#cf1322',
-                      fontSize: '13px',
-                      fontWeight: 500,
-                      cursor: isDeletingId === prov.id ? 'not-allowed' : 'pointer',
-                    }}
+                    className={styles.deleteBtn}
                   >
                     <DeleteOutlined />
                     {isDeletingId === prov.id ? 'Removing…' : 'Remove connection'}
@@ -484,24 +284,13 @@ export const ConfigureStoreSubView: React.FC = () => {
         )}
       </div>
 
-      <div
-        style={{
-          marginTop: '32px',
-          padding: '24px',
-          backgroundColor: 'rgba(0, 87, 194, 0.05)',
-          border: '1px solid rgba(0, 87, 194, 0.1)',
-          borderRadius: '12px',
-          display: 'flex',
-          gap: '24px',
-          alignItems: 'flex-start',
-        }}
-      >
-        <div style={{ padding: '8px', backgroundColor: 'rgba(0, 87, 194, 0.1)', color: '#234B5F', borderRadius: '8px' }}>
-          <BulbOutlined style={{ fontSize: '20px' }} />
+      <div className={styles.tipBanner}>
+        <div className={styles.tipIconWrap}>
+          <BulbOutlined className={styles.tipIcon} />
         </div>
         <div>
-          <h3 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700, color: '#1b1b1c' }}>Administrative Pro-Tip</h3>
-          <p style={{ margin: 0, fontSize: '14px', color: '#414755', lineHeight: '22px' }}>
+          <h3 className={styles.tipTitle}>Administrative Pro-Tip</h3>
+          <p className={styles.tipText}>
             Upload or paste a Google Cloud service account JSON key with Storage Object Viewer (or broader) access on
             your bucket. Saved connections are encrypted and reused automatically in the validation file picker.
           </p>

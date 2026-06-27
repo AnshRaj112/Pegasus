@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { UserOutlined, LogoutOutlined } from '@ant-design/icons';
 import headerIcon from '~/assets/icon.png';
+import { PATHS } from '~/router/router.constants';
 import styles from './Header.module.scss';
 
 export const Header: React.FC = () => {
@@ -12,8 +13,8 @@ export const Header: React.FC = () => {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const getLinkClass = (path: string): string => {
-    if (path === '/') {
-      return currentPath === '/' ? styles.navLinkActive : styles.navLink;
+    if (path === PATHS.DASHBOARD) {
+      return currentPath === PATHS.DASHBOARD ? styles.navLinkActive : styles.navLink;
     }
     const active = currentPath === path || currentPath.startsWith(`${path}/`);
     return active ? styles.navLinkActive : styles.navLink;
@@ -44,11 +45,11 @@ export const Header: React.FC = () => {
 
         {/* Center: Nav Links */}
         <div className={styles.navLinks}>
-          <Link to="/" className={getLinkClass('/')}>Dashboard</Link>
-          <Link to="/validations" className={getLinkClass('/validations')}>Validations</Link>
-          <Link to="/reports" className={getLinkClass('/reports')}>Reports</Link>
-          <Link to="/tests" className={getLinkClass('/test')}>Tests</Link>
-          <Link to="/admin" className={getLinkClass('/admin')}>Admin</Link>
+          <Link to={PATHS.DASHBOARD} className={getLinkClass(PATHS.DASHBOARD)}>Dashboard</Link>
+          <Link to={PATHS.VALIDATIONS} className={getLinkClass(PATHS.VALIDATIONS)}>Validations</Link>
+          <Link to={PATHS.REPORTS} className={getLinkClass(PATHS.REPORTS)}>Reports</Link>
+          <Link to={PATHS.TEST} className={getLinkClass(PATHS.TEST)}>Tests</Link>
+          <Link to={PATHS.ADMIN} className={getLinkClass(PATHS.ADMIN)}>Admin</Link>
         </div>
 
         {/* Right Side: Quick Actions */}
@@ -82,7 +83,7 @@ export const Header: React.FC = () => {
             {isDropdownOpen && (
               <div className={styles.dropdownMenu}>
                 <Link
-                  to="/profile"
+                  to={PATHS.PROFILE}
                   className={styles.dropdownItem}
                   onClick={() => setIsDropdownOpen(false)}
                 >

@@ -33,7 +33,7 @@ export function* saveSettingsSaga(action: PayloadAction<ValidationSettings>) {
 		)
 		yield put(settingActions.saveSettingsSuccess(response.data))
 		notification.success({
-			message: 'Success',
+			message: NOTIFICATION_SERVICE_TYPES.SUCCESS,
 			description: 'Settings saved successfully.',
 		})
 	} catch (error) {

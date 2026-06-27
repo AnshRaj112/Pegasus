@@ -3,7 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   RightOutlined, DatabaseOutlined, LeftOutlined,
 } from '@ant-design/icons';
-import { Api, MismatchSampleRow } from '../../../shared/api/Api';
+import { MismatchSampleRow } from '../../../shared/api/Api';
+import { useAppDispatch, useAppSelector } from '../../../redux/store';
+import { reportActions } from '../Report.reducer';
+import styles from './JsonSnippetComparison.module.scss';
 
 type JsonIssueKind = 'value_mismatch' | 'missing_in_target' | 'extra_in_target';
 
@@ -22,11 +25,10 @@ type JsonIssueRow = {
   targetSiblings: unknown[];
 };
 
-const FETCH_BATCH = 5000;
 const SKELETON_ROWS = 6;
 
-const SkeletonBlock: React.FC<{ width?: string }> = ({ width = '100%' }) => (
-  <div style={{ width, height: '14px', backgroundColor: '#e2e8f0', borderRadius: '4px', animation: 'json-snippet-pulse 1.5s ease-in-out infinite' }} />
+const SkeletonBlock: React.FC = () => (
+  <div className={`${styles.skeleton} ${styles.skeletonFull}`} />
 );
 
 const parseDetail = (raw: unknown): Record<string, unknown> | null => {
@@ -286,10 +288,10 @@ const buildJsonIssues = (items: MismatchSampleRow[]): JsonIssueRow[] => {
 const PathContext: React.FC<{ path: string }> = ({ path }) => {
   const tokens = splitPath(path);
   if (!tokens.length) {
-    return <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#94a3b8' }}>$</span>;
+    return <span className={styles.pathContext}>$</span>;
   }
   return (
-    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#94a3b8' }}>
+    <span className={styles.pathContext}>
       {tokens.join(' → ')}
     </span>
   );
@@ -315,18 +317,16 @@ const SiblingHint: React.FC<{
     .join('\n');
 
   return (
-    <span
-      title={tooltip}
-      style={{
-        fontSize: '11px',
-        color: '#64748b',
-        cursor: 'help',
-        borderBottom: '1px dotted #94a3b8',
-      }}
-    >
+    <span title={tooltip} className={styles.siblingHint}>
       … {siblings.length} items in {side}
     </span>
   );
+};
+
+const fieldLineClassName = (highlight: boolean, absent: boolean): string => {
+  if (highlight) return `${styles.fieldLine} ${styles.fieldLineHighlight}`;
+  if (absent) return `${styles.fieldLine} ${styles.fieldLineAbsent}`;
+  return styles.fieldLine;
 };
 
 const FieldLine: React.FC<{
@@ -335,21 +335,8 @@ const FieldLine: React.FC<{
   highlight: boolean;
   absent?: boolean;
 }> = ({ fieldKey, value, highlight, absent = false }) => (
-  <div style={{
-    display: 'grid',
-    gridTemplateColumns: '72px 1fr',
-    gap: '12px',
-    padding: '5px 10px',
-    fontFamily: 'var(--font-mono)',
-    fontSize: '12px',
-    lineHeight: 1.5,
-    backgroundColor: highlight ? '#fee2e2' : absent ? '#fff7ed' : 'transparent',
-    color: highlight ? '#991b1b' : absent ? '#c2410c' : '#1b1b1c',
-    fontWeight: highlight ? 600 : 400,
-    borderRadius: '4px',
-  }}
-  >
-    <span style={{ color: highlight ? '#991b1b' : '#64748b' }}>{fieldKey}</span>
+  <div className={fieldLineClassName(highlight, absent)}>
+    <span className={highlight ? styles.fieldKeyHighlight : styles.fieldKey}>{fieldKey}</span>
     <span>{value ?? '—'}</span>
   </div>
 );
@@ -360,11 +347,11 @@ const kindLabel: Record<JsonIssueKind, string> = {
   extra_in_target: 'extra in target',
 };
 
-const kindColor: Record<JsonIssueKind, string> = {
-  value_mismatch: '#991b1b',
-  missing_in_target: '#c2410c',
-  extra_in_target: '#c2410c',
-};
+const kindBadgeClass = (kind: JsonIssueKind): string => (
+  kind === 'value_mismatch'
+    ? `${styles.kindBadge} ${styles.kindBadgeMismatch}`
+    : `${styles.kindBadge} ${styles.kindBadgeMissing}`
+);
 
 const JsonIssuePair: React.FC<{ row: JsonIssueRow }> = ({ row }) => {
   const { fields, hasSource, hasTarget } = buildAlignedFieldRows(row);
@@ -378,69 +365,30 @@ const JsonIssuePair: React.FC<{ row: JsonIssueRow }> = ({ row }) => {
   const targetAbsent = !hasTarget;
 
   return (
-    <div style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid #f1f5f9' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
-        <span style={{ fontSize: '11px', color: '#64748b' }}>
-          UID: <span style={{ fontFamily: 'var(--font-mono)', color: '#1b1b1c' }}>{row.uid}</span>
+    <div className={styles.issuePair}>
+      <div className={styles.issueMeta}>
+        <span className={styles.issueUid}>
+          UID: <span className={styles.issueUidValue}>{row.uid}</span>
         </span>
-        <span style={{ color: '#cbd5e1' }}>|</span>
+        <span className={styles.issueDivider}>|</span>
         <PathContext path={row.jsonPath} />
-        <span style={{
-          fontSize: '10px',
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.04em',
-          color: kindColor[row.kind],
-          backgroundColor: row.kind === 'value_mismatch' ? '#fee2e2' : '#fff7ed',
-          padding: '2px 6px',
-          borderRadius: '4px',
-        }}
-        >
+        <span className={kindBadgeClass(row.kind)}>
           {kindLabel[row.kind]}
         </span>
         <SiblingHint keys={siblingKeys} siblings={siblings} side="source" />
       </div>
 
       {fields.length === 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-          <div style={{
-            padding: '10px 12px',
-            borderRadius: '6px',
-            border: '1px solid #fed7aa',
-            backgroundColor: sourceAbsent ? '#fff7ed' : '#f8fafc',
-            fontSize: '12px',
-            fontFamily: 'var(--font-mono)',
-            color: '#94a3b8',
-            fontStyle: 'italic',
-          }}
-          >
+        <div className={styles.fallbackGrid}>
+          <div className={`${styles.fallbackCell} ${sourceAbsent ? styles.fallbackCellAbsent : ''}`}>
             {sourceAbsent ? 'not present' : formatValue(row.sourceValue)}
           </div>
-          <div style={{
-            padding: '10px 12px',
-            borderRadius: '6px',
-            border: '1px solid #fed7aa',
-            backgroundColor: targetAbsent ? '#fff7ed' : '#f8fafc',
-            fontSize: '12px',
-            fontFamily: 'var(--font-mono)',
-            color: '#94a3b8',
-            fontStyle: 'italic',
-          }}
-          >
+          <div className={`${styles.fallbackCell} ${targetAbsent ? styles.fallbackCellAbsent : ''}`}>
             {targetAbsent ? 'not present' : formatValue(row.targetValue)}
           </div>
         </div>
       ) : (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '12px',
-          backgroundColor: '#f8fafc',
-          borderRadius: '6px',
-          border: '1px solid #e2e8f0',
-          padding: '6px 4px',
-        }}
-        >
+        <div className={styles.fieldsGrid}>
           <div>
             {fields.map(({ key, source, highlight }) => (
               <FieldLine
@@ -471,54 +419,38 @@ const JsonIssuePair: React.FC<{ row: JsonIssueRow }> = ({ row }) => {
 
 export const JsonSnippetComparison: React.FC = () => {
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
   const { mappingId, runId } = useParams<{ mappingId: string; runId: string }>();
-  const [summaryLoading, setSummaryLoading] = useState(true);
-  const [rowsLoading, setRowsLoading] = useState(true);
-  const [loadProgress, setLoadProgress] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [allItems, setAllItems] = useState<MismatchSampleRow[]>([]);
+  const historyRunState = useAppSelector((state) => state.report.historyRunState);
+  const mismatchesState = useAppSelector((state) => state.report.mismatchesState);
+
   const [sourceLabel, setSourceLabel] = useState('Source');
   const [targetLabel, setTargetLabel] = useState('Target');
   const [rowPage, setRowPage] = useState(0);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
+  const runReady = Boolean(runId && historyRunState.runId === runId);
+  const mismatchesReady = Boolean(runId && mismatchesState.runId === runId);
+  const summaryLoading = !runReady || historyRunState.isFetching;
+  const rowsLoading = !mismatchesReady || mismatchesState.isFetching || !mismatchesState.isComplete;
+  const loadProgress = mismatchesReady ? mismatchesState.progressMessage : 'Loading JSON mismatch paths…';
+  const error = (runReady && historyRunState.error)
+    || (mismatchesReady && mismatchesState.error)
+    || null;
+  const allItems = mismatchesReady ? mismatchesState.items : [];
+
   useEffect(() => {
     if (!runId) return;
-    let cancelled = false;
-    (async () => {
-      setSummaryLoading(true);
-      setRowsLoading(true);
-      setError(null);
-      try {
-        const { data: detail } = await Api.getValidationHistoryRun(runId);
-        if (cancelled) return;
-        setSourceLabel(detail.source_path ?? detail.source_filename ?? 'Source');
-        setTargetLabel(detail.target_path ?? detail.target_filename ?? 'Target');
-        setSummaryLoading(false);
-        setLoadProgress('Loading JSON mismatch paths…');
+    dispatch(reportActions.fetchHistoryRunRequest(runId));
+    dispatch(reportActions.fetchMismatchesRequest(runId));
+  }, [runId, dispatch]);
 
-        let offset = 0;
-        const collected: MismatchSampleRow[] = [];
-        for (;;) {
-          const { data: page } = await Api.getValidationMismatches(runId, { limit: FETCH_BATCH, offset });
-          if (cancelled) return;
-          collected.push(...page.items);
-          setAllItems([...collected]);
-          if (collected.length >= page.total || page.items.length < FETCH_BATCH) break;
-          offset += FETCH_BATCH;
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load JSON snippet');
-      } finally {
-        if (!cancelled) {
-          setSummaryLoading(false);
-          setRowsLoading(false);
-          setLoadProgress('');
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [runId]);
+  useEffect(() => {
+    if (!runReady || !historyRunState.data) return;
+    const detail = historyRunState.data;
+    setSourceLabel(detail.source_path ?? detail.source_filename ?? 'Source');
+    setTargetLabel(detail.target_path ?? detail.target_filename ?? 'Target');
+  }, [runReady, historyRunState.data]);
 
   const issues = useMemo(() => buildJsonIssues(allItems), [allItems]);
   const totalPages = Math.max(1, Math.ceil(issues.length / itemsPerPage));
@@ -530,74 +462,89 @@ export const JsonSnippetComparison: React.FC = () => {
     if (rowPage >= totalPages) setRowPage(Math.max(0, totalPages - 1));
   }, [rowPage, totalPages]);
 
-  if (error) return <div style={{ padding: '24px', color: '#ba1a1a' }}>{error}</div>;
+  if (error) return <div className={styles.error}>{error}</div>;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <style>{`@keyframes json-snippet-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }`}</style>
+    <div className={styles.page}>
       {loadProgress && (
-        <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#64748b' }}>{loadProgress}</p>
+        <p className={styles.loadProgress}>{loadProgress}</p>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#64748b', fontSize: '13px' }}>
-          <span style={{ cursor: 'pointer' }} onClick={() => navigate('/reports')}>Reports</span>
-          <RightOutlined style={{ fontSize: '10px' }} />
-          <span style={{ backgroundColor: '#f0eded', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>{pairLabel}</span>
-          <RightOutlined style={{ fontSize: '10px' }} />
-          <span style={{ backgroundColor: '#f0eded', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>{runId}</span>
-          <RightOutlined style={{ fontSize: '10px' }} />
-          <span style={{ color: '#1b1b1c', fontWeight: 600 }}>JSON Snippet</span>
+      <div className={styles.header}>
+        <div className={styles.breadcrumb}>
+          <span className={styles.breadcrumbLink} onClick={() => navigate('/reports')}>Reports</span>
+          <RightOutlined className={styles.breadcrumbIcon} />
+          <span className={styles.breadcrumbChip}>{pairLabel}</span>
+          <RightOutlined className={styles.breadcrumbIcon} />
+          <span className={styles.breadcrumbChip}>{runId}</span>
+          <RightOutlined className={styles.breadcrumbIcon} />
+          <span className={styles.breadcrumbCurrent}>JSON Snippet</span>
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', fontSize: '11px', color: '#64748b', flexWrap: 'wrap' }}>
-        <span><span style={{ color: '#991b1b', fontWeight: 600 }}>Red row</span> = field value differs</span>
-        <span><span style={{ color: '#c2410c', fontWeight: 600 }}>Orange</span> = missing / extra node</span>
+      <div className={styles.legend}>
+        <span><span className={styles.legendRed}>Red row</span> = field value differs</span>
+        <span><span className={styles.legendOrange}>Orange</span> = missing / extra node</span>
         <span>Each field is shown on its own line, source aligned with target</span>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden', minHeight: '400px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-          <div style={{ backgroundColor: '#1e293b', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#fff' }}>
-            <DatabaseOutlined /> <span style={{ fontSize: '14px', fontWeight: 600 }}>Source &gt; {sourceLabel}</span>
+      <div className={styles.panel}>
+        <div className={styles.panelHeaders}>
+          <div className={styles.panelHeaderSource}>
+            <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Source &gt; {sourceLabel}</span>
           </div>
-          <div style={{ backgroundColor: '#e2e8f0', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#1b1b1c' }}>
-            <DatabaseOutlined /> <span style={{ fontSize: '14px', fontWeight: 600 }}>Target &gt; {targetLabel}</span>
+          <div className={styles.panelHeaderTarget}>
+            <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Target &gt; {targetLabel}</span>
           </div>
         </div>
-        <div style={{ overflow: 'auto', flex: 1, padding: '12px 16px' }}>
+        <div className={styles.panelScroll}>
           {isLoading ? (
-            Array.from({ length: SKELETON_ROWS }, (_, i) => <div key={i} style={{ marginBottom: '12px' }}><SkeletonBlock /></div>)
+            Array.from({ length: SKELETON_ROWS }, (_, i) => (
+              <div key={i} className={styles.skeletonWrap}><SkeletonBlock /></div>
+            ))
           ) : pageRows.length === 0 ? (
-            <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No JSON mismatches for this run.</div>
+            <div className={styles.emptyCell}>No JSON mismatches for this run.</div>
           ) : pageRows.map((row) => (
             <JsonIssuePair key={`${row.uid}-${row.jsonPath}`} row={row} />
           ))}
         </div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0', borderTop: '1px solid #e2e8f0', marginTop: '16px' }}>
-        <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>
+      <div className={styles.footer}>
+        <span className={styles.footerNote}>
           Each field on its own row — source on the left, target on the right, aligned one-to-one.
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#64748b' }}>
+        <div className={styles.footerControls}>
+          <div className={styles.rowsPerPage}>
             Rows per page:
-            <select value={itemsPerPage} onChange={(e) => setItemsPerPage(Number(e.target.value))} style={{ border: 'none', fontWeight: 600, outline: 'none', backgroundColor: 'transparent' }}>
+            <select value={itemsPerPage} onChange={(e) => setItemsPerPage(Number(e.target.value))} className={styles.rowsPerPageSelect}>
               <option value={10}>10</option>
               <option value={20}>20</option>
               <option value={50}>50</option>
             </select>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', backgroundColor: '#f0eded', padding: '4px 8px', borderRadius: '6px' }}>
-            <LeftOutlined style={{ fontSize: '12px', color: rowPage <= 0 ? '#a0aabf' : '#414755', cursor: rowPage <= 0 ? 'not-allowed' : 'pointer' }} onClick={() => rowPage > 0 && setRowPage((p) => p - 1)} />
-            <span style={{ fontSize: '13px', fontWeight: 600 }}>
+          <div className={styles.pagination}>
+            <button
+              type="button"
+              disabled={rowPage <= 0}
+              onClick={() => rowPage > 0 && setRowPage((p) => p - 1)}
+              className={`${styles.paginationIcon} ${rowPage <= 0 ? styles.paginationIconDisabled : styles.paginationIconEnabled}`}
+            >
+              <LeftOutlined />
+            </button>
+            <span className={styles.paginationLabel}>
               {isLoading ? '—' : (issues.length ? rowPage + 1 : 0)}
-              <span style={{ color: '#a0aabf', margin: '0 4px', fontWeight: 400 }}>/</span>
+              <span className={styles.paginationDivider}>/</span>
               {isLoading ? '—' : totalPages}
             </span>
-            <RightOutlined style={{ fontSize: '12px', color: rowPage >= totalPages - 1 ? '#a0aabf' : '#414755', cursor: rowPage >= totalPages - 1 ? 'not-allowed' : 'pointer' }} onClick={() => rowPage < totalPages - 1 && setRowPage((p) => p + 1)} />
+            <button
+              type="button"
+              disabled={rowPage >= totalPages - 1}
+              onClick={() => rowPage < totalPages - 1 && setRowPage((p) => p + 1)}
+              className={`${styles.paginationIcon} ${rowPage >= totalPages - 1 ? styles.paginationIconDisabled : styles.paginationIconEnabled}`}
+            >
+              <RightOutlined />
+            </button>
           </div>
         </div>
       </div>

@@ -1,0 +1,98 @@
+@use '~/assets/styles/variables' as tokens;
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.infoBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  background-color: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 0.625rem;
+}
+
+.infoIcon {
+  color: #0369a1;
+  font-size: 1.25rem;
+  margin-top: 0.125rem;
+}
+
+.infoTitle {
+  font-weight: 600;
+  color: #0c4a6e;
+  margin-bottom: 0.25rem;
+}
+
+.infoBody {
+  font-size: 0.8125rem;
+  color: #334155;
+  line-height: 1.5;
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+.card {
+  border: 1px solid #d9d9d9;
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  background-color: tokens.$surface-container-lowest;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  color: tokens.$color-midnight-green;
+}
+
+.cardLabel {
+  font-size: tokens.$text-body-sm;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cardTitle {
+  margin: 0 0 0.5rem;
+}
+
+.cardDetails {
+  font-size: 0.8125rem;
+  color: tokens.$on-surface-variant;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sampleList {
+  margin: 0.25rem 0 0 1rem;
+  padding: 0;
+  font-size: tokens.$text-body-sm;
+  font-family: tokens.$font-mono;
+}
+
+.warningText {
+  color: #b45309;
+  font-size: tokens.$text-body-sm;
+}
+
+.readyBanner {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.875rem 1rem;
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  color: #166534;
+}

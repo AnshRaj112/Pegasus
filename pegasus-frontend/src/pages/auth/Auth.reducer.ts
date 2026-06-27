@@ -4,7 +4,7 @@ import { AuthReducerState } from './Auth.interface';
 export const initialState: AuthReducerState = {
   isAuthenticated: false,
   user: null,
-  isLoading: true,
+  isFetching: true,
   error: null,
 };
 
@@ -14,30 +14,30 @@ const authSlice = createSlice({
   reducers: {
     loginRequest: (state, _action: PayloadAction<{ email: string; password: string }>) => ({
       ...state,
-      isLoading: true,
+      isFetching: true,
       error: null,
     }),
     loginSuccess: (state, action: PayloadAction<{ email: string; fullName: string }>) => ({
       ...state,
-      isLoading: false,
+      isFetching: false,
       isAuthenticated: true,
       user: action.payload,
     }),
     loginFailure: (state, action: PayloadAction<string>) => ({
       ...state,
-      isLoading: false,
+      isFetching: false,
       error: action.payload,
     }),
     logoutSuccess: (state) => ({
       ...state,
-      isLoading: false,
+      isFetching: false,
       isAuthenticated: false,
       user: null,
       error: null,
     }),
     setSession: (state, action: PayloadAction<{ email: string } | null>) => ({
       ...state,
-      isLoading: false,
+      isFetching: false,
       isAuthenticated: Boolean(action.payload),
       user: action.payload ? { email: action.payload.email, fullName: action.payload.email } : null,
       error: null,

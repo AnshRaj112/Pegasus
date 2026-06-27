@@ -1,3 +1,5 @@
+@use '~/assets/styles/variables' as tokens;
+
 /* src/pages/validation/Validation.module.scss */
 
 .wizardHeaderShell {
@@ -5,8 +7,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 40px;
-  background-color: var(--surface-container-lowest, #ffffff);
-  border-bottom: 1px solid var(--outline-variant, #e6ecf4);
+  background-color: var(--surface-container-lowest, #{tokens.$surface-container-lowest});
+  border-bottom: 1px solid var(--outline-variant, #{tokens.$outline-variant});
   border-radius: 12px 12px 0 0;
 }
 
@@ -14,15 +16,15 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  color: #0c131d;
+  color: tokens.$on-surface;
 }
 
 .wizardStepTabBanner {
-  background-color: var(--surface-container-lowest, #ffffff);
+  background-color: var(--surface-container-lowest, #{tokens.$surface-container-lowest});
   padding: 24px 40px 12px;
-  border-left: 1px solid var(--outline-variant, #d9d9d9);
-  border-right: 1px solid var(--outline-variant, #d9d9d9);
-  border-bottom: 1px solid var(--outline-variant, #e2e8f0);
+  border-left: 1px solid var(--outline-variant, #{tokens.$outline-variant});
+  border-right: 1px solid var(--outline-variant, #{tokens.$outline-variant});
+  border-bottom: 1px solid var(--border-1, #{tokens.$border-1});
 }
 
 .wizardStepRow {
@@ -41,12 +43,12 @@
 }
 
 .stepTabActive {
-  color: var(--primary, #234B5F);
-  border-bottom: 2px solid var(--primary, #234B5F);
+  color: var(--primary, #{tokens.$primary});
+  border-bottom: 2px solid var(--primary, #{tokens.$primary});
 }
 
 .stepTabInactive {
-  color: #64748b;
+  color: tokens.$text-muted;
   border-bottom: 2px solid transparent;
 }
 
@@ -62,32 +64,32 @@
 }
 
 .stepNumberActive {
-  background-color: var(--primary, #234B5F);
-  color: var(--on-primary, #ffffff);
+  background-color: var(--primary, #{tokens.$primary});
+  color: var(--on-primary, #{tokens.$on-primary});
 }
 
 .stepNumberInactive {
-  background-color: #f1f5f9;
-  color: #64748b;
+  background-color: tokens.$border-subtle;
+  color: tokens.$text-muted;
 }
 
 .wizardWorkspaceArea {
   flex: 1;
-  background-color: var(--surface-container-lowest, #ffffff);
+  background-color: var(--surface-container-lowest, #{tokens.$surface-container-lowest});
   padding: 32px 40px;
   overflow-y: auto;
-  border-left: 1px solid var(--outline-variant, #d9d9d9);
-  border-right: 1px solid var(--outline-variant, #d9d9d9);
+  border-left: 1px solid var(--outline-variant, #{tokens.$outline-variant});
+  border-right: 1px solid var(--outline-variant, #{tokens.$outline-variant});
 }
 
 .wizardActionFooter {
   display: flex;
   align-items: center;
   padding: 24px;
-  background-color: #f8fafc;
-  border-left: 1px solid var(--outline-variant, #d9d9d9);
-  border-right: 1px solid var(--outline-variant, #d9d9d9);
-  border-bottom: 1px solid var(--outline-variant, #d9d9d9);
+  background-color: tokens.$row-hover;
+  border-left: 1px solid var(--outline-variant, #{tokens.$outline-variant});
+  border-right: 1px solid var(--outline-variant, #{tokens.$outline-variant});
+  border-bottom: 1px solid var(--outline-variant, #{tokens.$outline-variant});
   border-radius: 0 0 12px 12px;
 }
 
@@ -99,15 +101,15 @@
   }
 
   &::-webkit-scrollbar-track {
-    background: #f1f1f1;
+    background: tokens.$border-subtle;
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #c1c6d7;
+    background: tokens.$outline-variant;
     border-radius: 10px;
   }
 
   &::-webkit-scrollbar-thumb:hover {
-    background: #727786;
+    background: tokens.$on-surface-variant;
   }
 }

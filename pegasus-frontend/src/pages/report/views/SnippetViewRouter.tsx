@@ -1,8 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
-import { Api } from '../../../shared/api/Api';
+
+import { useAppDispatch, useAppSelector } from '~/redux/store';
+
+import { reportActions } from '../Report.reducer';
 import { SnippetComparison } from './SnippetComparison';
 import { JsonSnippetComparison } from './JsonSnippetComparison';
+import styles from './SnippetViewRouter.module.scss';
 
 const isJsonRun = (delimiter?: string | null, comparedColumns?: string[] | null): boolean => {
   if ((delimiter ?? '').trim().toLowerCase() === 'json') return true;
@@ -12,29 +16,24 @@ const isJsonRun = (delimiter?: string | null, comparedColumns?: string[] | null)
 
 export const SnippetViewRouter: React.FC = () => {
   const { runId } = useParams<{ runId: string }>();
-  const [useJsonView, setUseJsonView] = useState<boolean | null>(null);
+  const dispatch = useAppDispatch();
+  const historyRunState = useAppSelector((state) => state.report.historyRunState);
 
   useEffect(() => {
-    if (!runId) {
-      setUseJsonView(false);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const { data } = await Api.getValidationHistoryRun(runId);
-        if (!cancelled) {
-          setUseJsonView(isJsonRun(data.delimiter, data.compared_columns));
-        }
-      } catch {
-        if (!cancelled) setUseJsonView(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [runId]);
+    if (!runId) return;
+    dispatch(reportActions.fetchHistoryRunRequest(runId));
+  }, [runId, dispatch]);
+
+  const useJsonView = useMemo(() => {
+    if (!runId) return false;
+    if (historyRunState.runId !== runId) return null;
+    if (historyRunState.isFetching) return null;
+    if (historyRunState.error || !historyRunState.data) return false;
+    return isJsonRun(historyRunState.data.delimiter, historyRunState.data.compared_columns);
+  }, [runId, historyRunState]);
 
   if (useJsonView === null) {
-    return <div style={{ padding: '24px', color: '#64748b' }}>Loading snippet view…</div>;
+    return <div className={styles.loading}>Loading snippet view…</div>;
   }
 
   return useJsonView ? <JsonSnippetComparison /> : <SnippetComparison />;

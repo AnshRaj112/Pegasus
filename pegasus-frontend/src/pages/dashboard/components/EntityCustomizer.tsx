@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Search, SlidersHorizontal, ChevronDown } from 'lucide-react';
 
-import { Api, type EntityInsight } from '../../../shared/api/Api';
+import { type EntityInsight } from '../../../shared/api/Api';
+import { useAppDispatch, useAppSelector } from '../../../redux/store';
+import { dashboardActions } from '../Dashboard.reducer';
 import styles from '../Dashboard.module.scss';
 
 interface EntityCustomizerProps {
@@ -9,11 +11,12 @@ interface EntityCustomizerProps {
 }
 
 export const EntityCustomizer: React.FC<EntityCustomizerProps> = ({ entities }) => {
+  const dispatch = useAppDispatch();
+  const createEntityState = useAppSelector((state) => state.dashboard.createEntityState);
+
   const [incrementalTracking, setIncrementalTracking] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEntity, setSelectedEntity] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
 
   const filtered = useMemo(
     () =>
@@ -24,20 +27,13 @@ export const EntityCustomizer: React.FC<EntityCustomizerProps> = ({ entities }) 
   );
 
   const activeEntity = selectedEntity || filtered[0]?.display_name || '';
+  const saving = createEntityState.isFetching;
+  const message = createEntityState.data ?? createEntityState.error;
 
-  const handleCreate = async () => {
+  const handleCreate = () => {
     const name = searchQuery.trim() || activeEntity;
     if (!name) return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      await Api.createEntity({ display_name: name });
-      setMessage(`Entity "${name}" saved`);
-    } catch {
-      setMessage('Could not save entity (persistence may be disabled)');
-    } finally {
-      setSaving(false);
-    }
+    dispatch(dashboardActions.createEntityRequest({ display_name: name }));
   };
 
   return (

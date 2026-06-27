@@ -1,9 +1,38 @@
-import { Api } from '../../shared/api/Api';
+import { AxiosResponse } from 'axios';
 
-/** @deprecated Import from `shared/api/Api` directly */
+import {
+  Api,
+  CloudBrowseRequest,
+  CloudBrowseResponse,
+  CloudConnection,
+  CloudFileProfileRequest,
+  CloudFileProfileResponse,
+  FixedWidthLayoutPreviewResponse,
+  LocalColumnPreviewResponse,
+  SaveDraftRequest,
+  ValidateRequest,
+  ValidationHistoryDetail,
+} from '../../shared/api/Api';
+
 export const ValidationServiceApi = {
-  browseCloud: Api.browseCloud,
-  listCloudConnections: Api.listCloudConnections,
+  browseCloud: (body: CloudBrowseRequest): Promise<AxiosResponse<CloudBrowseResponse>> =>
+    Api.browseCloud(body),
+
+  listCloudConnections: (): Promise<AxiosResponse<CloudConnection[]>> =>
+    Api.listCloudConnections(),
+
+  profileCloudFile: (body: CloudFileProfileRequest): Promise<AxiosResponse<CloudFileProfileResponse>> =>
+    Api.profileCloudFile(body),
+
+  previewValidationColumns: (body: ValidateRequest): Promise<AxiosResponse<LocalColumnPreviewResponse>> =>
+    Api.previewValidationColumns(body),
+
+  previewFixedWidthLayout: (body: ValidateRequest): Promise<AxiosResponse<FixedWidthLayoutPreviewResponse>> =>
+    Api.previewFixedWidthLayout(body),
+
+  saveValidationDraft: (body: SaveDraftRequest): Promise<AxiosResponse<ValidationHistoryDetail>> =>
+    Api.saveValidationDraft(body),
+
   submitValidation: Api.submitValidation,
   pollJob: Api.getValidationJob,
   fetchMismatches: Api.getValidationMismatches,
@@ -16,5 +45,4 @@ export const ValidationServiceApi = {
       results: result,
     };
   },
-  previewValidationColumns: Api.previewValidationColumns,
 };

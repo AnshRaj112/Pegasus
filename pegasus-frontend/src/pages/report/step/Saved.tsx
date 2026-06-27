@@ -1,13 +1,26 @@
 import React from 'react';
 import { TableOutlined, HistoryOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { ReportItem, ReportBadge } from '../Report.interface';
-import { useNavigate } from 'react-router-dom';
 import { validationActions } from '../../validation/Validation.reducer';
+import styles from './ReportStep.module.scss';
+
+const renderBadges = (badges: ReportBadge[]) => badges.map((badge, bIdx) => (
+  <React.Fragment key={bIdx}>
+    {bIdx > 0 && <span className={styles.badgeSep}>|</span>}
+    {badge.type === 'box' ? (
+      <span className={styles.badgeBox}>{badge.content}</span>
+    ) : (
+      <span className={styles.badgeContent}>{badge.content}</span>
+    )}
+  </React.Fragment>
+));
 
 export const Saved: React.FC = () => {
   const dispatch = useAppDispatch();
-  const { savedReports, searchQuery, isLoading } = useAppSelector((s) => s.report);
+  const { data: savedReports, isFetching } = useAppSelector((s) => s.report.savedReports);
+  const searchQuery = useAppSelector((s) => s.report.searchQuery);
   const navigate = useNavigate();
 
   const filtered = savedReports.filter((r: ReportItem) =>
@@ -15,43 +28,42 @@ export const Saved: React.FC = () => {
     || r.sourceTitle.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  if (isLoading) return <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>Loading saved mappings...</div>;
-  if (filtered.length === 0) return <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>No saved mappings found.</div>;
+  if (isFetching) return <div className={styles.empty}>Loading saved mappings...</div>;
+  if (filtered.length === 0) return <div className={styles.empty}>No saved mappings found.</div>;
 
   return (
     <>
       {filtered.map((report: ReportItem, index: number) => (
-        <div key={report.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px 24px', borderBottom: index !== filtered.length - 1 ? '1px solid #f1f5f9' : 'none', backgroundColor: '#fff' }}>
-          <div onClick={() => navigate(`/reports/${report.id}/history`)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }} onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85'; }} onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}>
-            <div style={{ color: '#94a3b8', fontSize: '14px', width: '16px' }}>-</div>
+        <div
+          key={report.id}
+          className={`${styles.row} ${styles.rowStatic} ${index !== filtered.length - 1 ? styles.rowBordered : ''}`}
+        >
+          <div
+            onClick={() => navigate(`/reports/${report.id}/history`)}
+            className={styles.rowInner}
+          >
+            <div className={styles.dash}>-</div>
 
-            <div style={{ flex: 1, minWidth: '200px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                <TableOutlined style={{ color: '#64748b', fontSize: '16px' }} />
-                <span style={{ fontWeight: 600, color: '#1b1b1c', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.02em' }}>{report.sourceTitle}</span>
+            <div className={styles.column}>
+              <div className={styles.titleRow}>
+                <TableOutlined className={styles.fileIcon} />
+                <span className={styles.sourceTitle}>{report.sourceTitle}</span>
               </div>
-              <div style={{ color: '#64748b', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{report.sourceSubtitle}</div>
+              <div className={styles.monoPath}>{report.sourceSubtitle}</div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', height: '40px', padding: '0 16px' }}>
-              <HistoryOutlined style={{ color: '#64748b' }} />
-              <div style={{ marginLeft: '16px', height: '100%', width: '1px', backgroundColor: '#f1f5f9' }} />
+            <div className={styles.dividerCol}>
+              <HistoryOutlined className={styles.historyIcon} />
+              <div className={styles.vDivider} />
             </div>
 
-            <div style={{ flex: 1, minWidth: '200px' }}>
-              <div style={{ color: '#1b1b1c', fontSize: '13px', fontWeight: 500, marginBottom: '4px' }}>{report.jobTitle}</div>
-              <div style={{ color: '#64748b', fontSize: '12px' }}>{report.jobSubtitle}</div>
+            <div className={styles.column}>
+              <div className={styles.jobTitle}>{report.jobTitle}</div>
+              <div className={styles.jobSubtitle}>{report.jobSubtitle}</div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: '280px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', border: '1px solid rgba(0, 87, 194, 0.3)', borderRadius: '999px', padding: '2px 8px', color: 'var(--primary)', fontSize: '11px', fontFamily: 'var(--font-mono)' }}>
-                {report.badges.map((badge: ReportBadge, bIdx: number) => (
-                  <React.Fragment key={bIdx}>
-                    {bIdx > 0 && <span style={{ margin: '0 6px', opacity: 0.4 }}>|</span>}
-                    {badge.type === 'box' ? <span style={{ border: '1px solid rgba(0, 87, 194, 0.4)', borderRadius: '4px', padding: '0 4px', fontWeight: 700 }}>{badge.content}</span> : <span style={{ display: 'flex', alignItems: 'center' }}>{badge.content}</span>}
-                  </React.Fragment>
-                ))}
-              </div>
+            <div className={styles.badgesCol}>
+              <div className={styles.badgePill}>{renderBadges(report.badges)}</div>
             </div>
           </div>
           {report.draftRunId && (
@@ -61,7 +73,7 @@ export const Saved: React.FC = () => {
                 e.stopPropagation();
                 dispatch(validationActions.runValidationFromHistoryRequest(report.draftRunId!));
               }}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '6px', border: '1px solid #c1c6d7', background: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
+              className={styles.runBtn}
             >
               <PlayCircleOutlined /> Run
             </button>
