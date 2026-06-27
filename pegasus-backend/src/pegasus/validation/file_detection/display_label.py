@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T11:17:32Z
+# Last edited: 2026-06-27T14:34:06Z
 # --- END GENERATED FILE METADATA ---
 
 """Human-readable format labels from file detection reports (e.g. zip -> csv)."""
