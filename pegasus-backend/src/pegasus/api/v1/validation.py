@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T09:47:15Z
+# Last edited: 2026-06-26T16:47:12+05:30
 # --- END GENERATED FILE METADATA ---
 
 """CSV validation endpoints (local paths, browse, job polling)."""
@@ -344,6 +344,90 @@ async def preview_local_csv_columns_body(
                 status.HTTP_400_BAD_REQUEST,
                 detail="Use POST /validate/local/json-parent-preview for JSON files",
             )
+        source_archive = infer_archive_format_from_name(source_ref.object_name) or resolve_gcs_archive_format(
+            source_ref
+        )
+        target_archive = infer_archive_format_from_name(target_ref.object_name) or resolve_gcs_archive_format(
+            target_ref
+        )
+        if source_archive or target_archive:
+            if source_archive != target_archive:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Source and target must both be archives of the same kind",
+                )
+            from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+            from pegasus.validation.archive_leaf import (
+                archive_sample_has_tabular_leaf,
+                cleanup_work_dir,
+                materialize_gcs_archive_tabular_leaf,
+            )
+
+            src_adapter = GcsDelimitedAdapter(source_ref, delimiter=body.delimiter, has_header=body.has_header)
+            tgt_adapter = GcsDelimitedAdapter(target_ref, delimiter=body.delimiter, has_header=body.has_header)
+            src_profile = service.profile_archive_adapter(
+                src_adapter,
+                local_path=None,
+                object_name=source_cloud.object_name,
+                gcs_uri=source_ref.uri,
+                file_format=source_archive,
+            )
+            tgt_profile = service.profile_archive_adapter(
+                tgt_adapter,
+                local_path=None,
+                object_name=target_cloud.object_name,
+                gcs_uri=target_ref.uri,
+                file_format=target_archive,
+            )
+            if archive_sample_has_tabular_leaf(src_profile.archive_entries_sample) and archive_sample_has_tabular_leaf(
+                tgt_profile.archive_entries_sample
+            ):
+                import tempfile
+                from pathlib import Path
+
+                work_dir = Path(tempfile.mkdtemp(prefix="pegasus-archive-preview-"))
+                try:
+                    src_leaf = materialize_gcs_archive_tabular_leaf(
+                        src_adapter,
+                        settings=settings,
+                        work_dir=work_dir / "source",
+                    )
+                    tgt_leaf = materialize_gcs_archive_tabular_leaf(
+                        tgt_adapter,
+                        settings=settings,
+                        work_dir=work_dir / "target",
+                    )
+                    preview = service.preview_column_headers_from_adapters(
+                        source=FileDelimitedAdapter(
+                            src_leaf,
+                            delimiter=body.delimiter,
+                            has_header=body.has_header,
+                            skip_rows=body.header_leading_rows,
+                        ),
+                        target=FileDelimitedAdapter(
+                            tgt_leaf,
+                            delimiter=body.delimiter,
+                            has_header=body.has_header,
+                            skip_rows=body.header_leading_rows,
+                        ),
+                        uid_column=body.uid_column,
+                        delimiter=body.delimiter,
+                        has_header=body.has_header,
+                        header_leading_rows=body.header_leading_rows,
+                        file_format="csv",
+                    )
+                    return LocalColumnPreviewResponse(**preview)
+                except (OSError, ValueError, TypeError) as exc:
+                    raise HTTPException(
+                        status.HTTP_400_BAD_REQUEST,
+                        detail=f"Could not preview tabular leaf inside archive: {exc}",
+                    ) from exc
+                finally:
+                    cleanup_work_dir(work_dir)
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Column preview is not available for archive-only validation",
+            )
 
     source_input = resolve_delimited_input(
         settings=settings,
@@ -635,6 +719,28 @@ async def profile_cloud_file(
                 object_name=cloud.object_name,
                 gcs_uri=ref.uri,
                 file_format=columnar_format,
+            )
+        except ValidationBadRequestError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    archive_format = resolve_gcs_archive_format(ref)
+    if archive_format is not None:
+        adapter = GcsDelimitedAdapter(
+            ref,
+            delimiter=",",
+            has_header=body.has_header,
+        )
+        try:
+            return service.profile_archive_adapter(
+                adapter,
+                local_path=None,
+                object_name=cloud.object_name,
+                gcs_uri=ref.uri,
+                file_format=archive_format,
+                delimiter=body.delimiter,
+                has_header=body.has_header,
             )
         except ValidationBadRequestError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

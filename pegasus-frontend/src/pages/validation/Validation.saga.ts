@@ -104,7 +104,7 @@ function* submitValidationSaga() {
   let sourcePath = '';
   let targetPath = '';
   try {
-    const { validationForm }: ValidationReducerState = yield select(
+    const { validationForm, overviewProfileCache }: ValidationReducerState = yield select(
       (state: { validation: ValidationReducerState }) => state.validation,
     );
     if (!validationForm.sourceCloud || !validationForm.targetCloud) {
@@ -116,7 +116,10 @@ function* submitValidationSaga() {
 
     const accepted: import('axios').AxiosResponse<ValidationJobAcceptedResponse> = yield call(
       Api.submitValidation,
-      validateRequestFromForm(validationForm),
+      validateRequestFromForm(validationForm, undefined, {
+        sourceProfile: overviewProfileCache?.source ?? null,
+        targetProfile: overviewProfileCache?.target ?? null,
+      }),
     );
     jobId = accepted.data.job_id;
 
@@ -182,7 +185,7 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
     const formPatch = enrichFormWithConnections(formFromHistory(detail), connections);
     yield put(validationActions.setValidationForm(formPatch));
 
-    const { validationForm }: ValidationReducerState = yield select(
+    const { validationForm, overviewProfileCache }: ValidationReducerState = yield select(
       (state: { validation: ValidationReducerState }) => state.validation,
     );
     if (!validationForm.sourceCloud && !validationForm.targetCloud && !detail.source_path) {
@@ -201,6 +204,9 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
       validateRequestFromForm(validationForm, {
         source_path: detail.source_path,
         target_path: detail.target_path,
+      }, {
+        sourceProfile: overviewProfileCache?.source ?? null,
+        targetProfile: overviewProfileCache?.target ?? null,
       }),
     );
     jobId = accepted.data.job_id;

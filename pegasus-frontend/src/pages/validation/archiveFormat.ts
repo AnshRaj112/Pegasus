@@ -41,6 +41,46 @@ export const archiveKindFromProfile = (
   return null;
 };
 
+const TABULAR_LEAF_SUFFIXES = /\.(csv|tsv|psv|txt|dat)$/i;
+
+const formatChainHasTabularLeaf = (format: string | null | undefined): boolean => {
+  const chain = parseFormatChain(format);
+  return chain.some((segment) => {
+    const normalized = segment.toLowerCase().replace(/_/g, '-');
+    return ['csv', 'tsv', 'psv', 'delimited', 'dat', 'txt'].includes(normalized);
+  });
+};
+
+export const archiveHasTabularLeaf = (
+  profile: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format'> | null | undefined,
+): boolean => {
+  const sample = profile?.archive_entries_sample;
+  if (sample?.length) {
+    if (sample.some((path) => TABULAR_LEAF_SUFFIXES.test(path.split('/').pop() ?? ''))) {
+      return true;
+    }
+  }
+  return formatChainHasTabularLeaf(profile?.file_format);
+};
+
+export const archiveUsesTabularValidation = (input: {
+  sourceProfile?: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format' | 'suggested_file_format' | 'dataset_model' | 'object_name'> | null;
+  targetProfile?: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format' | 'suggested_file_format' | 'dataset_model' | 'object_name'> | null;
+  sourceFileName?: string | null;
+  targetFileName?: string | null;
+  detectedFileFormat?: string | null | undefined;
+}): boolean => {
+  const kind = resolveWizardArchiveMode({
+    detectedFileFormat: input.detectedFileFormat ?? null,
+    sourceFileName: input.sourceFileName,
+    targetFileName: input.targetFileName,
+    sourceProfile: input.sourceProfile,
+    targetProfile: input.targetProfile,
+  });
+  if (!kind) return false;
+  return archiveHasTabularLeaf(input.sourceProfile) && archiveHasTabularLeaf(input.targetProfile);
+};
+
 export const archiveKindFromFileName = (fileName: string | null | undefined): 'zip' | 'tar' | null => {
   const name = (fileName ?? '').toLowerCase();
   if (name.endsWith('.zip')) return 'zip';
@@ -49,7 +89,7 @@ export const archiveKindFromFileName = (fileName: string | null | undefined): 'z
 };
 
 export const profileLooksArchive = (
-  profile: CloudFileProfileResponse | null | undefined,
+  profile: Pick<CloudFileProfileResponse, 'suggested_file_format' | 'file_format' | 'dataset_model' | 'object_name'> | null | undefined,
   fileName?: string | null,
 ): boolean => {
   if (archiveKindFromProfile(profile)) return true;
@@ -62,8 +102,8 @@ export const resolveWizardArchiveMode = (input: {
   detectedFileFormat: string | null | undefined;
   sourceFileName?: string | null;
   targetFileName?: string | null;
-  sourceProfile?: CloudFileProfileResponse | null;
-  targetProfile?: CloudFileProfileResponse | null;
+  sourceProfile?: Pick<CloudFileProfileResponse, 'suggested_file_format' | 'file_format' | 'dataset_model' | 'object_name'> | null;
+  targetProfile?: Pick<CloudFileProfileResponse, 'suggested_file_format' | 'file_format' | 'dataset_model' | 'object_name'> | null;
 }): 'zip' | 'tar' | null => {
   if (input.detectedFileFormat === 'zip' || input.detectedFileFormat === 'tar') {
     return input.detectedFileFormat;

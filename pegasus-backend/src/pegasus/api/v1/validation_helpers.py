@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T09:39:41Z
+# Last edited: 2026-06-26T16:47:12+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Shared helpers for validation API endpoints and job polling."""
@@ -337,6 +337,9 @@ def refresh_run_result_for_persist(
             job_dirs.append(found)
     for job_dir in job_dirs:
         if not job_dir.is_dir():
+            continue
+        result_path = job_dir / "result.json"
+        if not result_path.is_file():
             continue
         try:
             fresh, _, meta = run_result_from_job_dir(job_dir)

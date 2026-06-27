@@ -13,9 +13,9 @@ import { OverviewJsonPreview } from './OverviewJsonPreview';
 import { assessEmptyValidationFiles, isValidationFileEmpty } from '../validationEmptyFiles';
 import { isFixedWidthFormat } from '../fixedWidthFormat';
 import { isJsonFileName, profileLooksJson } from '../jsonFormat';
-import { profileLooksArchive, resolveWizardArchiveMode } from '../archiveFormat';
+import { profileLooksArchive, resolveWizardArchiveMode, archiveKindFromProfile, archiveUsesTabularValidation } from '../archiveFormat';
 import { FixedWidthLayoutPanel } from './FixedWidthLayoutPanel';
-import { formatDetectionLabel } from '../../../shared/formatDisplayLabel';
+import { formatDetectionLabel, resolveArchiveFormatChain } from '../../../shared/formatDisplayLabel';
 import { FormatDetectionChainLabel } from '../../../shared/FormatDetectionChainLabel';
 import styles from './MappingOverviewStep.module.scss';
 
@@ -40,11 +40,19 @@ const formatBoolean = (val: boolean | null | undefined) => {
 const resolveCloudFormatRaw = (
   profile: CloudFileProfileResponse | null,
   fileName: string | null,
+  objectName: string | null | undefined,
   empty: boolean,
 ): string | null => {
   if (empty) return 'empty';
-  const raw = profile?.file_format ?? profile?.suggested_file_format;
-  if (raw) return raw;
+  const outer = archiveKindFromProfile(profile) ?? undefined;
+  const fromArchive = resolveArchiveFormatChain({
+    fileFormat: profile?.file_format,
+    suggestedFormat: profile?.suggested_file_format,
+    objectName: objectName ?? fileName,
+    archiveEntriesSample: profile?.archive_entries_sample,
+    outer,
+  });
+  if (fromArchive) return fromArchive;
   if (isJsonFileName(fileName)) return 'json';
   return null;
 };
@@ -179,10 +187,35 @@ export const MappingOverviewStep: React.FC = () => {
   const sourceLooksJson = profileLooksJson(sourceProfile.profile, form.sourceFileName);
   const targetLooksJson = profileLooksJson(targetProfile.profile, form.targetFileName);
   const isJson = !sourceEmpty && !targetEmpty && !isFixedWidth && sourceLooksJson && targetLooksJson;
-  const isArchive = !sourceEmpty && !targetEmpty && !isFixedWidth && !isJson && (
+  const isArchiveContainer = !sourceEmpty && !targetEmpty && !isFixedWidth && !isJson && (
     profileLooksArchive(sourceProfile.profile, form.sourceFileName)
     && profileLooksArchive(targetProfile.profile, form.targetFileName)
   );
+  const isArchiveTabular = isArchiveContainer && archiveUsesTabularValidation({
+    detectedFileFormat: form.detectedFileFormat,
+    sourceFileName: form.sourceFileName,
+    targetFileName: form.targetFileName,
+    sourceProfile: sourceProfile.profile,
+    targetProfile: targetProfile.profile,
+  });
+  const isArchive = isArchiveContainer && !isArchiveTabular;
+  const isArchiveMetadataOnly = isArchive;
+
+  const archiveTabularColumnCount = (
+    side: 'source' | 'target',
+    profile: CloudFileProfileResponse | null,
+  ): number | null => {
+    if (!isArchiveTabular) return null;
+    const previewCols = side === 'source'
+      ? previewData?.source_columns
+      : previewData?.target_columns;
+    return previewCols?.length ?? profile?.column_count ?? null;
+  };
+
+  const archiveTabularRowCount = (profile: CloudFileProfileResponse | null): number | null => {
+    if (!isArchiveTabular) return null;
+    return profile?.row_count ?? null;
+  };
 
   useEffect(() => {
     if (!isArchive || isFetching) return;
@@ -290,29 +323,47 @@ export const MappingOverviewStep: React.FC = () => {
         ? <SkeletonBlock sizes={['w36', 'h32']} />
         : '—';
 
-  const inferredColumnCount = isArchive
+  const inferredColumnCount = isArchiveMetadataOnly
     ? (sourceProfile.profile?.column_count ?? null)
+    : isArchiveTabular
+      ? archiveTabularColumnCount('source', sourceProfile.profile)
+      : isFixedWidth
+        ? (form.fixedWidthColumns.length || sourceProfile.profile?.column_count || null)
+        : isJson
+          ? (sourceProfile.profile?.column_count ?? 1)
+          : (sourceProfile.profile?.column_count ?? null);
+
+  const inferredTargetColumnCount = isArchiveTabular
+    ? archiveTabularColumnCount('target', targetProfile.profile)
     : isFixedWidth
-    ? (form.fixedWidthColumns.length || sourceProfile.profile?.column_count || null)
-    : isJson
-      ? (sourceProfile.profile?.column_count ?? 1)
-      : (sourceProfile.profile?.column_count ?? null);
+      ? inferredColumnCount
+      : isJson
+        ? (targetProfile.profile?.column_count ?? 1)
+        : (targetProfile.profile?.column_count ?? null);
 
   const inferredRowCount = (profile: CloudFileProfileResponse | null, empty: boolean) => {
     if (empty) return 0;
-    if (isArchive) return profile?.archive_entry_count ?? profile?.row_count ?? null;
+    if (isArchiveMetadataOnly) return profile?.archive_entry_count ?? profile?.row_count ?? null;
+    if (isArchiveTabular) return archiveTabularRowCount(profile);
     if (isJson) return profile?.row_count ?? 1;
     return profile?.row_count ?? null;
   };
 
   const headerFooterLabel = (profile: CloudFileProfileResponse | null) =>
-    isJson || isArchive ? 'N/A' : formatBoolean(profile?.has_header);
+    isJson || isArchiveMetadataOnly
+      ? 'N/A'
+      : formatBoolean(profile?.has_header ?? previewData?.has_header);
 
   const sourceStats = {
     name: form.sourceFileName ?? '—',
     path: gsPath(form.sourceCloud?.bucket ?? null, form.sourceCloud?.object_name ?? null),
     format: (() => {
-      const raw = resolveCloudFormatRaw(sourceProfile.profile, form.sourceFileName, sourceEmpty);
+      const raw = resolveCloudFormatRaw(
+        sourceProfile.profile,
+        form.sourceFileName,
+        form.sourceCloud?.object_name,
+        sourceEmpty,
+      );
       if (!raw) return '—';
       if (raw === 'empty') return formatDetectionLabel('empty');
       return <FormatDetectionChainLabel format={raw} />;
@@ -321,7 +372,7 @@ export const MappingOverviewStep: React.FC = () => {
     columnCount: sourceEmpty ? 0 : inferredColumnCount,
     rowCount: inferredRowCount(sourceProfile.profile, sourceEmpty),
     header: headerFooterLabel(sourceProfile.profile),
-    footer: isJson || isArchive ? 'N/A' : formatBoolean((sourceProfile.profile as { has_footer?: boolean })?.has_footer),
+    footer: isJson || isArchiveMetadataOnly ? 'N/A' : formatBoolean((sourceProfile.profile as { has_footer?: boolean })?.has_footer),
     preview: previewControl,
   };
 
@@ -329,16 +380,21 @@ export const MappingOverviewStep: React.FC = () => {
     name: form.targetFileName ?? '—',
     path: gsPath(form.targetCloud?.bucket ?? null, form.targetCloud?.object_name ?? null),
     format: (() => {
-      const raw = resolveCloudFormatRaw(targetProfile.profile, form.targetFileName, targetEmpty);
+      const raw = resolveCloudFormatRaw(
+        targetProfile.profile,
+        form.targetFileName,
+        form.targetCloud?.object_name,
+        targetEmpty,
+      );
       if (!raw) return '—';
       if (raw === 'empty') return formatDetectionLabel('empty');
       return <FormatDetectionChainLabel format={raw} />;
     })(),
     sizeBytes: targetProfile.profile?.file_size_bytes ?? form.targetFileSize,
-    columnCount: targetEmpty ? 0 : (isFixedWidth ? inferredColumnCount : isJson ? (targetProfile.profile?.column_count ?? 1) : targetProfile.profile?.column_count ?? null),
+    columnCount: targetEmpty ? 0 : inferredTargetColumnCount,
     rowCount: inferredRowCount(targetProfile.profile, targetEmpty),
     header: headerFooterLabel(targetProfile.profile),
-    footer: isJson || isArchive ? 'N/A' : formatBoolean((targetProfile.profile as { has_footer?: boolean })?.has_footer),
+    footer: isJson || isArchiveMetadataOnly ? 'N/A' : formatBoolean((targetProfile.profile as { has_footer?: boolean })?.has_footer),
     preview: previewControl,
   };
 

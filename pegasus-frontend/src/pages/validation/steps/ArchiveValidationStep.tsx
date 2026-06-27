@@ -1,7 +1,7 @@
 import React from 'react';
 import { FileZipOutlined, SafetyOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useAppSelector } from '../../../redux/store';
-import { formatDetectionLabel } from '../../../shared/formatDisplayLabel';
+import { resolveArchiveFormatChain } from '../../../shared/formatDisplayLabel';
 import { FormatDetectionChainLabel } from '../../../shared/FormatDetectionChainLabel';
 import { archiveKindFromProfile, resolveWizardArchiveMode } from '../archiveFormat';
 import styles from './ArchiveValidationStep.module.scss';
@@ -56,11 +56,29 @@ export const ArchiveValidationStep: React.FC = () => {
 
       <div className={styles.cardGrid}>
         {[
-          { label: 'Source', name: validationForm.sourceFileName, profile: sourceProfile },
-          { label: 'Target', name: validationForm.targetFileName, profile: targetProfile },
-        ].map(({ label, name, profile }) => (
-          <div key={label} className={styles.card}>
-            <div className={styles.cardHeader}>
+          {
+            label: 'Source',
+            name: validationForm.sourceFileName,
+            profile: sourceProfile,
+            objectName: validationForm.sourceCloud?.object_name,
+          },
+          {
+            label: 'Target',
+            name: validationForm.targetFileName,
+            profile: targetProfile,
+            objectName: validationForm.targetCloud?.object_name,
+          },
+        ].map(({ label, name, profile, objectName }) => (
+          <div
+            key={label}
+            style={{
+              border: '1px solid #d9d9d9',
+              borderRadius: '12px',
+              padding: '20px',
+              backgroundColor: '#fff',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', color: '#234B5F' }}>
               <FileZipOutlined />
               <span className={styles.cardLabel}>{label}</span>
             </div>
@@ -69,7 +87,15 @@ export const ArchiveValidationStep: React.FC = () => {
               <div>
                 <strong>Format:</strong>
                 {' '}
-                <FormatDetectionChainLabel format={profile?.file_format ?? archiveKind ?? 'zip'} />
+                <FormatDetectionChainLabel
+                  format={resolveArchiveFormatChain({
+                    fileFormat: profile?.file_format,
+                    suggestedFormat: profile?.suggested_file_format,
+                    objectName,
+                    archiveEntriesSample: profile?.archive_entries_sample,
+                    outer: archiveKind ?? archiveKindFromProfile(profile) ?? 'tar',
+                  }) ?? archiveKind ?? 'zip'}
+                />
               </div>
               <div><strong>Size:</strong> {formatBytes(profile?.file_size_bytes ?? null)}</div>
               <div><strong>Entries:</strong> {entryCount(profile) == null ? '—' : entryCount(profile)!.toLocaleString()}</div>
@@ -96,7 +122,7 @@ export const ArchiveValidationStep: React.FC = () => {
         <CheckCircleOutlined />
         Ready to validate
         {' '}
-        {archiveKind ? formatDetectionLabel(archiveKind) : 'archive'}
+        {archiveKind ? archiveKind.toUpperCase() : 'archive'}
         {' '}
         pair —
         {archiveKindFromProfile(sourceProfile) === archiveKindFromProfile(targetProfile)

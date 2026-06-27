@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T09:47:15Z
+# Last edited: 2026-06-26T16:47:12+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Tests for format display labels and fixed-width detection."""
@@ -131,6 +131,32 @@ def test_display_label_tar_contains_csv(tmp_path: Path) -> None:
     report = detect_file(archive)
     label = build_format_display_label(report, path=archive, object_name=archive.name)
     assert label == "tar -> csv"
+
+
+def test_display_label_from_nested_archive_member_path() -> None:
+    from pegasus.validation.file_detection.display_label import (
+        format_chain_from_archive_member_path,
+        format_display_label_from_archive_members,
+    )
+
+    chain = format_chain_from_archive_member_path("inner.tar/bundle.zip/rows.csv", outer="tar")
+    assert chain == ["tar", "tar", "zip", "csv"]
+
+    label = format_display_label_from_archive_members(
+        ["inner.tar/bundle.zip/rows.csv"],
+        outer="tar",
+    )
+    assert label == "tar -> tar -> zip -> csv"
+
+
+def test_infer_format_chain_from_case12_folder_name() -> None:
+    from pegasus.validation.file_detection.display_label import infer_format_chain_from_object_name
+
+    path = (
+        "test-data/Test_Files/generated_tar_containing_tar_containing_zip_containing_csv_file/"
+        "case12_src.tar"
+    )
+    assert infer_format_chain_from_object_name(path, outer="tar") == "tar -> tar -> zip -> csv"
 
 
 def test_display_label_from_object_name_when_archive_not_readable(tmp_path: Path) -> None:

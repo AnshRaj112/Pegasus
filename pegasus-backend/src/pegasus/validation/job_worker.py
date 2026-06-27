@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T09:47:15Z
+# Last edited: 2026-06-26T16:47:12+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Subprocess / pool entrypoint: run one validation job from files under *job_dir*."""
@@ -130,6 +130,25 @@ def _artifact_lacks_cell_detail(path: Path, compare_columns: list[str] | None = 
     except (OSError, json.JSONDecodeError):
         return True
     return False
+
+
+def _resolve_mismatch_lookup_inputs(
+    src: object,
+    tgt: object,
+    result: ValidationRunResult,
+) -> tuple[object, object]:
+    """Use extracted CSV paths for nested archive tabular validation."""
+    meta = getattr(result, "pipeline_metadata", None) or {}
+    if meta.get("path") != "archive_tabular_leaf":
+        return src, tgt
+    src_leaf = meta.get("source_leaf_local")
+    tgt_leaf = meta.get("target_leaf_local")
+    if src_leaf and tgt_leaf:
+        src_path = Path(str(src_leaf))
+        tgt_path = Path(str(tgt_leaf))
+        if src_path.is_file() and tgt_path.is_file():
+            return src_path, tgt_path
+    return src, tgt
 
 
 def _build_mismatch_lookups(
@@ -573,6 +592,24 @@ def _run_job_body(
                 test_mode=mode,
                 mismatch_snippet_limit=mismatch_snippet_limit,
             )
+        elif file_format in _ARCHIVE_FORMATS or is_archive_format(file_format):
+            result = service.validate_archive_pair_sync(
+                src,
+                tgt,
+                file_format=file_format,
+                artifact_export_parent=job_dir,
+                test_mode=mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
+                source_object_name=str(meta.get("source_filename") or ""),
+                target_object_name=str(meta.get("target_filename") or ""),
+                uid_column=uid_column,
+                delimiter=delimiter,
+                column_mappings=column_mappings,
+                has_header=has_header,
+                header_leading_rows=header_leading_rows,
+                progress_callback=_progress_cb,
+                resource_policy=resource_policy,
+            )
         elif file_format in _COLUMNAR_FORMATS:
             result = service.validate_columnar_pair_sync(
                 src,
@@ -626,6 +663,7 @@ def _run_job_body(
             profiler.mark_worker_finished()
         with lifecycle_span("Mismatch Export"):
             artifact = result.mismatch_artifact_path or result.report.mismatch_artifact_path
+            lookup_src, lookup_tgt = _resolve_mismatch_lookup_inputs(src, tgt, result)
             workspace = job_dir / "reconcile_workspace"
             export_path = job_dir / "mismatches.ndjson"
             wave_export = workspace / "mismatches_partial.ndjson"
@@ -674,8 +712,8 @@ def _run_job_body(
 
                         identity_columns = parse_identity_columns(uid_column) or [uid_column.strip()]
                         src_lookup, tgt_lookup = _build_mismatch_lookups(
-                            src,
-                            tgt,
+                            lookup_src,
+                            lookup_tgt,
                             identity_columns=identity_columns,
                             compare_columns=compared_cols,
                             delimiter=delimiter,
@@ -721,8 +759,8 @@ def _run_job_body(
                 _maybe_enrich_mismatch_artifact(
                     artifact,
                     compare_columns=compared_cols,
-                    src=src,
-                    tgt=tgt,
+                    src=lookup_src,
+                    tgt=lookup_tgt,
                     identity_columns=identity_columns,
                     delimiter=delimiter,
                     has_header=has_header,
@@ -766,12 +804,12 @@ def _run_job_body(
                     from pegasus.validation.pipeline.in_memory import _load_frame
 
                     src_frame = _load_frame(
-                        src,
+                        lookup_src,
                         identity_columns=identity_columns,
                         compare_columns=compared_cols,
                     )
                     tgt_frame = _load_frame(
-                        tgt,
+                        lookup_tgt,
                         identity_columns=identity_columns,
                         compare_columns=compared_cols,
                     )
@@ -787,8 +825,8 @@ def _run_job_body(
                     logger.debug("Could not build match samples from in-memory frames", exc_info=True)
                 if match_frame is None or match_frame.is_empty():
                     src_lookup, tgt_lookup = _build_mismatch_lookups(
-                        src,
-                        tgt,
+                        lookup_src,
+                        lookup_tgt,
                         identity_columns=identity_columns,
                         compare_columns=compared_cols,
                         delimiter=delimiter,
@@ -824,19 +862,6 @@ def _run_job_body(
                 result.report.summary = reconcile_summary_with_artifact(
                     dict(result.report.summary),
                     artifact,
-                )
-            rid_raw = meta.get("run_id")
-            if rid_raw and settings.enable_validation_persistence and artifact is not None and artifact.is_file():
-                import uuid as _uuid
-
-                from pegasus.api.v1.validation_helpers import persist_completed_job_blocking
-
-                result.mismatch_artifact_path = artifact
-                persist_completed_job_blocking(
-                    settings,
-                    run_id=_uuid.UUID(str(rid_raw)),
-                    run_result=result,
-                    job_meta={**meta, "job_id": job_id},
                 )
             if skip_artifact_export:
                 artifact = None
@@ -922,6 +947,25 @@ def _run_job_body(
         write_resource_profile_artifacts(job_dir, resource_profiler.to_dict())
         with lifecycle_span("Result Serialization"):
             _write_json(job_dir / "result.json", out, indent=True)
+        rid_raw = meta.get("run_id")
+        if (
+            rid_raw
+            and settings.enable_validation_persistence
+            and artifact is not None
+            and artifact.is_file()
+            and not skip_artifact_export
+        ):
+            import uuid as _uuid
+
+            from pegasus.api.v1.validation_helpers import persist_completed_job_blocking
+
+            result.mismatch_artifact_path = artifact
+            persist_completed_job_blocking(
+                settings,
+                run_id=_uuid.UUID(str(rid_raw)),
+                run_result=result,
+                job_meta={**meta, "job_id": job_id},
+            )
         _write_json(
             status_path,
             {

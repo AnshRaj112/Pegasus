@@ -20,7 +20,8 @@ import { assessEmptyValidationFiles } from './validationEmptyFiles';
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
 import { ConfigureMappingStep } from './steps/ConfigureMappingStep';
-import { resolveWizardArchiveMode } from './archiveFormat';
+import { Api } from '../../shared/api/Api';
+import { resolveWizardArchiveMode, archiveUsesTabularValidation } from './archiveFormat';
 import { isFixedWidthFormat } from './fixedWidthFormat';
 import { resolveWizardJsonMode } from './jsonFormat';
 
@@ -217,13 +218,20 @@ export const ValidationWizardView: React.FC = () => {
     sourceProfile: overviewCache?.source,
     targetProfile: overviewCache?.target,
   }));
+  const isArchiveMetadataOnly = isArchive && !archiveUsesTabularValidation({
+    detectedFileFormat: validationForm.detectedFileFormat,
+    sourceFileName: validationForm.sourceFileName,
+    targetFileName: validationForm.targetFileName,
+    sourceProfile: overviewCache?.source,
+    targetProfile: overviewCache?.target,
+  });
   const isStep3Loading = currentStep === 3 && (
     loadingRun
     || (isFixedWidth
       ? validationForm.fixedWidthColumns.length === 0
       : isJson
         ? false
-        : isArchive
+        : isArchiveMetadataOnly
           ? false
           : !validationForm.columnMappings || validationForm.columnMappings.length === 0)
   );
@@ -260,9 +268,16 @@ export const ValidationWizardView: React.FC = () => {
         targetProfile: overviewCache?.target,
       });
       if (archiveKind) {
+        const archiveTabular = archiveUsesTabularValidation({
+          detectedFileFormat: validationForm.detectedFileFormat,
+          sourceFileName: validationForm.sourceFileName,
+          targetFileName: validationForm.targetFileName,
+          sourceProfile: overviewCache?.source,
+          targetProfile: overviewCache?.target,
+        });
         dispatch(validationActions.setValidationForm({
           detectedFileFormat: archiveKind,
-          columnMappings: [],
+          ...(archiveTabular ? {} : { columnMappings: [] }),
         }));
       }
       navigate(validationMappingPath(runId));
@@ -345,7 +360,7 @@ export const ValidationWizardView: React.FC = () => {
           <div className={`${styles.stepTabItem} ${currentStep === 3 ? styles.stepTabActive : styles.stepTabInactive}`} style={{ cursor: 'default' }}>
             <span className={`${styles.stepNumberBadge} ${currentStep === 3 ? styles.stepNumberActive : styles.stepNumberInactive}`}>3</span>
             <span style={{ fontSize: '14px', fontWeight: 600 }}>
-              {overviewIsJson || isJson ? 'JSON Mapping' : isArchive ? 'Archive Validation' : 'File Mapping'}
+              {overviewIsJson || isJson ? 'JSON Mapping' : isArchiveMetadataOnly ? 'Archive Validation' : 'File Mapping'}
             </span>
           </div>
         </div>

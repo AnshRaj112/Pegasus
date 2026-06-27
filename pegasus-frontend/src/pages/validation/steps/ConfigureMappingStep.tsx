@@ -21,7 +21,7 @@ import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { isFixedWidthFormat } from '../fixedWidthFormat';
 import { resolveWizardJsonMode } from '../jsonFormat';
-import { resolveWizardArchiveMode } from '../archiveFormat';
+import { resolveWizardArchiveMode, archiveUsesTabularValidation } from '../archiveFormat';
 import { FixedWidthLayoutPanel } from './FixedWidthLayoutPanel';
 import { ArchiveValidationStep } from './ArchiveValidationStep';
 import { JsonParentMappingStep } from './JsonParentMappingStep';
@@ -249,6 +249,14 @@ export const ConfigureMappingStep: React.FC = () => {
     sourceProfile: overviewCache?.source,
     targetProfile: overviewCache?.target,
   }));
+  const isArchiveTabular = archiveUsesTabularValidation({
+    detectedFileFormat: validationForm.detectedFileFormat,
+    sourceFileName: validationForm.sourceFileName,
+    targetFileName: validationForm.targetFileName,
+    sourceProfile: overviewCache?.source,
+    targetProfile: overviewCache?.target,
+  });
+  const isArchiveMetadataOnly = isArchive && !isArchiveTabular;
 
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -280,7 +288,7 @@ export const ConfigureMappingStep: React.FC = () => {
   const fixedWidthLoading = previewFixedWidthState.pairKey === fixedWidthPairKey && previewFixedWidthState.isFetching;
   const fixedWidthError = previewFixedWidthState.pairKey === fixedWidthPairKey ? previewFixedWidthState.error : null;
 
-  const loadingPreview = !isFixedWidth && !isJson && !isArchive && Boolean(
+  const loadingPreview = !isFixedWidth && !isJson && !isArchiveMetadataOnly && Boolean(
     validationForm.sourceCloud && validationForm.targetCloud && columnsMatrix.length === 0 && !previewError,
   ) && (previewColumnsState.pairKey !== previewPairKey || previewColumnsState.isFetching);
 
@@ -325,17 +333,7 @@ export const ConfigureMappingStep: React.FC = () => {
   ]);
 
   useEffect(() => {
-    if (!isFixedWidth || previewFixedWidthState.pairKey !== fixedWidthPairKey || !previewFixedWidthState.data) return;
-    dispatch(validationActions.setValidationForm({
-      fixedWidthColumns: previewFixedWidthState.data.columns,
-      fixedWidthLineWidth: previewFixedWidthState.data.line_width,
-      uidColumn: validationForm.uidColumn || previewFixedWidthState.data.suggested_join_column,
-      detectedFileFormat: 'fixed-width',
-    }));
-  }, [previewFixedWidthState, fixedWidthPairKey, isFixedWidth, validationForm.uidColumn, dispatch]);
-
-  useEffect(() => {
-    if (!validationForm.sourceCloud || !validationForm.targetCloud || isFixedWidth || isJson || isArchive) return;
+    if (!validationForm.sourceCloud || !validationForm.targetCloud || isFixedWidth || isJson || isArchiveMetadataOnly) return;
     if (hydratedMappingsRef.current) return;
 
     if (validationForm.columnMappings.length > 0) {
@@ -429,28 +427,8 @@ export const ConfigureMappingStep: React.FC = () => {
       };
     });
 
-    setTargetSamplesRecord(tSamples);
-    setTargetColumnsList(preview.target_columns || []);
-    const mergedComplex = mergeComplexColumns(complex, mappings);
-    setComplexColumns(mergedComplex);
-    setColumnsMatrix(mappings);
-    setPage(1);
-
-    const initialPks = mappings.filter((m) => m.isPk).map((m) => m.sourceCol).join(',');
-    dispatch(validationActions.setValidationForm({
-      uidColumn: initialPks || defaultUid,
-      delimiter: preview.delimiter,
-      hasHeader: preview.has_header ?? validationForm.hasHeader,
-      columnMappings: matrixToColumnMappings(mappings, mergedComplex),
-    }));
-    hydratedMappingsRef.current = true;
-  }, [
-    previewColumnsState,
-    previewPairKey,
-    validationForm.hasHeader,
-    validationForm.uidColumn,
-    dispatch,
-  ]);
+    return () => { cancelled = true; };
+  }, [validationForm.sourceCloud, validationForm.targetCloud, validationForm.uidColumn, validationForm.delimiter, validationForm.hasHeader, validationForm.columnMappings.length, dispatch, isFixedWidth, isJson, isArchiveMetadataOnly]);
 
   const handleFixedWidthChange = (columns: FixedWidthColumnPreview[]) => {
     dispatch(validationActions.setValidationForm({ fixedWidthColumns: columns }));
@@ -464,7 +442,7 @@ export const ConfigureMappingStep: React.FC = () => {
     return <JsonParentMappingStep />;
   }
 
-  if (isArchive) {
+  if (isArchiveMetadataOnly) {
     return <ArchiveValidationStep />;
   }
 

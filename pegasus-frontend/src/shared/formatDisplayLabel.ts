@@ -125,7 +125,7 @@ export const formatDetectionChainDisplay = (format: string | null | undefined): 
   const segments = normalized.split('->').map((part) => part.trim()).filter(Boolean);
   const labels = segments.map((part) => formatDetectionSegmentLabel(part));
   const full = labels.join(' → ');
-  if (labels.length <= 3) {
+  if (labels.length <= 4) {
     return { short: full, middle: null, full };
   }
 
@@ -135,4 +135,98 @@ export const formatDetectionChainDisplay = (format: string | null | undefined): 
     middle,
     full,
   };
+};
+
+const chainDepth = (label: string | null | undefined): number => {
+  if (!label) return 0;
+  if (!label.includes('->')) return 1;
+  return label.split('->').length;
+};
+
+const kindFromContainingPiece = (token: string): string | null => {
+  if (token.endsWith('tar') || token === 'tar') return 'tar';
+  if (token.includes('zip')) return 'zip';
+  if (['csv', 'tsv', 'psv', 'json', 'parquet', 'orc', 'avro', 'txt', 'dat'].includes(token)) return token;
+  if (token.endsWith('csv') || token.endsWith('tsv') || token.endsWith('json')) {
+    return token.split('_').pop() ?? token;
+  }
+  return null;
+};
+
+const chainFromContainingSegment = (name: string): string[] => {
+  const lower = name.split('/').pop()?.toLowerCase() ?? '';
+  if (!lower.includes('_containing_')) return [];
+  const chain: string[] = [];
+  for (const raw of lower.split('_containing_')) {
+    const token = raw.replace(/_file$/, '').replace(/^_|_$/g, '');
+    const kind = kindFromContainingPiece(token);
+    if (kind) chain.push(kind);
+  }
+  return chain;
+};
+
+export const inferFormatChainFromObjectName = (
+  objectName: string | null | undefined,
+  outer?: string | null,
+): string | null => {
+  if (!objectName) return null;
+  const segments = objectName.replace(/\\/g, '/').replace(/^\/|\/$/g, '').split('/');
+  for (let i = segments.length - 1; i >= 0; i -= 1) {
+    const chain = chainFromContainingSegment(segments[i]);
+    if (chain.length < 2) continue;
+    if (outer && chain[0] !== outer) {
+      return [outer, ...chain].join(' -> ');
+    }
+    return chain.join(' -> ');
+  }
+  return null;
+};
+
+export const formatChainFromArchiveMemberPath = (
+  memberPath: string,
+  outer: string,
+): string | null => {
+  const parts = memberPath.replace(/\\/g, '/').split('/').filter(Boolean);
+  if (parts.length < 1) return null;
+  const chain: string[] = [outer];
+  for (const part of parts.slice(0, -1)) {
+    const low = part.toLowerCase();
+    if (low.endsWith('.tar') || low.endsWith('.tgz') || low.endsWith('.tar.gz')) chain.push('tar');
+    else if (low.endsWith('.zip')) chain.push('zip');
+  }
+  const leaf = parts[parts.length - 1].toLowerCase();
+  if (leaf.endsWith('.csv') || leaf.endsWith('.tsv') || leaf.endsWith('.psv')) {
+    chain.push(leaf.endsWith('.tsv') ? 'tsv' : leaf.endsWith('.psv') ? 'psv' : 'csv');
+  } else if (leaf.endsWith('.json')) {
+    chain.push('json');
+  }
+  return chain.length >= 2 ? chain.join(' -> ') : null;
+};
+
+export const resolveArchiveFormatChain = (input: {
+  fileFormat?: string | null;
+  suggestedFormat?: string | null;
+  objectName?: string | null;
+  archiveEntriesSample?: string[] | null;
+  outer?: string | null;
+}): string | null => {
+  const candidates: Array<string | null | undefined> = [input.fileFormat];
+  if (input.archiveEntriesSample?.length) {
+    const deepest = input.archiveEntriesSample.reduce((a, b) =>
+      (a.split('/').length >= b.split('/').length ? a : b));
+    candidates.push(formatChainFromArchiveMemberPath(deepest, input.outer ?? 'tar'));
+  }
+  candidates.push(inferFormatChainFromObjectName(input.objectName, input.outer ?? undefined));
+
+  let best: string | null = null;
+  let bestDepth = 0;
+  for (const candidate of candidates) {
+    if (!candidate || !candidate.includes('->')) continue;
+    const depth = chainDepth(candidate);
+    if (depth > bestDepth) {
+      best = candidate;
+      bestDepth = depth;
+    }
+  }
+  return best ?? input.fileFormat ?? input.suggestedFormat ?? null;
 };
