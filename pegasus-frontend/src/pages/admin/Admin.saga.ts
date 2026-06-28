@@ -14,7 +14,7 @@ import {
 import { adminActions } from './Admin.reducer';
 import { adminService } from './Admin.service';
 
-function* handleTestConnectionSaga(action: PayloadAction<string>) {
+export function* handleTestConnectionSaga(action: PayloadAction<string>) {
   const connectionId = action.payload;
   try {
     const adminState: AdminReducerState = yield select((state: { admin: AdminReducerState }) => state.admin);
@@ -41,7 +41,7 @@ function* handleTestConnectionSaga(action: PayloadAction<string>) {
   }
 }
 
-function* handleFetchWorkspacesSaga() {
+export function* handleFetchWorkspacesSaga() {
   try {
     const data: WorkspaceItem[] = yield call([adminService, adminService.fetchWorkspaces]);
     yield put(adminActions.fetchWorkspacesSuccess(data));
@@ -50,7 +50,7 @@ function* handleFetchWorkspacesSaga() {
   }
 }
 
-function* handleFetchProvidersSaga() {
+export function* handleFetchProvidersSaga() {
   try {
     const data: StorageProviderItem[] = yield call([adminService, adminService.fetchStorageProviders]);
     yield put(adminActions.fetchProvidersSuccess(data));
@@ -59,7 +59,7 @@ function* handleFetchProvidersSaga() {
   }
 }
 
-function* handleCreateProviderSaga(action: PayloadAction<CreateStorageProviderPayload>) {
+export function* handleCreateProviderSaga(action: PayloadAction<CreateStorageProviderPayload>) {
   try {
     const created: StorageProviderItem = yield call(
       [adminService, adminService.createStorageProvider],
@@ -75,7 +75,7 @@ function* handleCreateProviderSaga(action: PayloadAction<CreateStorageProviderPa
   }
 }
 
-function* handleUpdateProviderSaga(action: PayloadAction<StorageProviderPayload>) {
+export function* handleUpdateProviderSaga(action: PayloadAction<StorageProviderPayload>) {
   try {
     const updated: StorageProviderItem = yield call(
       [adminService, adminService.updateStorageProvider],
@@ -91,7 +91,7 @@ function* handleUpdateProviderSaga(action: PayloadAction<StorageProviderPayload>
   }
 }
 
-function* handleDeleteProviderSaga(action: PayloadAction<string>) {
+export function* handleDeleteProviderSaga(action: PayloadAction<string>) {
   try {
     yield call([adminService, adminService.deleteStorageProvider], action.payload);
     yield put(adminActions.deleteProviderSuccess(action.payload));

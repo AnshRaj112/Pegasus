@@ -15,7 +15,7 @@ const FETCH_BATCH = 5000;
 
 const selectActiveTab = (state: { report: { activeTab: TabType } }): TabType => state.report.activeTab;
 
-function* handleFetchReports() {
+export function* handleFetchReports() {
   const activeTab: TabType = yield select(selectActiveTab);
 
   try {
@@ -42,7 +42,7 @@ function* handleFetchReports() {
   }
 }
 
-function* fetchHistoryRunSaga(action: PayloadAction<string>) {
+export function* fetchHistoryRunSaga(action: PayloadAction<string>) {
   const runId = action.payload;
   try {
     const data: import('../../shared/api/Api').ValidationHistoryDetail = yield call(ReportService.fetchHistoryRun, runId);
@@ -59,7 +59,7 @@ function* fetchHistoryRunSaga(action: PayloadAction<string>) {
   }
 }
 
-function* fetchMismatchesSaga(action: PayloadAction<string>) {
+export function* fetchMismatchesSaga(action: PayloadAction<string>) {
   const runId = action.payload;
 
   try {

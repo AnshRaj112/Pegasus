@@ -238,7 +238,7 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
   }
 }
 
-function* listCloudConnectionsSaga() {
+export function* listCloudConnectionsSaga() {
   try {
     const response: import('axios').AxiosResponse<import('../../shared/api/Api').CloudConnection[]> = yield call(
       ValidationServiceApi.listCloudConnections,
@@ -251,7 +251,7 @@ function* listCloudConnectionsSaga() {
   }
 }
 
-function* browseCloudSaga(action: ReturnType<typeof validationActions.browseCloudRequest>) {
+export function* browseCloudSaga(action: ReturnType<typeof validationActions.browseCloudRequest>) {
   const { pathId, connectionId, bucket, prefix } = action.payload;
   try {
     const response: import('axios').AxiosResponse<import('../../shared/api/Api').CloudBrowseResponse> = yield call(ValidationServiceApi.browseCloud, {
@@ -317,7 +317,7 @@ function* profileCloudFilesSaga(action: ReturnType<typeof validationActions.prof
   }));
 }
 
-function* previewValidationColumnsSaga(action: PayloadAction<string>) {
+export function* previewValidationColumnsSaga(action: PayloadAction<string>) {
   const pairKey = action.payload;
   try {
     const { validationForm }: ValidationReducerState = yield select(
@@ -365,7 +365,7 @@ function* previewFixedWidthLayoutSaga(action: PayloadAction<string>) {
   }
 }
 
-function* saveDraftSaga(action: ReturnType<typeof validationActions.saveDraftRequest>) {
+export function* saveDraftSaga(action: ReturnType<typeof validationActions.saveDraftRequest>) {
   try {
     const response: import('axios').AxiosResponse<import('../../shared/api/Api').ValidationHistoryDetail> = yield call(ValidationServiceApi.saveValidationDraft, action.payload.draft);
     yield put(validationActions.saveDraftSuccess(response.data));
