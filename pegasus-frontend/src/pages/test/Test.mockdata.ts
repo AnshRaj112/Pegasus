@@ -1,4 +1,9 @@
-import { TestEntity } from './Test.interface';
+import { AxiosError, AxiosHeaders } from 'axios'
+
+import { initializeEmptyState } from '~/shared/constants/common.constants'
+
+import { TestEntity } from './Test.interface'
+import { initialState } from './Test.reducer'
 
 export const mockActiveTests: TestEntity[] = [
   {
@@ -83,3 +88,55 @@ export const mockSavedTests: TestEntity[] = [
     isDraft: true,
   }
 ];
+
+export const mockAxiosError = new AxiosError(
+  'Server error',
+  'ERR_BAD_REQUEST',
+  undefined,
+  undefined,
+  {
+    status: 500,
+    statusText: 'Internal Server Error',
+    headers: {},
+    config: { headers: new AxiosHeaders() },
+    data: { message: 'Failed to load active tests.' },
+  },
+)
+
+export const activeTestsLoading = {
+  ...initializeEmptyState,
+  isFetching: true,
+  error: null,
+}
+
+export const activeTestsSuccess = {
+  ...initializeEmptyState,
+  data: mockActiveTests,
+  isFetching: false,
+  error: null,
+}
+
+export const activeTestsError = {
+  ...initializeEmptyState,
+  isFetching: false,
+  error: 'Failed to load active tests.',
+}
+
+export const completedTestsSuccess = {
+  ...initializeEmptyState,
+  data: mockCompletedTests,
+  isFetching: false,
+  error: null,
+}
+
+export const savedTestsSuccess = {
+  ...initializeEmptyState,
+  data: mockSavedTests,
+  isFetching: false,
+  error: null,
+}
+
+export const testStateWithActiveData = {
+  ...initialState,
+  activeTests: activeTestsSuccess,
+}
