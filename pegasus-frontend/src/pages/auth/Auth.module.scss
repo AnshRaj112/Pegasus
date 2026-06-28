@@ -30,7 +30,7 @@
   flex-direction: column;
   background-color: var(--surface-bright, #{tokens.$surface});
   color: var(--on-surface, #{tokens.$on-surface});
-  font-family: 'Inter', sans-serif;
+  font-family: tokens.$font-body-md;
   position: relative;
 }
 

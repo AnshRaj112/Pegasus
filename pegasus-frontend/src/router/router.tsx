@@ -8,41 +8,15 @@ import { PATHS } from '~/router/router.constants';
 import NotFoundPage from '~/router/NotFoundPage';
 
 const Dashboard = lazy(() => import('~/pages/dashboard/Dashboard'));
-const ValidationWizardView = lazy(() =>
-  import('~/pages/validation/ValidationWizardView').then((module) => ({
-    default: module.ValidationWizardView,
-  })),
-);
-const Report = lazy(() =>
-  import('~/pages/report/Report').then((module) => ({ default: module.Report })),
-);
-const AdminView = lazy(() =>
-  import('~/pages/admin/AdminView').then((module) => ({ default: module.AdminView })),
-);
-const Login = lazy(() =>
-  import('~/pages/auth/Login').then((module) => ({ default: module.Login })),
-);
-const SnippetViewRouter = lazy(() =>
-  import('~/pages/report/views/SnippetViewRouter').then((module) => ({
-    default: module.SnippetViewRouter,
-  })),
-);
-const ExecutionHistory = lazy(() =>
-  import('~/pages/report/views/ExecutionHistory').then((module) => ({
-    default: module.ExecutionHistory,
-  })),
-);
+const ValidationWizardView = lazy(() => import('~/pages/validation/ValidationWizardView'));
+const Report = lazy(() => import('~/pages/report/Report'));
+const AdminView = lazy(() => import('~/pages/admin/AdminView'));
+const Login = lazy(() => import('~/pages/auth/Login'));
+const SnippetViewRouter = lazy(() => import('~/pages/report/views/SnippetViewRouter'));
+const ExecutionHistory = lazy(() => import('~/pages/report/views/ExecutionHistory'));
 const Profile = lazy(() => import('~/pages/profile/Profile'));
-const WorkspaceMgmtSubView = lazy(() =>
-  import('~/pages/admin/sections/WorkspaceMgmtSubView').then((module) => ({
-    default: module.WorkspaceMgmtSubView,
-  })),
-);
-const ConfigureStoreSubView = lazy(() =>
-  import('~/pages/admin/sections/ConfigureStoreSubView').then((module) => ({
-    default: module.ConfigureStoreSubView,
-  })),
-);
+const WorkspaceMgmtSubView = lazy(() => import('~/pages/admin/sections/WorkspaceMgmtSubView'));
+const ConfigureStoreSubView = lazy(() => import('~/pages/admin/sections/ConfigureStoreSubView'));
 const Setting = lazy(() => import('~/pages/admin/sections/setting/Setting'));
 const TestView = lazy(() => import('~/pages/test/TestView'));
 

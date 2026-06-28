@@ -14,7 +14,7 @@ const isJsonRun = (delimiter?: string | null, comparedColumns?: string[] | null)
   return false;
 };
 
-export const SnippetViewRouter: React.FC = () => {
+const SnippetViewRouter: React.FC = () => {
   const { runId } = useParams<{ runId: string }>();
   const dispatch = useAppDispatch();
   const historyRunState = useAppSelector((state) => state.report.historyRunState);
@@ -38,3 +38,5 @@ export const SnippetViewRouter: React.FC = () => {
 
   return useJsonView ? <JsonSnippetComparison /> : <SnippetComparison />;
 };
+
+export default SnippetViewRouter;

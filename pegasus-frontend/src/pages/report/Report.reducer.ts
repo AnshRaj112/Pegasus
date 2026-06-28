@@ -1,6 +1,6 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
-import { initializeEmptyState } from '~/shared/constants/common.constant';
+import { initializeEmptyState } from '~/shared/constants/common.constants';
 
 import { ReportItem, ReportState, TabType } from './Report.interface';
 import type { MismatchSampleRow, ValidationHistoryDetail } from '../../shared/api/Api';

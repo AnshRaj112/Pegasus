@@ -1,4 +1,4 @@
-@use '~/assets/styles/variables.scss' as *;
+@use '~/assets/styles/variables' as *;
 
 :root {
   --surface-dim: #{$surface-dim};
@@ -64,6 +64,7 @@
   --label-md: #{$text-label-md};
   --body-md: #{$text-body-md};
   --body-sm: #{$text-body-sm};
+  --font-family-sans: #{$font-family-sans};
 }
 
 *,

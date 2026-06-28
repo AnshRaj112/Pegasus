@@ -1,6 +1,6 @@
 import { PayloadAction, createSlice } from '@reduxjs/toolkit';
 
-import { initializeNullState } from '../../shared/constants/common.constant';
+import { initializeNullState } from '~/shared/constants/common.constants';
 
 import { DashboardDataResponse, DashboardReducerState } from './Dashboard.interface';
 

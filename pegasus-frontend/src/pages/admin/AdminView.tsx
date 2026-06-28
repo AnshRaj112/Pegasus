@@ -5,10 +5,10 @@ import { useAppDispatch } from '../../redux/store';
 import { adminLogout, fetchAdminMe } from '../../shared/api/adminAuth';
 import { authActions } from '../auth/Auth.reducer';
 import { resetValidationOnLogout } from '../validation/resetValidationOnLogout';
-import styles from './Admin.module.scss'; // ⚡ Import Module
+import styles from './Admin.module.scss';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 
-export const AdminView: React.FC = () => {
+const AdminView: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useAppDispatch();
@@ -43,7 +43,7 @@ export const AdminView: React.FC = () => {
 
   if (checkingSession) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 'calc(100vh - 64px)' }}>
+      <div className={styles.sessionLoading}>
         <Spin size="large" />
       </div>
     );
@@ -52,39 +52,42 @@ export const AdminView: React.FC = () => {
   return (
     <div className={styles.adminLayout}>
       <aside className={styles.adminSidebar}>
-        <div style={{ padding: '0 16px', marginBottom: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-            <div style={{ width: '32px', height: '32px', backgroundColor: '#234B5F', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff' }}>
-              <SafetyCertificateOutlined style={{ fontSize: '20px' }} />
+        <div className={styles.sidebarBrand}>
+          <div className={styles.sidebarBrandRow}>
+            <div className={styles.sidebarLogo}>
+              <SafetyCertificateOutlined className={styles.sidebarLogoIcon} />
             </div>
-            <span style={{ fontSize: '24px', fontWeight: 700, color: '#1b1b1c' }}>Admin Center</span>
+            <span className={styles.sidebarTitle}>Admin Center</span>
           </div>
-          <span style={{ fontSize: '14px', color: '#414755', fontWeight: 500, opacity: 0.7 }}>Technical Operations</span>
-          <p style={{ fontSize: '12px', color: '#727786', margin: '8px 0 0', wordBreak: 'break-all' }}>{adminEmail}</p>
+          <span className={styles.sidebarSubtitle}>Technical Operations</span>
+          <p className={styles.sidebarEmail}>{adminEmail}</p>
         </div>
 
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px', flexGrow: 1 }}>
+        <nav className={styles.sidebarNav}>
           <button
+            type="button"
             onClick={() => navigate('/admin/workspace-management')}
             className={`${styles.navButton} ${location.pathname.includes('/workspace-management') ? styles.navButtonActive : ''}`}
           >
-            <AppstoreOutlined style={{ fontSize: '18px' }} />
+            <AppstoreOutlined className={styles.navIcon} />
             Workspace Management
           </button>
 
           <button
+            type="button"
             onClick={() => navigate('/admin/configure-store')}
             className={`${styles.navButton} ${location.pathname.includes('/configure-store') ? styles.navButtonActive : ''}`}
           >
-            <ApiOutlined style={{ fontSize: '18px' }} />
+            <ApiOutlined className={styles.navIcon} />
             Configure Store
           </button>
 
           <button
+            type="button"
             onClick={() => navigate('/admin/settings')}
             className={`${styles.navButton} ${location.pathname.includes('/settings') ? styles.navButtonActive : ''}`}
           >
-            <SettingOutlined style={{ fontSize: '18px' }} />
+            <SettingOutlined className={styles.navIcon} />
             Configure Settings
           </button>
         </nav>
@@ -92,9 +95,9 @@ export const AdminView: React.FC = () => {
         <button
           type="button"
           onClick={() => void handleAdminLogout()}
-          style={{ marginTop: 'auto', width: '100%', padding: '12px', backgroundColor: '#fff', border: '1px solid #d9d9d9', color: '#414755', fontSize: '14px', fontWeight: 500, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' }}
+          className={styles.logoutBtn}
         >
-          <LogoutOutlined style={{ fontSize: '18px' }} />
+          <LogoutOutlined className={styles.navIcon} />
           Admin sign out
         </button>
       </aside>
@@ -107,3 +110,5 @@ export const AdminView: React.FC = () => {
     </div>
   );
 };
+
+export default AdminView;

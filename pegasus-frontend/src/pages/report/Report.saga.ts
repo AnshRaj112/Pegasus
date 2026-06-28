@@ -5,7 +5,7 @@ import { all, call, delay, put, select, takeLatest } from 'redux-saga/effects';
 
 import { MismatchSampleRow } from '../../shared/api/Api';
 import { getApiErrorMessage } from '../../shared/api/apiError';
-import { NOTIFICATION_SERVICE_TYPES } from '../../shared/constants/common.constant';
+import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
 
 import { ReportItem, TabType } from './Report.interface';
 import { reportActions } from './Report.reducer';

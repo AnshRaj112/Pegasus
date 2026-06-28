@@ -76,12 +76,10 @@ const toExplorerItem = (entry: CloudBrowseEntry): FileExplorerItem => ({
   size: entry.is_dir ? '—' : formatBytes(entry.size_bytes),
   sizeBytes: entry.size_bytes ?? null,
   createdAt: formatDate(entry.created_at),
-  // ⚡ Added (entry as any) to bypass the TypeScript strict type check
-  modifiedAt: formatDate(entry.updated_at || (entry as any).modified_at),
+  modifiedAt: formatDate(entry.updated_at || entry.modified_at),
   owner: stripGcsUserPrefix(entry.owner),
   createdBy: stripGcsUserPrefix(entry.created_by),
-  // ⚡ Added (entry as any) here as well
-  rawModifiedAt: new Date(entry.updated_at || (entry as any).modified_at || 0).getTime(),
+  rawModifiedAt: new Date(entry.updated_at || entry.modified_at || 0).getTime(),
 });
 
 const envFallbackConnection = (): CloudConnection | null => {

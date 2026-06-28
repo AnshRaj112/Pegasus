@@ -151,6 +151,7 @@ export interface CloudBrowseEntry {
   size_bytes?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
+  modified_at?: string | null;
   owner?: string | null;
   created_by?: string | null;
 }

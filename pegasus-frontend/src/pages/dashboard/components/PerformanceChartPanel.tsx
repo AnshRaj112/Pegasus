@@ -37,20 +37,20 @@ export const PerformanceChartPanel: React.FC<PerformanceChartPanelProps> = ({ da
     <div className={styles.rightChartCol}>
       <div className={styles.chartHeader}>
         <div>
-          <h3 style={{ fontFamily: 'var(--font-h3)', fontSize: 'var(--h3)', margin: 0, color: 'var(--on-surface)' }}>
+          <h3 className={styles.chartTitle}>
             Validation Performance
           </h3>
-          <p style={{ fontSize: 'var(--body-sm)', color: 'var(--on-surface-variant)', margin: '4px 0 0' }}>
+          <p className={styles.chartSubtitle}>
             {isLoading ? 'Loading…' : 'Pass vs fail (last 7 days)'}
           </p>
         </div>
         <div className={styles.chartLegend}>
           <div className={styles.legendItem}>
-            <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: 'var(--color-midnight-green)' }} />
+            <span className={`${styles.legendDot} ${styles.legendDotPass}`} />
             Pass
           </div>
           <div className={styles.legendItem}>
-            <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: 'var(--status-fail)' }} />
+            <span className={`${styles.legendDot} ${styles.legendDotFail}`} />
             Fail
           </div>
         </div>
@@ -58,19 +58,19 @@ export const PerformanceChartPanel: React.FC<PerformanceChartPanelProps> = ({ da
 
       <div className={styles.chartWrapper}>
         {dailyStats.length === 0 && !isLoading ? (
-          <p style={{ padding: '24px', color: 'var(--on-surface-variant)', fontSize: '13px' }}>
+          <p className={styles.chartEmpty}>
             No validation history yet. Run a validation to see trends.
           </p>
         ) : (
-          <svg style={{ width: '100%', height: '100%' }} viewBox="0 0 800 200" preserveAspectRatio="none">
+          <svg className={styles.chartSvg} viewBox="0 0 800 200" preserveAspectRatio="none">
             <defs>
               <linearGradient id="grad-pass" x1="0%" x2="0%" y1="0%" y2="100%">
-                <stop offset="0%" style={{ stopColor: 'var(--color-midnight-green)', stopOpacity: 0.2 }} />
-                <stop offset="100%" style={{ stopColor: 'var(--color-midnight-green)', stopOpacity: 0 }} />
+                <stop offset="0%" stopColor="var(--color-midnight-green)" stopOpacity={0.2} />
+                <stop offset="100%" stopColor="var(--color-midnight-green)" stopOpacity={0} />
               </linearGradient>
             </defs>
             {chartLinesY.map((y) => (
-              <line key={y} stroke="#f0f0f0" strokeWidth="1" x1="0" x2="800" y1={y} y2={y} />
+              <line key={y} className={styles.chartGridLine} x1="0" x2="800" y1={y} y2={y} />
             ))}
             {passPoints.length > 1 && (
               <>
@@ -80,22 +80,14 @@ export const PerformanceChartPanel: React.FC<PerformanceChartPanelProps> = ({ da
                 />
                 <path
                   d={toPath(passPoints)}
-                  fill="none"
-                  stroke="#234B5F"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="3"
+                  className={styles.chartPassLine}
                 />
               </>
             )}
             {failPoints.length > 1 && (
               <path
                 d={toPath(failPoints)}
-                fill="none"
-                stroke="#ba1a1a"
-                strokeDasharray="4"
-                strokeLinecap="round"
-                strokeWidth="2"
+                className={styles.chartFailLine}
               />
             )}
           </svg>
