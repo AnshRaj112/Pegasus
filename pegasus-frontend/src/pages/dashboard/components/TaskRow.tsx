@@ -7,11 +7,11 @@ interface TaskRowProps {
   task: TaskItem;
 }
 
-const progressClass = (status: TaskItem['status']) => {
-  if (status === 'Failed') return styles.progressFailed;
-  if (status === 'Completed') return styles.progressCompleted;
-  if (status === 'Scheduled') return styles.progressScheduled;
-  return styles.progressDefault;
+const progressMeterClass = (status: TaskItem['status']) => {
+  if (status === 'Failed') return styles.progressMeterFailed;
+  if (status === 'Completed') return styles.progressMeterCompleted;
+  if (status === 'Scheduled') return styles.progressMeterScheduled;
+  return '';
 };
 
 export const TaskRow: React.FC<TaskRowProps> = ({ task }) => {
@@ -52,12 +52,11 @@ export const TaskRow: React.FC<TaskRowProps> = ({ task }) => {
       </td>
       <td className={styles.cell}>{getStatusBadge(task.status)}</td>
       <td className={styles.cell}>
-        <div className={styles.progressTrack}>
-          <div
-            className={`${styles.progressFill} ${progressClass(task.status)}`}
-            style={{ width: `${task.progress}%` }}
-          />
-        </div>
+        <progress
+          className={`${styles.progressMeter} ${progressMeterClass(task.status)}`}
+          value={task.progress}
+          max={100}
+        />
         {task.status === 'Running' && (
           <div className={styles.progressLabel}>{task.progress}% Processing</div>
         )}

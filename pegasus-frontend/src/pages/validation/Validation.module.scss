@@ -93,6 +93,94 @@
   border-radius: 0 0 12px 12px;
 }
 
+.wizardPage {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: tokens.$spacing-lg;
+  max-width: tokens.$container-max;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.wizardTitle {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.015em;
+}
+
+.stepTabLabel {
+  font-size: tokens.$text-label-md;
+  font-weight: 600;
+}
+
+.stepTabStatic {
+  cursor: default;
+}
+
+.loadingRun {
+  padding: 3rem;
+  text-align: center;
+  color: tokens.$on-surface-variant;
+}
+
+.wizardActionFooterSpread {
+  justify-content: space-between;
+}
+
+.footerBtnGroup {
+  display: flex;
+  gap: tokens.$spacing-md;
+}
+
+.secondaryBtn {
+  padding: 0 tokens.$spacing-lg;
+  height: 2.5rem;
+  border-radius: tokens.$spacing-sm;
+  border: 0.0625rem solid tokens.$outline-variant;
+  background: tokens.$surface-container-lowest;
+  color: tokens.$on-surface-variant;
+  font-size: tokens.$text-label-md;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secondaryBtnDisabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.secondaryBtnMuted {
+  opacity: 0.6;
+}
+
+.primaryBtn {
+  padding: 0 2rem;
+  height: 2.5rem;
+  border-radius: tokens.$spacing-sm;
+  border: none;
+  background: tokens.$color-midnight-green;
+  color: tokens.$on-primary;
+  font-size: tokens.$text-label-md;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: tokens.$spacing-sm;
+  transition: all 0.2s;
+}
+
+.primaryBtnDisabled {
+  background: tokens.$surface-variant;
+  color: tokens.$on-surface-variant;
+  cursor: not-allowed;
+}
+
+.proceedIcon {
+  font-size: 1rem;
+}
+
 /* Reusable scrollbar for the internal tables */
 .customScrollbar {
   &::-webkit-scrollbar {

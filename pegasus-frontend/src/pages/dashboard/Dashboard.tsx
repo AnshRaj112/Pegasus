@@ -8,7 +8,7 @@ import { WorkspacesPanel } from './components/WorkspacesPanel';
 import { dashboardActions } from './Dashboard.reducer';
 import styles from './Dashboard.module.scss';
 
-export const Dashboard: React.FC = () => {
+const Dashboard: React.FC = () => {
   const dispatch = useAppDispatch();
   const { data, isFetching } = useAppSelector((state) => state.dashboard.dashboardDataState);
 
@@ -29,7 +29,7 @@ export const Dashboard: React.FC = () => {
         <PerformanceChartPanel dailyStats={data?.dailyStats ?? []} isLoading={isFetching} />
       </div>
 
-      <div className={styles.row2Grid} style={{ alignItems: 'flex-start' }}>
+      <div className={`${styles.row2Grid} ${styles.row2GridAlignStart}`}>
         <ActiveTasksPanel tasks={data?.tasks ?? []} isLoading={isFetching} />
         <WorkspacesPanel entities={data?.entities ?? []} isLoading={isFetching} />
         <EntityCustomizer entities={data?.entities ?? []} />

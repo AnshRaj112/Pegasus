@@ -427,8 +427,20 @@ export const ConfigureMappingStep: React.FC = () => {
       };
     });
 
-    return () => { cancelled = true; };
-  }, [validationForm.sourceCloud, validationForm.targetCloud, validationForm.uidColumn, validationForm.delimiter, validationForm.hasHeader, validationForm.columnMappings.length, dispatch, isFixedWidth, isJson, isArchiveMetadataOnly]);
+    setTargetColumnsList(preview.target_columns ?? []);
+    setTargetSamplesRecord(tSamples);
+    setComplexColumns(mergeComplexColumns(complex, mappings));
+    setColumnsMatrix(mappings);
+    setPage(1);
+    hydratedMappingsRef.current = true;
+  }, [
+    previewColumnsState.pairKey,
+    previewColumnsState.data,
+    previewPairKey,
+    validationForm.hasHeader,
+    validationForm.uidColumn,
+    dispatch,
+  ]);
 
   const handleFixedWidthChange = (columns: FixedWidthColumnPreview[]) => {
     dispatch(validationActions.setValidationForm({ fixedWidthColumns: columns }));

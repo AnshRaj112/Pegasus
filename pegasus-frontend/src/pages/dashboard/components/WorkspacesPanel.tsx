@@ -16,56 +16,49 @@ export const WorkspacesPanel: React.FC<WorkspacesPanelProps> = ({ entities, isLo
   return (
     <div className={styles.panelCard}>
       <div className={styles.panelHeader}>
-        <h3 style={{ fontSize: 'var(--label-md)', fontWeight: 500, margin: 0 }}>Workspaces</h3>
-        <span style={{ fontSize: 'var(--body-sm)', color: 'var(--on-surface-variant)' }}>
+        <h3 className={styles.panelTitle}>Workspaces</h3>
+        <span className={styles.panelMeta}>
           {isLoading ? 'Loading…' : `${entities.length} entities`}
         </span>
       </div>
 
       <div className={`${styles.workspaceScrollContainer} custom-scrollbar`}>
-        <div
-          className={styles.defaultWorkspaceCard}
-          style={{ border: '1px solid var(--surface-variant)', borderRadius: '8px', padding: 'var(--md)' }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--xs)' }}>
-              <Lock size={16} style={{ color: 'var(--on-surface-variant)' }} />
-              <span style={{ fontWeight: 500, marginLeft: '4px' }}>Global Workspace</span>
+        <div className={styles.defaultWorkspaceCard}>
+          <div className={styles.workspaceCardHeader}>
+            <div className={styles.workspaceTitleRow}>
+              <Lock size={16} className={styles.workspaceIcon} />
+              <span className={styles.workspaceTitle}>Global Workspace</span>
             </div>
             <span className={styles['badge-system-highlight']}>System Default</span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--xs)', fontSize: 'var(--body-sm)', marginTop: 'var(--sm)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--on-surface-variant)' }}>Total Entities:</span>
+          <div className={styles.workspaceStats}>
+            <div className={styles.workspaceStatRow}>
+              <span className={styles.workspaceStatLabel}>Total Entities:</span>
               <strong>{entities.length}</strong>
             </div>
           </div>
         </div>
 
         {entities.length === 0 && !isLoading && (
-          <p style={{ fontSize: 'var(--body-sm)', color: 'var(--on-surface-variant)', padding: '8px 0' }}>
+          <p className={styles.workspaceEmptyHint}>
             No entity insights yet. Run validations to infer entities from filenames.
           </p>
         )}
 
         {entities.slice(0, 8).map((entity) => (
-          <div
-            key={entity.inferred_entity}
-            className={styles.defaultWorkspaceCard}
-            style={{ border: '1px solid var(--surface-variant)', borderRadius: '8px', padding: 'var(--md)' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--xs)' }}>
-              <FolderHeart size={16} style={{ color: 'var(--on-surface-variant)' }} />
-              <span style={{ fontWeight: 500, marginLeft: '4px' }}>{entity.display_name}</span>
+          <div key={entity.inferred_entity} className={styles.defaultWorkspaceCard}>
+            <div className={styles.workspaceTitleRow}>
+              <FolderHeart size={16} className={styles.workspaceIcon} />
+              <span className={styles.workspaceTitle}>{entity.display_name}</span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--xs)', fontSize: 'var(--body-sm)', marginTop: 'var(--sm)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--on-surface-variant)' }}>Runs:</span>
+            <div className={styles.workspaceStats}>
+              <div className={styles.workspaceStatRow}>
+                <span className={styles.workspaceStatLabel}>Runs:</span>
                 <strong>{entity.total_count}</strong>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--on-surface-variant)' }}>Pass rate:</span>
-                <strong style={{ color: passRate(entity) >= 80 ? '#16a34a' : '#ea580c' }}>
+              <div className={styles.workspaceStatRow}>
+                <span className={styles.workspaceStatLabel}>Pass rate:</span>
+                <strong className={passRate(entity) >= 80 ? styles.passRateHigh : styles.passRateLow}>
                   {passRate(entity)}%
                 </strong>
               </div>

@@ -8,7 +8,7 @@ import { Completed } from './step/Completed';
 import { Saved } from './step/Saved';
 import styles from './Report.module.scss';
 
-export const Report: React.FC = () => {
+const Report: React.FC = () => {
   const dispatch = useAppDispatch();
   const { activeTab, searchQuery } = useAppSelector((s) => s.report);
 
@@ -72,3 +72,5 @@ export const Report: React.FC = () => {
     </div>
   );
 };
+
+export default Report;

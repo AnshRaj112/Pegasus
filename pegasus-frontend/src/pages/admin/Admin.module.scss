@@ -57,6 +57,88 @@
   margin: 0 auto;
 }
 
+.sessionLoading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: calc(100vh - 64px);
+}
+
+.sidebarBrand {
+  padding: 0 16px;
+  margin-bottom: 24px;
+}
+
+.sidebarBrandRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.sidebarLogo {
+  width: 32px;
+  height: 32px;
+  background-color: tokens.$color-midnight-green;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: tokens.$on-primary;
+}
+
+.sidebarLogoIcon {
+  font-size: 20px;
+}
+
+.sidebarTitle {
+  font-size: 24px;
+  font-weight: 700;
+  color: tokens.$on-surface;
+}
+
+.sidebarSubtitle {
+  font-size: 14px;
+  color: tokens.$on-surface-variant;
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+.sidebarEmail {
+  font-size: 12px;
+  color: #727786;
+  margin: 8px 0 0;
+  word-break: break-all;
+}
+
+.sidebarNav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-grow: 1;
+}
+
+.navIcon {
+  font-size: 18px;
+}
+
+.logoutBtn {
+  margin-top: auto;
+  width: 100%;
+  padding: 12px;
+  background-color: tokens.$surface-container-lowest;
+  border: 1px solid #d9d9d9;
+  color: tokens.$on-surface-variant;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
 /* Reusable Bento Layouts */
 .bentoGrid3 {
   display: grid;

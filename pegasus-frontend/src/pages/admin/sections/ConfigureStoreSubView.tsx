@@ -57,7 +57,7 @@ const testBtnClass = (result: 'success' | 'failed' | null | undefined, disabled:
   return `${base} ${styles.testBtnDefault}`;
 };
 
-export const ConfigureStoreSubView: React.FC = () => {
+const ConfigureStoreSubView: React.FC = () => {
   const dispatch = useAppDispatch();
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [connectModalOpen, setConnectModalOpen] = useState(false);
@@ -324,3 +324,5 @@ export const ConfigureStoreSubView: React.FC = () => {
     </div>
   );
 };
+
+export default ConfigureStoreSubView;

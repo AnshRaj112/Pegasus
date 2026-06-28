@@ -12,7 +12,7 @@ import '~/assets/styles/global.scss';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ConfigProvider>
+    <ConfigProvider theme={{ token: { fontFamily: 'Plus Jakarta Sans, sans-serif' } }}>
       <Provider store={store}>
         {/* ModalProvider will go here once implemented */}
         <App />

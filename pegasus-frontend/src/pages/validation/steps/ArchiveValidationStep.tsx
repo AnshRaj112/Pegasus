@@ -69,16 +69,8 @@ export const ArchiveValidationStep: React.FC = () => {
             objectName: validationForm.targetCloud?.object_name,
           },
         ].map(({ label, name, profile, objectName }) => (
-          <div
-            key={label}
-            style={{
-              border: '1px solid #d9d9d9',
-              borderRadius: '12px',
-              padding: '20px',
-              backgroundColor: '#fff',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', color: '#234B5F' }}>
+          <div key={label} className={styles.card}>
+            <div className={styles.cardHeader}>
               <FileZipOutlined />
               <span className={styles.cardLabel}>{label}</span>
             </div>

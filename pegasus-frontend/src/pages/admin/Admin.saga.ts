@@ -3,7 +3,7 @@ import { PayloadAction } from '@reduxjs/toolkit';
 import { notification } from 'antd';
 
 import { getApiErrorMessage } from '../../shared/api/apiError';
-import { NOTIFICATION_SERVICE_TYPES } from '../../shared/constants/common.constant';
+import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
 import {
  AdminReducerState,
  CreateStorageProviderPayload,

@@ -5,7 +5,7 @@ import { PayloadAction } from '@reduxjs/toolkit';
 
 import { Api, ValidationJobAcceptedResponse } from '../../shared/api/Api';
 import { getApiErrorMessage, isTransientPollError, pollRecoveryHint } from '../../shared/api/apiError';
-import { NOTIFICATION_SERVICE_TYPES } from '../../shared/constants/common.constant';
+import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
 import { reportActions } from '../report/Report.reducer';
 import { gcsUri } from '../report/reportPairId';
 

@@ -1,5 +1,10 @@
 @use '~/assets/styles/variables' as tokens;
 
+.fieldMaxWidth {
+	max-width: 20rem;
+	width: 100%;
+}
+
 .mainWrapper {
 	background-color: tokens.$row-hover;
 	min-height: calc(100vh - 128px);
@@ -116,13 +121,13 @@
 
 		.envValue {
 	  color: tokens.$primary;
-			font-family: 'JetBrains Mono', monospace;
+			font-family: tokens.$font-mono;
 			font-weight: 500;
 		}
 
 		.envValueDark {
 			color: tokens.$on-surface;
-			font-family: 'JetBrains Mono', monospace;
+			font-family: tokens.$font-mono;
 			font-weight: 500;
 		}
 	}

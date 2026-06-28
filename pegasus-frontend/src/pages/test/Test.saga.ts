@@ -1,7 +1,7 @@
 import { notification } from 'antd';
 import { AxiosError } from 'axios';
 import { all, put, takeLatest, delay } from 'redux-saga/effects';
-import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constant';
+import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
 import { testActions } from './Test.reducer';
 import { mockActiveTests, mockCompletedTests, mockSavedTests } from './Test.mockdata';
 

@@ -13,8 +13,8 @@ export const ActiveTasksPanel: React.FC<ActiveTasksPanelProps> = ({ tasks, isLoa
   return (
     <div className={styles.panelCard}>
       <div className={styles.panelHeader}>
-        <h3 style={{ fontSize: 'var(--label-md)', fontWeight: 500, margin: 0 }}>Active Tasks</h3>
-        <span style={{ fontSize: 'var(--body-sm)', color: 'var(--on-surface-variant)' }}>
+        <h3 className={styles.panelTitle}>Active Tasks</h3>
+        <span className={styles.panelMeta}>
           {isLoading ? 'Loading…' : `${tasks.length} jobs`}
         </span>
       </div>
@@ -22,15 +22,15 @@ export const ActiveTasksPanel: React.FC<ActiveTasksPanelProps> = ({ tasks, isLoa
         <table className={styles.taskTable}>
           <thead className={styles.tableHeaderSticky}>
             <tr>
-              <th style={{ padding: 'var(--md)', color: 'var(--on-surface-variant)', borderBottom: '1px solid var(--surface-variant)', fontSize: 'var(--label-md)' }}>Task Name</th>
-              <th style={{ padding: 'var(--md)', color: 'var(--on-surface-variant)', borderBottom: '1px solid var(--surface-variant)', fontSize: 'var(--label-md)' }}>Status</th>
-              <th style={{ padding: 'var(--md)', color: 'var(--on-surface-variant)', borderBottom: '1px solid var(--surface-variant)', fontSize: 'var(--label-md)' }}>Progress</th>
+              <th className={styles.tableHeadCell}>Task Name</th>
+              <th className={styles.tableHeadCell}>Status</th>
+              <th className={styles.tableHeadCell}>Progress</th>
             </tr>
           </thead>
           <tbody className={styles['zebra-table']}>
             {!isLoading && tasks.length === 0 && (
               <tr>
-                <td colSpan={3} style={{ padding: 'var(--md)', color: 'var(--on-surface-variant)', fontSize: 'var(--body-sm)' }}>
+                <td colSpan={3} className={styles.tableEmptyCell}>
                   No validation jobs in queue.
                 </td>
               </tr>

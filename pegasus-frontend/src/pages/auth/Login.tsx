@@ -17,7 +17,7 @@ import loginIcon from '~/assets/login_icon.png';
 import onixLogo from '~/assets/logo.png';
 import styles from './Auth.module.scss';
 
-export const Login: React.FC = () => {
+const Login: React.FC = () => {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   
@@ -143,3 +143,5 @@ export const Login: React.FC = () => {
     </div>
   );
 };
+
+export default Login;

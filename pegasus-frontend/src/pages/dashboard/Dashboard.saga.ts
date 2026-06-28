@@ -4,7 +4,7 @@ import { AxiosError, AxiosResponse } from 'axios';
 import { all, call, put, takeLatest } from 'redux-saga/effects';
 
 import { getApiErrorMessage } from '../../shared/api/apiError';
-import { NOTIFICATION_SERVICE_TYPES } from '../../shared/constants/common.constant';
+import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
 
 import { DashboardDataResponse } from './Dashboard.interface';
 import { dashboardActions } from './Dashboard.reducer';

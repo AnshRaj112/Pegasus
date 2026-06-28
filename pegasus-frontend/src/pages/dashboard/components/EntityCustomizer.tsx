@@ -39,26 +39,25 @@ export const EntityCustomizer: React.FC<EntityCustomizerProps> = ({ entities }) 
   return (
     <div className={styles.customizerCard}>
       <div>
-        <h3 style={{ fontSize: 'var(--h3)', fontWeight: 600, margin: 0, color: 'var(--on-surface)' }}>Entity Customizer</h3>
-        <p style={{ fontSize: 'var(--body-sm)', color: 'var(--on-surface-variant)', margin: '4px 0 0' }}>
+        <h3 className={styles.customizerTitle}>Entity Customizer</h3>
+        <p className={styles.customizerSubtitle}>
           Tailor your data view for specific reporting entities.
         </p>
       </div>
 
       <div className={styles.inputIconWrapper}>
-        <Search size={16} className={styles.searchIcon} style={{ left: '12px' }} />
+        <Search size={16} className={styles.searchIcon} />
         <input
           type="text"
           placeholder="Search entities..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className={styles.textInput}
-          style={{ paddingLeft: '36px' }}
         />
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--xs)' }}>
-        <label style={{ fontWeight: 500, fontSize: 'var(--label-md)' }}>Entity Selector</label>
+      <div className={styles.fieldGroup}>
+        <label className={styles.fieldLabel}>Entity Selector</label>
         <div className={styles.inputIconWrapper}>
           <select
             value={activeEntity}
@@ -72,21 +71,21 @@ export const EntityCustomizer: React.FC<EntityCustomizerProps> = ({ entities }) 
               </option>
             ))}
           </select>
-          <ChevronDown size={16} className={styles.selectDropdownIcon} style={{ right: '12px' }} />
+          <ChevronDown size={16} className={styles.selectDropdownIcon} />
         </div>
       </div>
 
       <div className={styles.toggleRow}>
         <div>
-          <div style={{ fontWeight: 500 }}>Incremental Tracking</div>
-          <div style={{ fontSize: '10px', color: 'var(--on-surface-variant)' }}>Daily sync enabled</div>
+          <div className={styles.toggleTitle}>Incremental Tracking</div>
+          <div className={styles.toggleHint}>Daily sync enabled</div>
         </div>
         <label className={styles.toggleContainer}>
           <input
             type="checkbox"
             checked={incrementalTracking}
             onChange={(e) => setIncrementalTracking(e.target.checked)}
-            style={{ display: 'none' }}
+            className={styles.toggleInput}
           />
           <div className={`${styles.toggleTrack} ${incrementalTracking ? styles.toggleTrackActive : ''}`}>
             <div className={`${styles.toggleThumb} ${incrementalTracking ? styles.toggleThumbActive : ''}`} />
@@ -95,13 +94,13 @@ export const EntityCustomizer: React.FC<EntityCustomizerProps> = ({ entities }) 
       </div>
 
       {message && (
-        <p style={{ fontSize: '12px', color: 'var(--on-surface-variant)', margin: 0 }}>{message}</p>
+        <p className={styles.statusMessage}>{message}</p>
       )}
 
       <div className={styles.customizerFooterSpacer}>
         <button type="button" className={styles.submitActionBtn} onClick={handleCreate} disabled={saving}>
           <SlidersHorizontal size={16} />
-          <span style={{ marginLeft: '6px' }}>{saving ? 'Saving…' : 'Create Micro-Dashboard'}</span>
+          <span className={styles.btnLabelSpaced}>{saving ? 'Saving…' : 'Create Micro-Dashboard'}</span>
         </button>
       </div>
     </div>

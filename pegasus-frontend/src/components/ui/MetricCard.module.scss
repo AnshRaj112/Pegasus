@@ -1,0 +1,81 @@
+@use '~/assets/styles/variables' as tokens;
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--surface-variant);
+  padding: var(--md);
+  border-radius: var(--lg);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+  color: var(--on-surface-variant);
+}
+
+.icon {
+  flex-shrink: 0;
+}
+
+.label {
+  font-family: var(--font-label-md);
+  font-size: var(--label-md);
+  font-weight: 500;
+  margin-left: 0.25rem;
+}
+
+.body {
+  margin-top: var(--base);
+}
+
+.value {
+  font-family: var(--font-h2);
+  font-size: var(--h2);
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.subtext {
+  font-family: var(--font-body-sm);
+  font-size: var(--body-sm);
+  font-weight: 500;
+  color: var(--on-surface-variant);
+}
+
+.variantPass {
+  .icon {
+    color: var(--status-pass);
+  }
+
+  .subtext {
+    color: var(--status-pass);
+  }
+}
+
+.variantFail {
+  .icon {
+    color: var(--status-fail);
+  }
+
+  .subtext {
+    color: var(--status-fail);
+  }
+}
+
+.variantTotal {
+  .icon {
+    color: var(--color-midnight-green);
+  }
+}
+
+.variantRunning {
+  .icon {
+    color: tokens.$status-running;
+  }
+}

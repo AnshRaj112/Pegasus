@@ -37,7 +37,7 @@ const MetricItem: React.FC<{ label: string; value: string; errorTone?: boolean }
   </div>
 );
 
-export const ExecutionHistory: React.FC = () => {
+const ExecutionHistory: React.FC = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const { mappingId } = useParams<{ mappingId: string }>();
@@ -199,3 +199,5 @@ export const ExecutionHistory: React.FC = () => {
     </div>
   );
 };
+
+export default ExecutionHistory;
