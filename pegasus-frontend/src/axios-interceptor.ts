@@ -6,8 +6,7 @@ import { PATHS } from '~/router/router.constants';
 
 const pendingGetRequests = new Map<string, AbortController>();
 
-const isAuthEndpoint = (url?: string): boolean =>
-  Boolean(url?.includes('/admin/auth/'));
+const isAuthEndpoint = (url?: string): boolean => Boolean(url?.includes('/admin/auth/'));
 
 const buildGetRequestKey = (config: InternalAxiosRequestConfig): string => {
   const params = config.params ? JSON.stringify(config.params) : '';
@@ -16,9 +15,18 @@ const buildGetRequestKey = (config: InternalAxiosRequestConfig): string => {
 
 const redirectToLogin = (): void => {
   if (typeof window === 'undefined') return;
+  
   const currentPath = window.location.hash.replace(/^#/, '') || PATHS.DASHBOARD;
-  if (currentPath.startsWith(PATHS.LOGIN)) return;
-  window.location.hash = `#${PATHS.LOGIN}`;
+  
+  // Normalize both paths to ensure they start with a '/' for a reliable comparison
+  const normalizedCurrent = currentPath.startsWith('/') ? currentPath : `/${currentPath}`;
+  const normalizedLoginPath = PATHS.LOGIN.startsWith('/') ? PATHS.LOGIN : `/${PATHS.LOGIN}`;
+  
+  // Correctly checks "/login".startsWith("/login")
+  if (normalizedCurrent.startsWith(normalizedLoginPath)) return;
+  
+  // Assigns the hash properly (e.g., "#/login" instead of "#/#/login")
+  window.location.hash = `#${normalizedLoginPath}`;
 };
 
 export const setupAxiosInterceptors = (): void => {
