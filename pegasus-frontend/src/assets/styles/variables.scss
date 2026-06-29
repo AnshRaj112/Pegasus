@@ -1,0 +1,73 @@
+// Design tokens — import in module SCSS via:
+// @use '~/assets/styles/variables' as tokens;
+
+$surface-dim: #dcd9d9;
+$surface-container-highest: #e5e2e1;
+$on-background: #1b1b1c;
+$on-surface: #1b1b1c;
+$inverse-primary: #afc6ff;
+$background: #fcf9f8;
+$surface: #fcf9f8;
+$surface-variant: #e5e2e1;
+$surface-container: #f0eded;
+$surface-container-high: #eae7e7;
+$surface-container-low: #f6f3f2;
+$surface-container-lowest: #ffffff;
+
+$color-midnight-green: #234b5f;
+$color-midnight-green-accent: #239cd9;
+$color-midnight-green-light: rgba(35, 75, 95, 0.1);
+
+$color-onyx-red: #e06b67;
+$color-onyx-red-deep: #952622;
+$color-onyx-red-light: rgba(224, 107, 103, 0.1);
+
+$primary: #234b5f;
+$on-primary: #ffffff;
+$primary-container: #239cd9;
+$primary-fixed: rgba(35, 75, 95, 0.12);
+$on-primary-fixed: #234b5f;
+$on-primary-fixed-variant: #1a3a4a;
+$secondary: #239cd9;
+
+$status-pass: #16a34a;
+$status-pass-bg: #dcfce7;
+$status-fail: #ba1a1a;
+$status-fail-bg: #ffdad6;
+
+$error: #ba1a1a;
+$error-container: #ffdad6;
+$on-error-container: #93000a;
+
+$border-1: #e5e7eb;
+$outline-variant: #c1c6d7;
+$on-surface-variant: #414755;
+
+$text-muted: #64748b;
+$text-icon: #94a3b8;
+$border-subtle: #f1f5f9;
+$row-hover: #f8fafc;
+$status-running: #ea580c;
+
+$spacing-xl: 2rem;
+$spacing-gutter: 1.5rem;
+$spacing-base: 0.5rem;
+$spacing-md: 1rem;
+$spacing-sm: 0.5rem;
+$spacing-lg: 1.5rem;
+$spacing-xs: 0.25rem;
+$container-max: 90rem;
+
+$font-family-sans: 'Plus Jakarta Sans', sans-serif;
+$font-h2: $font-family-sans;
+$font-h3: $font-family-sans;
+$font-label-md: $font-family-sans;
+$font-body-md: $font-family-sans;
+$font-body-sm: $font-family-sans;
+$font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+$text-h2: 1.875rem;
+$text-h3: 1.5rem;
+$text-label-md: 0.875rem;
+$text-body-md: 0.875rem;
+$text-body-sm: 0.75rem;

@@ -1,0 +1,230 @@
+@use '~/assets/styles/variables' as tokens;
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.cardsRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+}
+
+.arrowIcon {
+  font-size: 1.25rem;
+  color: #727786;
+}
+
+.skeleton {
+  background-color: #e2e8f0;
+  border-radius: 0.25rem;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+.skeletonW36 {
+  width: 2.25rem;
+}
+
+.skeletonW48 {
+  width: 3rem;
+}
+
+.skeletonW60 {
+  width: 60%;
+}
+
+.skeletonW90 {
+  width: 90%;
+}
+
+.skeletonH16 {
+  height: 1rem;
+}
+
+.skeletonH24 {
+  height: 1.5rem;
+}
+
+.skeletonH32 {
+  height: 2rem;
+}
+
+.previewBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-color: tokens.$color-midnight-green;
+  color: tokens.$on-primary;
+  border: 1.5px solid tokens.$color-midnight-green;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.375rem;
+  font-size: tokens.$text-body-sm;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+
+  &:hover:not(:disabled) {
+    background-color: #1a3847;
+    border-color: #1a3847;
+    box-shadow: 0 0.25rem 0.375rem -0.0625rem rgba(35, 75, 95, 0.2);
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  &:disabled {
+    background-color: tokens.$surface-container-high;
+    color: #727786;
+    border-color: tokens.$surface-container-high;
+    cursor: not-allowed;
+  }
+}
+
+.previewBtnIcon {
+  font-size: 1rem;
+}
+
+.fileCard {
+  flex: 1;
+  background-color: tokens.$surface-container-lowest;
+  border: 1px solid #d9d9d9;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  min-width: 18.75rem;
+}
+
+.fileCardEmpty {
+  border-color: #fecaca;
+  box-shadow: inset 0 0 0 1px #fee2e2;
+}
+
+.fileCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  color: tokens.$color-midnight-green;
+}
+
+.fileCardLabel {
+  font-size: tokens.$text-body-sm;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.fileCardName {
+  margin: 0 0 0.25rem;
+  font-size: 1.125rem;
+  min-height: 1.5rem;
+}
+
+.fileCardNameEmpty {
+  color: tokens.$error;
+}
+
+.fileCardPath {
+  font-size: tokens.$text-body-sm;
+  color: #727786;
+  font-family: tokens.$font-mono;
+  word-break: break-all;
+  min-height: 1rem;
+}
+
+.fileCardStats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.statRow {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid tokens.$surface-container;
+  padding-bottom: 0.5rem;
+  align-items: center;
+}
+
+.statLabel {
+  font-size: 0.8125rem;
+  color: tokens.$on-surface-variant;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.statValue {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: tokens.$on-surface;
+}
+
+.statValueWarn {
+  color: tokens.$error;
+}
+
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-radius: 0.5rem;
+  border: 1px solid;
+}
+
+.alertSuccess {
+  background-color: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.alertError {
+  background-color: #fef2f2;
+  border-color: #fecaca;
+}
+
+.alertWarning {
+  background-color: #fffbeb;
+  border-color: #fde68a;
+}
+
+.alertIconSuccess {
+  color: tokens.$status-pass;
+  font-size: 1.25rem;
+}
+
+.alertIconError {
+  color: #dc2626;
+  font-size: 1.25rem;
+}
+
+.alertIconWarning {
+  color: #d97706;
+  font-size: 1.25rem;
+}
+
+.alertTitle {
+  margin: 0 0 0.25rem;
+  font-size: tokens.$text-label-md;
+  font-weight: 700;
+}
+
+.alertMessage {
+  margin: 0;
+  font-size: 0.8125rem;
+}

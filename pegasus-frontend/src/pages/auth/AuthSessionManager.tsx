@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from 'antd';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
 import { authActions } from './Auth.reducer';
+import styles from './AuthSessionManager.module.scss';
 import { resetValidationOnLogout } from '../validation/resetValidationOnLogout';
 import {
   adminLogout,
@@ -13,7 +14,6 @@ import {
   registerSessionExtender,
   resetSessionActivity,
 } from '../../shared/api/sessionActivity';
-import styles from './Auth.module.scss';
 
 const INACTIVITY_MS = 15 * 60 * 1000;
 const PROMPT_GRACE_MS = 5 * 60 * 1000;
@@ -22,7 +22,7 @@ const INACTIVITY_CHECK_MS = 10 * 1000;
 export const AuthSessionManager: React.FC = () => {
   const dispatch = useAppDispatch();
   const isAuthenticated = useAppSelector((state) => state.auth.isAuthenticated);
-  const isLoading = useAppSelector((state) => state.auth.isLoading);
+  const isFetching = useAppSelector((state) => state.auth.isFetching);
 
   const [showPrompt, setShowPrompt] = useState(false);
   const [countdownMs, setCountdownMs] = useState(PROMPT_GRACE_MS);
@@ -79,7 +79,7 @@ export const AuthSessionManager: React.FC = () => {
   }, [isAuthenticated]);
 
   useEffect(() => {
-    if (!isAuthenticated || isLoading) return;
+    if (!isAuthenticated || isFetching) return;
 
     const checkInactivity = () => {
       const idleMs = Date.now() - getLastSessionActivityMs();
@@ -100,7 +100,7 @@ export const AuthSessionManager: React.FC = () => {
     return () => {
       window.clearInterval(interval);
     };
-  }, [isAuthenticated, isLoading]);
+  }, [isAuthenticated, isFetching]);
 
   useEffect(() => {
     if (!showPrompt) return;
@@ -130,7 +130,7 @@ export const AuthSessionManager: React.FC = () => {
   return (
     <Modal
       className={styles.sessionModal}
-      open={!isLoading && isAuthenticated && showPrompt}
+      open={!isFetching && isAuthenticated && showPrompt}
       closable={false}
       maskClosable={false}
       centered
@@ -150,7 +150,7 @@ export const AuthSessionManager: React.FC = () => {
         void forceLogout();
       }}
     >
-      <p className={styles.sessionModalBody}>
+      <p className={styles.modalText}>
         You have been inactive for 15 minutes. Extend your session to stay logged in, or you will be logged out automatically in {countdownLabel}.
       </p>
     </Modal>

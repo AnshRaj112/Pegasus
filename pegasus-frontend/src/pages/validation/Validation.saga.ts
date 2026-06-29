@@ -1,13 +1,17 @@
-import { call, delay, fork, put, select, takeLatest } from 'redux-saga/effects';
+import { call, delay, fork, put, select, takeLatest, all } from 'redux-saga/effects';
 import { notification } from 'antd';
+import { AxiosError } from 'axios';
+import { PayloadAction } from '@reduxjs/toolkit';
 
 import { Api, ValidationJobAcceptedResponse } from '../../shared/api/Api';
 import { getApiErrorMessage, isTransientPollError, pollRecoveryHint } from '../../shared/api/apiError';
+import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
 import { reportActions } from '../report/Report.reducer';
 import { gcsUri } from '../report/reportPairId';
 
 import { ValidationDataResponse, ValidationReducerState } from './Validation.interface';
 import { validationActions } from './Validation.reducer';
+import { ValidationServiceApi } from './Validation.service';
 import {
   removeActiveSession,
   upsertActiveSession,
@@ -177,7 +181,7 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
   let targetPath = '';
   try {
     const { data: detail } = yield call(Api.getValidationHistoryRun, runId);
-    const { data: connections } = yield call(Api.listCloudConnections);
+    const { data: connections } = yield call(ValidationServiceApi.listCloudConnections);
     const formPatch = enrichFormWithConnections(formFromHistory(detail), connections);
     yield put(validationActions.setValidationForm(formPatch));
 
@@ -234,7 +238,170 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
   }
 }
 
+export function* listCloudConnectionsSaga() {
+  try {
+    const response: import('axios').AxiosResponse<import('../../shared/api/Api').CloudConnection[]> = yield call(
+      ValidationServiceApi.listCloudConnections,
+    );
+    yield put(validationActions.listCloudConnectionsSuccess(response.data));
+  } catch (error: unknown) {
+    yield put(validationActions.listCloudConnectionsError(
+      getApiErrorMessage(error, 'Failed to load cloud connections'),
+    ));
+  }
+}
+
+export function* browseCloudSaga(action: ReturnType<typeof validationActions.browseCloudRequest>) {
+  const { pathId, connectionId, bucket, prefix } = action.payload;
+  try {
+    const response: import('axios').AxiosResponse<import('../../shared/api/Api').CloudBrowseResponse> = yield call(ValidationServiceApi.browseCloud, {
+      connection_id: connectionId,
+      bucket: bucket?.trim() ? bucket : null,
+      prefix,
+      file_format: 'auto',
+    });
+    yield put(validationActions.browseCloudSuccess({
+      pathId,
+      connectionId,
+      data: response.data,
+    }));
+  } catch (error: unknown) {
+    yield put(validationActions.browseCloudError({
+      pathId,
+      error: getApiErrorMessage(error, 'Could not browse GCS bucket. Check connection credentials.'),
+    }));
+  }
+}
+
+function* profileCloudFilesSaga(action: ReturnType<typeof validationActions.profileCloudFilesRequest>) {
+  const { sourceKey, targetKey } = action.payload;
+  const { validationForm }: ValidationReducerState = yield select(
+    (state: { validation: ValidationReducerState }) => state.validation,
+  );
+  if (!validationForm.sourceCloud || !validationForm.targetCloud) return;
+
+  let source: import('../../shared/api/Api').CloudFileProfileResponse | null = null;
+  let target: import('../../shared/api/Api').CloudFileProfileResponse | null = null;
+  let sourceError = false;
+  let targetError = false;
+
+  try {
+    const sourceResponse: import('axios').AxiosResponse<import('../../shared/api/Api').CloudFileProfileResponse> = yield call(ValidationServiceApi.profileCloudFile, {
+      cloud: validationForm.sourceCloud,
+      delimiter: validationForm.delimiter || 'auto',
+      has_header: validationForm.hasHeader,
+    });
+    source = sourceResponse.data;
+  } catch {
+    sourceError = true;
+  }
+
+  try {
+    const targetResponse: import('axios').AxiosResponse<import('../../shared/api/Api').CloudFileProfileResponse> = yield call(ValidationServiceApi.profileCloudFile, {
+      cloud: validationForm.targetCloud,
+      delimiter: validationForm.delimiter || 'auto',
+      has_header: validationForm.hasHeader,
+    });
+    target = targetResponse.data;
+  } catch {
+    targetError = true;
+  }
+
+  yield put(validationActions.setOverviewProfileCache({
+    sourceKey,
+    targetKey,
+    source,
+    target,
+    sourceError,
+    targetError,
+  }));
+}
+
+export function* previewValidationColumnsSaga(action: PayloadAction<string>) {
+  const pairKey = action.payload;
+  try {
+    const { validationForm }: ValidationReducerState = yield select(
+      (state: { validation: ValidationReducerState }) => state.validation,
+    );
+    if (!validationForm.sourceCloud || !validationForm.targetCloud) return;
+
+    const response: import('axios').AxiosResponse<import('../../shared/api/Api').LocalColumnPreviewResponse> = yield call(ValidationServiceApi.previewValidationColumns, {
+      source_cloud: validationForm.sourceCloud,
+      target_cloud: validationForm.targetCloud,
+      uid_column: validationForm.uidColumn || 'id',
+      delimiter: validationForm.delimiter || 'auto',
+      has_header: validationForm.hasHeader,
+    });
+    yield put(validationActions.previewValidationColumnsSuccess({ pairKey, data: response.data }));
+  } catch (error: unknown) {
+    yield put(validationActions.previewValidationColumnsError({
+      pairKey,
+      error: getApiErrorMessage(error, 'Could not load file preview from server'),
+    }));
+  }
+}
+
+function* previewFixedWidthLayoutSaga(action: PayloadAction<string>) {
+  const pairKey = action.payload;
+  try {
+    const { validationForm }: ValidationReducerState = yield select(
+      (state: { validation: ValidationReducerState }) => state.validation,
+    );
+    if (!validationForm.sourceCloud || !validationForm.targetCloud) return;
+
+    const response: import('axios').AxiosResponse<import('../../shared/api/Api').FixedWidthLayoutPreviewResponse> = yield call(ValidationServiceApi.previewFixedWidthLayout, {
+      source_cloud: validationForm.sourceCloud,
+      target_cloud: validationForm.targetCloud,
+      uid_column: validationForm.uidColumn,
+      delimiter: validationForm.delimiter || 'auto',
+      has_header: validationForm.hasHeader,
+    });
+    yield put(validationActions.previewFixedWidthLayoutSuccess({ pairKey, data: response.data }));
+  } catch (error: unknown) {
+    yield put(validationActions.previewFixedWidthLayoutError({
+      pairKey,
+      error: getApiErrorMessage(error, 'Could not infer fixed-width layout'),
+    }));
+  }
+}
+
+export function* saveDraftSaga(action: ReturnType<typeof validationActions.saveDraftRequest>) {
+  try {
+    const response: import('axios').AxiosResponse<import('../../shared/api/Api').ValidationHistoryDetail> = yield call(ValidationServiceApi.saveValidationDraft, action.payload.draft);
+    yield put(validationActions.saveDraftSuccess(response.data));
+    if (action.payload.intent === 'save') {
+      notification.success({
+        message: NOTIFICATION_SERVICE_TYPES.SUCCESS,
+        description: 'Find it under Reports → Saved.',
+      });
+      yield put(reportActions.fetchReportsRequest());
+    }
+  } catch (error: unknown) {
+    const fallback = action.payload.intent === 'proceed'
+      ? 'Failed to create validation run'
+      : 'Save failed';
+    const errorMessage = getApiErrorMessage(error, fallback);
+    yield put(validationActions.saveDraftError(errorMessage));
+    if (error instanceof AxiosError) {
+      notification.error({
+        message: action.payload.intent === 'proceed'
+          ? 'Could not start file overview'
+          : NOTIFICATION_SERVICE_TYPES.ERROR,
+        description: errorMessage,
+      });
+    }
+  }
+}
+
 export default function* validationSaga() {
-  yield takeLatest(validationActions.submitValidationRequest.type, submitValidationSaga);
-  yield takeLatest(validationActions.runValidationFromHistoryRequest.type, runFromHistorySaga);
+  yield all([
+    takeLatest(validationActions.submitValidationRequest.type, submitValidationSaga),
+    takeLatest(validationActions.runValidationFromHistoryRequest.type, runFromHistorySaga),
+    takeLatest(validationActions.listCloudConnectionsRequest.type, listCloudConnectionsSaga),
+    takeLatest(validationActions.browseCloudRequest.type, browseCloudSaga),
+    takeLatest(validationActions.profileCloudFilesRequest.type, profileCloudFilesSaga),
+    takeLatest(validationActions.previewValidationColumnsRequest.type, previewValidationColumnsSaga),
+    takeLatest(validationActions.previewFixedWidthLayoutRequest.type, previewFixedWidthLayoutSaga),
+    takeLatest(validationActions.saveDraftRequest.type, saveDraftSaga),
+  ]);
 }

@@ -1,0 +1,60 @@
+@use '~/assets/styles/variables' as tokens;
+
+.shell {
+  background: var(--background);
+  color: var(--on-background);
+  font-family: var(--font-body-md);
+  font-size: var(--body-md);
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.main {
+  flex-grow: 1;
+  width: 100%;
+  padding: var(--xl) var(--gutter);
+  max-width: var(--container-max);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--lg);
+  box-sizing: border-box;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.footer {
+  background: var(--surface-container);
+  border-top: 1px solid var(--surface-variant);
+  margin-top: var(--xl);
+}
+
+.footerInner {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: var(--md) var(--gutter);
+  max-width: var(--container-max);
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.footerBrand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--xs);
+}
+
+.footerTitle {
+  font-family: var(--font-h3);
+  font-size: var(--h3);
+  color: var(--on-surface);
+}
+
+.footerCopy {
+  font-size: var(--body-sm);
+  color: var(--on-surface-variant);
+}

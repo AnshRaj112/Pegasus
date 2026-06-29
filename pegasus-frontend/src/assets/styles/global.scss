@@ -1,0 +1,108 @@
+@use '~/assets/styles/variables' as *;
+
+:root {
+  --surface-dim: #{$surface-dim};
+  --surface-container-highest: #{$surface-container-highest};
+  --on-background: #{$on-background};
+  --on-surface: #{$on-surface};
+  --inverse-primary: #{$inverse-primary};
+  --background: #{$background};
+  --surface: #{$surface};
+  --surface-variant: #{$surface-variant};
+  --surface-container: #{$surface-container};
+  --surface-container-high: #{$surface-container-high};
+  --surface-container-low: #{$surface-container-low};
+  --surface-container-lowest: #{$surface-container-lowest};
+
+  --color-midnight-green: #{$color-midnight-green};
+  --color-midnight-green-accent: #{$color-midnight-green-accent};
+  --color-midnight-green-light: #{$color-midnight-green-light};
+
+  --color-onyx-red: #{$color-onyx-red};
+  --color-onyx-red-deep: #{$color-onyx-red-deep};
+  --color-onyx-red-light: #{$color-onyx-red-light};
+
+  --primary: #{$primary};
+  --on-primary: #{$on-primary};
+  --primary-container: #{$primary-container};
+  --primary-fixed: #{$primary-fixed};
+  --on-primary-fixed: #{$on-primary-fixed};
+  --on-primary-fixed-variant: #{$on-primary-fixed-variant};
+  --secondary: #{$secondary};
+
+  --status-pass: #{$status-pass};
+  --status-pass-bg: #{$status-pass-bg};
+  --status-fail: #{$status-fail};
+  --status-fail-bg: #{$status-fail-bg};
+
+  --error: #{$error};
+  --error-container: #{$error-container};
+  --on-error-container: #{$on-error-container};
+
+  --border-1: #{$border-1};
+  --outline-variant: #{$outline-variant};
+  --on-surface-variant: #{$on-surface-variant};
+
+  --xl: #{$spacing-xl};
+  --gutter: #{$spacing-gutter};
+  --base: #{$spacing-base};
+  --md: #{$spacing-md};
+  --container-max: #{$container-max};
+  --sm: #{$spacing-sm};
+  --lg: #{$spacing-lg};
+  --xs: #{$spacing-xs};
+
+  --font-h2: #{$font-h2};
+  --font-h3: #{$font-h3};
+  --font-label-md: #{$font-label-md};
+  --font-body-md: #{$font-body-md};
+  --font-body-sm: #{$font-body-sm};
+  --font-mono: #{$font-mono};
+
+  --h2: #{$text-h2};
+  --h3: #{$text-h3};
+  --label-md: #{$text-label-md};
+  --body-md: #{$text-body-md};
+  --body-sm: #{$text-body-sm};
+  --font-family-sans: #{$font-family-sans};
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body-md);
+  background-color: var(--background);
+  color: var(--on-surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--outline-variant) transparent;
+
+  &::-webkit-scrollbar {
+    width: 0.5rem;
+    height: 0.5rem;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--outline-variant);
+    border-radius: 0.25rem;
+  }
+
+  &::-webkit-scrollbar-track {
+    background-color: transparent;
+  }
+}

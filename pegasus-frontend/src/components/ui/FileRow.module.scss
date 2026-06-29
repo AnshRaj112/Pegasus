@@ -1,0 +1,47 @@
+@use '~/assets/styles/variables' as tokens;
+
+.row {
+  border-bottom: 1px solid var(--outline-variant);
+  cursor: pointer;
+}
+
+.rowSelected {
+  background-color: var(--primary-fixed);
+}
+
+.checkboxCell {
+  padding: var(--md);
+  width: 2.5rem;
+}
+
+.checkbox {
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.nameCell {
+  padding: var(--md);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+}
+
+.fileIcon {
+  color: var(--outline);
+}
+
+.fileIconSelected {
+  color: var(--primary);
+}
+
+.metaCell {
+  padding: var(--md);
+  font-family: var(--font-code-sm);
+  font-size: var(--body-sm);
+  color: var(--on-surface-variant);
+}
+
+.statusCell {
+  padding: var(--md);
+}

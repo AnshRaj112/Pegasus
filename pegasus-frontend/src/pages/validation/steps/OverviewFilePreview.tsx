@@ -2,17 +2,28 @@ import React, { useMemo, useRef } from 'react';
 import { Modal } from 'antd';
 import { DatabaseOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LocalColumnPreviewResponse } from '../../../shared/api/Api';
+import styles from './OverviewFilePreview.module.scss';
 
-const SkeletonCell: React.FC<{ width?: string }> = ({ width = '100%' }) => (
-  <div
-    style={{
-      width,
-      height: '14px',
-      backgroundColor: '#e2e8f0',
-      borderRadius: '4px',
-      animation: 'overview-preview-skeleton 1.5s ease-in-out infinite',
-    }}
-  />
+type SkeletonWidth = 'w40' | 'w45' | 'w55' | 'w65' | 'w70' | 'w75';
+
+const skeletonWidthClass: Record<SkeletonWidth, string> = {
+  w40: styles.skeletonW40,
+  w45: styles.skeletonW45,
+  w55: styles.skeletonW55,
+  w65: styles.skeletonW65,
+  w70: styles.skeletonW70,
+  w75: styles.skeletonW75,
+};
+
+const headerSkeletonWidths: SkeletonWidth[] = ['w40', 'w55', 'w70'];
+
+const cellSkeletonWidth = (rowIndex: number, colIndex: number): SkeletonWidth => {
+  const widths: SkeletonWidth[] = ['w45', 'w55', 'w65', 'w75'];
+  return widths[(rowIndex + colIndex) % 4];
+};
+
+const SkeletonCell: React.FC<{ width: SkeletonWidth }> = ({ width }) => (
+  <div className={`${styles.skeletonCell} ${skeletonWidthClass[width]}`} />
 );
 
 const buildDataRows = (
@@ -98,58 +109,25 @@ export const OverviewFilePreview: React.FC<OverviewFilePreviewProps> = ({
     headerLabel: string,
     headerTone: 'dark' | 'light',
   ) => (
-    <div
-      style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        backgroundColor: '#fff',
-        borderRadius: '12px',
-        border: '1px solid #d9d9d9',
-        overflow: 'hidden',
-        minWidth: 0,
-      }}
-    >
-      <div
-        style={{
-          backgroundColor: headerTone === 'dark' ? '#234B5F' : '#f0eded',
-          padding: '12px 16px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          color: headerTone === 'dark' ? '#fff' : '#1b1b1c',
-        }}
-      >
+    <div className={styles.panel}>
+      <div className={`${styles.panelHeader} ${headerTone === 'dark' ? styles.panelHeaderDark : styles.panelHeaderLight}`}>
         {headerIcon}
-        <span style={{ fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span className={styles.panelHeaderLabel}>
           {headerLabel}
         </span>
       </div>
-      <div ref={scrollRef} onScroll={onScroll} style={{ overflow: 'auto', maxHeight: 'min(52vh, 480px)' }}>
-        <table style={{ borderCollapse: 'collapse', textAlign: 'left', whiteSpace: 'nowrap' }}>
-          <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 1 }}>
+      <div ref={scrollRef} onScroll={onScroll} className={styles.scrollArea}>
+        <table className={styles.table}>
+          <thead className={styles.tableHead}>
             <tr>
               {loading && columns.length === 0
                 ? Array.from({ length: 6 }, (_, i) => (
-                  <th
-                    key={`skel-h-${side}-${i}`}
-                    style={{ padding: '10px 14px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}
-                  >
-                    <SkeletonCell width={`${40 + (i % 3) * 15}%`} />
+                  <th key={`skel-h-${side}-${i}`} className={styles.th}>
+                    <SkeletonCell width={headerSkeletonWidths[i % 3]} />
                   </th>
                 ))
                 : columns.map((col) => (
-                  <th
-                    key={`${side}-${col}`}
-                    style={{
-                      padding: '10px 14px',
-                      borderBottom: '1px solid #e2e8f0',
-                      fontSize: '12px',
-                      color: '#414755',
-                      fontWeight: 700,
-                      fontFamily: 'var(--font-mono)',
-                    }}
-                  >
+                  <th key={`${side}-${col}`} className={`${styles.th} ${styles.thName}`}>
                     {col}
                   </th>
                 ))}
@@ -158,33 +136,25 @@ export const OverviewFilePreview: React.FC<OverviewFilePreviewProps> = ({
           <tbody>
             {loading ? (
               Array.from({ length: 6 }, (_, rowIndex) => (
-                <tr key={`skel-r-${side}-${rowIndex}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <tr key={`skel-r-${side}-${rowIndex}`} className={styles.bodyRow}>
                   {Array.from({ length: Math.max(columns.length, 6) }, (_, colIndex) => (
-                    <td key={colIndex} style={{ padding: '10px 14px' }}>
-                      <SkeletonCell width={`${45 + ((rowIndex + colIndex) % 4) * 10}%`} />
+                    <td key={colIndex} className={styles.td}>
+                      <SkeletonCell width={cellSkeletonWidth(rowIndex, colIndex)} />
                     </td>
                   ))}
                 </tr>
               ))
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={Math.max(columns.length, 1)} style={{ padding: '24px', textAlign: 'center', color: '#727786', fontSize: '13px' }}>
+                <td colSpan={Math.max(columns.length, 1)} className={styles.emptyCell}>
                   No sample rows available.
                 </td>
               </tr>
             ) : (
               rows.map((row, rowIndex) => (
-                <tr key={`${side}-row-${rowIndex}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <tr key={`${side}-row-${rowIndex}`} className={styles.bodyRow}>
                   {row.map((cell, colIndex) => (
-                    <td
-                      key={`${side}-cell-${rowIndex}-${colIndex}`}
-                      style={{
-                        padding: '10px 14px',
-                        fontSize: '12px',
-                        fontFamily: 'var(--font-mono)',
-                        color: '#1b1b1c',
-                      }}
-                    >
+                    <td key={`${side}-cell-${rowIndex}-${colIndex}`} className={`${styles.td} ${styles.tdData}`}>
                       {cell}
                     </td>
                   ))}
@@ -206,21 +176,19 @@ export const OverviewFilePreview: React.FC<OverviewFilePreviewProps> = ({
       centered
       destroyOnHidden={false}
       title="File preview"
-      styles={{ body: { paddingTop: 8 } }}
+      classNames={{ body: styles.modalBody }}
     >
-      <style>{`@keyframes overview-preview-skeleton { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }`}</style>
-
-      <p style={{ margin: '0 0 16px 0', fontSize: '12px', color: '#727786' }}>
+      <p className={styles.description}>
         First ~4 KB of each file — column headers and sample rows. Scroll horizontally in either panel to keep both in sync.
       </p>
 
       {error && (
-        <div style={{ padding: '12px', marginBottom: '16px', backgroundColor: '#fef2f2', color: '#dc2626', borderRadius: '8px', fontSize: '13px' }}>
+        <div className={styles.errorBanner}>
           {error}
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: '16px', alignItems: 'stretch' }}>
+      <div className={styles.panelsRow}>
         {renderTable(
           'source',
           sourceColumns,

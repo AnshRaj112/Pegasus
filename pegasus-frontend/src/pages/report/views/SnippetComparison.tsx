@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { DownloadOutlined, RightOutlined, DatabaseOutlined, LeftOutlined, CheckCircleOutlined } from '@ant-design/icons';
-import { Api, MismatchSampleRow } from '../../../shared/api/Api';
+import { MismatchSampleRow } from '../../../shared/api/Api';
+import { useAppDispatch, useAppSelector } from '../../../redux/store';
+import { reportActions } from '../Report.reducer';
 import { downloadSnippetCsv, downloadSnippetPdf, downloadSnippetXlsx } from '../snippetExport';
+import styles from './SnippetComparison.module.scss';
 
 type RowStatus = 'match' | 'mismatch' | 'extra_source' | 'missing_target';
 
@@ -16,20 +19,31 @@ type SnippetRow = {
 
 const COLS_PER_PAGE = 10;
 const EMPTY = '—';
-const FETCH_BATCH = 5000;
 const SKELETON_ROWS = 8;
 
-const SkeletonCell: React.FC<{ width?: string }> = ({ width = '100%' }) => (
-  <div style={{ width, height: '14px', backgroundColor: '#e2e8f0', borderRadius: '4px', animation: 'snippet-skeleton-pulse 1.5s ease-in-out infinite' }} />
+const SKELETON_WIDTH_CLASSES = [
+  styles.skeletonW55,
+  styles.skeletonW70,
+  styles.skeletonW40,
+  styles.skeletonW55,
+];
+
+const skeletonWidthClass = (colIdx: number, rowIdx: number): string => {
+  if (colIdx === 0) return styles.skeletonW72;
+  return SKELETON_WIDTH_CLASSES[(rowIdx + colIdx) % SKELETON_WIDTH_CLASSES.length];
+};
+
+const SkeletonCell: React.FC<{ colIdx: number; rowIdx?: number }> = ({ colIdx, rowIdx = 0 }) => (
+  <div className={`${styles.skeleton} ${skeletonWidthClass(colIdx, rowIdx)}`} />
 );
 
 const SnippetSkeletonRows: React.FC<{ colCount: number; rows?: number }> = ({ colCount, rows = SKELETON_ROWS }) => (
   <>
     {Array.from({ length: rows }, (_, i) => (
-      <tr key={`skeleton-${i}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
+      <tr key={`skeleton-${i}`} className={styles.skeletonRow}>
         {Array.from({ length: colCount }, (_, j) => (
-          <td key={j} style={{ padding: '12px 16px' }}>
-            <SkeletonCell width={j === 0 ? '72px' : `${50 + ((i + j) % 4) * 10}%`} />
+          <td key={j} className={styles.td}>
+            <SkeletonCell colIdx={j} rowIdx={i} />
           </td>
         ))}
       </tr>
@@ -134,14 +148,13 @@ const isMatchedCell = (row: SnippetRow, col: string): boolean => {
 
 export const SnippetComparison: React.FC = () => {
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
   const { mappingId, runId } = useParams<{ mappingId: string; runId: string }>();
-  const [summaryLoading, setSummaryLoading] = useState(true);
-  const [rowsLoading, setRowsLoading] = useState(true);
-  const [loadProgress, setLoadProgress] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const historyRunState = useAppSelector((state) => state.report.historyRunState);
+  const mismatchesState = useAppSelector((state) => state.report.mismatchesState);
+
   const [expectedMismatchTotal, setExpectedMismatchTotal] = useState(0);
   const [columns, setColumns] = useState<string[]>([]);
-  const [allItems, setAllItems] = useState<MismatchSampleRow[]>([]);
   const [sourceLabel, setSourceLabel] = useState('Source');
   const [targetLabel, setTargetLabel] = useState('Target');
   const [colPage, setColPage] = useState(0);
@@ -153,70 +166,40 @@ export const SnippetComparison: React.FC = () => {
   const sourceRef = useRef<HTMLDivElement>(null);
   const targetRef = useRef<HTMLDivElement>(null);
 
+  const runReady = Boolean(runId && historyRunState.runId === runId);
+  const mismatchesReady = Boolean(runId && mismatchesState.runId === runId);
+  const summaryLoading = !runReady || historyRunState.isFetching;
+  const rowsLoading = !mismatchesReady || mismatchesState.isFetching || !mismatchesState.isComplete;
+  const loadProgress = mismatchesReady ? mismatchesState.progressMessage : 'Loading run summary…';
+  const error = (runReady && historyRunState.error)
+    || (mismatchesReady && mismatchesState.error)
+    || null;
+  const allItems = mismatchesReady ? mismatchesState.items : [];
+
   useEffect(() => {
     if (!runId) return;
-    let cancelled = false;
-    (async () => {
-      setSummaryLoading(true);
-      setRowsLoading(true);
-      setError(null);
-      setLoadProgress('Loading run summary…');
-      try {
-        const { data: detail } = await Api.getValidationHistoryRun(runId);
-        if (cancelled) return;
-        const cols = detail.compared_columns?.length ? detail.compared_columns : [];
-        setColumns(cols);
-        setSourceLabel(detail.source_path ?? detail.source_filename ?? 'Source');
-        setTargetLabel(detail.target_path ?? detail.target_filename ?? 'Target');
-        const mc = detail.mismatch_counts;
-        const expected = mc.missing_in_target + mc.extra_in_target + (
-          mc.value_mismatch_rows ?? mc.value_mismatch
-        );
-        setExpectedMismatchTotal(expected);
-        setCleanRun(expected === 0);
-        setShowMatchedOnly(expected === 0);
-        setColPage(0);
-        setRowPage(0);
-        setSummaryLoading(false);
-        setLoadProgress('Loading mismatch rows…');
+    dispatch(reportActions.fetchHistoryRunRequest(runId));
+    dispatch(reportActions.fetchMismatchesRequest(runId));
+  }, [runId, dispatch]);
 
-        let offset = 0;
-        const collected: MismatchSampleRow[] = [];
-        let pageTotal = 0;
-        for (let attempt = 0; attempt < 30; attempt += 1) {
-          offset = 0;
-          collected.length = 0;
-          for (;;) {
-            const { data: page } = await Api.getValidationMismatches(runId, { limit: FETCH_BATCH, offset });
-            if (cancelled) return;
-            pageTotal = page.total;
-            collected.push(...page.items);
-            setAllItems([...collected]);
-            setLoadProgress(
-              page.total > collected.length
-                ? `Loaded ${collected.length.toLocaleString()} / ${page.total.toLocaleString()} mismatch rows…`
-                : '',
-            );
-            if (collected.length >= page.total && page.total > 0) break;
-            if (page.items.length < FETCH_BATCH) break;
-            offset += FETCH_BATCH;
-          }
-          if (collected.length > 0 || pageTotal > 0) break;
-          setLoadProgress('Waiting for mismatch rows to finish saving…');
-          await new Promise((r) => setTimeout(r, 2000));
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load snippet');
-      } finally {
-        if (!cancelled) {
-          setSummaryLoading(false);
-          setRowsLoading(false);
-          setLoadProgress('');
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [runId]);
+  useEffect(() => {
+    if (!runReady || !historyRunState.data) return;
+
+    const detail = historyRunState.data;
+    const cols = detail.compared_columns?.length ? detail.compared_columns : [];
+    setColumns(cols);
+    setSourceLabel(detail.source_path ?? detail.source_filename ?? 'Source');
+    setTargetLabel(detail.target_path ?? detail.target_filename ?? 'Target');
+    const mc = detail.mismatch_counts;
+    const expected = mc.missing_in_target + mc.extra_in_target + (
+      mc.value_mismatch_rows ?? mc.value_mismatch
+    );
+    setExpectedMismatchTotal(expected);
+    setCleanRun(expected === 0);
+    setShowMatchedOnly(expected === 0);
+    setColPage(0);
+    setRowPage(0);
+  }, [runReady, historyRunState.data]);
 
   const allRows = useMemo(() => buildSnippetRows(allItems, columns), [allItems, columns]);
 
@@ -283,73 +266,76 @@ export const SnippetComparison: React.FC = () => {
     target: visibleCols.map((c) => row.target[c] ?? EMPTY),
   }));
 
-  const cellStyle = (row: SnippetRow, side: 'source' | 'target', col: string): React.CSSProperties => {
-    if (col === 'uid') return { fontWeight: 600 };
+  const cellClassName = (row: SnippetRow, side: 'source' | 'target', col: string): string => {
+    if (col === 'uid') return styles.cellUid;
     const src = row.source[col] ?? EMPTY;
     const tgt = row.target[col] ?? EMPTY;
     const isMismatch = row.mismatchColumns.has(col) && visibleCols.includes(col);
     const isRowIssue = row.status === 'extra_source' || row.status === 'missing_target';
 
-    if (isMismatch) {
-      return { backgroundColor: '#fee2e2', color: '#991b1b', fontWeight: 600 };
-    }
+    if (isMismatch) return styles.cellMismatch;
     if (isRowIssue) {
       const hasValue = side === 'source' ? src !== EMPTY : tgt !== EMPTY;
-      return {
-        backgroundColor: '#fff7ed',
-        color: hasValue ? '#c2410c' : '#94a3b8',
-      };
+      return hasValue ? styles.cellRowIssue : styles.cellRowIssueEmpty;
     }
-    if (src !== EMPTY && tgt !== EMPTY && src === tgt) {
-      return { color: '#166534' };
-    }
-    return { color: '#1b1b1c' };
+    if (src !== EMPTY && tgt !== EMPTY && src === tgt) return styles.cellMatch;
+    return styles.cellDefault;
   };
 
-  const rowBg = (row: SnippetRow) =>
-    (row.status === 'extra_source' || row.status === 'missing_target' ? '#fff7ed' : '#fff');
+  const rowClassName = (row: SnippetRow): string => {
+    if (showMatchedOnly) return styles.rowDefault;
+    return (row.status === 'extra_source' || row.status === 'missing_target')
+      ? styles.rowIssue
+      : styles.rowDefault;
+  };
 
   const renderCells = (row: SnippetRow, side: 'source' | 'target') => displayCols.map((col) => {
     const cell = col === 'uid' ? row.uid : (row[side][col] ?? EMPTY);
     return (
-      <td key={`${side}-${col}`} style={{
-        padding: '12px 16px',
-        fontSize: '13px',
-        fontFamily: 'var(--font-mono)',
-        ...cellStyle(row, side, col),
-      }}>
+      <td key={`${side}-${col}`} className={`${styles.td} ${cellClassName(row, side, col)}`}>
         {cell}
       </td>
     );
   });
 
+  const emptyMessage = allItems.length === 0 && expectedMismatchTotal > 0
+    ? 'Mismatch rows were not saved for this run. Re-run validation to regenerate the snippet, or check that the database is reachable.'
+    : issueRows.length === 0 && matchRows.length === 0
+      ? cleanRun
+        ? 'No matching row samples were saved for this run. Re-run validation to regenerate the snippet.'
+        : 'No mismatches for this validation run.'
+      : showMatchedOnly
+        ? displayColumns.length === 0
+          ? 'No matched columns in this validation run.'
+          : 'No matched values in the current column window. Use “Next cols” to inspect other columns.'
+        : 'No issues in the current column window. Use “Next cols” to inspect other columns.';
+
   const isDataLoading = summaryLoading || rowsLoading;
   const skeletonColCount = displayCols.length || COLS_PER_PAGE + 1;
 
-  if (error) return <div style={{ padding: '24px', color: '#ba1a1a' }}>{error}</div>;
+  if (error) return <div className={styles.error}>{error}</div>;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <style>{`@keyframes snippet-skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }`}</style>
+    <div className={styles.page}>
       {loadProgress && (
-        <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#64748b' }}>{loadProgress}</p>
+        <p className={styles.loadProgress}>{loadProgress}</p>
       )}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#64748b', fontSize: '13px' }}>
-          <span style={{ cursor: 'pointer' }} onClick={() => navigate('/reports')}>Reports</span>
-          <RightOutlined style={{ fontSize: '10px' }} />
-          <span style={{ backgroundColor: '#f0eded', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>{pairLabel}</span>
-          <RightOutlined style={{ fontSize: '10px' }} />
-          <span style={{ backgroundColor: '#f0eded', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>{runId}</span>
-          <RightOutlined style={{ fontSize: '10px' }} />
-          <span style={{ color: '#1b1b1c', fontWeight: 600 }}>Snippet</span>
+      <div className={styles.header}>
+        <div className={styles.breadcrumb}>
+          <span className={styles.breadcrumbLink} onClick={() => navigate('/reports')}>Reports</span>
+          <RightOutlined className={styles.breadcrumbIcon} />
+          <span className={styles.breadcrumbChip}>{pairLabel}</span>
+          <RightOutlined className={styles.breadcrumbIcon} />
+          <span className={styles.breadcrumbChip}>{runId}</span>
+          <RightOutlined className={styles.breadcrumbIcon} />
+          <span className={styles.breadcrumbCurrent}>Snippet</span>
         </div>
-        <div style={{ position: 'relative' }}>
-          <button type="button" onClick={() => setDownloadOpen((o) => !o)} style={{ backgroundColor: '#1e293b', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 500, cursor: 'pointer' }}>
+        <div className={styles.downloadWrap}>
+          <button type="button" onClick={() => setDownloadOpen((o) => !o)} className={styles.downloadBtn}>
             <DownloadOutlined /> Download Snippet
           </button>
           {downloadOpen && (
-            <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: '4px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 20, minWidth: '140px' }}>
+            <div className={styles.downloadMenu}>
               {(['CSV', 'XLSX', 'PDF'] as const).map((fmt) => (
                 <button key={fmt} type="button" onClick={() => {
                   setDownloadOpen(false);
@@ -358,7 +344,7 @@ export const SnippetComparison: React.FC = () => {
                   if (fmt === 'CSV') downloadSnippetCsv(data, visibleCols, `${base}.csv`);
                   else if (fmt === 'XLSX') downloadSnippetXlsx(data, visibleCols, `${base}.xlsx`);
                   else downloadSnippetPdf(data, visibleCols, `Snippet ${runId}`);
-                }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '13px' }}>
+                }} className={styles.downloadMenuItem}>
                   {fmt}
                 </button>
               ))}
@@ -367,34 +353,22 @@ export const SnippetComparison: React.FC = () => {
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '12px', color: '#64748b' }}>
+      <div className={styles.controls}>
+        <span className={styles.controlText}>
           Columns {displayColumns.length ? colPage * COLS_PER_PAGE + 1 : 0}–{Math.min((colPage + 1) * COLS_PER_PAGE, displayColumns.length)} of {displayColumns.length}
           {showMatchedOnly && columns.length !== displayColumns.length ? ` (${columns.length} total)` : ''}
         </span>
-        <button type="button" disabled={colPage <= 0} onClick={() => setColPage((p) => p - 1)} style={{ padding: '4px 10px', fontSize: '12px', cursor: colPage <= 0 ? 'not-allowed' : 'pointer' }}>← Prev cols</button>
-        <button type="button" disabled={colPage >= totalColPages - 1} onClick={() => setColPage((p) => p + 1)} style={{ padding: '4px 10px', fontSize: '12px', cursor: colPage >= totalColPages - 1 ? 'not-allowed' : 'pointer' }}>Next cols →</button>
+        <button type="button" disabled={colPage <= 0} onClick={() => setColPage((p) => p - 1)} className={styles.navBtn}>← Prev cols</button>
+        <button type="button" disabled={colPage >= totalColPages - 1} onClick={() => setColPage((p) => p + 1)} className={styles.navBtn}>Next cols →</button>
         <button
           type="button"
           onClick={() => setShowMatchedOnly((v) => !v)}
-          style={{
-            padding: '4px 12px',
-            fontSize: '12px',
-            fontWeight: 500,
-            cursor: 'pointer',
-            borderRadius: '6px',
-            border: showMatchedOnly ? '1px solid #166534' : '1px solid #e2e8f0',
-            backgroundColor: showMatchedOnly ? '#dcfce7' : '#fff',
-            color: showMatchedOnly ? '#166534' : '#414755',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
+          className={`${styles.matchToggle} ${showMatchedOnly ? styles.matchToggleActive : ''}`}
         >
           <CheckCircleOutlined />
           {showMatchedOnly ? 'Showing matched only' : 'Show matched only'}
         </button>
-        <span style={{ fontSize: '12px', color: '#64748b' }}>
+        <span className={styles.controlText}>
           {isDataLoading
             ? 'Loading…'
             : showMatchedOnly || cleanRun
@@ -403,49 +377,37 @@ export const SnippetComparison: React.FC = () => {
         </span>
       </div>
 
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '12px', fontSize: '11px', color: '#64748b' }}>
-        <span><span style={{ color: '#166534', fontWeight: 600 }}>Green</span> = matching</span>
-        <span><span style={{ color: '#991b1b', fontWeight: 600 }}>Red</span> = mismatch</span>
-        <span><span style={{ color: '#c2410c', fontWeight: 600 }}>Orange</span> = missing / extra row</span>
+      <div className={styles.legend}>
+        <span><span className={styles.legendGreen}>Green</span> = matching</span>
+        <span><span className={styles.legendRed}>Red</span> = mismatch</span>
+        <span><span className={styles.legendOrange}>Orange</span> = missing / extra row</span>
       </div>
 
-      <div style={{ display: 'flex', gap: '24px', flex: 1, minHeight: '400px', overflow: 'hidden' }}>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden', minWidth: 0 }}>
-          <div style={{ backgroundColor: '#1e293b', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#fff' }}>
-            <DatabaseOutlined /> <span style={{ fontSize: '14px', fontWeight: 600 }}>Source &gt; {sourceLabel}</span>
+      <div className={styles.panels}>
+        <div className={styles.panel}>
+          <div className={styles.panelHeaderSource}>
+            <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Source &gt; {sourceLabel}</span>
           </div>
-          <div ref={sourceRef} onScroll={handleSourceScroll} style={{ overflow: 'auto', flex: 1 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', whiteSpace: 'nowrap' }}>
-              <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>
+          <div ref={sourceRef} onScroll={handleSourceScroll} className={styles.panelScroll}>
+            <table className={styles.table}>
+              <thead className={styles.thead}>
                 <tr>
                   {isDataLoading && displayCols.length === 0
                     ? Array.from({ length: skeletonColCount }, (_, i) => (
-                      <th key={i} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>
-                        {i === 0 ? 'UID' : <SkeletonCell width={`${40 + (i % 3) * 15}%`} />}
+                      <th key={i} className={styles.th}>
+                        {i === 0 ? 'UID' : <SkeletonCell colIdx={i} />}
                       </th>
                     ))
-                    : displayCols.map((col) => <th key={col} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>{col === 'uid' ? 'UID' : col}</th>)}
+                    : displayCols.map((col) => <th key={col} className={styles.th}>{col === 'uid' ? 'UID' : col}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {isDataLoading ? (
                   <SnippetSkeletonRows colCount={skeletonColCount} />
                 ) : pageRows.length === 0 ? (
-                  <tr><td colSpan={displayCols.length || 1} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
-                    {allItems.length === 0 && expectedMismatchTotal > 0
-                      ? 'Mismatch rows were not saved for this run. Re-run validation to regenerate the snippet, or check that the database is reachable.'
-                      : issueRows.length === 0 && matchRows.length === 0
-                        ? cleanRun
-                          ? 'No matching row samples were saved for this run. Re-run validation to regenerate the snippet.'
-                          : 'No mismatches for this validation run.'
-                        : showMatchedOnly
-                          ? displayColumns.length === 0
-                            ? 'No matched columns in this validation run.'
-                            : 'No matched values in the current column window. Use “Next cols” to inspect other columns.'
-                          : 'No issues in the current column window. Use “Next cols” to inspect other columns.'}
-                  </td></tr>
+                  <tr><td colSpan={displayCols.length || 1} className={styles.emptyCell}>{emptyMessage}</td></tr>
                 ) : pageRows.map((row) => (
-                  <tr key={`src-${row.uid}`} style={{ backgroundColor: showMatchedOnly ? '#fff' : rowBg(row), borderBottom: '1px solid #f1f5f9' }}>
+                  <tr key={`src-${row.uid}`} className={rowClassName(row)}>
                     {renderCells(row, 'source')}
                   </tr>
                 ))}
@@ -453,42 +415,30 @@ export const SnippetComparison: React.FC = () => {
             </table>
           </div>
         </div>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden', minWidth: 0 }}>
-          <div style={{ backgroundColor: '#e2e8f0', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#1b1b1c' }}>
-            <DatabaseOutlined /> <span style={{ fontSize: '14px', fontWeight: 600 }}>Target &gt; {targetLabel}</span>
+        <div className={styles.panel}>
+          <div className={styles.panelHeaderTarget}>
+            <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Target &gt; {targetLabel}</span>
           </div>
-          <div ref={targetRef} onScroll={handleTargetScroll} style={{ overflow: 'auto', flex: 1 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', whiteSpace: 'nowrap' }}>
-              <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>
+          <div ref={targetRef} onScroll={handleTargetScroll} className={styles.panelScroll}>
+            <table className={styles.table}>
+              <thead className={styles.thead}>
                 <tr>
                   {isDataLoading && displayCols.length === 0
                     ? Array.from({ length: skeletonColCount }, (_, i) => (
-                      <th key={i} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>
-                        {i === 0 ? 'UID' : <SkeletonCell width={`${40 + (i % 3) * 15}%`} />}
+                      <th key={i} className={styles.th}>
+                        {i === 0 ? 'UID' : <SkeletonCell colIdx={i} />}
                       </th>
                     ))
-                    : displayCols.map((col) => <th key={col} style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#414755' }}>{col === 'uid' ? 'UID' : col}</th>)}
+                    : displayCols.map((col) => <th key={col} className={styles.th}>{col === 'uid' ? 'UID' : col}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {isDataLoading ? (
                   <SnippetSkeletonRows colCount={skeletonColCount} />
                 ) : pageRows.length === 0 ? (
-                  <tr><td colSpan={displayCols.length || 1} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
-                    {allItems.length === 0 && expectedMismatchTotal > 0
-                      ? 'Mismatch rows were not saved for this run. Re-run validation to regenerate the snippet, or check that the database is reachable.'
-                      : issueRows.length === 0 && matchRows.length === 0
-                        ? cleanRun
-                          ? 'No matching row samples were saved for this run. Re-run validation to regenerate the snippet.'
-                          : 'No mismatches for this validation run.'
-                        : showMatchedOnly
-                          ? displayColumns.length === 0
-                            ? 'No matched columns in this validation run.'
-                            : 'No matched values in the current column window. Use “Next cols” to inspect other columns.'
-                          : 'No issues in the current column window. Use “Next cols” to inspect other columns.'}
-                  </td></tr>
+                  <tr><td colSpan={displayCols.length || 1} className={styles.emptyCell}>{emptyMessage}</td></tr>
                 ) : pageRows.map((row) => (
-                  <tr key={`tgt-${row.uid}`} style={{ backgroundColor: showMatchedOnly ? '#fff' : rowBg(row), borderBottom: '1px solid #f1f5f9' }}>
+                  <tr key={`tgt-${row.uid}`} className={rowClassName(row)}>
                     {renderCells(row, 'target')}
                   </tr>
                 ))}
@@ -498,29 +448,43 @@ export const SnippetComparison: React.FC = () => {
         </div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0', borderTop: '1px solid #e2e8f0', marginTop: '16px' }}>
-        <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>
+      <div className={styles.footer}>
+        <span className={styles.footerNote}>
           {cleanRun
             ? 'Showing up to 10 matching rows per column. Use “Next cols” to inspect other columns.'
             : 'Use “Next cols” to inspect mismatches in other columns. Row pages list every UID with a missing, extra, or value mismatch.'}
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#64748b' }}>
+        <div className={styles.footerControls}>
+          <div className={styles.rowsPerPage}>
             Rows per page:
-            <select value={itemsPerPage} onChange={(e) => setItemsPerPage(Number(e.target.value))} style={{ border: 'none', fontWeight: 600, outline: 'none', backgroundColor: 'transparent' }}>
+            <select value={itemsPerPage} onChange={(e) => setItemsPerPage(Number(e.target.value))} className={styles.rowsPerPageSelect}>
               <option value={10}>10</option>
               <option value={20}>20</option>
               <option value={50}>50</option>
             </select>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', backgroundColor: '#f0eded', padding: '4px 8px', borderRadius: '6px' }}>
-            <LeftOutlined style={{ fontSize: '12px', color: rowPage <= 0 ? '#a0aabf' : '#414755', cursor: rowPage <= 0 ? 'not-allowed' : 'pointer' }} onClick={() => rowPage > 0 && setRowPage((p) => p - 1)} />
-            <span style={{ fontSize: '13px', fontWeight: 600 }}>
+          <div className={styles.pagination}>
+            <button
+              type="button"
+              disabled={rowPage <= 0}
+              onClick={() => rowPage > 0 && setRowPage((p) => p - 1)}
+              className={`${styles.paginationIcon} ${rowPage <= 0 ? styles.paginationIconDisabled : styles.paginationIconEnabled}`}
+            >
+              <LeftOutlined />
+            </button>
+            <span className={styles.paginationLabel}>
               {isDataLoading ? '—' : (displayIssueRows.length ? rowPage + 1 : 0)}
-              <span style={{ color: '#a0aabf', margin: '0 4px', fontWeight: 400 }}>/</span>
+              <span className={styles.paginationDivider}>/</span>
               {isDataLoading ? '—' : totalRowPages}
             </span>
-            <RightOutlined style={{ fontSize: '12px', color: rowPage >= totalRowPages - 1 ? '#a0aabf' : '#414755', cursor: rowPage >= totalRowPages - 1 ? 'not-allowed' : 'pointer' }} onClick={() => rowPage < totalRowPages - 1 && setRowPage((p) => p + 1)} />
+            <button
+              type="button"
+              disabled={rowPage >= totalRowPages - 1}
+              onClick={() => rowPage < totalRowPages - 1 && setRowPage((p) => p + 1)}
+              className={`${styles.paginationIcon} ${rowPage >= totalRowPages - 1 ? styles.paginationIconDisabled : styles.paginationIconEnabled}`}
+            >
+              <RightOutlined />
+            </button>
           </div>
         </div>
       </div>

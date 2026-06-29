@@ -1,3 +1,5 @@
+@use '~/assets/styles/variables' as tokens;
+
 /* src/pages/validation/Validation.module.scss */
 
 .wizardHeaderShell {
@@ -5,8 +7,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 40px;
-  background-color: var(--surface-container-lowest, #ffffff);
-  border-bottom: 1px solid var(--outline-variant, #e6ecf4);
+  background-color: var(--surface-container-lowest, #{tokens.$surface-container-lowest});
+  border-bottom: 1px solid var(--outline-variant, #{tokens.$outline-variant});
   border-radius: 12px 12px 0 0;
 }
 
@@ -14,15 +16,15 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  color: #0c131d;
+  color: tokens.$on-surface;
 }
 
 .wizardStepTabBanner {
-  background-color: var(--surface-container-lowest, #ffffff);
+  background-color: var(--surface-container-lowest, #{tokens.$surface-container-lowest});
   padding: 24px 40px 12px;
-  border-left: 1px solid var(--outline-variant, #d9d9d9);
-  border-right: 1px solid var(--outline-variant, #d9d9d9);
-  border-bottom: 1px solid var(--outline-variant, #e2e8f0);
+  border-left: 1px solid var(--outline-variant, #{tokens.$outline-variant});
+  border-right: 1px solid var(--outline-variant, #{tokens.$outline-variant});
+  border-bottom: 1px solid var(--border-1, #{tokens.$border-1});
 }
 
 .wizardStepRow {
@@ -41,12 +43,12 @@
 }
 
 .stepTabActive {
-  color: var(--primary, #234B5F);
-  border-bottom: 2px solid var(--primary, #234B5F);
+  color: var(--primary, #{tokens.$primary});
+  border-bottom: 2px solid var(--primary, #{tokens.$primary});
 }
 
 .stepTabInactive {
-  color: #64748b;
+  color: tokens.$text-muted;
   border-bottom: 2px solid transparent;
 }
 
@@ -62,33 +64,121 @@
 }
 
 .stepNumberActive {
-  background-color: var(--primary, #234B5F);
-  color: var(--on-primary, #ffffff);
+  background-color: var(--primary, #{tokens.$primary});
+  color: var(--on-primary, #{tokens.$on-primary});
 }
 
 .stepNumberInactive {
-  background-color: #f1f5f9;
-  color: #64748b;
+  background-color: tokens.$border-subtle;
+  color: tokens.$text-muted;
 }
 
 .wizardWorkspaceArea {
   flex: 1;
-  background-color: var(--surface-container-lowest, #ffffff);
+  background-color: var(--surface-container-lowest, #{tokens.$surface-container-lowest});
   padding: 32px 40px;
   overflow-y: auto;
-  border-left: 1px solid var(--outline-variant, #d9d9d9);
-  border-right: 1px solid var(--outline-variant, #d9d9d9);
+  border-left: 1px solid var(--outline-variant, #{tokens.$outline-variant});
+  border-right: 1px solid var(--outline-variant, #{tokens.$outline-variant});
 }
 
 .wizardActionFooter {
   display: flex;
   align-items: center;
   padding: 24px;
-  background-color: #f8fafc;
-  border-left: 1px solid var(--outline-variant, #d9d9d9);
-  border-right: 1px solid var(--outline-variant, #d9d9d9);
-  border-bottom: 1px solid var(--outline-variant, #d9d9d9);
+  background-color: tokens.$row-hover;
+  border-left: 1px solid var(--outline-variant, #{tokens.$outline-variant});
+  border-right: 1px solid var(--outline-variant, #{tokens.$outline-variant});
+  border-bottom: 1px solid var(--outline-variant, #{tokens.$outline-variant});
   border-radius: 0 0 12px 12px;
+}
+
+.wizardPage {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: tokens.$spacing-lg;
+  max-width: tokens.$container-max;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.wizardTitle {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.015em;
+}
+
+.stepTabLabel {
+  font-size: tokens.$text-label-md;
+  font-weight: 600;
+}
+
+.stepTabStatic {
+  cursor: default;
+}
+
+.loadingRun {
+  padding: 3rem;
+  text-align: center;
+  color: tokens.$on-surface-variant;
+}
+
+.wizardActionFooterSpread {
+  justify-content: space-between;
+}
+
+.footerBtnGroup {
+  display: flex;
+  gap: tokens.$spacing-md;
+}
+
+.secondaryBtn {
+  padding: 0 tokens.$spacing-lg;
+  height: 2.5rem;
+  border-radius: tokens.$spacing-sm;
+  border: 0.0625rem solid tokens.$outline-variant;
+  background: tokens.$surface-container-lowest;
+  color: tokens.$on-surface-variant;
+  font-size: tokens.$text-label-md;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secondaryBtnDisabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.secondaryBtnMuted {
+  opacity: 0.6;
+}
+
+.primaryBtn {
+  padding: 0 2rem;
+  height: 2.5rem;
+  border-radius: tokens.$spacing-sm;
+  border: none;
+  background: tokens.$color-midnight-green;
+  color: tokens.$on-primary;
+  font-size: tokens.$text-label-md;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: tokens.$spacing-sm;
+  transition: all 0.2s;
+}
+
+.primaryBtnDisabled {
+  background: tokens.$surface-variant;
+  color: tokens.$on-surface-variant;
+  cursor: not-allowed;
+}
+
+.proceedIcon {
+  font-size: 1rem;
 }
 
 /* Reusable scrollbar for the internal tables */
@@ -99,15 +189,15 @@
   }
 
   &::-webkit-scrollbar-track {
-    background: #f1f1f1;
+    background: tokens.$border-subtle;
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #c1c6d7;
+    background: tokens.$outline-variant;
     border-radius: 10px;
   }
 
   &::-webkit-scrollbar-thumb:hover {
-    background: #727786;
+    background: tokens.$on-surface-variant;
   }
 }

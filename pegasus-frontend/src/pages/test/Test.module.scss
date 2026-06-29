@@ -1,17 +1,17 @@
-// @use '~/styles/token.css' as vars;
+@use '~/assets/styles/variables' as tokens;
 
 .testContainer {
-  background-color: #ffffff;
+  background-color: var(--surface-container-lowest, #{tokens.$surface-container-lowest});
 }
 
 .headerTitle {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #191c1e;
+  color: var(--on-surface, #{tokens.$on-surface});
 }
 
 .tabs {
-  border-bottom: 1px solid #e0e3e5;
+  border-bottom: 0.0625rem solid var(--border-1, #{tokens.$border-1});
 }
 
 .tabBtn {
@@ -19,93 +19,92 @@
   border: none;
   padding-bottom: 0.75rem;
   font-weight: 500;
-  color: #41484c;
+  color: var(--on-surface-variant, #{tokens.$on-surface-variant});
   margin-right: 2rem;
   cursor: pointer;
   transition: all 0.2s ease;
 
   &--active {
-    color: #191c1e;
+    color: var(--on-surface, #{tokens.$on-surface});
     font-weight: 600;
-    border-bottom: 2px solid #053447;
+    border-bottom: 0.125rem solid var(--color-midnight-green, #{tokens.$color-midnight-green});
   }
 
   &:hover:not(.tabBtn--active) {
-    color: #053447;
+    color: var(--color-midnight-green, #{tokens.$color-midnight-green});
   }
 }
 
 .searchInput {
-  border-radius: 4px;
-  width: 250px;
+  border-radius: 0.25rem;
+  width: 15.625rem;
 }
 
 .listRow {
-  border-bottom: 1px solid #e0e3e5;
+  border-bottom: 0.0625rem solid var(--border-1, #{tokens.$border-1});
   padding: 1rem 1.5rem;
   transition: background-color 0.2s ease;
 
   &:hover {
-    background-color: #f8f9fb;
+    background-color: var(--surface-container-low, #{tokens.$surface-container-low});
   }
 }
 
-/* Pelican specific badges */
 .statusBadge {
-  border: 1px solid #72787d;
-  color: #191c1e;
-  border-radius: 12px;
-  padding: 2px 8px;
+  border: 0.0625rem solid var(--outline-variant, #{tokens.$outline-variant});
+  color: var(--on-surface, #{tokens.$on-surface});
+  border-radius: 0.75rem;
+  padding: 0.125rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 500;
 
   &--pass {
-    border-color: #2e7d32;
-    color: #2e7d32;
-    background-color: #edf7ed;
+    border-color: var(--status-pass, #{tokens.$status-pass});
+    color: var(--status-pass, #{tokens.$status-pass});
+    background-color: var(--status-pass-bg, #{tokens.$status-pass-bg});
   }
 
   &--fail {
-    border-color: #d32f2f;
-    color: #d32f2f;
-    background-color: #ffebee;
+    border-color: var(--status-fail, #{tokens.$status-fail});
+    color: var(--status-fail, #{tokens.$status-fail});
+    background-color: var(--status-fail-bg, #{tokens.$status-fail-bg});
   }
 
   &--incoherent {
-    border-color: #d32f2f;
-    color: #d32f2f;
-    background-color: #ffebee;
+    border-color: var(--status-fail, #{tokens.$status-fail});
+    color: var(--status-fail, #{tokens.$status-fail});
+    background-color: var(--status-fail-bg, #{tokens.$status-fail-bg});
   }
 }
 
 .typeIcon {
-  border: 1px solid #72787d;
-  color: #2e7d32;
+  border: 0.0625rem solid var(--outline-variant, #{tokens.$outline-variant});
+  color: var(--status-pass, #{tokens.$status-pass});
   font-size: 0.65rem;
   font-weight: 700;
-  padding: 0 4px;
-  border-radius: 2px;
-  margin-left: 4px;
+  padding: 0 0.25rem;
+  border-radius: 0.125rem;
+  margin-left: 0.25rem;
 
   &--red {
-    color: #d32f2f;
+    color: var(--status-fail, #{tokens.$status-fail});
   }
 }
 
 .snippetBtn {
-  border: 1px solid #41484c;
-  background: white;
-  border-radius: 4px;
-  padding: 2px 8px;
+  border: 0.0625rem solid var(--on-surface-variant, #{tokens.$on-surface-variant});
+  background: var(--surface-container-lowest, #{tokens.$surface-container-lowest});
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.5rem;
   font-size: 0.75rem;
-  color: #191c1e;
+  color: var(--on-surface, #{tokens.$on-surface});
   cursor: pointer;
 
   &:hover {
-    background-color: #f2f4f6;
+    background-color: var(--surface-container-low, #{tokens.$surface-container-low});
   }
 }
 
 .endedBlock {
-  min-width: 80px;
+  min-width: 5rem;
 }

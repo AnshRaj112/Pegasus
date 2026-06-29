@@ -1,0 +1,63 @@
+@use '~/assets/styles/variables' as tokens;
+
+.modalText {
+  margin: 0;
+  color: tokens.$on-surface-variant;
+  font-size: tokens.$text-body-md;
+  line-height: 1.5;
+}
+
+.sessionModal {
+  :global(.ant-modal-content) {
+    background-color: tokens.$surface-container-lowest;
+    border: 1px solid tokens.$outline-variant;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    padding: 0;
+  }
+
+  :global(.ant-modal-header) {
+    background: transparent;
+    border-bottom: 1px solid tokens.$outline-variant;
+    margin-bottom: 0;
+    padding: 20px 24px 16px;
+  }
+
+  :global(.ant-modal-title) {
+    color: tokens.$on-surface;
+    font-family: tokens.$font-h3;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  :global(.ant-modal-body) {
+    padding: 16px 24px;
+  }
+
+  :global(.ant-modal-footer) {
+    border-top: 1px solid tokens.$outline-variant;
+    margin-top: 0;
+    padding: 12px 24px 20px;
+  }
+
+  :global(.ant-btn-default) {
+    border-color: tokens.$outline-variant;
+    color: tokens.$on-surface;
+    background: tokens.$surface-container-lowest;
+
+    &:hover {
+      border-color: #727786 !important;
+      color: tokens.$on-surface !important;
+    }
+  }
+
+  :global(.ant-btn-primary) {
+    background-color: tokens.$color-onyx-red;
+    border-color: tokens.$color-onyx-red;
+
+    &:hover {
+      background-color: tokens.$color-onyx-red-deep !important;
+      border-color: tokens.$color-onyx-red-deep !important;
+    }
+  }
+}

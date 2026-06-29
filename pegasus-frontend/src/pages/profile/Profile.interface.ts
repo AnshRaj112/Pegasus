@@ -12,8 +12,12 @@ export interface UserProfile {
   isLocal: boolean;
 }
 
-export interface ProfileState {
-  data: UserProfile | null;
-  isLoading: boolean;
+export interface AsyncState<T> {
+  data: T | null;
+  isFetching: boolean;
   error: string | null;
+}
+
+export interface ProfileReducerState {
+  fetchProfileState: AsyncState<UserProfile>;
 }

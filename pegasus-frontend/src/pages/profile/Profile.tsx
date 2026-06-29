@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
-import { useDispatch } from 'react-redux';
 import { Row, Col, Flex } from 'antd';
+
+import { useAppDispatch } from '~/redux/store';
+
 import styles from './Profile.module.scss';
 import { UserProfile } from './Profile.interface';
 
@@ -19,7 +21,7 @@ const mockUser: UserProfile = {
 };
 
 const Profile: React.FC = () => {
-  const dispatch = useDispatch();
+  const dispatch = useAppDispatch();
   const data = mockUser; 
 
   useEffect(() => {

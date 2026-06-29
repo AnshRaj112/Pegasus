@@ -4,7 +4,6 @@ import { notification } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
 import { validationActions } from './Validation.reducer';
-import { reportActions } from '../report/Report.reducer';
 import { loadValidationRunForm } from './validationRerun';
 import {
   VALIDATIONS_BASE,
@@ -21,17 +20,17 @@ import { assessEmptyValidationFiles } from './validationEmptyFiles';
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
 import { ConfigureMappingStep } from './steps/ConfigureMappingStep';
-import { Api } from '../../shared/api/Api';
 import { resolveWizardArchiveMode, archiveUsesTabularValidation } from './archiveFormat';
 import { isFixedWidthFormat } from './fixedWidthFormat';
 import { resolveWizardJsonMode } from './jsonFormat';
+import { GoogleCloudStorageConfig } from '../../shared/api/Api';
 
 import styles from './Validation.module.scss';
 
-const cloudObjectKey = (cloud: any): string =>
+const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string =>
   cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';
 
-export const ValidationWizardView: React.FC = () => {
+const ValidationWizardView: React.FC = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const location = useLocation();
@@ -42,6 +41,7 @@ export const ValidationWizardView: React.FC = () => {
   const validationForm = useAppSelector((state) => state.validation.validationForm);
   const overviewCache = useAppSelector((state) => state.validation.overviewProfileCache);
   const wizardRunId = useAppSelector((state) => state.validation.wizardRunId);
+  const saveDraftState = useAppSelector((state) => state.validation.saveDraftState);
 
   const [savingDraft, setSavingDraft] = useState(false);
   const [advancing, setAdvancing] = useState(false);
@@ -49,7 +49,6 @@ export const ValidationWizardView: React.FC = () => {
   const loadedRunIdRef = useRef<string | null>(null);
   const sessionSaveReadyRef = useRef(false);
 
-  // Align loaded-run tracking with store bootstrap (see redux/store.ts).
   useLayoutEffect(() => {
     const saved = loadValidationTabSession();
     if (saved?.wizardRunId) {
@@ -110,6 +109,46 @@ export const ValidationWizardView: React.FC = () => {
       cancelled = true;
     };
   }, [runId, dispatch, navigate]);
+
+  const buildDraftPayload = () => ({
+    source_path: `gs://${validationForm.sourceCloud!.bucket}/${validationForm.sourceCloud!.object_name}`,
+    target_path: `gs://${validationForm.targetCloud!.bucket}/${validationForm.targetCloud!.object_name}`,
+    uid_column: validationForm.uidColumn,
+    delimiter: validationForm.delimiter || 'auto',
+    column_mappings: validationForm.columnMappings,
+  });
+
+  useEffect(() => {
+    if (!saveDraftState.data || saveDraftState.isFetching) return;
+
+    loadedRunIdRef.current = saveDraftState.data.run_id;
+
+    if (saveDraftState.intent === 'proceed') {
+      navigate(validationOverviewPath(saveDraftState.data.run_id));
+      setAdvancing(false);
+    } else if (saveDraftState.intent === 'save') {
+      if (currentStep === 2) {
+        navigate(validationOverviewPath(saveDraftState.data.run_id), { replace: true });
+      } else if (currentStep === 3) {
+        navigate(validationMappingPath(saveDraftState.data.run_id), { replace: true });
+      }
+      setSavingDraft(false);
+    }
+
+    dispatch(validationActions.clearSaveDraftState());
+  }, [saveDraftState, currentStep, navigate, dispatch]);
+
+  useEffect(() => {
+    if (!saveDraftState.error || saveDraftState.isFetching) return;
+
+    if (saveDraftState.intent === 'proceed') {
+      setAdvancing(false);
+    } else if (saveDraftState.intent === 'save') {
+      setSavingDraft(false);
+    }
+
+    dispatch(validationActions.clearSaveDraftState());
+  }, [saveDraftState.error, saveDraftState.intent, saveDraftState.isFetching, dispatch]);
 
   const isStep2Loading = currentStep === 2 && (
     loadingRun
@@ -201,29 +240,14 @@ export const ValidationWizardView: React.FC = () => {
     || (currentStep === 1 && !isStep1Valid)
     || (currentStep === 2 && overviewBlocksMapping);
 
-  const handleProceed = async () => {
+  const handleProceed = () => {
     if (currentStep === 1) {
       if (!isStep1Valid || !validationForm.sourceCloud || !validationForm.targetCloud) return;
       setAdvancing(true);
-      try {
-        const { data } = await Api.saveValidationDraft({
-          source_path: `gs://${validationForm.sourceCloud.bucket}/${validationForm.sourceCloud.object_name}`,
-          target_path: `gs://${validationForm.targetCloud.bucket}/${validationForm.targetCloud.object_name}`,
-          uid_column: validationForm.uidColumn,
-          delimiter: validationForm.delimiter || 'auto',
-          column_mappings: validationForm.columnMappings,
-        });
-        loadedRunIdRef.current = data.run_id;
-        dispatch(validationActions.setWizardRunId(data.run_id));
-        navigate(validationOverviewPath(data.run_id));
-      } catch (e) {
-        notification.error({
-          message: 'Could not start file overview',
-          description: e instanceof Error ? e.message : 'Failed to create validation run',
-        });
-      } finally {
-        setAdvancing(false);
-      }
+      dispatch(validationActions.saveDraftRequest({
+        draft: buildDraftPayload(),
+        intent: 'proceed',
+      }));
       return;
     }
 
@@ -276,46 +300,18 @@ export const ValidationWizardView: React.FC = () => {
     validationForm.sourceCloud?.object_name && validationForm.targetCloud?.object_name,
   );
 
-  const handleSaveDraft = async () => {
+  const handleSaveDraft = () => {
     if (!canSaveDraft || !validationForm.sourceCloud || !validationForm.targetCloud) return;
     setSavingDraft(true);
-    try {
-      const { data } = await Api.saveValidationDraft({
-        source_path: `gs://${validationForm.sourceCloud.bucket}/${validationForm.sourceCloud.object_name}`,
-        target_path: `gs://${validationForm.targetCloud.bucket}/${validationForm.targetCloud.object_name}`,
-        uid_column: validationForm.uidColumn,
-        delimiter: validationForm.delimiter || 'auto',
-        column_mappings: validationForm.columnMappings,
-      });
-      notification.success({
-        message: 'Draft saved',
-        description: 'Find it under Reports → Saved.',
-      });
-      loadedRunIdRef.current = data.run_id;
-      dispatch(validationActions.setWizardRunId(data.run_id));
-      if (currentStep === 2) {
-        navigate(validationOverviewPath(data.run_id), { replace: true });
-      } else if (currentStep === 3) {
-        navigate(validationMappingPath(data.run_id), { replace: true });
-      }
-      dispatch(reportActions.fetchReportsRequest());
-    } catch (e) {
-      notification.error({
-        message: 'Could not save draft',
-        description: e instanceof Error ? e.message : 'Save failed',
-      });
-    } finally {
-      setSavingDraft(false);
-    }
+    dispatch(validationActions.saveDraftRequest({
+      draft: buildDraftPayload(),
+      intent: 'save',
+    }));
   };
 
   const renderStepContent = () => {
     if (loadingRun && runId) {
-      return (
-        <div style={{ padding: '48px', textAlign: 'center', color: '#727786' }}>
-          Loading validation run…
-        </div>
-      );
+      return <div className={styles.loadingRun}>Loading validation run…</div>;
     }
 
     switch (currentStep) {
@@ -337,28 +333,26 @@ export const ValidationWizardView: React.FC = () => {
       : 'Proceed to Overview';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '24px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
+    <div className={styles.wizardPage}>
       <header className={styles.wizardHeaderShell}>
         <div className={styles.wizardHeaderLogoGroup}>
-          <h2 style={{ fontSize: '18px', fontWeight: 700, margin: 0, letterSpacing: '-0.015em' }}>
-            File-to-File Validation Tool
-          </h2>
+          <h2 className={styles.wizardTitle}>File-to-File Validation Tool</h2>
         </div>
       </header>
 
       <div className={styles.wizardStepTabBanner}>
         <div className={styles.wizardStepRow}>
-          <div className={`${styles.stepTabItem} ${currentStep === 1 ? styles.stepTabActive : styles.stepTabInactive}`} style={{ cursor: 'default' }}>
+          <div className={`${styles.stepTabItem} ${styles.stepTabStatic} ${currentStep === 1 ? styles.stepTabActive : styles.stepTabInactive}`}>
             <span className={`${styles.stepNumberBadge} ${currentStep === 1 ? styles.stepNumberActive : styles.stepNumberInactive}`}>1</span>
-            <span style={{ fontSize: '14px', fontWeight: 600 }}>File Selection</span>
+            <span className={styles.stepTabLabel}>File Selection</span>
           </div>
-          <div className={`${styles.stepTabItem} ${currentStep === 2 ? styles.stepTabActive : styles.stepTabInactive}`} style={{ cursor: 'default' }}>
+          <div className={`${styles.stepTabItem} ${styles.stepTabStatic} ${currentStep === 2 ? styles.stepTabActive : styles.stepTabInactive}`}>
             <span className={`${styles.stepNumberBadge} ${currentStep === 2 ? styles.stepNumberActive : styles.stepNumberInactive}`}>2</span>
-            <span style={{ fontSize: '14px', fontWeight: 600 }}>File Overview</span>
+            <span className={styles.stepTabLabel}>File Overview</span>
           </div>
-          <div className={`${styles.stepTabItem} ${currentStep === 3 ? styles.stepTabActive : styles.stepTabInactive}`} style={{ cursor: 'default' }}>
+          <div className={`${styles.stepTabItem} ${styles.stepTabStatic} ${currentStep === 3 ? styles.stepTabActive : styles.stepTabInactive}`}>
             <span className={`${styles.stepNumberBadge} ${currentStep === 3 ? styles.stepNumberActive : styles.stepNumberInactive}`}>3</span>
-            <span style={{ fontSize: '14px', fontWeight: 600 }}>
+            <span className={styles.stepTabLabel}>
               {overviewIsJson || isJson ? 'JSON Mapping' : isArchiveMetadataOnly ? 'Archive Validation' : 'File Mapping'}
             </span>
           </div>
@@ -369,44 +363,42 @@ export const ValidationWizardView: React.FC = () => {
         {renderStepContent()}
       </main>
 
-      <footer className={styles.wizardActionFooter} style={{ justifyContent: 'space-between' }}>
+      <footer className={`${styles.wizardActionFooter} ${styles.wizardActionFooterSpread}`}>
         <div>
           {currentStep > 1 && (
             <button
+              type="button"
               onClick={handleBack}
               disabled={isActuallyLoading}
-              style={{ padding: '0 24px', height: '40px', borderRadius: '8px', border: '1px solid #d9d9d9', background: '#ffffff', color: '#414755', fontSize: '14px', fontWeight: 600, cursor: isActuallyLoading ? 'not-allowed' : 'pointer', opacity: isActuallyLoading ? 0.6 : 1 }}
+              className={`${styles.secondaryBtn} ${isActuallyLoading ? styles.secondaryBtnDisabled : ''}`}
             >
               Back
             </button>
           )}
         </div>
-        <div style={{ display: 'flex', gap: '16px' }}>
+        <div className={styles.footerBtnGroup}>
           <button
             type="button"
             disabled={!canSaveDraft || savingDraft}
             onClick={() => void handleSaveDraft()}
             title="Save mapping configuration without running validation"
-            style={{ padding: '0 24px', height: '40px', borderRadius: '8px', border: '1px solid #d9d9d9', background: '#ffffff', color: '#414755', fontSize: '14px', fontWeight: 600, cursor: canSaveDraft && !savingDraft ? 'pointer' : 'not-allowed', opacity: canSaveDraft ? 1 : 0.6 }}
+            className={`${styles.secondaryBtn} ${!canSaveDraft || savingDraft ? styles.secondaryBtnMuted : ''}`}
           >
             {savingDraft ? 'Saving…' : 'Save Draft'}
           </button>
           <button
+            type="button"
             onClick={() => void handleProceed()}
             disabled={isNextButtonDisabled}
-            style={{
-              padding: '0 32px', height: '40px', borderRadius: '8px', border: 'none',
-              background: isNextButtonDisabled ? '#e5e2e1' : '#234B5F',
-              color: isNextButtonDisabled ? '#727786' : '#ffffff',
-              fontSize: '14px', fontWeight: 700, cursor: isNextButtonDisabled ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s',
-            }}
+            className={isNextButtonDisabled ? `${styles.primaryBtn} ${styles.primaryBtnDisabled}` : styles.primaryBtn}
           >
             {isActuallyLoading ? 'Processing...' : proceedLabel}
-            {!isActuallyLoading && <ArrowRightOutlined style={{ fontSize: '16px' }} />}
+            {!isActuallyLoading && <ArrowRightOutlined className={styles.proceedIcon} />}
           </button>
         </div>
       </footer>
     </div>
   );
 };
+
+export default ValidationWizardView;

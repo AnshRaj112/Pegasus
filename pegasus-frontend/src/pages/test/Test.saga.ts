@@ -1,18 +1,20 @@
 import { notification } from 'antd';
-import { AxiosError, AxiosResponse } from 'axios';
-import { all, call, put, takeLatest } from 'redux-saga/effects';
-import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constant';
+import { AxiosError } from 'axios';
+import { all, put, takeLatest, delay } from 'redux-saga/effects';
+import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
 import { testActions } from './Test.reducer';
-import { TestEntity } from './Test.interface';
-import { TestServiceApi } from './Test.service';
+import { mockActiveTests, mockCompletedTests, mockSavedTests } from './Test.mockdata';
 
 export function* fetchActiveTestsSaga() {
   try {
-    const response: AxiosResponse<TestEntity[]> = yield call(TestServiceApi.fetchActiveTests);
-    yield put(testActions.fetchActiveTestsSuccess(response.data));
+    // Simulate network latency to test skeleton loaders
+    yield delay(800); 
+    
+    // Bypass TestServiceApi for now and yield the mock data directly
+    yield put(testActions.fetchActiveTestsSuccess(mockActiveTests));
   } catch (error) {
     if (error instanceof AxiosError) {
-      yield put(testActions.fetchActiveTestsError(error.response?.data?.message || 'Error fetching active tests'));
+      yield put(testActions.fetchActiveTestsError(error.response?.data?.message || 'Error'));
       notification.error({
         message: NOTIFICATION_SERVICE_TYPES.ERROR,
         description: error.response?.data?.message || 'Failed to load active tests.',
@@ -23,11 +25,11 @@ export function* fetchActiveTestsSaga() {
 
 export function* fetchCompletedTestsSaga() {
   try {
-    const response: AxiosResponse<TestEntity[]> = yield call(TestServiceApi.fetchCompletedTests);
-    yield put(testActions.fetchCompletedTestsSuccess(response.data));
+    yield delay(800); 
+    yield put(testActions.fetchCompletedTestsSuccess(mockCompletedTests));
   } catch (error) {
     if (error instanceof AxiosError) {
-      yield put(testActions.fetchCompletedTestsError(error.response?.data?.message || 'Error fetching completed tests'));
+      yield put(testActions.fetchCompletedTestsError(error.response?.data?.message || 'Error'));
       notification.error({
         message: NOTIFICATION_SERVICE_TYPES.ERROR,
         description: error.response?.data?.message || 'Failed to load completed tests.',
@@ -38,11 +40,11 @@ export function* fetchCompletedTestsSaga() {
 
 export function* fetchSavedTestsSaga() {
   try {
-    const response: AxiosResponse<TestEntity[]> = yield call(TestServiceApi.fetchSavedTests);
-    yield put(testActions.fetchSavedTestsSuccess(response.data));
+    yield delay(800);
+    yield put(testActions.fetchSavedTestsSuccess(mockSavedTests));
   } catch (error) {
     if (error instanceof AxiosError) {
-      yield put(testActions.fetchSavedTestsError(error.response?.data?.message || 'Error fetching saved tests'));
+      yield put(testActions.fetchSavedTestsError(error.response?.data?.message || 'Error'));
       notification.error({
         message: NOTIFICATION_SERVICE_TYPES.ERROR,
         description: error.response?.data?.message || 'Failed to load saved tests.',

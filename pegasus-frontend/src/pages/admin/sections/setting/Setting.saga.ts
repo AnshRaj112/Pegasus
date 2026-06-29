@@ -3,7 +3,7 @@ import { notification } from 'antd'
 import { AxiosError, AxiosResponse } from 'axios'
 import { all, call, put, takeLatest } from 'redux-saga/effects'
 
-import { NOTIFICATION_SERVICE_TYPES } from '../../../../shared/constants/common.constant'
+import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
 
 import { ValidationSettings, ValidationSettingsResponse } from './Setting.interface'
 import { settingActions } from './Setting.reducer'
@@ -33,7 +33,7 @@ export function* saveSettingsSaga(action: PayloadAction<ValidationSettings>) {
 		)
 		yield put(settingActions.saveSettingsSuccess(response.data))
 		notification.success({
-			message: 'Success',
+			message: NOTIFICATION_SERVICE_TYPES.SUCCESS,
 			description: 'Settings saved successfully.',
 		})
 	} catch (error) {

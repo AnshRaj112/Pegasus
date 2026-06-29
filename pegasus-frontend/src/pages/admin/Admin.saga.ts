@@ -3,6 +3,7 @@ import { PayloadAction } from '@reduxjs/toolkit';
 import { notification } from 'antd';
 
 import { getApiErrorMessage } from '../../shared/api/apiError';
+import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
 import {
  AdminReducerState,
  CreateStorageProviderPayload,
@@ -13,7 +14,7 @@ import {
 import { adminActions } from './Admin.reducer';
 import { adminService } from './Admin.service';
 
-function* handleTestConnectionSaga(action: PayloadAction<string>) {
+export function* handleTestConnectionSaga(action: PayloadAction<string>) {
   const connectionId = action.payload;
   try {
     const adminState: AdminReducerState = yield select((state: { admin: AdminReducerState }) => state.admin);
@@ -32,7 +33,7 @@ function* handleTestConnectionSaga(action: PayloadAction<string>) {
   } catch (error: unknown) {
     yield put(adminActions.testConnectionFailure(connectionId));
     notification.error({
-      message: 'Connection test failed',
+      message: NOTIFICATION_SERVICE_TYPES.ERROR,
       description: getApiErrorMessage(error, 'Could not reach the storage bucket.'),
     });
     yield delay(2500);
@@ -40,7 +41,7 @@ function* handleTestConnectionSaga(action: PayloadAction<string>) {
   }
 }
 
-function* handleFetchWorkspacesSaga() {
+export function* handleFetchWorkspacesSaga() {
   try {
     const data: WorkspaceItem[] = yield call([adminService, adminService.fetchWorkspaces]);
     yield put(adminActions.fetchWorkspacesSuccess(data));
@@ -49,7 +50,7 @@ function* handleFetchWorkspacesSaga() {
   }
 }
 
-function* handleFetchProvidersSaga() {
+export function* handleFetchProvidersSaga() {
   try {
     const data: StorageProviderItem[] = yield call([adminService, adminService.fetchStorageProviders]);
     yield put(adminActions.fetchProvidersSuccess(data));
@@ -58,7 +59,7 @@ function* handleFetchProvidersSaga() {
   }
 }
 
-function* handleCreateProviderSaga(action: PayloadAction<CreateStorageProviderPayload>) {
+export function* handleCreateProviderSaga(action: PayloadAction<CreateStorageProviderPayload>) {
   try {
     const created: StorageProviderItem = yield call(
       [adminService, adminService.createStorageProvider],
@@ -66,7 +67,7 @@ function* handleCreateProviderSaga(action: PayloadAction<CreateStorageProviderPa
     );
     yield put(adminActions.createProviderSuccess(created));
     notification.success({
-      message: 'Storage connected',
+      message: NOTIFICATION_SERVICE_TYPES.SUCCESS,
       description: `${created.name} is ready to use in validation workflows.`,
     });
   } catch (error: unknown) {
@@ -74,7 +75,7 @@ function* handleCreateProviderSaga(action: PayloadAction<CreateStorageProviderPa
   }
 }
 
-function* handleUpdateProviderSaga(action: PayloadAction<StorageProviderPayload>) {
+export function* handleUpdateProviderSaga(action: PayloadAction<StorageProviderPayload>) {
   try {
     const updated: StorageProviderItem = yield call(
       [adminService, adminService.updateStorageProvider],
@@ -82,7 +83,7 @@ function* handleUpdateProviderSaga(action: PayloadAction<StorageProviderPayload>
     );
     yield put(adminActions.updateProviderSuccess(updated));
     notification.success({
-      message: 'Storage connection updated',
+      message: NOTIFICATION_SERVICE_TYPES.SUCCESS,
       description: `${updated.name} has been saved.`,
     });
   } catch (error: unknown) {
@@ -90,11 +91,14 @@ function* handleUpdateProviderSaga(action: PayloadAction<StorageProviderPayload>
   }
 }
 
-function* handleDeleteProviderSaga(action: PayloadAction<string>) {
+export function* handleDeleteProviderSaga(action: PayloadAction<string>) {
   try {
     yield call([adminService, adminService.deleteStorageProvider], action.payload);
     yield put(adminActions.deleteProviderSuccess(action.payload));
-    notification.success({ message: 'Storage connection removed' });
+    notification.success({
+      message: NOTIFICATION_SERVICE_TYPES.SUCCESS,
+      description: 'Storage connection removed',
+    });
   } catch (error: unknown) {
     yield put(adminActions.deleteProviderError(getApiErrorMessage(error, 'Failed to delete storage connection')));
   }

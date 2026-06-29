@@ -244,4 +244,17 @@ export const ReportService = {
     });
     return [...data.items].sort((a, b) => runTs(b) - runTs(a));
   },
+
+  fetchHistoryRun: async (runId: string) => {
+    const { data } = await Api.getValidationHistoryRun(runId);
+    return data;
+  },
+
+  fetchMismatchesPage: async (
+    runId: string,
+    params: { limit: number; offset: number },
+  ) => {
+    const { data } = await Api.getValidationMismatches(runId, params);
+    return data;
+  },
 };

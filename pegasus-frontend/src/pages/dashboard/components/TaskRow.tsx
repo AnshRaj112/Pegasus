@@ -1,71 +1,64 @@
 import React from 'react';
 import { CheckCircle2, Loader2, Calendar, AlertCircle } from 'lucide-react';
-import { TaskItem } from '../Dashboard.interface'; // ⚡ We import it here now!
+import { TaskItem } from '../Dashboard.interface';
+import styles from './TaskRow.module.scss';
 
 interface TaskRowProps {
   task: TaskItem;
 }
 
+const progressMeterClass = (status: TaskItem['status']) => {
+  if (status === 'Failed') return styles.progressMeterFailed;
+  if (status === 'Completed') return styles.progressMeterCompleted;
+  if (status === 'Scheduled') return styles.progressMeterScheduled;
+  return '';
+};
+
 export const TaskRow: React.FC<TaskRowProps> = ({ task }) => {
   const getStatusBadge = (status: TaskItem['status']) => {
-
-    // Upgraded base style block: Removed background color panel bounds and outline borders
-    const textOnlyBadgeStyle: React.CSSProperties = {
-      fontSize: 'var(--body-sm)',
-      fontWeight: 600,
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '6px'
-    };
-
     switch (status) {
       case 'Completed':
         return (
-          <span style={{ ...textOnlyBadgeStyle, color: '#166534' }}>
+          <span className={`${styles.badge} ${styles.badgeCompleted}`}>
             <CheckCircle2 size={14} /> Completed
           </span>
         );
       case 'Running':
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--xs)', color: '#ea580c', fontWeight: 600, fontSize: 'var(--body-sm)' }}>
+          <div className={styles.badgeRunning}>
             <Loader2 size={14} className="icon-spin-loop" /> Running
           </div>
         );
       case 'Scheduled':
         return (
-          <span style={{ ...textOnlyBadgeStyle, color: 'var(--on-surface-variant)' }}>
+          <span className={`${styles.badge} ${styles.badgeScheduled}`}>
             <Calendar size={14} /> Scheduled
           </span>
         );
       case 'Failed':
         return (
-          <span style={{ ...textOnlyBadgeStyle, color: 'var(--error)' }}>
+          <span className={`${styles.badge} ${styles.badgeFailed}`}>
             <AlertCircle size={14} /> Failed
           </span>
         );
     }
   };
 
-  const getProgressColor = (status: TaskItem['status']) => {
-    if (status === 'Failed') return 'var(--error)';
-    if (status === 'Completed') return '#16a34a';
-    if (status === 'Scheduled') return 'var(--surface-dim)';
-    return 'var(--primary)';
-  };
-
   return (
-    <tr style={{ borderBottom: '1px solid var(--surface-variant)' }}>
-      <td style={{ padding: 'var(--md)' }}>
-        <div style={{ fontWeight: 500, color: 'var(--on-surface)' }}>{task.name}</div>
-        <div style={{ fontFamily: 'var(--font-body-sm)', fontSize: 'var(--body-sm)', color: 'var(--on-surface-variant)' }}>{task.time}</div>
+    <tr className={styles.row}>
+      <td className={styles.cell}>
+        <div className={styles.taskName}>{task.name}</div>
+        <div className={styles.taskTime}>{task.time}</div>
       </td>
-      <td style={{ padding: 'var(--md)' }}>{getStatusBadge(task.status)}</td>
-      <td style={{ padding: 'var(--md)' }}>
-        <div style={{ width: '100%', background: 'var(--surface-container)', borderRadius: '9999px', height: '6px', overflow: 'hidden' }}>
-          <div style={{ backgroundColor: getProgressColor(task.status), height: '6px', borderRadius: '9999px', width: `${task.progress}%` }}></div>
-        </div>
+      <td className={styles.cell}>{getStatusBadge(task.status)}</td>
+      <td className={styles.cell}>
+        <progress
+          className={`${styles.progressMeter} ${progressMeterClass(task.status)}`}
+          value={task.progress}
+          max={100}
+        />
         {task.status === 'Running' && (
-          <div style={{ fontSize: '10px', marginTop: 'var(--xs)', color: 'var(--on-surface-variant)' }}>{task.progress}% Processing</div>
+          <div className={styles.progressLabel}>{task.progress}% Processing</div>
         )}
       </td>
     </tr>

@@ -1,15 +1,31 @@
-import { call, put, takeLatest } from 'redux-saga/effects';
+import { notification } from 'antd';
+import { AxiosError } from 'axios';
+import { all, call, put, takeLatest } from 'redux-saga/effects';
+
+import { getApiErrorMessage } from '../../shared/api/apiError';
+import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
+
+import { profileActions } from './Profile.reducer';
 import { fetchUserProfile } from './Profile.service';
 
-function* handleFetchProfile(): Generator<any, void, any> {
+export function* fetchProfileSaga() {
   try {
-    const data = yield call(fetchUserProfile);
-    yield put({ type: 'FETCH_PROFILE_SUCCESS', payload: data });
-  } catch (error: any) {
-    yield put({ type: 'FETCH_PROFILE_FAILURE', payload: error.message });
+    const data: Awaited<ReturnType<typeof fetchUserProfile>> = yield call(fetchUserProfile);
+    yield put(profileActions.fetchProfileSuccess(data));
+  } catch (error) {
+    const errorMessage = getApiErrorMessage(error, 'Failed to fetch profile');
+    yield put(profileActions.fetchProfileError(errorMessage));
+    if (error instanceof AxiosError) {
+      notification.error({
+        message: NOTIFICATION_SERVICE_TYPES.ERROR,
+        description: errorMessage,
+      });
+    }
   }
 }
 
-export function* watchProfileSagas() {
-  yield takeLatest('FETCH_PROFILE_REQUEST', handleFetchProfile);
+export function* profileSaga() {
+  yield all([
+    takeLatest(profileActions.fetchProfileRequest.type, fetchProfileSaga),
+  ]);
 }

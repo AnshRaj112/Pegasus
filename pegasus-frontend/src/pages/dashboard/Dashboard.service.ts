@@ -6,6 +6,7 @@ import {
  EntityInsight,
  QueueJobSnapshot,
  QueueStatusResponse,
+ CreateEntityRequest,
 } from '../../shared/api/Api';
 
 import { DashboardDataResponse, TaskItem } from './Dashboard.interface';
@@ -68,4 +69,6 @@ export const DashboardServiceApi = {
       data: { ...queue, dailyStats, totals, entities },
     } as AxiosResponse<DashboardDataResponse>;
   },
+
+  createEntity: (body: CreateEntityRequest) => Api.createEntity(body),
 };

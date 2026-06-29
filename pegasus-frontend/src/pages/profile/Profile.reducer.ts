@@ -1,20 +1,43 @@
-import { ProfileState } from './Profile.interface';
+import { PayloadAction, createSlice } from '@reduxjs/toolkit';
 
-const initialState: ProfileState = {
-  data: null,
-  isLoading: false,
-  error: null,
+import { initializeNullState } from '~/shared/constants/common.constants';
+
+import { ProfileReducerState, UserProfile } from './Profile.interface';
+
+export const initialState: ProfileReducerState = {
+  fetchProfileState: initializeNullState,
 };
 
-export const profileReducer = (state = initialState, action: any): ProfileState => {
-  switch (action.type) {
-    case 'FETCH_PROFILE_REQUEST':
-      return { ...state, isLoading: true, error: null };
-    case 'FETCH_PROFILE_SUCCESS':
-      return { ...state, isLoading: false, data: action.payload };
-    case 'FETCH_PROFILE_FAILURE':
-      return { ...state, isLoading: false, error: action.payload };
-    default:
-      return state;
-  }
+const profileSlice = createSlice({
+  name: 'profile',
+  initialState,
+  reducers: {
+    fetchProfileRequest: (state) => ({
+      ...state,
+      fetchProfileState: {
+        ...initializeNullState,
+        isFetching: true,
+      },
+    }),
+    fetchProfileSuccess: (state, action: PayloadAction<UserProfile>) => ({
+      ...state,
+      fetchProfileState: {
+        ...initializeNullState,
+        data: action.payload,
+      },
+    }),
+    fetchProfileError: (state, action: PayloadAction<string>) => ({
+      ...state,
+      fetchProfileState: {
+        ...initializeNullState,
+        error: action.payload,
+      },
+    }),
+  },
+});
+
+export const profileActions = {
+  ...profileSlice.actions,
 };
+
+export default profileSlice.reducer;

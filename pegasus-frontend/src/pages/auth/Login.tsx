@@ -11,12 +11,13 @@ import { useAppDispatch } from '~/redux/store';
 import { authActions } from './Auth.reducer';
 import { adminLogin } from '~/shared/api/adminAuth';
 import { getApiErrorMessage } from '~/shared/api/apiError';
+import { PATHS } from '~/router/router.constants';
 
 import loginIcon from '~/assets/login_icon.png';
 import onixLogo from '~/assets/logo.png';
 import styles from './Auth.module.scss';
 
-export const Login: React.FC = () => {
+const Login: React.FC = () => {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   
@@ -33,7 +34,7 @@ export const Login: React.FC = () => {
     try {
       const user = await adminLogin(email.trim(), password);
       dispatch(authActions.setSession({ email: user.email }));
-      navigate('/');
+      navigate(PATHS.DASHBOARD);
     } catch (err: unknown) {
       setError(getApiErrorMessage(err, 'Sign-in failed.'));
     } finally {
@@ -142,3 +143,5 @@ export const Login: React.FC = () => {
     </div>
   );
 };
+
+export default Login;

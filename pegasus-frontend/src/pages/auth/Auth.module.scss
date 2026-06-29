@@ -1,22 +1,24 @@
+@use '~/assets/styles/variables' as tokens;
+
 :root {
-  --surface-bright: #fcf9f8;
-  --surface-container-lowest: #ffffff;
-  --on-surface: #1b1b1c;
-  --on-surface-variant: #414755;
-  --on-primary: #ffffff;
-  --color-onyx-red: #E06B67;
-  --color-onyx-red-deep: #952622;
+  --surface-bright: #{tokens.$surface};
+  --surface-container-lowest: #{tokens.$surface-container-lowest};
+  --on-surface: #{tokens.$on-surface};
+  --on-surface-variant: #{tokens.$on-surface-variant};
+  --on-primary: #{tokens.$on-primary};
+  --color-onyx-red: #{tokens.$color-onyx-red};
+  --color-onyx-red-deep: #{tokens.$color-onyx-red-deep};
   --color-onyx-red-light: rgba(224, 107, 103, 0.25);
-  --status-fail: #ba1a1a;
-  --outline: #727786;
-  --outline-variant: #c1c6d7;
+  --status-fail: #{tokens.$status-fail};
+  --outline: #{tokens.$text-muted};
+  --outline-variant: #{tokens.$outline-variant};
 }
 
 /* Force kills the browser's default white border stripe */
 :global(body), :global(html) {
   margin: 0 !important;
   padding: 0 !important;
-  background-color: var(--surface-bright, #fcf9f8);
+  background-color: var(--surface-bright, #{tokens.$surface});
 }
 
 .authWrapper {
@@ -26,9 +28,9 @@
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  background-color: var(--surface-bright, #fcf9f8);
-  color: var(--on-surface, #1b1b1c);
-  font-family: 'Inter', sans-serif;
+  background-color: var(--surface-bright, #{tokens.$surface});
+  color: var(--on-surface, #{tokens.$on-surface});
+  font-family: tokens.$font-body-md;
   position: relative;
 }
 
@@ -78,8 +80,8 @@
 .authCard {
   width: 100%;
   max-width: 420px;
-  background-color: var(--surface-container-lowest, #ffffff);
-  border: 1px solid var(--outline-variant, #c1c6d7);
+  background-color: var(--surface-container-lowest, #{tokens.$surface-container-lowest});
+  border: 1px solid var(--outline-variant, #{tokens.$outline-variant});
   border-radius: 12px;
   padding: 36px 32px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
@@ -97,7 +99,7 @@
 .authCardTitle {
   font-size: 20px; 
   font-weight: 800;
-  color: var(--on-surface, #1b1b1c);
+  color: var(--on-surface, #{tokens.$on-surface});
   margin: 0 0 2px 0;
   line-height: 1.1;
   letter-spacing: -0.5px;
@@ -106,7 +108,7 @@
 .authCardSubtitle {
   font-size: 10px; 
   font-weight: 700;
-  color: var(--on-surface-variant, #414755);
+  color: var(--on-surface-variant, #{tokens.$on-surface-variant});
   margin: 0;
   letter-spacing: 0.8px;
   text-transform: uppercase;
@@ -120,7 +122,7 @@
 .authFormLabel {
   font-size: 13px;
   font-weight: 600;
-  color: var(--on-surface, #1b1b1c);
+  color: var(--on-surface, #{tokens.$on-surface});
 }
 
 .authFormForgotLink {
@@ -136,7 +138,7 @@
 .authFormError {
   margin: 0;
   font-size: 13px;
-  color: var(--status-fail, #ba1a1a);
+  color: var(--status-fail, #{tokens.$status-fail});
 }
 
 .inputWrapper {
@@ -149,7 +151,7 @@
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--outline, #727786);
+  color: var(--outline, #{tokens.$text-muted});
 }
 
 .actionIcon {
@@ -157,7 +159,7 @@
   right: 12px;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--outline, #727786);
+  color: var(--outline, #{tokens.$text-muted});
   cursor: pointer;
   background: none;
   border: none;
@@ -167,23 +169,23 @@
   width: 100%;
   box-sizing: border-box;
   padding: 10px 16px 10px 36px;
-  background-color: var(--surface-container-lowest, #ffffff);
-  border: 1px solid var(--outline-variant, #c1c6d7);
+  background-color: var(--surface-container-lowest, #{tokens.$surface-container-lowest});
+  border: 1px solid var(--outline-variant, #{tokens.$outline-variant});
   border-radius: 6px;
   font-size: 14px;
   outline: none;
   transition: all 0.2s;
 
   &:focus {
-    border-color: var(--color-onyx-red, #E06B67);
+    border-color: var(--color-onyx-red, #{tokens.$color-onyx-red});
     box-shadow: 0 0 0 2px var(--color-onyx-red-light);
   }
 }
 
 .submitBtn {
   width: 100%;
-  background-color: var(--color-onyx-red, #E06B67);
-  color: var(--on-primary, #ffffff);
+  background-color: var(--color-onyx-red, #{tokens.$color-onyx-red});
+  color: var(--on-primary, #{tokens.$on-primary});
   padding: 10px;
   border-radius: 6px;
   font-size: 14px;
@@ -196,7 +198,7 @@
   transition: all 0.2s;
 
   &:hover {
-    background-color: var(--color-onyx-red-deep, #952622);
+    background-color: var(--color-onyx-red-deep, #{tokens.$color-onyx-red-deep});
   }
   
   &:active {
@@ -210,66 +212,4 @@
   font-size: 12px;
   position: relative;
   z-index: 1;
-}
-
-.sessionModal {
-  :global(.ant-modal-content) {
-    background-color: var(--surface-container-lowest, #ffffff);
-    border: 1px solid var(--outline-variant, #c1c6d7);
-    border-radius: 12px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-    padding: 0;
-  }
-
-  :global(.ant-modal-header) {
-    background: transparent;
-    border-bottom: 1px solid var(--outline-variant, #c1c6d7);
-    margin-bottom: 0;
-    padding: 20px 24px 16px;
-  }
-
-  :global(.ant-modal-title) {
-    color: var(--on-surface, #1b1b1c);
-    font-family: var(--font-h3, 'Inter', sans-serif);
-    font-size: 18px;
-    font-weight: 700;
-  }
-
-  :global(.ant-modal-body) {
-    padding: 16px 24px;
-  }
-
-  :global(.ant-modal-footer) {
-    border-top: 1px solid var(--outline-variant, #c1c6d7);
-    margin-top: 0;
-    padding: 12px 24px 20px;
-  }
-
-  :global(.ant-btn-default) {
-    border-color: var(--outline-variant, #c1c6d7);
-    color: var(--on-surface, #1b1b1c);
-    background: var(--surface-container-lowest, #ffffff);
-
-    &:hover {
-      border-color: var(--outline, #727786) !important;
-      color: var(--on-surface, #1b1b1c) !important;
-    }
-  }
-
-  :global(.ant-btn-primary) {
-    background-color: var(--color-onyx-red, #E06B67);
-    border-color: var(--color-onyx-red, #E06B67);
-
-    &:hover {
-      background-color: var(--color-onyx-red-deep, #952622) !important;
-      border-color: var(--color-onyx-red-deep, #952622) !important;
-    }
-  }
-}
-
-.sessionModalBody {
-  margin: 0;
-  color: var(--on-surface-variant, #414755);
-  font-size: var(--body-md, 14px);
-  line-height: 1.5;
 }

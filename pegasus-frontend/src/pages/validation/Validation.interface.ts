@@ -14,7 +14,53 @@ export type {
   ValidateResult,
   ValidationJobDetailResponse,
   ValidationMismatchesResponse,
+  ValidationHistoryDetail,
+  SaveDraftRequest,
 } from '../../shared/api/Api';
+
+export interface AsyncState<T> {
+  data: T | null;
+  isFetching: boolean;
+  error: string | null;
+}
+
+export type SaveDraftIntent = 'proceed' | 'save';
+
+export interface BrowseCloudRequestPayload {
+  pathId: string;
+  connectionId: string;
+  bucket: string | null;
+  prefix: string;
+  background?: boolean;
+}
+
+export interface BrowseCloudState {
+  pathId: string | null;
+  connectionId: string | null;
+  background: boolean;
+  isFetching: boolean;
+  data: import('../../shared/api/Api').CloudBrowseResponse | null;
+  error: string | null;
+}
+
+export interface PreviewRequestState<T> {
+  pairKey: string | null;
+  data: T | null;
+  isFetching: boolean;
+  error: string | null;
+}
+
+export interface SaveDraftState {
+  data: import('../../shared/api/Api').ValidationHistoryDetail | null;
+  intent: SaveDraftIntent | null;
+  isFetching: boolean;
+  error: string | null;
+}
+
+export interface ProfileCloudFilesRequestPayload {
+  sourceKey: string;
+  targetKey: string;
+}
 
 export interface ValidationDataResponse {
   jobId: string | null;
@@ -66,4 +112,9 @@ export interface ValidationReducerState {
   };
   /** Navigate to execution history for this file pair after validation starts or completes. */
   pendingHistoryNavigation: { sourcePath: string; targetPath: string } | null;
+  cloudConnectionsState: AsyncState<import('../../shared/api/Api').CloudConnection[]>;
+  browseCloudState: BrowseCloudState;
+  previewColumnsState: PreviewRequestState<import('../../shared/api/Api').LocalColumnPreviewResponse>;
+  previewFixedWidthState: PreviewRequestState<import('../../shared/api/Api').FixedWidthLayoutPreviewResponse>;
+  saveDraftState: SaveDraftState;
 }

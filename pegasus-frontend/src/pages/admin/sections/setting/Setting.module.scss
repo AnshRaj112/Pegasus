@@ -1,5 +1,12 @@
+@use '~/assets/styles/variables' as tokens;
+
+.fieldMaxWidth {
+	max-width: 20rem;
+	width: 100%;
+}
+
 .mainWrapper {
-	background-color: #f4f6f8; /* theme.colors.background */
+	background-color: tokens.$row-hover;
 	min-height: calc(100vh - 128px);
 }
 
@@ -13,17 +20,17 @@
 	margin-bottom: 2rem;
 
 	h1 {
-		color: #234b5f; /* theme.colors.primary */
+  color: tokens.$primary;
 	}
 
 	p {
-		color: #41484c; /* theme.colors.on-surface-variant */
+		color: tokens.$on-surface-variant;
 	}
 }
 
 .settingsCard {
-	background-color: #ffffff; /* theme.colors.surface-container-lowest */
-	border: 1px solid #c1c7cc; /* theme.colors.outline-variant */
+	background-color: tokens.$surface-container-lowest;
+	border: 1px solid tokens.$outline-variant;
 	border-radius: 0.5rem;
 	box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 
@@ -31,25 +38,25 @@
 	:global {
 		.ant-input-number,
 		.ant-select-selector {
-			border-color: #c1c7cc;
+			border-color: tokens.$outline-variant;
 		}
 		
 		.ant-input-number-focused,
 		.ant-input-number:focus,
 		.ant-select-focused .ant-select-selector {
-			border-color: #234b5f !important;
+			border-color: tokens.$primary !important;
 			box-shadow: 0 0 0 2px rgba(35, 75, 95, 0.1) !important;
 		}
 
 		.ant-checkbox-checked .ant-checkbox-inner {
-			background-color: #234b5f;
-			border-color: #234b5f;
+			background-color: tokens.$primary;
+			border-color: tokens.$primary;
 		}
 	}
 }
 
 .formLabel {
-	color: #191c1e; /* theme.colors.on-surface */
+	color: tokens.$on-surface;
 	font-weight: 500;
 	margin-bottom: 0.5rem;
 	display: block;
@@ -57,12 +64,12 @@
 
 .helperText {
 	font-size: 0.75rem;
-	color: #41484c; /* theme.colors.on-surface-variant */
+	color: tokens.$on-surface-variant;
 	margin-top: 0.25rem;
 }
 
 .divider {
-	border-color: #e0e3e5; /* theme.colors.surface-variant */
+	border-color: tokens.$surface-variant;
 	margin: 0;
 }
 
@@ -79,7 +86,7 @@
 	padding: 1.5rem;
 	
 	.infoTitle {
-		color: #234b5f; /* theme.colors.primary */
+  color: tokens.$primary;
 	}
 
 	p {
@@ -88,13 +95,13 @@
 }
 
 .envCard {
-	background-color: #f2f4f6; /* theme.colors.surface-container-low */
-	border: 1px solid #c1c7cc; /* theme.colors.outline-variant */
+	background-color: tokens.$surface-container-low;
+	border: 1px solid tokens.$outline-variant;
 	border-radius: 0.75rem;
 	padding: 1.5rem;
 
 	h4 {
-		color: #191c1e; /* theme.colors.on-surface */
+		color: tokens.$on-surface;
 	}
 }
 
@@ -110,40 +117,40 @@
 		display: flex;
 		justify-content: space-between;
 		font-size: 0.8125rem;
-		color: #41484c; /* theme.colors.on-surface-variant */
+		color: tokens.$on-surface-variant;
 
 		.envValue {
-			color: #234b5f; /* theme.colors.primary */
-			font-family: 'JetBrains Mono', monospace;
+	  color: tokens.$primary;
+			font-family: tokens.$font-mono;
 			font-weight: 500;
 		}
 
 		.envValueDark {
-			color: #191c1e; /* theme.colors.on-surface */
-			font-family: 'JetBrains Mono', monospace;
+			color: tokens.$on-surface;
+			font-family: tokens.$font-mono;
 			font-weight: 500;
 		}
 	}
 }
 
 .actionButton {
-	background-color: #234b5f;
-	color: #ffffff;
+	background-color: tokens.$primary;
+	color: tokens.$on-primary;
 	
 	&:hover {
 		opacity: 0.9;
-		background-color: #234b5f !important;
-		color: #ffffff !important;
+		background-color: tokens.$primary !important;
+		color: tokens.$on-primary !important;
 	}
 }
 
 .resetButton {
-	color: #234b5f;
-	border-color: #234b5f;
+	color: tokens.$primary;
+	border-color: tokens.$primary;
 
 	&:hover {
 		background-color: rgba(35, 75, 95, 0.05) !important;
-		color: #234b5f !important;
-		border-color: #234b5f !important;
+		color: tokens.$primary !important;
+		border-color: tokens.$primary !important;
 	}
 }

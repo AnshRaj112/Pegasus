@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
-import { Api, CloudConnection, CloudBrowseEntry, GoogleCloudStorageConfig } from '../../../shared/api/Api';
+import { CloudConnection, CloudBrowseEntry, GoogleCloudStorageConfig } from '../../../shared/api/Api';
 import {
   getConnectionBrowsePath,
   isBrowsePathFresh,
@@ -13,6 +13,7 @@ import {
   FileTextOutlined, DeleteOutlined, CheckOutlined, CloudOutlined,
   FolderFilled, ArrowUpOutlined, SyncOutlined,
 } from '@ant-design/icons';
+import styles from './FileSelectionStep.module.scss';
 
 export interface FileExplorerItem {
   id: string;
@@ -75,12 +76,10 @@ const toExplorerItem = (entry: CloudBrowseEntry): FileExplorerItem => ({
   size: entry.is_dir ? '—' : formatBytes(entry.size_bytes),
   sizeBytes: entry.size_bytes ?? null,
   createdAt: formatDate(entry.created_at),
-  // ⚡ Added (entry as any) to bypass the TypeScript strict type check
-  modifiedAt: formatDate(entry.updated_at || (entry as any).modified_at),
+  modifiedAt: formatDate(entry.updated_at || entry.modified_at),
   owner: stripGcsUserPrefix(entry.owner),
   createdBy: stripGcsUserPrefix(entry.created_by),
-  // ⚡ Added (entry as any) here as well
-  rawModifiedAt: new Date(entry.updated_at || (entry as any).modified_at || 0).getTime(),
+  rawModifiedAt: new Date(entry.updated_at || entry.modified_at || 0).getTime(),
 });
 
 const envFallbackConnection = (): CloudConnection | null => {
@@ -148,21 +147,23 @@ const fileFromValidationCloud = (
   rawModifiedAt: 0,
 });
 
-const SkeletonCell: React.FC<{ width?: string }> = ({ width = '100%' }) => (
-  <div style={{ width, height: '14px', backgroundColor: '#e2e8f0', borderRadius: '4px', animation: 'browse-skeleton-pulse 1.5s ease-in-out infinite' }} />
+const SKELETON_NAME_WIDTHS = [styles.skeletonW55, styles.skeletonW67, styles.skeletonW79];
+
+const SkeletonCell: React.FC<{ widthClass: string }> = ({ widthClass }) => (
+  <div className={`${styles.skeleton} ${widthClass}`} />
 );
 
 const BrowseSkeletonRows: React.FC<{ rows?: number }> = ({ rows = 8 }) => (
   <>
     {Array.from({ length: rows }, (_, i) => (
-      <tr key={`skeleton-${i}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
-        <td style={{ padding: '12px' }}><SkeletonCell width="16px" /></td>
-        <td style={{ padding: '12px' }}><SkeletonCell width={`${55 + (i % 3) * 12}%`} /></td>
-        <td style={{ padding: '12px' }}><SkeletonCell width="64px" /></td>
-        <td style={{ padding: '12px' }}><SkeletonCell width="96px" /></td>
-        <td style={{ padding: '12px' }}><SkeletonCell width="96px" /></td>
-        <td style={{ padding: '12px' }}><SkeletonCell width="80px" /></td>
-        <td style={{ padding: '12px' }}><SkeletonCell width="72px" /></td>
+      <tr key={`skeleton-${i}`} className={styles.skeletonRow}>
+        <td className={styles.td}><SkeletonCell widthClass={styles.skeletonW16} /></td>
+        <td className={styles.td}><SkeletonCell widthClass={SKELETON_NAME_WIDTHS[i % SKELETON_NAME_WIDTHS.length]} /></td>
+        <td className={styles.td}><SkeletonCell widthClass={styles.skeletonW64} /></td>
+        <td className={styles.td}><SkeletonCell widthClass={styles.skeletonW96} /></td>
+        <td className={styles.td}><SkeletonCell widthClass={styles.skeletonW96} /></td>
+        <td className={styles.td}><SkeletonCell widthClass={styles.skeletonW80} /></td>
+        <td className={styles.td}><SkeletonCell widthClass={styles.skeletonW72} /></td>
       </tr>
     ))}
   </>
@@ -175,15 +176,15 @@ const truncateWithEllipsis = (text: string, maxLength = MAX_DISPLAY_NAME_LENGTH)
   return `${text.slice(0, maxLength)}...`;
 };
 
-const TruncatableName: React.FC<{ text: string; maxLength?: number; style?: React.CSSProperties }> = ({
+const TruncatableName: React.FC<{ text: string; maxLength?: number; className?: string }> = ({
   text,
   maxLength = MAX_DISPLAY_NAME_LENGTH,
-  style,
+  className,
 }) => {
   const display = truncateWithEllipsis(text, maxLength);
   const isTruncated = display !== text;
   return (
-    <span title={isTruncated ? text : undefined} style={style}>
+    <span title={isTruncated ? text : undefined} className={className}>
       {display}
     </span>
   );
@@ -211,7 +212,8 @@ export const FileSelectionStep: React.FC = () => {
   const [browseEntries, setBrowseEntries] = useState<FileExplorerItem[]>([]);
   const [browseError, setBrowseError] = useState<string | null>(null);
   const [loadingBrowseKey, setLoadingBrowseKey] = useState<string | null>(null);
-  const browseRequestIdRef = useRef(0);
+  const browseCloudState = useAppSelector((state) => state.validation.browseCloudState);
+  const cloudConnectionsState = useAppSelector((state) => state.validation.cloudConnectionsState);
 
   const [selectingFor, setSelectingFor] = useState<'source' | 'target' | 'none'>(() =>
     initialSelectingFor(validationForm.sourceCloud, validationForm.targetCloud),
@@ -287,71 +289,70 @@ export const FileSelectionStep: React.FC = () => {
     setBrowseError(null);
   }, [readCachedSnapshot]);
 
-  const cancelInFlightBrowse = useCallback(() => {
-    browseRequestIdRef.current += 1;
-  }, []);
-
   const loadBrowse = useCallback((
     ctx: BrowseContext,
     pathId: string,
-    requestId: number,
     options?: { background?: boolean },
   ) => {
     if (!ctx.connectionId || ctx.bucket == null) return;
-    const connectionId = ctx.connectionId;
 
     if (!options?.background) {
       setLoadingBrowseKey(pathId);
     }
 
-    Api.browseCloud({
-      connection_id: connectionId,
-      bucket: ctx.bucket.trim() ? ctx.bucket : null,
+    dispatch(validationActions.browseCloudRequest({
+      pathId,
+      connectionId: ctx.connectionId,
+      bucket: ctx.bucket,
       prefix: ctx.prefix,
-      file_format: 'auto',
-    })
-      .then((res) => {
-        if (requestId !== browseRequestIdRef.current) return;
-        const mappedEntries: FileExplorerItem[] = res.data.entries.map((entry) => ({
-          ...toExplorerItem(entry),
-          connectionId,
-          bucket: res.data.bucket,
-        }));
-        const resolvedBucket = res.data.bucket || ctx.bucket || '';
-        const cacheCtx: BrowseContext = { ...ctx, bucket: resolvedBucket };
-        const snapshot: BrowseCacheEntry = {
-          entries: mappedEntries,
-          parentPrefix: res.data.parent_prefix,
-          error: null,
-        };
-        persistSnapshot(cacheCtx, snapshot);
-        if (resolvedBucket !== ctx.bucket) {
-          setBrowse((prev) => ({ ...prev, bucket: resolvedBucket }));
-        }
-        setBrowseError(null);
-        setParentPrefix(snapshot.parentPrefix);
-        setBrowseEntries(snapshot.entries);
-      })
-      .catch(() => {
-        if (requestId !== browseRequestIdRef.current) return;
-        const resolvedBucket = ctx.bucket || '';
-        const cacheCtx: BrowseContext = { ...ctx, bucket: resolvedBucket };
-        const snapshot: BrowseCacheEntry = {
-          entries: [],
-          parentPrefix: null,
-          error: 'Could not browse GCS bucket. Check connection credentials.',
-        };
-        persistSnapshot(cacheCtx, snapshot);
-        setBrowseError(snapshot.error);
-        setParentPrefix(null);
-        setBrowseEntries([]);
-      })
-      .finally(() => {
-        if (requestId === browseRequestIdRef.current) {
-          setLoadingBrowseKey((prev) => (prev === pathId ? null : prev));
-        }
-      });
-  }, [persistSnapshot]);
+      background: options?.background,
+    }));
+  }, [dispatch]);
+
+  useEffect(() => {
+    if (!browse.connectionId || browse.bucket == null || !currentBrowsePathId) return;
+    if (browseCloudState.pathId !== currentBrowsePathId) return;
+
+    if (browseCloudState.data) {
+      const res = browseCloudState.data;
+      const connectionId = browseCloudState.connectionId ?? browse.connectionId;
+      const mappedEntries: FileExplorerItem[] = res.entries.map((entry) => ({
+        ...toExplorerItem(entry),
+        connectionId,
+        bucket: res.bucket,
+      }));
+      const resolvedBucket = res.bucket || browse.bucket || '';
+      const cacheCtx: BrowseContext = { ...browse, bucket: resolvedBucket };
+      const snapshot: BrowseCacheEntry = {
+        entries: mappedEntries,
+        parentPrefix: res.parent_prefix,
+        error: null,
+      };
+      persistSnapshot(cacheCtx, snapshot);
+      if (resolvedBucket !== browse.bucket) {
+        setBrowse((prev) => ({ ...prev, bucket: resolvedBucket }));
+      }
+      setBrowseError(null);
+      setParentPrefix(snapshot.parentPrefix);
+      setBrowseEntries(snapshot.entries);
+      setLoadingBrowseKey(null);
+    }
+
+    if (browseCloudState.error) {
+      const resolvedBucket = browse.bucket || '';
+      const cacheCtx: BrowseContext = { ...browse, bucket: resolvedBucket };
+      const snapshot: BrowseCacheEntry = {
+        entries: [],
+        parentPrefix: null,
+        error: browseCloudState.error,
+      };
+      persistSnapshot(cacheCtx, snapshot);
+      setBrowseError(snapshot.error);
+      setParentPrefix(null);
+      setBrowseEntries([]);
+      setLoadingBrowseKey(null);
+    }
+  }, [browseCloudState, currentBrowsePathId, browse, persistSnapshot]);
 
   useLayoutEffect(() => {
     if (!browse.connectionId || browse.bucket == null || !currentBrowsePathId) {
@@ -369,14 +370,12 @@ export const FileSelectionStep: React.FC = () => {
     if (cached) {
       setLoadingBrowseKey(null);
       if (!isBrowsePathFresh(cached)) {
-        const requestId = ++browseRequestIdRef.current;
-        loadBrowse(browse, currentBrowsePathId, requestId, { background: true });
+        loadBrowse(browse, currentBrowsePathId, { background: true });
       }
       return;
     }
 
-    const requestId = ++browseRequestIdRef.current;
-    loadBrowse(browse, currentBrowsePathId, requestId);
+    loadBrowse(browse, currentBrowsePathId);
   }, [
     browse.connectionId,
     browse.bucket,
@@ -390,25 +389,27 @@ export const FileSelectionStep: React.FC = () => {
     connections.find((c) => c.id === connectionId)?.name ?? 'Unknown connection';
 
   useEffect(() => {
-    Api.listCloudConnections()
-      .then((res) => {
-        const active = res.data.filter((c) => c.active && c.provider === 'google-cloud-storage');
-        setConnections(active);
-        setConnectionsError(null);
-        // ⚡ Intentionally removed logic that auto-selects the first bucket
-      })
-      .catch(() => {
-        const fallback = envFallbackConnection();
-        if (fallback) {
-          setConnections([fallback]);
-          // ⚡ Intentionally removed fallback auto-select logic
-          setConnectionsError(null);
-        } else {
-          setConnectionsError('Sign in via Admin to load GCS connections, or set VITE_GCS_CONNECTION_ID.');
-          setLoadingBrowseKey(null);
-        }
-      });
-  }, []);
+    dispatch(validationActions.listCloudConnectionsRequest());
+  }, [dispatch]);
+
+  useEffect(() => {
+    if (!cloudConnectionsState.data) return;
+    const active = cloudConnectionsState.data.filter((c) => c.active && c.provider === 'google-cloud-storage');
+    setConnections(active);
+    setConnectionsError(null);
+  }, [cloudConnectionsState.data]);
+
+  useEffect(() => {
+    if (!cloudConnectionsState.error) return;
+    const fallback = envFallbackConnection();
+    if (fallback) {
+      setConnections([fallback]);
+      setConnectionsError(null);
+    } else {
+      setConnectionsError('Sign in via Admin to load GCS connections, or set VITE_GCS_CONNECTION_ID.');
+      setLoadingBrowseKey(null);
+    }
+  }, [cloudConnectionsState.error]);
 
   useEffect(() => {
     const isStepFullyConfigured = Boolean(sourceFile && targetFile);
@@ -462,8 +463,7 @@ export const FileSelectionStep: React.FC = () => {
   ]);
 
   const handleConnectionSelect = (conn: CloudConnection) => {
-    resetFilters(); // ⚡ Wipe filters on connection change
-    cancelInFlightBrowse();
+    resetFilters();
     const next = browseContextFromConnection(conn);
     const nextPathId = browsePathId(next);
     applyBrowseSnapshot(next);
@@ -487,7 +487,6 @@ export const FileSelectionStep: React.FC = () => {
     if (isFileTableLocked) return;
 
     if (file.type === 'folder') {
-      cancelInFlightBrowse();
       if (!browse.bucket) {
         resetFilters(); // ⚡ Wipe filters when stepping into a new bucket
         setActiveBrowse({ bucket: file.objectName, prefix: '' });
@@ -542,8 +541,8 @@ export const FileSelectionStep: React.FC = () => {
   };
 
   const SortIcon = ({ columnKey }: { columnKey: string }) => {
-    if (sortConfig?.key !== columnKey) return <span style={{ color: '#c1c6d7', marginLeft: '4px', fontSize: '10px' }}>↕</span>;
-    return <span style={{ color: '#234B5F', marginLeft: '4px', fontSize: '10px' }}>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>;
+    if (sortConfig?.key !== columnKey) return <span className={styles.sortIconInactive}>↕</span>;
+    return <span className={styles.sortIconActive}>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>;
   };
 
   // ⚡ Integrated Search + Dynamic Sort applied sequentially
@@ -580,92 +579,88 @@ export const FileSelectionStep: React.FC = () => {
     : `gs://${browse.bucket}/${browse.prefix}`;
 
   const browsingForLabel = selectingFor === 'target' ? 'Target' : 'Source';
-  const browsingForColor = selectingFor === 'target' ? '#234B5F' : '#234B5F';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '24px' }}>
-      <style>{`@keyframes browse-skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }`}</style>
+    <div className={styles.page}>
       <div>
-        <label style={{ display: 'block', fontSize: '14px', fontWeight: 500, marginBottom: '8px', color: '#414755' }}>Validation Pattern</label>
+        <label className={styles.fieldLabel}>Validation Pattern</label>
         <select
           value={validationMode}
           onChange={(e) => {
             setValidationMode(e.target.value); setSourceFile(null); setTargetFile(null); setSelectingFor('source');
           }}
-          style={{ width: '320px', height: '40px', padding: '0 12px', borderRadius: '8px', border: '1px solid #d9d9d9', fontSize: '14px' }}
+          className={styles.patternSelect}
         >
           <option>Single to Single (Default)</option><option>Many to Many</option><option>Batch Comparison</option>
         </select>
       </div>
 
-      <div style={{ display: 'flex', gap: '24px', backgroundColor: '#ffffff', padding: '16px', borderRadius: '12px', border: '1px solid #d9d9d9' }}>
-        <div onClick={() => handleSelectingFor('source')} style={{ flex: 1, padding: '16px', borderRadius: '8px', border: selectingFor === 'source' ? '2px solid #234B5F' : '1px dashed #727786', cursor: 'pointer' }}>
-          <span style={{ fontSize: '12px', fontWeight: 700, color: '#234B5F' }}>1. Source ({sourceFile ? 1 : 0})</span>
+      <div className={styles.selectionRow}>
+        <div
+          onClick={() => handleSelectingFor('source')}
+          className={`${styles.selectionCard} ${selectingFor === 'source' ? styles.selectionCardActive : ''}`}
+        >
+          <span className={styles.selectionTitle}>1. Source ({sourceFile ? 1 : 0})</span>
           {sourceFile ? (
-            <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckOutlined style={{ color: '#234B5F' }} />
-                {/* ⚡ Replaced plain name with truncatable component */}
-                <TruncatableName
-                  text={sourceFile.name}
-                  style={{ fontSize: '13px', fontWeight: 600, maxWidth: '180px', display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                />
-                <button type="button" onClick={(e) => { e.stopPropagation(); setSourceFile(null); setSelectingFor('source'); }} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ba1a1a' }}><DeleteOutlined /></button>
+            <div className={styles.selectionContent}>
+              <div className={styles.selectionFileRow}>
+                <CheckOutlined className={styles.checkIcon} />
+                <TruncatableName text={sourceFile.name} className={styles.fileName} />
+                <button type="button" onClick={(e) => { e.stopPropagation(); setSourceFile(null); setSelectingFor('source'); }} className={styles.removeBtn}><DeleteOutlined /></button>
               </div>
-              <span style={{ fontSize: '11px', color: '#64748b', paddingLeft: '22px' }}>
+              <span className={styles.fileMeta}>
                 {connectionName(sourceFile.connectionId)}
               </span>
-              <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', paddingLeft: '22px' }}>
+              <span className={styles.filePath}>
                 gs://{sourceFile.bucket}/{sourceFile.objectName}
               </span>
             </div>
           ) : (
-            <p style={{ margin: '8px 0 0', fontSize: '14px', color: '#727786', fontStyle: 'italic' }}>Pick a GCS object from any connection…</p>
+            <p className={styles.selectionPlaceholder}>Pick a GCS object from any connection…</p>
           )}
         </div>
 
-        <ArrowRightOutlined style={{ fontSize: '24px', color: '#727786', alignSelf: 'center', flexShrink: 0 }} />
+        <ArrowRightOutlined className={styles.arrowIcon} />
 
-        <div onClick={() => handleSelectingFor('target')} style={{ flex: 1, padding: '16px', borderRadius: '8px', border: selectingFor === 'target' ? '2px solid #234B5F' : '1px dashed #727786', cursor: 'pointer' }}>
-          <span style={{ fontSize: '12px', fontWeight: 700, color: '#234B5F' }}>2. Target ({targetFile ? 1 : 0})</span>
+        <div
+          onClick={() => handleSelectingFor('target')}
+          className={`${styles.selectionCard} ${selectingFor === 'target' ? styles.selectionCardActive : ''}`}
+        >
+          <span className={styles.selectionTitle}>2. Target ({targetFile ? 1 : 0})</span>
           {targetFile ? (
-            <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckOutlined style={{ color: '#234B5F' }} />
-                {/* ⚡ Replaced plain name with truncatable component */}
-                <TruncatableName
-                  text={targetFile.name}
-                  style={{ fontSize: '13px', fontWeight: 600, maxWidth: '180px', display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                />
-                <button type="button" onClick={(e) => { e.stopPropagation(); setTargetFile(null); setSelectingFor('target'); }} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ba1a1a' }}><DeleteOutlined /></button>
+            <div className={styles.selectionContent}>
+              <div className={styles.selectionFileRow}>
+                <CheckOutlined className={styles.checkIcon} />
+                <TruncatableName text={targetFile.name} className={styles.fileName} />
+                <button type="button" onClick={(e) => { e.stopPropagation(); setTargetFile(null); setSelectingFor('target'); }} className={styles.removeBtn}><DeleteOutlined /></button>
               </div>
-              <span style={{ fontSize: '11px', color: '#64748b', paddingLeft: '22px' }}>
+              <span className={styles.fileMeta}>
                 {connectionName(targetFile.connectionId)}
               </span>
-              <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', paddingLeft: '22px' }}>
+              <span className={styles.filePath}>
                 gs://{targetFile.bucket}/{targetFile.objectName}
               </span>
             </div>
           ) : (
-            <p style={{ margin: '8px 0 0', fontSize: '14px', color: '#727786', fontStyle: 'italic' }}>Pick a GCS object from any connection…</p>
+            <p className={styles.selectionPlaceholder}>Pick a GCS object from any connection…</p>
           )}
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '24px', height: '500px' }}>
-        <div className="custom-scrollbar" style={{ gridColumn: 'span 3', backgroundColor: '#f8fafc', borderRadius: '12px', border: '1px solid #d9d9d9', overflowY: 'auto', padding: '12px', position: 'relative' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '10px 12px', fontWeight: 600, fontSize: '14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div className={styles.grid}>
+        <div className={`custom-scrollbar ${styles.sidebar}`}>
+          <div className={styles.sidebarHeader}>
+            <div className={styles.sidebarHeaderLeft}>
               <CloudOutlined /> GCS Connections
             </div>
-            {isBrowsing && <SyncOutlined spin style={{ color: browsingForColor, fontSize: '14px' }} />}
+            {isBrowsing && <SyncOutlined spin className={styles.syncIcon} />}
           </div>
-          <div style={{ fontSize: '11px', color: browsingForColor, fontWeight: 600, padding: '0 12px 8px' }}>
+          <div className={styles.browsingLabel}>
             Browsing for {browsingForLabel}
           </div>
           {connectionsError && (
-            <p style={{ fontSize: '12px', color: '#ba1a1a', padding: '0 12px' }}>
-              {connectionsError} <Link to="/admin" style={{ color: '#234B5F' }}>Sign in as admin</Link>
+            <p className={styles.connectionsError}>
+              {connectionsError} <Link to="/admin" className={styles.adminLink}>Sign in as admin</Link>
             </p>
           )}
           {connections.map((conn) => {
@@ -678,30 +673,22 @@ export const FileSelectionStep: React.FC = () => {
                 key={conn.id}
                 type="button"
                 onClick={() => handleConnectionSelect(conn)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', margin: '4px 0',
-                  width: '100%', textAlign: 'left',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  backgroundColor: isActive ? '#e6f4ff' : 'transparent',
-                  color: isActive ? '#234B5F' : '#414755',
-                  border: isActive ? '1px solid #91caff' : '1px solid transparent',
-                }}
+                className={`${styles.connBtn} ${isActive ? styles.connBtnActive : ''}`}
               >
                 {isLoadingThis ? (
-                  <SyncOutlined spin style={{ color: browsingForColor, fontSize: '14px' }} />
+                  <SyncOutlined spin className={styles.syncIcon} />
                 ) : (
                   <FolderOutlined />
                 )}
-                <div style={{ overflow: 'hidden', flex: 1 }}>
-                  <div style={{ fontSize: '13px', fontWeight: isActive ? 700 : 500, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{conn.name}</div>
-                  <div style={{ fontSize: '10px', color: '#727786', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                <div className={styles.connInfo}>
+                  <div className={`${styles.connName} ${isActive ? styles.connNameActive : ''}`}>{conn.name}</div>
+                  <div className={styles.connBucket}>
                     {conn.bucket?.trim() ? `gs://${conn.bucket}` : 'All accessible buckets'}
                   </div>
                   {(isSourceConn || isTargetConn) && (
-                    <div style={{ display: 'flex', gap: '4px', marginTop: '2px' }}>
-                      {isSourceConn && <span style={{ fontSize: '9px', backgroundColor: '#234B5F', color: '#fff', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>SRC</span>}
-                      {isTargetConn && <span style={{ fontSize: '9px', backgroundColor: '#234B5F', color: '#fff', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>TGT</span>}
+                    <div className={styles.roleBadges}>
+                      {isSourceConn && <span className={styles.roleBadge}>SRC</span>}
+                      {isTargetConn && <span className={styles.roleBadge}>TGT</span>}
                     </div>
                   )}
                 </div>
@@ -710,46 +697,52 @@ export const FileSelectionStep: React.FC = () => {
           })}
         </div>
 
-        <div style={{ gridColumn: 'span 9', display: 'flex', flexDirection: 'column', backgroundColor: 'white', borderRadius: '12px', border: '1px solid #d9d9d9', overflow: 'hidden', position: 'relative' }}>
-          <div style={{ padding: '16px', borderBottom: '1px solid #d9d9d9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontFamily: 'var(--font-mono)', color: '#64748b' }}>
+        <div className={styles.mainPanel}>
+          <div className={styles.panelHeader}>
+            <div className={styles.breadcrumb}>
               <FolderOpenOutlined />
               <span title={breadcrumb.length > MAX_DISPLAY_NAME_LENGTH ? breadcrumb : undefined}>
                 {truncateWithEllipsis(breadcrumb)}
               </span>
-              {isBrowsing && <SyncOutlined spin style={{ color: browsingForColor, fontSize: '14px' }} />}
+              {isBrowsing && <SyncOutlined spin className={styles.syncIcon} />}
               {parentPrefix != null && !isBrowsing && (
-                <button type="button" onClick={() => { cancelInFlightBrowse(); setActiveBrowse({ prefix: parentPrefix }); }} style={{ marginLeft: '8px', border: 'none', background: '#f0f0f0', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontSize: '12px' }}><ArrowUpOutlined /> Back</button>
+                <button type="button" onClick={() => { setActiveBrowse({ prefix: parentPrefix }); }} className={styles.navBtn}><ArrowUpOutlined /> Back</button>
               )}
               {isMultiBucketConnection && browse.bucket && !browse.prefix && parentPrefix == null && !isBrowsing && (
-                <button type="button" onClick={() => { cancelInFlightBrowse(); setActiveBrowse({ bucket: '' }); }} style={{ marginLeft: '8px', border: 'none', background: '#f0f0f0', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', fontSize: '12px' }}><ArrowUpOutlined /> Buckets</button>
+                <button type="button" onClick={() => { setActiveBrowse({ bucket: '' }); }} className={styles.navBtn}><ArrowUpOutlined /> Buckets</button>
               )}
             </div>
-            <div style={{ position: 'relative' }}>
-              <input type="text" placeholder="Search…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} disabled={isBrowsing} style={{ padding: '6px 12px 6px 36px', borderRadius: '8px', border: '1px solid #d9d9d9', width: '200px', fontSize: '12px', opacity: isBrowsing ? 0.6 : 1 }} />
-              <SearchOutlined style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+            <div className={styles.searchWrap}>
+              <input
+                type="text"
+                placeholder="Search…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                disabled={isBrowsing}
+                className={`${styles.searchInput} ${isBrowsing ? styles.searchInputDisabled : ''}`}
+              />
+              <SearchOutlined className={styles.searchIcon} />
             </div>
           </div>
 
-          <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-            {browseError && <p style={{ padding: '16px', color: '#ba1a1a', fontSize: '13px' }}>{browseError}</p>}
-            <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-              <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', fontSize: '11px', textTransform: 'uppercase', color: '#727786' }}>
+          <div className={`custom-scrollbar ${styles.tableScroll}`}>
+            {browseError && <p className={styles.browseError}>{browseError}</p>}
+            <table className={styles.table}>
+              <thead className={styles.thead}>
                 <tr>
-                  <th style={{ padding: '12px', width: 40, borderBottom: '1px solid #d9d9d9' }} />
-                  {/* ⚡ Added Sortable Column Headers */}
-                  <th onClick={() => handleSort('name')} style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9', cursor: 'pointer', width: '32%' }}>
+                  <th className={`${styles.th} ${styles.thIcon}`} />
+                  <th onClick={() => handleSort('name')} className={`${styles.th} ${styles.thName} ${styles.thSortable}`}>
                     Name <SortIcon columnKey="name" />
                   </th>
-                  <th onClick={() => handleSort('size')} style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9', cursor: 'pointer' }}>
+                  <th onClick={() => handleSort('size')} className={`${styles.th} ${styles.thSortable}`}>
                     Size <SortIcon columnKey="size" />
                   </th>
-                  <th onClick={() => handleSort('modifiedAt')} style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9', cursor: 'pointer' }}>
+                  <th onClick={() => handleSort('modifiedAt')} className={`${styles.th} ${styles.thSortable}`}>
                     Date Modified <SortIcon columnKey="modifiedAt" />
                   </th>
-                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9' }}>Created At</th>
-                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9' }}>Created By</th>
-                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #d9d9d9' }}>Owner</th>
+                  <th className={styles.th}>Created At</th>
+                  <th className={styles.th}>Created By</th>
+                  <th className={styles.th}>Owner</th>
                 </tr>
               </thead>
               <tbody>
@@ -757,7 +750,6 @@ export const FileSelectionStep: React.FC = () => {
                   <BrowseSkeletonRows />
                 ) : (
                   <>
-                    {/* ⚡ Changed mapping to use the sorted array */}
                     {sortedAndFilteredFiles.map((file) => {
                       const isSource = sourceFile?.id === file.id && sourceFile?.connectionId === file.connectionId;
                       const isTarget = targetFile?.id === file.id && targetFile?.connectionId === file.connectionId;
@@ -768,30 +760,28 @@ export const FileSelectionStep: React.FC = () => {
                         <tr
                           key={`${file.connectionId}-${file.id}`}
                           onClick={() => handleRowClick(file)}
-                          style={{ borderBottom: '1px solid #f1f5f9', backgroundColor: isSelected ? '#f0f8ff' : 'transparent', cursor: isDisabledFile ? 'not-allowed' : 'pointer', transition: 'background-color 0.2s', opacity: isDisabledFile ? 0.5 : 1 }}
-                          onMouseEnter={(e) => { if (!isSelected && !isDisabledFile) e.currentTarget.style.backgroundColor = '#f8fafc'; }}
-                          onMouseLeave={(e) => { if (!isSelected && !isDisabledFile) e.currentTarget.style.backgroundColor = 'transparent'; }}
+                          className={`${styles.dataRow} ${isSelected ? styles.dataRowSelected : ''} ${isDisabledFile ? styles.dataRowDisabled : ''}`}
                         >
-                          <td style={{ padding: '12px' }}>{file.type === 'file' && <input type="checkbox" readOnly checked={isSelected} disabled={isDisabledFile} />}</td>
-                          <td style={{ padding: '12px', overflow: 'hidden' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1b1b1c', fontWeight: 500, minWidth: 0 }}>
-                              {file.type === 'folder' ? <FolderFilled style={{ color: '#faad14', fontSize: '16px', flexShrink: 0 }} /> : <FileTextOutlined style={{ color: '#64748b', fontSize: '16px', flexShrink: 0 }} />}
-                              <TruncatableName text={file.name} style={{ fontSize: 'inherit', fontWeight: 500 }} />
-                              {isSource && <span style={{ fontSize: '10px', backgroundColor: '#234B5F', color: '#fff', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, flexShrink: 0 }}>SOURCE</span>}
-                              {isTarget && <span style={{ fontSize: '10px', backgroundColor: '#234B5F', color: '#fff', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, flexShrink: 0 }}>TARGET</span>}
+                          <td className={styles.td}>{file.type === 'file' && <input type="checkbox" readOnly checked={isSelected} disabled={isDisabledFile} />}</td>
+                          <td className={`${styles.td} ${styles.tdOverflow}`}>
+                            <div className={styles.fileCell}>
+                              {file.type === 'folder' ? <FolderFilled className={styles.folderIcon} /> : <FileTextOutlined className={styles.fileIcon} />}
+                              <TruncatableName text={file.name} className={styles.fileNameInherit} />
+                              {isSource && <span className={styles.selectionTag}>SOURCE</span>}
+                              {isTarget && <span className={styles.selectionTag}>TARGET</span>}
                             </div>
                           </td>
-                          <td style={{ padding: '12px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#414755' }}>{file.size}</td>
-                          <td style={{ padding: '12px', fontSize: '12px', color: '#414755' }}>{file.modifiedAt}</td>
-                          <td style={{ padding: '12px', fontSize: '12px', color: '#414755' }}>{file.createdAt}</td>
-                          <td style={{ padding: '12px', fontSize: '12px', color: '#414755' }}>{file.createdBy}</td>
-                          <td style={{ padding: '12px', fontSize: '12px', color: '#414755' }}>{file.owner}</td>
+                          <td className={`${styles.td} ${styles.cellMono}`}>{file.size}</td>
+                          <td className={`${styles.td} ${styles.cellText}`}>{file.modifiedAt}</td>
+                          <td className={`${styles.td} ${styles.cellText}`}>{file.createdAt}</td>
+                          <td className={`${styles.td} ${styles.cellText}`}>{file.createdBy}</td>
+                          <td className={`${styles.td} ${styles.cellText}`}>{file.owner}</td>
                         </tr>
                       );
                     })}
                     {sortedAndFilteredFiles.length === 0 && !browseError && (
                       <tr>
-                        <td colSpan={7} style={{ padding: '32px', textAlign: 'center', color: '#727786', fontStyle: 'italic', fontSize: '13px' }}>
+                        <td colSpan={7} className={styles.emptyCell}>
                           No files or folders found in this directory.
                         </td>
                       </tr>

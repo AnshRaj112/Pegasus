@@ -1,23 +1,25 @@
 import React from 'react';
 import { Tooltip } from 'antd';
 import { formatDetectionChainDisplay } from './formatDisplayLabel';
+import styles from './FormatDetectionChainLabel.module.scss';
 
 type Props = {
   format: string | null | undefined;
-  style?: React.CSSProperties;
+  className?: string;
 };
 
 /** Renders `TAR → TAR → ZIP → Delimited file`, or `TAR → … → Delimited file` when 5+ layers. */
-export const FormatDetectionChainLabel: React.FC<Props> = ({ format, style }) => {
+export const FormatDetectionChainLabel: React.FC<Props> = ({ format, className }) => {
   const { short, middle } = formatDetectionChainDisplay(format);
+  const labelClass = className ? `${styles.label} ${className}` : styles.label;
 
   if (!middle) {
-    return <span style={style}>{short}</span>;
+    return <span className={labelClass}>{short}</span>;
   }
 
   return (
     <Tooltip title={middle}>
-      <span style={style}>{short}</span>
+      <span className={labelClass}>{short}</span>
     </Tooltip>
   );
 };

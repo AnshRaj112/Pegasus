@@ -22,4 +22,9 @@ export interface DashboardReducerState {
     isFetching: boolean;
     error: string | null;
   };
+  createEntityState: {
+    data: string | null;
+    isFetching: boolean;
+    error: string | null;
+  };
 }

@@ -129,13 +129,12 @@ const Setting = () => {
 										</label>
 										<InputNumber
 											id="input-cores"
-											className="w-100"
+											className={`w-100 ${styles.fieldMaxWidth}`}
 											min={1}
 											max={64}
 											value={formData.cores}
 											onChange={handleCoresChange}
 											data-testid="input-cores"
-											style={{ maxWidth: '320px' }}
 										/>
 										<Paragraph className={styles.helperText}>
 											Recommended: 8 cores. Maximum supported by current instance: 32 cores.
@@ -172,12 +171,11 @@ const Setting = () => {
 										</label>
 										<Select
 											id="select-samples"
-											className="w-100"
+											className={`w-100 ${styles.fieldMaxWidth}`}
 											options={SAMPLES_OPTIONS}
 											value={formData.samplesPerColumnError}
 											onChange={handleSamplesChange}
 											data-testid="select-samples"
-											style={{ maxWidth: '320px' }}
 										/>
 										<Paragraph className={styles.helperText}>
 											Define the depth of sampling when an inconsistency is detected in a specific column.

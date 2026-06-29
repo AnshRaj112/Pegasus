@@ -1,5 +1,5 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { initializeEmptyState } from '~/shared/constants/common.constant';
+import { initializeEmptyState } from '~/shared/constants/common.constants';
 import { TestReducerState, TestEntity } from './Test.interface';
 
 export const initialState: TestReducerState = {

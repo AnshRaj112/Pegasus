@@ -1,18 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { 
-  PlayCircleOutlined, 
-  BranchesOutlined, 
-  ClockCircleOutlined, 
-  CalendarOutlined, 
-  FileTextOutlined, 
+import {
+  PlayCircleOutlined,
+  BranchesOutlined,
+  ClockCircleOutlined,
+  CalendarOutlined,
+  FileTextOutlined,
   RightOutlined,
-  FileOutlined, 
+  FileOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppDispatch } from '../../../redux/store';
 import { ReportService } from '../Report.service';
 import { ValidationHistorySummary } from '../../../shared/api/Api';
 import { validationActions } from '../../validation/Validation.reducer';
+import styles from './ExecutionHistory.module.scss';
 
 const formatEnd = (iso: string | null | undefined) => {
   if (!iso) return '—';
@@ -29,24 +30,23 @@ const formatDuration = (sec: number | null | undefined) => {
   return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
 };
 
-const MetricItem: React.FC<{ label: string; value: string; color?: string }> = ({ label, value, color = '#1b1b1c' }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', minWidth: '120px' }}>
-    <span style={{ fontSize: '10px', fontWeight: 700, color: '#727786', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>{label}</span>
-    <span style={{ fontSize: '20px', fontWeight: 600, color }}>{value}</span>
+const MetricItem: React.FC<{ label: string; value: string; errorTone?: boolean }> = ({ label, value, errorTone }) => (
+  <div className={styles.metricItem}>
+    <span className={styles.metricLabel}>{label}</span>
+    <span className={`${styles.metricValue} ${errorTone ? styles.metricValueError : ''}`}>{value}</span>
   </div>
 );
 
-export const ExecutionHistory: React.FC = () => {
+const ExecutionHistory: React.FC = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const { mappingId } = useParams<{ mappingId: string }>();
-  
+
   const [runs, setRuns] = useState<ValidationHistorySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pairLabel, setPairLabel] = useState('');
-  
-  // New states to hold source and target file info
+
   const [sourceFileInfo, setSourceFileInfo] = useState<{ name: string; path: string } | null>(null);
   const [targetFileInfo, setTargetFileInfo] = useState<{ name: string; path: string } | null>(null);
 
@@ -60,17 +60,15 @@ export const ExecutionHistory: React.FC = () => {
         const { sourcePath, targetPath } = await ReportService.resolvePairByMappingId(mappingId);
         const items = await ReportService.fetchRunsForPair(sourcePath, targetPath);
         if (cancelled) return;
-        
+
         setRuns(items);
-        
-        // Extract names and paths
+
         const shortSource = sourcePath.replace(/\\/g, '/').split('/').pop() ?? sourcePath;
         const shortTarget = targetPath.replace(/\\/g, '/').split('/').pop() ?? targetPath;
-        
+
         setPairLabel(shortSource);
         setSourceFileInfo({ name: shortSource, path: sourcePath });
         setTargetFileInfo({ name: shortTarget, path: targetPath });
-
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load history');
       } finally {
@@ -83,83 +81,72 @@ export const ExecutionHistory: React.FC = () => {
   const MAPPING_NAME = pairLabel;
 
   if (loading) {
-    return <div style={{ padding: '32px', color: '#64748b' }}>Loading execution history…</div>;
+    return <div className={styles.loading}>Loading execution history…</div>;
   }
 
   if (error) {
-    return <div style={{ padding: '32px', color: '#ba1a1a' }}>{error}</div>;
+    return <div className={styles.error}>{error}</div>;
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
-      {/* Header & Controls */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#64748b', fontSize: '12px' }}>
-            <span onClick={() => navigate('/reports')} style={{ cursor: 'pointer' }} onMouseEnter={(e) => { e.currentTarget.style.color = '#234B5F'; }} onMouseLeave={(e) => { e.currentTarget.style.color = '#64748b'; }}>Reports</span>
-            <RightOutlined style={{ fontSize: '10px' }} />
-            <span style={{ color: '#234B5F', fontWeight: 500 }}>{MAPPING_NAME}</span>
-            <RightOutlined style={{ fontSize: '10px' }} />
-            <span style={{ color: '#1b1b1c', fontWeight: 500 }}>History</span>
+    <div className={styles.page}>
+      <div className={styles.header}>
+        <div className={styles.headerLeft}>
+          <div className={styles.breadcrumb}>
+            <span className={styles.breadcrumbLink} onClick={() => navigate('/reports')}>Reports</span>
+            <RightOutlined className={styles.breadcrumbIcon} />
+            <span className={styles.breadcrumbActive}>{MAPPING_NAME}</span>
+            <RightOutlined className={styles.breadcrumbIcon} />
+            <span className={styles.breadcrumbCurrent}>History</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <div style={{ backgroundColor: '#f0eded', border: '1px solid #c1c6d7', padding: '4px 12px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <BranchesOutlined style={{ color: '#414755', fontSize: '14px' }} />
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#1b1b1c', fontWeight: 600 }}>{MAPPING_NAME}</span>
-              {runs[0] && (
-                <span style={{ marginLeft: '8px', fontWeight: 700, color: runs[0].is_match ? '#16a34a' : '#ba1a1a' }}>
-                  {runs[0].is_match ? 'P' : 'F'}
-                </span>
-              )}
-            </div>
+          <div className={styles.mappingBadge}>
+            <BranchesOutlined className={styles.mappingIcon} />
+            <span className={styles.mappingName}>{MAPPING_NAME}</span>
+            {runs[0] && (
+              <span className={runs[0].is_match ? styles.passBadge : styles.failBadge}>
+                {runs[0].is_match ? 'P' : 'F'}
+              </span>
+            )}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
+        <div className={styles.headerActions}>
           <button
             type="button"
             disabled={!runs[0]?.run_id}
             onClick={() => runs[0]?.run_id && dispatch(validationActions.runValidationFromHistoryRequest(runs[0].run_id))}
-            style={{ backgroundColor: '#234B5F', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 500, cursor: runs[0]?.run_id ? 'pointer' : 'not-allowed', opacity: runs[0]?.run_id ? 1 : 0.6 }}
+            className={styles.runBtn}
           >
             <PlayCircleOutlined /> Run Validation
           </button>
         </div>
       </div>
 
-      {/* File Information Section */}
       {sourceFileInfo && targetFileInfo && (
-        <div style={{ backgroundColor: '#fff', border: '1px solid #e5e2e1', borderRadius: '8px', padding: '16px 24px', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-          {/* Source File */}
-          <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              <FileOutlined style={{ color: '#64748b', fontSize: '16px' }} />
-              <span style={{ textTransform: "capitalize", fontWeight: 600, color: '#1b1b1c', fontSize: '13px' }}>{sourceFileInfo.name}</span>
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#727786', textTransform: 'uppercase', letterSpacing: '0.05em', marginLeft: '4px' }}>(Source)</span>
+        <div className={styles.fileCard}>
+          <div className={styles.fileSection}>
+            <div className={styles.fileTitleRow}>
+              <FileOutlined className={styles.fileIcon} />
+              <span className={styles.fileName}>{sourceFileInfo.name}</span>
+              <span className={styles.fileLabel}>(Source)</span>
             </div>
-            <div style={{ color: '#64748b', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{sourceFileInfo.path}</div>
+            <div className={styles.filePath}>{sourceFileInfo.path}</div>
           </div>
 
-          {/* <div style={{ display: 'flex', alignItems: 'center', height: '40px', padding: '0 8px' }}>
-            <RightOutlined style={{ color: '#94a3b8' }} />
-          </div> */}
-
-          {/* Target File */}
-          <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              <FileOutlined style={{ color: '#64748b', fontSize: '16px' }} />
-              <span style={{ textTransform: "capitalize", fontWeight: 600, color: '#1b1b1c', fontSize: '13px' }}>{targetFileInfo.name}</span>
-              <span style={{ fontSize: '10px', fontWeight: 700, color: '#727786', textTransform: 'uppercase', letterSpacing: '0.05em', marginLeft: '4px' }}>(Target)</span>
+          <div className={styles.fileSection}>
+            <div className={styles.fileTitleRow}>
+              <FileOutlined className={styles.fileIcon} />
+              <span className={styles.fileName}>{targetFileInfo.name}</span>
+              <span className={styles.fileLabel}>(Target)</span>
             </div>
-            <div style={{ color: '#64748b', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{targetFileInfo.path}</div>
+            <div className={styles.filePath}>{targetFileInfo.path}</div>
           </div>
         </div>
       )}
 
-      {/* Runs List */}
       {runs.length === 0 ? (
-        <div style={{ padding: '32px', color: '#64748b', textAlign: 'center' }}>No validation runs for this file pair yet.</div>
+        <div className={styles.emptyState}>No validation runs for this file pair yet.</div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div className={styles.runsList}>
           {runs.map((run, idx) => {
             const mc = run.mismatch_counts;
             const totalRowMismatched = mc.value_mismatch_rows != null ? mc.value_mismatch_rows : mc.value_mismatch;
@@ -167,41 +154,41 @@ export const ExecutionHistory: React.FC = () => {
             const isLitmus = run.test_mode === 'litmus';
             const passed = run.is_match === true;
             return (
-              <div key={run.run_id} style={{ backgroundColor: '#fff', border: '1px solid #e5e2e1', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', opacity: idx > 0 ? 0.85 : 1 }}>
-                <div style={{ backgroundColor: '#fcf9f8', borderBottom: '1px solid #e5e2e1', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-                    <span style={{ textTransform: 'uppercase', fontSize: '18px', fontWeight: 600, color: '#1b1b1c', fontFamily: 'var(--font-mono)' }}>{MAPPING_NAME}</span>
-                    <span style={{ fontWeight: 700, color: passed ? '#16a34a' : '#ba1a1a' }}>{passed ? 'P' : 'F'}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', color: '#64748b', fontSize: '12px' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><ClockCircleOutlined /> {formatDuration(run.durations?.validation_seconds ?? run.durations?.total_seconds)}</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><CalendarOutlined /> Ended: {formatEnd(run.completed_at ?? run.created_at)}</span>
+              <div key={run.run_id} className={`${styles.runCard} ${idx > 0 ? styles.runCardFaded : ''}`}>
+                <div className={styles.runHeader}>
+                  <div className={styles.runHeaderLeft}>
+                    <span className={styles.runTitle}>{MAPPING_NAME}</span>
+                    <span className={passed ? styles.runPass : styles.runFail}>{passed ? 'P' : 'F'}</span>
+                    <div className={styles.runMeta}>
+                      <span className={styles.runMetaItem}><ClockCircleOutlined /> {formatDuration(run.durations?.validation_seconds ?? run.durations?.total_seconds)}</span>
+                      <span className={styles.runMetaItem}><CalendarOutlined /> Ended: {formatEnd(run.completed_at ?? run.created_at)}</span>
                     </div>
                   </div>
                   {!isLitmus && (
                     <button
                       type="button"
                       onClick={() => mappingId && navigate(`/reports/${mappingId}/history/${run.run_id}/snippet`)}
-                      style={{ backgroundColor: '#fff', border: '1px solid #c1c6d7', color: '#1b1b1c', padding: '6px 12px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}
+                      className={styles.snippetBtn}
                     >
                       <FileTextOutlined /> Snippet
                     </button>
                   )}
                 </div>
-                <div style={{ overflowX: 'auto', display: 'flex', padding: '16px 24px', gap: '24px' }}>
+                <div className={styles.metricsRow}>
                   <MetricItem label="Source Rows" value={run.source_row_count != null ? run.source_row_count.toLocaleString() : '—'} />
-                  <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
+                  <div className={styles.metricDivider} />
                   <MetricItem label="Target Rows" value={run.target_row_count != null ? run.target_row_count.toLocaleString() : '—'} />
-                  <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
-                  <MetricItem label="Cell Mismatch" value={String(mc.value_mismatch)} color={mc.value_mismatch ? '#ba1a1a' : '#1b1b1c'} />
-                  <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
+                  <div className={styles.metricDivider} />
+                  <MetricItem label="Cell Mismatch" value={String(mc.value_mismatch)} errorTone={Boolean(mc.value_mismatch)} />
+                  <div className={styles.metricDivider} />
                   <MetricItem label="Total Row Mismatched" value={String(totalRowMismatched)} />
-                  <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
+                  <div className={styles.metricDivider} />
                   <MetricItem label="Extra Rows" value={String(mc.extra_in_target)} />
-                  <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
+                  <div className={styles.metricDivider} />
                   <MetricItem label="Missing Rows" value={String(mc.missing_in_target)} />
-                  <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
+                  <div className={styles.metricDivider} />
                   <MetricItem label="Total Row Errors" value={String(totalRowErrors)} />
-                  <div style={{ width: '1px', backgroundColor: '#e5e2e1' }} />
+                  <div className={styles.metricDivider} />
                   <MetricItem label="Mapped Cols" value={String(run.mapping_count)} />
                 </div>
               </div>
@@ -212,3 +199,5 @@ export const ExecutionHistory: React.FC = () => {
     </div>
   );
 };
+
+export default ExecutionHistory;

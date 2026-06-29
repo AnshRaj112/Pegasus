@@ -1,0 +1,70 @@
+@use '~/assets/styles/variables' as tokens;
+
+.panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: tokens.$surface-container-lowest;
+  border-radius: 0.75rem;
+  border: 1px solid #d9d9d9;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.panelHeader {
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.panelHeaderDark {
+  background-color: tokens.$color-midnight-green;
+  color: tokens.$on-primary;
+}
+
+.panelHeaderLight {
+  background-color: tokens.$surface-container;
+  color: tokens.$on-surface;
+}
+
+.panelHeaderLabel {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panelBody {
+  overflow: auto;
+  max-height: min(52vh, 480px);
+  padding: 1rem;
+  background-color: tokens.$row-hover;
+}
+
+.jsonPre {
+  margin: 0;
+  font-size: tokens.$text-body-sm;
+  line-height: 1.5;
+  font-family: tokens.$font-mono;
+  color: tokens.$on-surface;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.description {
+  margin: 0 0 1rem;
+  font-size: tokens.$text-body-sm;
+  color: #727786;
+}
+
+.panelsRow {
+  display: flex;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.modalBody {
+  padding-top: 0.5rem;
+}

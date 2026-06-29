@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-26T16:47:12+05:30
+# Last edited: 2026-06-28T11:55:42Z
 # --- END GENERATED FILE METADATA ---
 
 """CSV validation endpoints (local paths, browse, job polling)."""
@@ -59,7 +59,7 @@ from pegasus.schemas.validation_history import (
 )
 from pegasus.validation.file_detection import detect_file
 from pegasus.validation.file_detection.coerce import coerce_local_validate_fields_with_detection
-from pegasus.validation.file_format import infer_archive_format_from_name, infer_file_format_from_path, is_archive_format, normalize_file_format
+from pegasus.validation.file_format import infer_file_format_from_path, normalize_file_format
 from pegasus.validation.file_pairing import auto_match_files_by_name, list_files_in_directory
 from pegasus.services.exceptions import ValidationBadRequestError
 from pegasus.services.job_size_estimate import enrich_meta_file_sizes
@@ -75,10 +75,8 @@ from pegasus.validation.cloud_input import (
     resolve_columnar_input,
     resolve_delimited_input,
 )
-from pegasus.validation.cloud_profile import resolve_gcs_archive_format, resolve_gcs_columnar_format, resolve_gcs_json_format
-from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+from pegasus.validation.cloud_profile import resolve_gcs_columnar_format, resolve_gcs_json_format
 from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter
-from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
 from pegasus.validation.gcs_object import cloud_config_to_meta, gcs_object_ref_from_config
 from pegasus.validation.gcs_browse import browse_gcs_prefix, list_gcs_buckets, list_gcs_files_under_prefix
 from pegasus.validation.local_browse import (
@@ -944,34 +942,7 @@ async def validate_csv_local_paths(
                 status.HTTP_400_BAD_REQUEST,
                 detail="Use POST /validate/local/fixed-width-layout for fixed-width files",
             )
-        if is_archive_format(file_format):
-            source_ref = gcs_object_ref_from_config(source_cloud)
-            target_ref = gcs_object_ref_from_config(target_cloud)
-            source_adapter = GcsDelimitedAdapter(
-                source_ref,
-                delimiter=",",
-                has_header=body.has_header,
-                skip_rows=body.header_leading_rows,
-            )
-            target_adapter = GcsDelimitedAdapter(
-                target_ref,
-                delimiter=",",
-                has_header=body.has_header,
-                skip_rows=body.header_leading_rows,
-            )
-            source_input = ResolvedDelimitedInput(
-                adapter=source_adapter,
-                display_name=source_ref.uri,
-                is_cloud=True,
-            )
-            target_input = ResolvedDelimitedInput(
-                adapter=target_adapter,
-                display_name=target_ref.uri,
-                is_cloud=True,
-            )
-            resolved_source = source_adapter.path
-            resolved_target = target_adapter.path
-        elif is_columnar_format(file_format):
+        if is_columnar_format(file_format):
             source_input = resolve_columnar_input(
                 settings=settings,
                 label="source",
