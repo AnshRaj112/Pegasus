@@ -25,12 +25,10 @@ import { resolveWizardArchiveMode, archiveUsesTabularValidation } from '../archi
 import { FixedWidthLayoutPanel } from './FixedWidthLayoutPanel';
 import { ArchiveValidationStep } from './ArchiveValidationStep';
 import { JsonParentMappingStep } from './JsonParentMappingStep';
+import { buildPreviewPairKey, cloudObjectKey, isPreviewStateCached } from '../validationPreviewCache';
 import styles from './ConfigureMappingStep.module.scss';
 
 const PAGE_SIZE = 10;
-
-const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string =>
-  cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';
 
 interface ComplexMappingRow {
   id: string;
@@ -282,7 +280,7 @@ export const ConfigureMappingStep: React.FC = () => {
 
   const sourceKey = cloudObjectKey(validationForm.sourceCloud);
   const targetKey = cloudObjectKey(validationForm.targetCloud);
-  const previewPairKey = `${sourceKey}|${targetKey}|${validationForm.uidColumn}|${validationForm.delimiter}|${validationForm.hasHeader}`;
+  const previewPairKey = buildPreviewPairKey(validationForm, sourceKey, targetKey);
   const fixedWidthPairKey = previewPairKey;
   const previewError = previewColumnsState.pairKey === previewPairKey ? previewColumnsState.error : null;
   const fixedWidthLoading = previewFixedWidthState.pairKey === fixedWidthPairKey && previewFixedWidthState.isFetching;
@@ -318,6 +316,7 @@ export const ConfigureMappingStep: React.FC = () => {
   useEffect(() => {
     if (!isFixedWidth || !validationForm.sourceCloud || !validationForm.targetCloud) return;
     if (validationForm.fixedWidthColumns.length > 0) return;
+    if (isPreviewStateCached(previewFixedWidthState, fixedWidthPairKey)) return;
 
     dispatch(validationActions.previewFixedWidthLayoutRequest(fixedWidthPairKey));
   }, [
@@ -329,6 +328,7 @@ export const ConfigureMappingStep: React.FC = () => {
     validationForm.hasHeader,
     validationForm.fixedWidthColumns.length,
     fixedWidthPairKey,
+    previewFixedWidthState,
     dispatch,
   ]);
 
@@ -361,6 +361,8 @@ export const ConfigureMappingStep: React.FC = () => {
       return;
     }
 
+    if (isPreviewStateCached(previewColumnsState, previewPairKey)) return;
+
     dispatch(validationActions.previewValidationColumnsRequest(previewPairKey));
   }, [
     validationForm.sourceCloud,
@@ -370,10 +372,12 @@ export const ConfigureMappingStep: React.FC = () => {
     validationForm.hasHeader,
     validationForm.columnMappings,
     previewPairKey,
+    previewColumnsState,
     dispatch,
     isFixedWidth,
     isJson,
     isArchive,
+    isArchiveMetadataOnly,
   ]);
 
   useEffect(() => {

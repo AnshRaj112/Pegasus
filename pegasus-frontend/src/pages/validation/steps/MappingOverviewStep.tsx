@@ -5,12 +5,13 @@ import {
   HddOutlined, TableOutlined, BarcodeOutlined, BuildOutlined,
   EyeOutlined,
 } from '@ant-design/icons';
-import { CloudFileProfileResponse, FixedWidthColumnPreview, GoogleCloudStorageConfig } from '../../../shared/api/Api';
+import { CloudFileProfileResponse, FixedWidthColumnPreview } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { OverviewFilePreview } from './OverviewFilePreview';
 import { OverviewJsonPreview } from './OverviewJsonPreview';
 import { assessEmptyValidationFiles, isValidationFileEmpty } from '../validationEmptyFiles';
+import { buildPreviewPairKey, cloudObjectKey, isPreviewStateCached } from '../validationPreviewCache';
 import { isFixedWidthFormat } from '../fixedWidthFormat';
 import { isJsonFileName, profileLooksJson } from '../jsonFormat';
 import { profileLooksArchive, resolveWizardArchiveMode, archiveKindFromProfile, archiveUsesTabularValidation } from '../archiveFormat';
@@ -29,7 +30,6 @@ const formatBytes = (bytes: number | null) => {
 
 const formatCount = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString();
 const gsPath = (bucket: string | null, objectName: string | null) => bucket && objectName ? `gs://${bucket}/${objectName}` : '—';
-const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string => cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';
 
 const formatBoolean = (val: boolean | null | undefined) => {
   if (val === true) return 'Yes';
@@ -157,8 +157,8 @@ export const MappingOverviewStep: React.FC = () => {
 
   const sourceKey = cloudObjectKey(form.sourceCloud);
   const targetKey = cloudObjectKey(form.targetCloud);
-  const previewPairKey = `${sourceKey}|${targetKey}|${form.uidColumn || 'id'}|${form.delimiter || 'auto'}|${form.hasHeader}`;
-  const fixedWidthPairKey = `${sourceKey}|${targetKey}|${form.uidColumn}|${form.delimiter || 'auto'}|${form.hasHeader}`;
+  const previewPairKey = buildPreviewPairKey(form, sourceKey, targetKey);
+  const fixedWidthPairKey = previewPairKey;
   const previewLoading = previewColumnsState.pairKey === previewPairKey && previewColumnsState.isFetching;
   const previewError = previewColumnsState.pairKey === previewPairKey ? previewColumnsState.error : null;
   const previewData = previewColumnsState.pairKey === previewPairKey ? previewColumnsState.data : null;
@@ -226,7 +226,7 @@ export const MappingOverviewStep: React.FC = () => {
       sourceProfile: sourceProfile.profile,
       targetProfile: targetProfile.profile,
     });
-    if (!kind) return;
+    if (!kind || form.detectedFileFormat === kind) return;
     dispatch(validationActions.setValidationForm({
       detectedFileFormat: kind,
       columnMappings: [],
@@ -235,17 +235,23 @@ export const MappingOverviewStep: React.FC = () => {
 
   useEffect(() => {
     if (!isJson || isFetching) return;
-    dispatch(validationActions.setValidationForm({
-      detectedFileFormat: 'json',
-      uidColumn: form.uidColumn || 'document',
-      columnMappings: [],
-    }));
-  }, [isJson, isFetching, dispatch, form.uidColumn]);
+    const patch: Partial<typeof form> = {};
+    if (form.detectedFileFormat !== 'json') {
+      patch.detectedFileFormat = 'json';
+      patch.columnMappings = [];
+    }
+    if (!form.uidColumn) {
+      patch.uidColumn = 'document';
+    }
+    if (Object.keys(patch).length > 0) {
+      dispatch(validationActions.setValidationForm(patch));
+    }
+  }, [isJson, isFetching, dispatch, form.uidColumn, form.detectedFileFormat]);
 
   useEffect(() => {
-    if (!isFixedWidth || isFetching) return;
+    if (!isFixedWidth || isFetching || form.detectedFileFormat === 'fixed-width') return;
     dispatch(validationActions.setValidationForm({ detectedFileFormat: 'fixed-width' }));
-  }, [isFixedWidth, isFetching, dispatch]);
+  }, [isFixedWidth, isFetching, form.detectedFileFormat, dispatch]);
 
   useEffect(() => {
     if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || cacheHit) return;
@@ -256,6 +262,7 @@ export const MappingOverviewStep: React.FC = () => {
     if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || !isFixedWidth || form.fixedWidthColumns.length > 0) {
       return;
     }
+    if (isPreviewStateCached(previewFixedWidthState, fixedWidthPairKey)) return;
 
     dispatch(validationActions.previewFixedWidthLayoutRequest(fixedWidthPairKey));
   }, [
@@ -269,6 +276,7 @@ export const MappingOverviewStep: React.FC = () => {
     isFixedWidth,
     sourceKey,
     targetKey,
+    previewFixedWidthState,
     dispatch,
   ]);
 
@@ -287,9 +295,10 @@ export const MappingOverviewStep: React.FC = () => {
     if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || isFixedWidth || isJson || isArchive || isFetching) {
       return;
     }
+    if (isPreviewStateCached(previewColumnsState, previewPairKey)) return;
 
     dispatch(validationActions.previewValidationColumnsRequest(previewPairKey));
-  }, [form.sourceCloud, form.targetCloud, form.uidColumn, form.delimiter, form.hasHeader, previewPairKey, sourceKey, targetKey, isFixedWidth, isJson, isArchive, isFetching, dispatch]);
+  }, [form.sourceCloud, form.targetCloud, form.uidColumn, form.delimiter, form.hasHeader, previewPairKey, sourceKey, targetKey, isFixedWidth, isJson, isArchive, isFetching, previewColumnsState, dispatch]);
 
   const handleFixedWidthChange = (columns: FixedWidthColumnPreview[]) => {
     dispatch(validationActions.setValidationForm({ fixedWidthColumns: columns }));

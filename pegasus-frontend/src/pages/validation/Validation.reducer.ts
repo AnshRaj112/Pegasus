@@ -12,7 +12,7 @@ import {
 import { GoogleCloudStorageConfig, LocalColumnPreviewResponse, FixedWidthLayoutPreviewResponse, SaveDraftRequest, ValidationHistoryDetail } from '../../shared/api/Api';
 import { ValidationTabSession } from './validationTabStorage';
 
-const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string =>
+export const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string =>
   cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';
 
 const shouldClearOverviewCache = (
@@ -26,6 +26,22 @@ const shouldClearOverviewCache = (
     return true;
   }
   if (patch.hasHeader !== undefined && patch.hasHeader !== prev.hasHeader) {
+    return true;
+  }
+  if (patch.delimiter !== undefined && patch.delimiter !== prev.delimiter) {
+    return true;
+  }
+  return false;
+};
+
+const shouldClearPreviewCache = (
+  prev: ValidationFormState,
+  patch: Partial<ValidationFormState>,
+): boolean => {
+  if (shouldClearOverviewCache(prev, patch)) {
+    return true;
+  }
+  if (patch.uidColumn !== undefined && patch.uidColumn !== prev.uidColumn) {
     return true;
   }
   return false;
@@ -122,12 +138,14 @@ const validationSlice = createSlice({
           fixedWidthLineWidth: null,
         }
         : {};
+      const clearOverview = shouldClearOverviewCache(state.validationForm, action.payload);
+      const clearPreview = shouldClearPreviewCache(state.validationForm, action.payload);
       return {
         ...state,
         validationForm: { ...state.validationForm, ...action.payload, ...clearedFixedWidth },
-        overviewProfileCache: shouldClearOverviewCache(state.validationForm, action.payload)
-          ? null
-          : state.overviewProfileCache,
+        overviewProfileCache: clearOverview ? null : state.overviewProfileCache,
+        previewColumnsState: clearPreview ? initialState.previewColumnsState : state.previewColumnsState,
+        previewFixedWidthState: clearPreview ? initialState.previewFixedWidthState : state.previewFixedWidthState,
       };
     },
     setOverviewProfileCache: (state, action: PayloadAction<OverviewProfileCache>) => ({
@@ -253,15 +271,25 @@ const validationSlice = createSlice({
 
     profileCloudFilesRequest: (state, _action: PayloadAction<ProfileCloudFilesRequestPayload>) => state,
 
-    previewValidationColumnsRequest: (state, action: PayloadAction<string>) => ({
-      ...state,
-      previewColumnsState: {
-        pairKey: action.payload,
-        data: null,
-        isFetching: true,
-        error: null,
-      },
-    }),
+    previewValidationColumnsRequest: (state, action: PayloadAction<string>) => {
+      const pairKey = action.payload;
+      const cached = state.previewColumnsState;
+      if (cached.pairKey === pairKey && cached.data != null && !cached.error) {
+        return state;
+      }
+      if (cached.pairKey === pairKey && cached.isFetching) {
+        return state;
+      }
+      return {
+        ...state,
+        previewColumnsState: {
+          pairKey,
+          data: null,
+          isFetching: true,
+          error: null,
+        },
+      };
+    },
     previewValidationColumnsSuccess: (state, action: PayloadAction<{
       pairKey: string;
       data: LocalColumnPreviewResponse;
@@ -284,15 +312,25 @@ const validationSlice = createSlice({
       },
     }),
 
-    previewFixedWidthLayoutRequest: (state, action: PayloadAction<string>) => ({
-      ...state,
-      previewFixedWidthState: {
-        pairKey: action.payload,
-        data: null,
-        isFetching: true,
-        error: null,
-      },
-    }),
+    previewFixedWidthLayoutRequest: (state, action: PayloadAction<string>) => {
+      const pairKey = action.payload;
+      const cached = state.previewFixedWidthState;
+      if (cached.pairKey === pairKey && cached.data != null && !cached.error) {
+        return state;
+      }
+      if (cached.pairKey === pairKey && cached.isFetching) {
+        return state;
+      }
+      return {
+        ...state,
+        previewFixedWidthState: {
+          pairKey,
+          data: null,
+          isFetching: true,
+          error: null,
+        },
+      };
+    },
     previewFixedWidthLayoutSuccess: (state, action: PayloadAction<{
       pairKey: string;
       data: FixedWidthLayoutPreviewResponse;

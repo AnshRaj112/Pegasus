@@ -275,10 +275,20 @@ export function* browseCloudSaga(action: ReturnType<typeof validationActions.bro
 
 function* profileCloudFilesSaga(action: ReturnType<typeof validationActions.profileCloudFilesRequest>) {
   const { sourceKey, targetKey } = action.payload;
-  const { validationForm }: ValidationReducerState = yield select(
+  const { validationForm, overviewProfileCache }: ValidationReducerState = yield select(
     (state: { validation: ValidationReducerState }) => state.validation,
   );
   if (!validationForm.sourceCloud || !validationForm.targetCloud) return;
+
+  if (
+    overviewProfileCache?.sourceKey === sourceKey
+    && overviewProfileCache?.targetKey === targetKey
+    && !overviewProfileCache.sourceError
+    && !overviewProfileCache.targetError
+    && (overviewProfileCache.source != null || overviewProfileCache.target != null)
+  ) {
+    return;
+  }
 
   let source: import('../../shared/api/Api').CloudFileProfileResponse | null = null;
   let target: import('../../shared/api/Api').CloudFileProfileResponse | null = null;
@@ -319,10 +329,17 @@ function* profileCloudFilesSaga(action: ReturnType<typeof validationActions.prof
 
 export function* previewValidationColumnsSaga(action: PayloadAction<string>) {
   const pairKey = action.payload;
+  const { validationForm, previewColumnsState }: ValidationReducerState = yield select(
+    (state: { validation: ValidationReducerState }) => state.validation,
+  );
+  if (
+    previewColumnsState.pairKey === pairKey
+    && previewColumnsState.data != null
+    && !previewColumnsState.error
+  ) {
+    return;
+  }
   try {
-    const { validationForm }: ValidationReducerState = yield select(
-      (state: { validation: ValidationReducerState }) => state.validation,
-    );
     if (!validationForm.sourceCloud || !validationForm.targetCloud) return;
 
     const response: import('axios').AxiosResponse<import('../../shared/api/Api').LocalColumnPreviewResponse> = yield call(ValidationServiceApi.previewValidationColumns, {
@@ -343,10 +360,17 @@ export function* previewValidationColumnsSaga(action: PayloadAction<string>) {
 
 function* previewFixedWidthLayoutSaga(action: PayloadAction<string>) {
   const pairKey = action.payload;
+  const { validationForm, previewFixedWidthState }: ValidationReducerState = yield select(
+    (state: { validation: ValidationReducerState }) => state.validation,
+  );
+  if (
+    previewFixedWidthState.pairKey === pairKey
+    && previewFixedWidthState.data != null
+    && !previewFixedWidthState.error
+  ) {
+    return;
+  }
   try {
-    const { validationForm }: ValidationReducerState = yield select(
-      (state: { validation: ValidationReducerState }) => state.validation,
-    );
     if (!validationForm.sourceCloud || !validationForm.targetCloud) return;
 
     const response: import('axios').AxiosResponse<import('../../shared/api/Api').FixedWidthLayoutPreviewResponse> = yield call(ValidationServiceApi.previewFixedWidthLayout, {
