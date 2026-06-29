@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-29T05:26:25Z
+# Last edited: 2026-06-29T07:09:43Z
 # --- END GENERATED FILE METADATA ---
 
 """GCS streaming-only config must not auto-load full objects for in-memory reconcile."""
