@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-28T11:55:42Z
+# Last edited: 2026-06-28T11:56:30Z
 # --- END GENERATED FILE METADATA ---
 
 """Infer fixed-width column slices and date formats for the mapping UI."""
