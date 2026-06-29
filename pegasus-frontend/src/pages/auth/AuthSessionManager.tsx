@@ -7,50 +7,49 @@ import {
   adminLogout,
   extendAdminSession,
   fetchAdminMe,
-  fetchAdminSessionStatus,
 } from '../../shared/api/adminAuth';
+import {
+  getLastSessionActivityMs,
+  registerSessionExtender,
+  resetSessionActivity,
+} from '../../shared/api/sessionActivity';
+import styles from './Auth.module.scss';
 
-const WARNING_WINDOW_MS = 5 * 60 * 1000;
-const SESSION_POLL_MS = 30 * 1000;
+const INACTIVITY_MS = 15 * 60 * 1000;
+const PROMPT_GRACE_MS = 5 * 60 * 1000;
+const INACTIVITY_CHECK_MS = 10 * 1000;
 
 export const AuthSessionManager: React.FC = () => {
   const dispatch = useAppDispatch();
   const isAuthenticated = useAppSelector((state) => state.auth.isAuthenticated);
   const isLoading = useAppSelector((state) => state.auth.isLoading);
 
-  const [expiresAtMs, setExpiresAtMs] = useState<number | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
-  const [countdownMs, setCountdownMs] = useState(WARNING_WINDOW_MS);
+  const [countdownMs, setCountdownMs] = useState(PROMPT_GRACE_MS);
   const forceLogoutAtRef = useRef<number | null>(null);
+  const showPromptRef = useRef(false);
+  showPromptRef.current = showPrompt;
 
   const forceLogout = useCallback(async () => {
     try {
       await adminLogout();
     } finally {
       setShowPrompt(false);
-      setExpiresAtMs(null);
       forceLogoutAtRef.current = null;
       resetValidationOnLogout(dispatch);
       dispatch(authActions.logoutSuccess());
     }
   }, [dispatch]);
 
-  const refreshSessionStatus = useCallback(async () => {
-    try {
-      const status = await fetchAdminSessionStatus();
-      const nextExpiry = new Date(status.expires_at).getTime();
-      setExpiresAtMs(nextExpiry);
-    } catch {
-      await forceLogout();
-    }
-  }, [forceLogout]);
-
   useEffect(() => {
     let cancelled = false;
     const bootstrap = async () => {
       try {
         const me = await fetchAdminMe();
-        if (!cancelled) dispatch(authActions.setSession({ email: me.email }));
+        if (!cancelled) {
+          resetSessionActivity();
+          dispatch(authActions.setSession({ email: me.email }));
+        }
       } catch {
         if (!cancelled) dispatch(authActions.setSession(null));
       }
@@ -62,36 +61,46 @@ export const AuthSessionManager: React.FC = () => {
   }, [dispatch]);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      registerSessionExtender(null);
+      return;
+    }
+    registerSessionExtender(async () => {
+      await extendAdminSession();
+    });
+    return () => {
+      registerSessionExtender(null);
+    };
+  }, [isAuthenticated]);
+
+  useEffect(() => {
     if (!isAuthenticated) return;
-    void refreshSessionStatus();
-    const interval = window.setInterval(() => {
-      void refreshSessionStatus();
-    }, SESSION_POLL_MS);
+    resetSessionActivity();
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || isLoading) return;
+
+    const checkInactivity = () => {
+      const idleMs = Date.now() - getLastSessionActivityMs();
+      if (idleMs >= INACTIVITY_MS) {
+        if (!showPromptRef.current) {
+          setShowPrompt(true);
+          forceLogoutAtRef.current = Date.now() + PROMPT_GRACE_MS;
+          setCountdownMs(PROMPT_GRACE_MS);
+        }
+      } else if (showPromptRef.current) {
+        setShowPrompt(false);
+        forceLogoutAtRef.current = null;
+      }
+    };
+
+    checkInactivity();
+    const interval = window.setInterval(checkInactivity, INACTIVITY_CHECK_MS);
     return () => {
       window.clearInterval(interval);
     };
-  }, [isAuthenticated, refreshSessionStatus]);
-
-  useEffect(() => {
-    if (!isAuthenticated || expiresAtMs == null) {
-      setShowPrompt(false);
-      forceLogoutAtRef.current = null;
-      return;
-    }
-    const remaining = expiresAtMs - Date.now();
-    if (remaining <= 0) {
-      void forceLogout();
-      return;
-    }
-    if (remaining <= WARNING_WINDOW_MS) {
-      setShowPrompt(true);
-      forceLogoutAtRef.current = Date.now() + Math.min(WARNING_WINDOW_MS, remaining);
-      setCountdownMs(Math.min(WARNING_WINDOW_MS, remaining));
-    } else {
-      setShowPrompt(false);
-      forceLogoutAtRef.current = null;
-    }
-  }, [expiresAtMs, forceLogout, isAuthenticated]);
+  }, [isAuthenticated, isLoading]);
 
   useEffect(() => {
     if (!showPrompt) return;
@@ -120,17 +129,19 @@ export const AuthSessionManager: React.FC = () => {
 
   return (
     <Modal
+      className={styles.sessionModal}
       open={!isLoading && isAuthenticated && showPrompt}
       closable={false}
       maskClosable={false}
+      centered
       title="Session expiring soon"
-      okText="Extend 30 minutes"
+      okText="Extend session"
       cancelText="Logout"
       onOk={() => {
-        void extendAdminSession().then((status) => {
+        void extendAdminSession().then(() => {
+          resetSessionActivity();
           setShowPrompt(false);
           forceLogoutAtRef.current = null;
-          setExpiresAtMs(new Date(status.expires_at).getTime());
         }).catch(async () => {
           await forceLogout();
         });
@@ -139,8 +150,8 @@ export const AuthSessionManager: React.FC = () => {
         void forceLogout();
       }}
     >
-      <p style={{ marginBottom: 0 }}>
-        Your session will end soon. Extend now to stay logged in, or you will be logged out automatically in {countdownLabel}.
+      <p className={styles.sessionModalBody}>
+        You have been inactive for 15 minutes. Extend your session to stay logged in, or you will be logged out automatically in {countdownLabel}.
       </p>
     </Modal>
   );

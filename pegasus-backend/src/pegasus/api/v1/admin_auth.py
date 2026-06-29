@@ -7,9 +7,10 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Body, Cookie, Depends, HTTPException, Request, Response, status
 
 from pegasus.api.deps import AppSettings, DbSession
 from pegasus.core.admin_auth import (
@@ -32,6 +33,7 @@ from pegasus.schemas.admin_auth import (
 router = APIRouter(prefix="/admin/auth", tags=["admin-auth"])
 
 ADMIN_SESSION_COOKIE = "pegasus_admin_session"
+_SESSION_SLIDE_SKIP_SUFFIXES = ("/admin/auth/session",)
 
 
 def _normalized_email(raw: str) -> str:
@@ -61,7 +63,9 @@ def _clear_admin_cookie(response: Response, settings: AppSettings) -> None:
 
 
 async def get_current_admin_user(
+    request: Request,
     session: DbSession,
+    settings: AppSettings,
     admin_session_token: Annotated[str | None, Cookie(alias=ADMIN_SESSION_COOKIE)] = None,
 ) -> AdminUser:
     token = (admin_session_token or "").strip()
@@ -76,6 +80,13 @@ async def get_current_admin_user(
         await AdminAuthRepository.delete_session_by_hash(session, hashed)
         await session.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Admin session expired.")
+    path = request.url.path
+    if not any(path.endswith(suffix) for suffix in _SESSION_SLIDE_SKIP_SUFFIXES):
+        remaining = session_row.expires_at - now
+        slide_threshold = timedelta(minutes=max(1, settings.admin_session_ttl_minutes // 2))
+        if remaining < slide_threshold:
+            session_row.expires_at = expires_at_from_now(settings.admin_session_ttl_minutes)
+            await session.commit()
     user = await AdminAuthRepository.get_user_by_id(session, session_row.user_id)
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Admin user not found.")
