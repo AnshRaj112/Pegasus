@@ -8,3 +8,17 @@ export const getRouterPath = (): string => {
   const path = hash.startsWith('#') ? hash.slice(1) : hash;
   return path.startsWith('/') ? path : `/${path}`;
 };
+
+/**
+ * Hash routing expects URLs like `http://host:port/#/login`.
+ * Any non-root pathname (e.g. `/sdfghj#/login`) is invalid.
+ */
+export const isValidAppPathname = (pathname: string): boolean => {
+  const normalized = pathname.replace(/\/+$/, '') || '/';
+  return normalized === '/';
+};
+
+export const hasInvalidAppPathname = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return !isValidAppPathname(window.location.pathname);
+};

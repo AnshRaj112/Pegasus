@@ -30,10 +30,12 @@ from pegasus.validation.resource_profiler import (
     log_resource_snapshot_summary,
     write_resource_profile_artifacts,
 )
+from pegasus.validation.file_format import is_archive_format
 
 logger = logging.getLogger(__name__)
 
 _COLUMNAR_FORMATS = frozenset({"parquet", "orc", "avro"})
+_ARCHIVE_FORMATS = frozenset({"zip", "tar"})
 
 
 def _write_json(path: Path, obj: object, *, indent: bool = False) -> None:

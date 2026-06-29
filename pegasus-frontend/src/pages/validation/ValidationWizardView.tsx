@@ -16,6 +16,9 @@ import {
   saveValidationTabSession,
 } from './validationTabStorage';
 import { assessEmptyValidationFiles } from './validationEmptyFiles';
+import { cloudObjectKey, resolveOverviewPreviewStatus } from './overviewPreview';
+import { resolveMappingStepReady } from './mappingStepReady';
+import { dispatchOverviewProfileFetch } from './overviewPrefetch';
 
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
@@ -23,12 +26,8 @@ import { ConfigureMappingStep } from './steps/ConfigureMappingStep';
 import { resolveWizardArchiveMode, archiveUsesTabularValidation } from './archiveFormat';
 import { isFixedWidthFormat } from './fixedWidthFormat';
 import { resolveWizardJsonMode } from './jsonFormat';
-import { GoogleCloudStorageConfig } from '../../shared/api/Api';
 
 import styles from './Validation.module.scss';
-
-const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string =>
-  cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';
 
 const ValidationWizardView: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -40,8 +39,13 @@ const ValidationWizardView: React.FC = () => {
   const { isFetching } = useAppSelector((state) => state.validation.validationDataState);
   const validationForm = useAppSelector((state) => state.validation.validationForm);
   const overviewCache = useAppSelector((state) => state.validation.overviewProfileCache);
+  const overviewProfileFetchState = useAppSelector((state) => state.validation.overviewProfileFetchState);
   const wizardRunId = useAppSelector((state) => state.validation.wizardRunId);
   const saveDraftState = useAppSelector((state) => state.validation.saveDraftState);
+  const previewColumnsState = useAppSelector((state) => state.validation.previewColumnsState);
+  const previewFixedWidthState = useAppSelector((state) => state.validation.previewFixedWidthState);
+  const overviewPreviewShown = useAppSelector((state) => state.validation.overviewPreviewShown);
+  const overviewPreviewSessionKey = useAppSelector((state) => state.validation.overviewPreviewSessionKey);
 
   const [savingDraft, setSavingDraft] = useState(false);
   const [advancing, setAdvancing] = useState(false);
@@ -124,6 +128,12 @@ const ValidationWizardView: React.FC = () => {
     loadedRunIdRef.current = saveDraftState.data.run_id;
 
     if (saveDraftState.intent === 'proceed') {
+      dispatchOverviewProfileFetch(
+        dispatch,
+        validationForm,
+        overviewCache,
+        overviewProfileFetchState,
+      );
       navigate(validationOverviewPath(saveDraftState.data.run_id));
       setAdvancing(false);
     } else if (saveDraftState.intent === 'save') {
@@ -136,7 +146,7 @@ const ValidationWizardView: React.FC = () => {
     }
 
     dispatch(validationActions.clearSaveDraftState());
-  }, [saveDraftState, currentStep, navigate, dispatch]);
+  }, [saveDraftState, currentStep, navigate, dispatch, validationForm, overviewCache, overviewProfileFetchState]);
 
   useEffect(() => {
     if (!saveDraftState.error || saveDraftState.isFetching) return;
@@ -152,6 +162,11 @@ const ValidationWizardView: React.FC = () => {
 
   const isStep2Loading = currentStep === 2 && (
     loadingRun
+    || (
+      overviewProfileFetchState.isFetching
+      && overviewProfileFetchState.sourceKey === cloudObjectKey(validationForm.sourceCloud)
+      && overviewProfileFetchState.targetKey === cloudObjectKey(validationForm.targetCloud)
+    )
     || overviewCache?.sourceKey !== cloudObjectKey(validationForm.sourceCloud)
     || overviewCache?.targetKey !== cloudObjectKey(validationForm.targetCloud)
   );
@@ -202,6 +217,22 @@ const ValidationWizardView: React.FC = () => {
     validationForm.fixedWidthColumns.length,
   ]);
 
+  const overviewPreviewStatus = useMemo(() => resolveOverviewPreviewStatus({
+    form: validationForm,
+    cache: overviewCache,
+    previewColumnsState,
+    previewFixedWidthState,
+  }), [validationForm, overviewCache, previewColumnsState, previewFixedWidthState]);
+
+  const overviewPreviewSatisfied = overviewPreviewStatus.ready
+    && overviewPreviewShown
+    && overviewPreviewSessionKey === overviewPreviewStatus.sessionKey;
+
+  const overviewPreviewPending = currentStep === 2
+    && !overviewBlocksMapping
+    && overviewPreviewStatus.kind !== 'skipped'
+    && (!overviewPreviewStatus.ready || !overviewPreviewSatisfied);
+
   const isFixedWidth = isFixedWidthFormat(validationForm.detectedFileFormat);
   const isJson = resolveWizardJsonMode({
     detectedFileFormat: validationForm.detectedFileFormat,
@@ -224,21 +255,35 @@ const ValidationWizardView: React.FC = () => {
     sourceProfile: overviewCache?.source,
     targetProfile: overviewCache?.target,
   });
-  const isStep3Loading = currentStep === 3 && (
-    loadingRun
-    || (isFixedWidth
-      ? validationForm.fixedWidthColumns.length === 0
-      : isJson
-        ? false
-        : isArchiveMetadataOnly
-          ? false
-          : !validationForm.columnMappings || validationForm.columnMappings.length === 0)
-  );
+  const isStep3Loading = currentStep === 3 && loadingRun;
 
-  const isActuallyLoading = isFetching || advancing || isStep2Loading || isStep3Loading;
+  const mappingStepStatus = useMemo(() => resolveMappingStepReady({
+    form: validationForm,
+    cache: overviewCache,
+    previewColumnsState,
+    previewFixedWidthState,
+    isJson,
+    isArchiveMetadataOnly,
+    isFixedWidth,
+  }), [
+    validationForm,
+    overviewCache,
+    previewColumnsState,
+    previewFixedWidthState,
+    isJson,
+    isArchiveMetadataOnly,
+    isFixedWidth,
+  ]);
+
+  const isStep3DataLoading = currentStep === 3 && mappingStepStatus.loading;
+  const isStep3DataBlocked = currentStep === 3 && !mappingStepStatus.loading && !mappingStepStatus.ready;
+
+  const isActuallyLoading = isFetching || advancing || isStep2Loading || isStep3Loading || isStep3DataLoading
+    || (currentStep === 2 && overviewPreviewStatus.loading);
   const isNextButtonDisabled = isActuallyLoading
+    || isStep3DataBlocked
     || (currentStep === 1 && !isStep1Valid)
-    || (currentStep === 2 && overviewBlocksMapping);
+    || (currentStep === 2 && (overviewBlocksMapping || overviewPreviewPending));
 
   const handleProceed = () => {
     if (currentStep === 1) {
@@ -283,6 +328,26 @@ const ValidationWizardView: React.FC = () => {
       return;
     }
 
+    if (currentStep === 3) {
+      if (isFixedWidth && validationForm.fixedWidthColumns.length === 0) {
+        notification.warning({
+          message: 'Fixed-width layout required',
+          description: 'Configure the fixed-width column layout before running validation.',
+        });
+        return;
+      }
+      if (!isJson && !isArchiveMetadataOnly && !isFixedWidth) {
+        const hasMappings = (validationForm.columnMappings?.length ?? 0) > 0;
+        if (!hasMappings) {
+          notification.warning({
+            message: 'Column mapping required',
+            description: 'Map at least one source column to a target column before running validation.',
+          });
+          return;
+        }
+      }
+    }
+
     dispatch(validationActions.submitValidationRequest());
   };
 
@@ -323,13 +388,23 @@ const ValidationWizardView: React.FC = () => {
   };
 
   const proceedLabel = currentStep === 3
-    ? 'Run Validation'
+    ? isStep3DataLoading
+      ? 'Loading mapping data…'
+      : isStep3DataBlocked
+        ? 'Mapping data unavailable'
+      : 'Run Validation'
     : currentStep === 2
       ? overviewBlocksMapping
         ? 'Cannot proceed — empty file'
-        : overviewIsJson
-          ? 'Proceed to JSON Mapping'
-          : 'Proceed to Mapping'
+        : overviewPreviewStatus.error
+          ? 'Preview failed — fix files or retry'
+        : overviewPreviewPending && overviewPreviewStatus.loading
+          ? 'Loading preview…'
+          : overviewPreviewPending && overviewPreviewStatus.ready && !overviewPreviewSatisfied
+            ? 'Review preview to continue'
+          : overviewIsJson
+            ? 'Proceed to JSON Mapping'
+            : 'Proceed to Mapping'
       : 'Proceed to Overview';
 
   return (

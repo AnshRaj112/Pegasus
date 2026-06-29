@@ -27,25 +27,19 @@ import { ArchiveValidationStep } from './ArchiveValidationStep';
 import { JsonParentMappingStep } from './JsonParentMappingStep';
 import styles from './ConfigureMappingStep.module.scss';
 
+import { cloudObjectKey, buildPreviewPairKey, buildFixedWidthPreviewPairKey } from '../overviewPreview';
+import { shouldRequestPreview } from '../overviewRequestGuards';
+import {
+  applySavedColumnMappingsToMatrix,
+  buildMatrixFromColumnPreview,
+  enrichMatrixWithPreviewSamples,
+  targetSamplesFromPreview,
+  type MappingMatrixRow,
+} from '../mappingMatrixPreview';
+
 const PAGE_SIZE = 10;
 
-const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string =>
-  cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';
-
-interface ComplexMappingRow {
-  id: string;
-  sourceCol: string;
-  sourceType: string;
-  targetCols: { name: string; type: string; sample: string }[];
-  isPk: boolean;
-  isIgnored: boolean;
-  isSensitive: boolean;
-  isExpanded: boolean;
-  isOrderSensitive: boolean;
-  sourceExpr: string;
-  targetExpr: string;
-  previewValue: string;
-}
+interface ComplexMappingRow extends MappingMatrixRow {}
 
 const looksStructured = (value: string): boolean => {
   const s = value.trim();
@@ -282,8 +276,8 @@ export const ConfigureMappingStep: React.FC = () => {
 
   const sourceKey = cloudObjectKey(validationForm.sourceCloud);
   const targetKey = cloudObjectKey(validationForm.targetCloud);
-  const previewPairKey = `${sourceKey}|${targetKey}|${validationForm.uidColumn}|${validationForm.delimiter}|${validationForm.hasHeader}`;
-  const fixedWidthPairKey = previewPairKey;
+  const previewPairKey = buildPreviewPairKey(sourceKey, targetKey, validationForm);
+  const fixedWidthPairKey = buildFixedWidthPreviewPairKey(sourceKey, targetKey, validationForm);
   const previewError = previewColumnsState.pairKey === previewPairKey ? previewColumnsState.error : null;
   const fixedWidthLoading = previewFixedWidthState.pairKey === fixedWidthPairKey && previewFixedWidthState.isFetching;
   const fixedWidthError = previewFixedWidthState.pairKey === fixedWidthPairKey ? previewFixedWidthState.error : null;
@@ -313,11 +307,12 @@ export const ConfigureMappingStep: React.FC = () => {
 
   useEffect(() => {
     hydratedMappingsRef.current = false;
-  }, [validationForm.sourceCloud, validationForm.targetCloud]);
+  }, [validationForm.sourceCloud, validationForm.targetCloud, previewPairKey]);
 
   useEffect(() => {
     if (!isFixedWidth || !validationForm.sourceCloud || !validationForm.targetCloud) return;
     if (validationForm.fixedWidthColumns.length > 0) return;
+    if (!shouldRequestPreview(previewFixedWidthState, fixedWidthPairKey)) return;
 
     dispatch(validationActions.previewFixedWidthLayoutRequest(fixedWidthPairKey));
   }, [
@@ -329,39 +324,49 @@ export const ConfigureMappingStep: React.FC = () => {
     validationForm.hasHeader,
     validationForm.fixedWidthColumns.length,
     fixedWidthPairKey,
+    previewFixedWidthState,
     dispatch,
   ]);
 
   useEffect(() => {
-    if (!validationForm.sourceCloud || !validationForm.targetCloud || isFixedWidth || isJson || isArchiveMetadataOnly) return;
-    if (hydratedMappingsRef.current) return;
-
-    if (validationForm.columnMappings.length > 0) {
-      const restored = matrixFromColumnMappings(
-        validationForm.columnMappings,
-        validationForm.uidColumn,
-      );
-      const targetNames = new Set<string>();
-      validationForm.columnMappings.forEach((mapping) => {
-        targetNames.add(mapping.target_column);
-        (mapping.target_columns ?? []).forEach((col) => targetNames.add(col));
-      });
-      setTargetColumnsList(Array.from(targetNames));
-      setComplexColumns(
-        mergeComplexColumns(
-          validationForm.columnMappings
-            .filter((m) => m.compare_mode === 'structured')
-            .map((m) => m.source_column),
-          restored,
-        ),
-      );
-      setColumnsMatrix(restored);
-      setPage(1);
-      hydratedMappingsRef.current = true;
+    if (!validationForm.sourceCloud || !validationForm.targetCloud || isFixedWidth || isJson || isArchiveMetadataOnly) {
       return;
     }
+    if (hydratedMappingsRef.current) return;
 
-    dispatch(validationActions.previewValidationColumnsRequest(previewPairKey));
+    const previewReady = previewColumnsState.pairKey === previewPairKey && Boolean(previewColumnsState.data);
+    const previewLoading = previewColumnsState.pairKey === previewPairKey && previewColumnsState.isFetching;
+
+    if (!previewReady && !previewLoading) {
+      if (!shouldRequestPreview(previewColumnsState, previewPairKey)) {
+        if (validationForm.columnMappings.length > 0) {
+          const restored = matrixFromColumnMappings(
+            validationForm.columnMappings,
+            validationForm.uidColumn,
+          );
+          const targetNames = new Set<string>();
+          validationForm.columnMappings.forEach((mapping) => {
+            targetNames.add(mapping.target_column);
+            (mapping.target_columns ?? []).forEach((col) => targetNames.add(col));
+          });
+          setTargetColumnsList(Array.from(targetNames));
+          setComplexColumns(
+            mergeComplexColumns(
+              validationForm.columnMappings
+                .filter((m) => m.compare_mode === 'structured')
+                .map((m) => m.source_column),
+              restored,
+            ),
+          );
+          setColumnsMatrix(restored);
+          setPage(1);
+          hydratedMappingsRef.current = true;
+        }
+        return;
+      }
+
+      dispatch(validationActions.previewValidationColumnsRequest(previewPairKey));
+    }
   }, [
     validationForm.sourceCloud,
     validationForm.targetCloud,
@@ -370,10 +375,11 @@ export const ConfigureMappingStep: React.FC = () => {
     validationForm.hasHeader,
     validationForm.columnMappings,
     previewPairKey,
+    previewColumnsState,
     dispatch,
     isFixedWidth,
     isJson,
-    isArchive,
+    isArchiveMetadataOnly,
   ]);
 
   useEffect(() => {
@@ -387,58 +393,33 @@ export const ConfigureMappingStep: React.FC = () => {
       return;
     }
 
-    const savedUids = validationForm.uidColumn?.split(',') || [];
-    const defaultUid = preview.source_columns.includes('column_1') ? 'column_1' : preview.source_columns[0] ?? 'id';
-    const isUidMatch = (col: string) => savedUids.includes(col) || (savedUids.length === 0 && col === defaultUid);
+    let mappings = buildMatrixFromColumnPreview(preview, validationForm.uidColumn).rows;
+    if (validationForm.columnMappings.length > 0) {
+      mappings = applySavedColumnMappingsToMatrix(
+        mappings,
+        validationForm.columnMappings,
+        validationForm.uidColumn,
+      );
+    }
+    mappings = enrichMatrixWithPreviewSamples(mappings, preview);
 
-    const autoMappings = preview.auto_mappings ?? [];
-    const complex = preview.complex_columns ?? [];
+    const targetSamples = targetSamplesFromPreview(preview);
+    const complex = mergeComplexColumns(preview.complex_columns ?? [], mappings);
 
-    const tSamples: Record<string, string> = {};
-    Object.entries(preview.target_samples ?? {}).forEach(([k, v]) => {
-      tSamples[k] = (v as string[])[0] ?? '';
-    });
-
-    const mappings: ComplexMappingRow[] = preview.source_columns.map((col) => {
-      const auto = autoMappings.find((m) => m.source_column === col);
-      const isUid = isUidMatch(col);
-      const uidTarget = isUid && preview.target_columns.includes(col) ? col : null;
-      const targets = auto ? [auto.target_column] : uidTarget ? [uidTarget] : [];
-
-      const sample = preview.source_samples?.[col]?.[0] ?? '';
-      const inferredType = inferType(sample, complex.includes(col));
-
-      return {
-        id: col,
-        sourceCol: col,
-        sourceType: inferredType,
-        targetCols: targets.map((t) => {
-          const targetSample = tSamples[t] ?? '';
-          return { name: t, type: inferType(targetSample, false), sample: targetSample };
-        }),
-        isPk: isUid,
-        isIgnored: false,
-        isSensitive: false,
-        isExpanded: false,
-        isOrderSensitive: false,
-        sourceExpr: '',
-        targetExpr: '',
-        previewValue: sample,
-      };
-    });
-
+    hydratedMappingsRef.current = true;
     setTargetColumnsList(preview.target_columns ?? []);
-    setTargetSamplesRecord(tSamples);
-    setComplexColumns(mergeComplexColumns(complex, mappings));
+    setTargetSamplesRecord(targetSamples);
+    setComplexColumns(complex);
     setColumnsMatrix(mappings);
     setPage(1);
-    hydratedMappingsRef.current = true;
+    syncMappings(mappings);
   }, [
     previewColumnsState.pairKey,
     previewColumnsState.data,
     previewPairKey,
     validationForm.hasHeader,
     validationForm.uidColumn,
+    validationForm.columnMappings,
     dispatch,
   ]);
 
@@ -613,7 +594,7 @@ export const ConfigureMappingStep: React.FC = () => {
       <div className={styles.headerRow}>
         <div>
           <h2 className={styles.heading}>
-            Pegasus_Data_Mapping
+            Pegasus Column Mapping
           </h2>
           <div className={styles.pathRow}>
             <span className={styles.pathItem}>

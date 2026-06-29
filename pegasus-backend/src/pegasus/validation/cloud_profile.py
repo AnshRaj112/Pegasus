@@ -24,7 +24,13 @@ from pegasus.validation.file_detection.display_label import (
     _pick_richest_format_label,
 )
 from pegasus.validation.file_detection.types import FileDetectionReport
-from pegasus.validation.file_format import infer_file_format_from_path, is_columnar_format, normalize_file_format
+from pegasus.validation.file_format import (
+    infer_archive_format_from_name,
+    infer_file_format_from_path,
+    is_archive_format,
+    is_columnar_format,
+    normalize_file_format,
+)
 from pegasus.validation.gcs_object import GcsObjectRef, gcs_object_ref_from_config, read_gcs_prefix
 
 

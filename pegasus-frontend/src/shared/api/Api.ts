@@ -9,6 +9,8 @@ import { httpClient } from './httpClient';
 
 /** Completion polls may build a large JSON payload; allow up to 10 minutes per request. */
 const JOB_POLL_TIMEOUT_MS = 600_000;
+/** GCS profile/preview can be slow on large objects; do not use the default 15s client timeout. */
+const VALIDATION_CLOUD_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 2_000;
 const MAX_POLL_BACKOFF_MS = 30_000;
 
@@ -489,11 +491,11 @@ export const Api = {
 
   /** POST /validate/cloud/profile — detect format and row/column counts for one GCS object */
   profileCloudFile: (body: CloudFileProfileRequest): Promise<AxiosResponse<CloudFileProfileResponse>> =>
-    httpClient.post(E.validateCloudProfile, body),
+    httpClient.post(E.validateCloudProfile, body, { timeout: VALIDATION_CLOUD_TIMEOUT_MS }),
 
   /** POST /validate/local/columns — header preview (supports source_cloud / target_cloud) */
   previewValidationColumns: (body: ValidateRequest): Promise<AxiosResponse<LocalColumnPreviewResponse>> =>
-    httpClient.post(E.validateLocalColumns, body),
+    httpClient.post(E.validateLocalColumns, body, { timeout: VALIDATION_CLOUD_TIMEOUT_MS }),
 
   /** GET /validate/options — wizard test modes and snippet limits */
   getValidationOptions: (): Promise<AxiosResponse<ValidationOptionsResponse>> =>
@@ -501,7 +503,7 @@ export const Api = {
 
   /** POST /validate/local/fixed-width-layout — infer slices and date formats */
   previewFixedWidthLayout: (body: ValidateRequest): Promise<AxiosResponse<FixedWidthLayoutPreviewResponse>> =>
-    httpClient.post(E.validateLocalFixedWidthLayout, body),
+    httpClient.post(E.validateLocalFixedWidthLayout, body, { timeout: VALIDATION_CLOUD_TIMEOUT_MS }),
 
   previewJsonParentMapping: (body: ValidateRequest): Promise<AxiosResponse<JsonParentPreviewResponse>> =>
     httpClient.post(E.validateLocalJsonParentPreview, body),

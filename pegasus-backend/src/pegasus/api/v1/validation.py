@@ -59,7 +59,7 @@ from pegasus.schemas.validation_history import (
 )
 from pegasus.validation.file_detection import detect_file
 from pegasus.validation.file_detection.coerce import coerce_local_validate_fields_with_detection
-from pegasus.validation.file_format import infer_file_format_from_path, normalize_file_format
+from pegasus.validation.file_format import infer_archive_format_from_name, infer_file_format_from_path, normalize_file_format
 from pegasus.validation.file_pairing import auto_match_files_by_name, list_files_in_directory
 from pegasus.services.exceptions import ValidationBadRequestError
 from pegasus.services.job_size_estimate import enrich_meta_file_sizes
@@ -75,8 +75,13 @@ from pegasus.validation.cloud_input import (
     resolve_columnar_input,
     resolve_delimited_input,
 )
-from pegasus.validation.cloud_profile import resolve_gcs_columnar_format, resolve_gcs_json_format
+from pegasus.validation.cloud_profile import (
+    resolve_gcs_archive_format,
+    resolve_gcs_columnar_format,
+    resolve_gcs_json_format,
+)
 from pegasus.validation.adapters.gcs_columnar import GcsColumnarAdapter
+from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
 from pegasus.validation.gcs_object import cloud_config_to_meta, gcs_object_ref_from_config
 from pegasus.validation.gcs_browse import browse_gcs_prefix, list_gcs_buckets, list_gcs_files_under_prefix
 from pegasus.validation.local_browse import (

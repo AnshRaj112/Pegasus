@@ -70,6 +70,11 @@ export const initialState: ValidationReducerState = {
   wizardRunId: null,
   validationForm: defaultValidationForm,
   overviewProfileCache: null,
+  overviewProfileFetchState: {
+    sourceKey: null,
+    targetKey: null,
+    isFetching: false,
+  },
   validationDataState: initializeNullState,
   pendingHistoryNavigation: null,
   cloudConnectionsState: initializeNullState,
@@ -99,6 +104,8 @@ export const initialState: ValidationReducerState = {
     isFetching: false,
     error: null,
   },
+  overviewPreviewShown: false,
+  overviewPreviewSessionKey: null,
 };
 
 const validationSlice = createSlice({
@@ -128,11 +135,32 @@ const validationSlice = createSlice({
         overviewProfileCache: shouldClearOverviewCache(state.validationForm, action.payload)
           ? null
           : state.overviewProfileCache,
+        overviewPreviewShown: shouldClearOverviewCache(state.validationForm, action.payload)
+          ? false
+          : state.overviewPreviewShown,
+        overviewPreviewSessionKey: shouldClearOverviewCache(state.validationForm, action.payload)
+          ? null
+          : state.overviewPreviewSessionKey,
+        overviewProfileFetchState: shouldClearOverviewCache(state.validationForm, action.payload)
+          ? initialState.overviewProfileFetchState
+          : state.overviewProfileFetchState,
       };
     },
     setOverviewProfileCache: (state, action: PayloadAction<OverviewProfileCache>) => ({
       ...state,
       overviewProfileCache: action.payload,
+      overviewProfileFetchState: {
+        sourceKey: action.payload.sourceKey,
+        targetKey: action.payload.targetKey,
+        isFetching: false,
+      },
+      overviewPreviewShown: false,
+      overviewPreviewSessionKey: null,
+    }),
+    setOverviewPreviewShown: (state, action: PayloadAction<{ sessionKey: string }>) => ({
+      ...state,
+      overviewPreviewShown: true,
+      overviewPreviewSessionKey: action.payload.sessionKey,
     }),
     setWizardRunId: (state, action: PayloadAction<string | null>) => ({
       ...state,
@@ -144,6 +172,7 @@ const validationSlice = createSlice({
       wizardRunId: null,
       validationForm: defaultValidationForm,
       overviewProfileCache: null,
+      overviewProfileFetchState: initialState.overviewProfileFetchState,
       validationDataState: initializeNullState,
       pendingHistoryNavigation: null,
       cloudConnectionsState: initializeNullState,
@@ -151,6 +180,8 @@ const validationSlice = createSlice({
       previewColumnsState: initialState.previewColumnsState,
       previewFixedWidthState: initialState.previewFixedWidthState,
       saveDraftState: initialState.saveDraftState,
+      overviewPreviewShown: false,
+      overviewPreviewSessionKey: null,
     }),
     restoreTabSession: (_state, action: PayloadAction<ValidationTabSession>) => ({
       currentStep: 1,
@@ -158,6 +189,7 @@ const validationSlice = createSlice({
       wizardRunId: action.payload.wizardRunId,
       validationForm: { ...defaultValidationForm, ...action.payload.validationForm },
       overviewProfileCache: action.payload.overviewProfileCache,
+      overviewProfileFetchState: initialState.overviewProfileFetchState,
       validationDataState: initializeNullState,
       pendingHistoryNavigation: null,
       cloudConnectionsState: initializeNullState,
@@ -165,6 +197,8 @@ const validationSlice = createSlice({
       previewColumnsState: initialState.previewColumnsState,
       previewFixedWidthState: initialState.previewFixedWidthState,
       saveDraftState: initialState.saveDraftState,
+      overviewPreviewShown: false,
+      overviewPreviewSessionKey: null,
     }),
     clearValidationRun: (state) => ({
       ...state,
@@ -251,17 +285,34 @@ const validationSlice = createSlice({
       },
     }),
 
-    profileCloudFilesRequest: (state, _action: PayloadAction<ProfileCloudFilesRequestPayload>) => state,
-
-    previewValidationColumnsRequest: (state, action: PayloadAction<string>) => ({
+    profileCloudFilesRequest: (state, action: PayloadAction<ProfileCloudFilesRequestPayload>) => ({
       ...state,
-      previewColumnsState: {
-        pairKey: action.payload,
-        data: null,
+      overviewProfileFetchState: {
+        sourceKey: action.payload.sourceKey,
+        targetKey: action.payload.targetKey,
         isFetching: true,
-        error: null,
       },
     }),
+
+    previewValidationColumnsRequest: (state, action: PayloadAction<string>) => {
+      if (
+        state.previewColumnsState.pairKey === action.payload
+        && (state.previewColumnsState.isFetching || state.previewColumnsState.data)
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        overviewPreviewShown: false,
+        overviewPreviewSessionKey: null,
+        previewColumnsState: {
+          pairKey: action.payload,
+          data: null,
+          isFetching: true,
+          error: null,
+        },
+      };
+    },
     previewValidationColumnsSuccess: (state, action: PayloadAction<{
       pairKey: string;
       data: LocalColumnPreviewResponse;
@@ -284,15 +335,25 @@ const validationSlice = createSlice({
       },
     }),
 
-    previewFixedWidthLayoutRequest: (state, action: PayloadAction<string>) => ({
-      ...state,
-      previewFixedWidthState: {
-        pairKey: action.payload,
-        data: null,
-        isFetching: true,
-        error: null,
-      },
-    }),
+    previewFixedWidthLayoutRequest: (state, action: PayloadAction<string>) => {
+      if (
+        state.previewFixedWidthState.pairKey === action.payload
+        && (state.previewFixedWidthState.isFetching || state.previewFixedWidthState.data)
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        overviewPreviewShown: false,
+        overviewPreviewSessionKey: null,
+        previewFixedWidthState: {
+          pairKey: action.payload,
+          data: null,
+          isFetching: true,
+          error: null,
+        },
+      };
+    },
     previewFixedWidthLayoutSuccess: (state, action: PayloadAction<{
       pairKey: string;
       data: FixedWidthLayoutPreviewResponse;

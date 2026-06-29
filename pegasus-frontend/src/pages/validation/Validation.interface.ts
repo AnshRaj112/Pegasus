@@ -99,12 +99,19 @@ export interface OverviewProfileCache {
   targetError: boolean;
 }
 
+export interface OverviewProfileFetchState {
+  sourceKey: string | null;
+  targetKey: string | null;
+  isFetching: boolean;
+}
+
 export interface ValidationReducerState {
   currentStep: number;
   isStep1Valid: boolean;
   wizardRunId: string | null;
   validationForm: ValidationFormState;
   overviewProfileCache: OverviewProfileCache | null;
+  overviewProfileFetchState: OverviewProfileFetchState;
   validationDataState: {
     data: ValidationDataResponse | null;
     isFetching: boolean;
@@ -117,4 +124,7 @@ export interface ValidationReducerState {
   previewColumnsState: PreviewRequestState<import('../../shared/api/Api').LocalColumnPreviewResponse>;
   previewFixedWidthState: PreviewRequestState<import('../../shared/api/Api').FixedWidthLayoutPreviewResponse>;
   saveDraftState: SaveDraftState;
+  /** True after the overview preview modal has been shown for the current file pair. */
+  overviewPreviewShown: boolean;
+  overviewPreviewSessionKey: string | null;
 }

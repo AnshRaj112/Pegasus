@@ -381,6 +381,27 @@ class Settings(BaseSettings):
         ge=1024 * 1024,
         description="Maximum uncompressed bytes per archive member when auto-extracting.",
     )
+    validation_archive_max_declared_bytes: int = Field(
+        default=50 * 1024 * 1024 * 1024,
+        ge=1024 * 1024,
+        description="Maximum sum of declared uncompressed sizes from archive headers.",
+    )
+    validation_archive_max_compression_ratio: float = Field(
+        default=1000.0,
+        ge=1.0,
+        description="Reject archive entries whose declared uncompressed/compressed ratio exceeds this.",
+    )
+    validation_archive_max_nest_depth: int = Field(
+        default=3,
+        ge=1,
+        le=8,
+        description="Maximum archive nesting depth for metadata manifest expansion (e.g. tar/zip/csv).",
+    )
+    validation_archive_max_nested_member_bytes: int = Field(
+        default=64 * 1024 * 1024,
+        ge=1024 * 1024,
+        description="Maximum uncompressed bytes per nested archive member expanded inline.",
+    )
 
     @model_validator(mode="after")
     def _validate_encryption_key(self) -> "Settings":

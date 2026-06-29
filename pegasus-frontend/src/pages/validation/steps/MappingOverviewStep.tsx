@@ -1,16 +1,19 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DatabaseOutlined, FileTextOutlined, ArrowRightOutlined,
   CheckCircleFilled, WarningFilled, CloseCircleFilled, ProfileOutlined,
   HddOutlined, TableOutlined, BarcodeOutlined, BuildOutlined,
   EyeOutlined,
 } from '@ant-design/icons';
-import { CloudFileProfileResponse, FixedWidthColumnPreview, GoogleCloudStorageConfig } from '../../../shared/api/Api';
+import { CloudFileProfileResponse, FixedWidthColumnPreview, FixedWidthLayoutPreviewResponse, LocalColumnPreviewResponse } from '../../../shared/api/Api';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { OverviewFilePreview } from './OverviewFilePreview';
 import { OverviewJsonPreview } from './OverviewJsonPreview';
+import { OverviewArchivePreview } from './OverviewArchivePreview';
 import { assessEmptyValidationFiles, isValidationFileEmpty } from '../validationEmptyFiles';
+import { cloudObjectKey, buildPreviewPairKey, buildFixedWidthPreviewPairKey } from '../overviewPreview';
+import { shouldRequestOverviewProfiles, shouldRequestPreview } from '../overviewRequestGuards';
 import { isFixedWidthFormat } from '../fixedWidthFormat';
 import { isJsonFileName, profileLooksJson } from '../jsonFormat';
 import { profileLooksArchive, resolveWizardArchiveMode, archiveKindFromProfile, archiveUsesTabularValidation } from '../archiveFormat';
@@ -29,7 +32,29 @@ const formatBytes = (bytes: number | null) => {
 
 const formatCount = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString();
 const gsPath = (bucket: string | null, objectName: string | null) => bucket && objectName ? `gs://${bucket}/${objectName}` : '—';
-const cloudObjectKey = (cloud: GoogleCloudStorageConfig | null): string => cloud ? `${cloud.connection_id ?? ''}:${cloud.bucket ?? ''}:${cloud.object_name}` : '';
+
+const fixedWidthToColumnPreview = (data: FixedWidthLayoutPreviewResponse): LocalColumnPreviewResponse => {
+  const source_columns = data.columns.map((column) => column.field_name);
+  const source_samples: Record<string, string[]> = {};
+  const target_samples: Record<string, string[]> = {};
+  for (const column of data.columns) {
+    source_samples[column.field_name] = [column.source_sample?.trim() || '—'];
+    target_samples[column.field_name] = [column.target_sample?.trim() || '—'];
+  }
+  return {
+    source_columns,
+    target_columns: [...source_columns],
+    compare_columns: [],
+    auto_mappings: [],
+    unmatched_source_columns: [],
+    unmatched_target_columns: [],
+    delimiter: 'fixed-width',
+    has_header: true,
+    source_samples,
+    target_samples,
+    sample_row_count: 1,
+  };
+};
 
 const formatBoolean = (val: boolean | null | undefined) => {
   if (val === true) return 'Yes';
@@ -150,15 +175,17 @@ export const MappingOverviewStep: React.FC = () => {
   const dispatch = useAppDispatch();
   const form = useAppSelector((s) => s.validation.validationForm);
   const cache = useAppSelector((s) => s.validation.overviewProfileCache);
+  const profileFetchState = useAppSelector((s) => s.validation.overviewProfileFetchState);
   const previewColumnsState = useAppSelector((s) => s.validation.previewColumnsState);
   const previewFixedWidthState = useAppSelector((s) => s.validation.previewFixedWidthState);
 
   const [previewOpen, setPreviewOpen] = useState(false);
+  const autoPreviewedRef = useRef<string | null>(null);
 
   const sourceKey = cloudObjectKey(form.sourceCloud);
   const targetKey = cloudObjectKey(form.targetCloud);
-  const previewPairKey = `${sourceKey}|${targetKey}|${form.uidColumn || 'id'}|${form.delimiter || 'auto'}|${form.hasHeader}`;
-  const fixedWidthPairKey = `${sourceKey}|${targetKey}|${form.uidColumn}|${form.delimiter || 'auto'}|${form.hasHeader}`;
+  const previewPairKey = buildPreviewPairKey(sourceKey, targetKey, form);
+  const fixedWidthPairKey = buildFixedWidthPreviewPairKey(sourceKey, targetKey, form);
   const previewLoading = previewColumnsState.pairKey === previewPairKey && previewColumnsState.isFetching;
   const previewError = previewColumnsState.pairKey === previewPairKey ? previewColumnsState.error : null;
   const previewData = previewColumnsState.pairKey === previewPairKey ? previewColumnsState.data : null;
@@ -200,6 +227,19 @@ export const MappingOverviewStep: React.FC = () => {
   });
   const isArchive = isArchiveContainer && !isArchiveTabular;
   const isArchiveMetadataOnly = isArchive;
+
+  const fixedWidthPreviewData = previewFixedWidthState.pairKey === fixedWidthPairKey
+    ? previewFixedWidthState.data
+    : null;
+  const fixedWidthColumnPreview = useMemo(
+    () => (isFixedWidth && fixedWidthPreviewData ? fixedWidthToColumnPreview(fixedWidthPreviewData) : null),
+    [isFixedWidth, fixedWidthPreviewData],
+  );
+  const tabularPreviewData = isFixedWidth ? fixedWidthColumnPreview : previewData;
+  const sourceArchiveEntries = sourceProfile.profile?.archive_entries_sample ?? [];
+  const targetArchiveEntries = targetProfile.profile?.archive_entries_sample ?? [];
+  const archivePreviewReady = isArchiveMetadataOnly
+    && Boolean(sourceProfile.profile && targetProfile.profile);
 
   const archiveTabularColumnCount = (
     side: 'source' | 'target',
@@ -248,14 +288,16 @@ export const MappingOverviewStep: React.FC = () => {
   }, [isFixedWidth, isFetching, dispatch]);
 
   useEffect(() => {
-    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || cacheHit) return;
+    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey) return;
+    if (!shouldRequestOverviewProfiles(cache, profileFetchState, sourceKey, targetKey)) return;
     dispatch(validationActions.profileCloudFilesRequest({ sourceKey, targetKey }));
-  }, [form.sourceCloud, form.targetCloud, sourceKey, targetKey, cacheHit, dispatch]);
+  }, [form.sourceCloud, form.targetCloud, sourceKey, targetKey, cache, profileFetchState, dispatch]);
 
   useEffect(() => {
     if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || !isFixedWidth || form.fixedWidthColumns.length > 0) {
       return;
     }
+    if (!shouldRequestPreview(previewFixedWidthState, fixedWidthPairKey)) return;
 
     dispatch(validationActions.previewFixedWidthLayoutRequest(fixedWidthPairKey));
   }, [
@@ -267,6 +309,7 @@ export const MappingOverviewStep: React.FC = () => {
     form.fixedWidthColumns.length,
     fixedWidthPairKey,
     isFixedWidth,
+    previewFixedWidthState,
     sourceKey,
     targetKey,
     dispatch,
@@ -284,12 +327,13 @@ export const MappingOverviewStep: React.FC = () => {
   }, [previewFixedWidthState, fixedWidthPairKey, isFixedWidth, form.uidColumn, dispatch]);
 
   useEffect(() => {
-    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || isFixedWidth || isJson || isArchive || isFetching) {
+    if (!form.sourceCloud || !form.targetCloud || !sourceKey || !targetKey || isFixedWidth || isJson || isArchiveMetadataOnly || isFetching) {
       return;
     }
+    if (!shouldRequestPreview(previewColumnsState, previewPairKey)) return;
 
     dispatch(validationActions.previewValidationColumnsRequest(previewPairKey));
-  }, [form.sourceCloud, form.targetCloud, form.uidColumn, form.delimiter, form.hasHeader, previewPairKey, sourceKey, targetKey, isFixedWidth, isJson, isArchive, isFetching, dispatch]);
+  }, [form.sourceCloud, form.targetCloud, form.uidColumn, form.delimiter, form.hasHeader, previewPairKey, sourceKey, targetKey, isFixedWidth, isJson, isArchiveMetadataOnly, isFetching, previewColumnsState, dispatch]);
 
   const handleFixedWidthChange = (columns: FixedWidthColumnPreview[]) => {
     dispatch(validationActions.setValidationForm({ fixedWidthColumns: columns }));
@@ -301,27 +345,77 @@ export const MappingOverviewStep: React.FC = () => {
 
   useEffect(() => {
     setPreviewOpen(false);
-  }, [previewPairKey]);
+    autoPreviewedRef.current = null;
+  }, [previewPairKey, fixedWidthPairKey, sourceKey, targetKey]);
 
-  const openPreview = useCallback(() => {
-    setPreviewOpen(true);
-  }, []);
+  const previewSessionKey = `${sourceKey}|${targetKey}`;
 
   const jsonPreviewReady = Boolean(
     sourceProfile.profile?.json_preview && targetProfile.profile?.json_preview,
   );
 
+  const openPreview = useCallback(() => {
+    setPreviewOpen(true);
+    dispatch(validationActions.setOverviewPreviewShown({ sessionKey: previewSessionKey }));
+  }, [dispatch, previewSessionKey]);
+
+  useEffect(() => {
+    if (isFetching || autoPreviewedRef.current === previewSessionKey) return;
+
+    const tabularReady = Boolean(tabularPreviewData);
+    const jsonReady = isJson && jsonPreviewReady;
+    const fixedWidthReady = isFixedWidth && Boolean(fixedWidthColumnPreview) && !fixedWidthLoading;
+    const archiveReady = archivePreviewReady;
+
+    if (tabularReady || jsonReady || fixedWidthReady || archiveReady) {
+      autoPreviewedRef.current = previewSessionKey;
+      setPreviewOpen(true);
+      dispatch(validationActions.setOverviewPreviewShown({ sessionKey: previewSessionKey }));
+    }
+  }, [
+    isFetching,
+    previewSessionKey,
+    tabularPreviewData,
+    isJson,
+    jsonPreviewReady,
+    isFixedWidth,
+    fixedWidthColumnPreview,
+    fixedWidthLoading,
+    archivePreviewReady,
+    dispatch,
+  ]);
+
+  const previewLoadingActive = isFixedWidth
+    ? fixedWidthLoading
+    : isJson
+      ? isFetching
+      : isArchiveMetadataOnly
+        ? isFetching
+        : previewLoading;
+
   const previewControl = isJson
     ? (jsonPreviewReady
       ? <PreviewButton onClick={openPreview} />
-      : isFetching
+      : previewLoadingActive
         ? <SkeletonBlock sizes={['w36', 'h32']} />
         : '—')
-    : previewData
-      ? <PreviewButton onClick={openPreview} />
-      : previewLoading
-        ? <SkeletonBlock sizes={['w36', 'h32']} />
-        : '—';
+    : isArchiveMetadataOnly
+      ? (archivePreviewReady
+        ? <PreviewButton onClick={openPreview} />
+        : previewLoadingActive
+          ? <SkeletonBlock sizes={['w36', 'h32']} />
+          : '—')
+      : isFixedWidth
+        ? (fixedWidthColumnPreview
+          ? <PreviewButton onClick={openPreview} />
+          : previewLoadingActive
+            ? <SkeletonBlock sizes={['w36', 'h32']} />
+            : '—')
+        : tabularPreviewData
+          ? <PreviewButton onClick={openPreview} />
+          : previewLoadingActive
+            ? <SkeletonBlock sizes={['w36', 'h32']} />
+            : '—';
 
   const inferredColumnCount = isArchiveMetadataOnly
     ? (sourceProfile.profile?.column_count ?? null)
@@ -427,6 +521,24 @@ export const MappingOverviewStep: React.FC = () => {
         blocksMapping: false,
       };
     }
+    if (previewError && !isJson && !isArchiveMetadataOnly && !isFixedWidth) {
+      return {
+        status: 'error' as const,
+        title: 'Preview failed',
+        message: previewError,
+        mismatches: { size: false, columns: false, rows: false },
+        blocksMapping: false,
+      };
+    }
+    if (fixedWidthError && isFixedWidth) {
+      return {
+        status: 'error' as const,
+        title: 'Preview failed',
+        message: fixedWidthError,
+        mismatches: { size: false, columns: false, rows: false },
+        blocksMapping: false,
+      };
+    }
     if (emptyAssessment?.blocksMapping) {
       return {
         status: 'error' as const,
@@ -491,12 +603,12 @@ export const MappingOverviewStep: React.FC = () => {
       </div>
 
       <OverviewFilePreview
-        open={previewOpen && !isJson}
-        preview={previewData}
+        open={previewOpen && !isJson && !isArchiveMetadataOnly}
+        preview={tabularPreviewData}
         sourceLabel={sourceStats.name}
         targetLabel={targetStats.name}
-        loading={previewLoading}
-        error={previewError}
+        loading={previewLoadingActive}
+        error={isFixedWidth ? fixedWidthError : previewError}
         onClose={() => setPreviewOpen(false)}
       />
 
@@ -504,6 +616,15 @@ export const MappingOverviewStep: React.FC = () => {
         open={previewOpen && isJson}
         sourcePreview={sourceProfile.profile?.json_preview ?? null}
         targetPreview={targetProfile.profile?.json_preview ?? null}
+        sourceLabel={sourceStats.name}
+        targetLabel={targetStats.name}
+        onClose={() => setPreviewOpen(false)}
+      />
+
+      <OverviewArchivePreview
+        open={previewOpen && isArchiveMetadataOnly}
+        sourceEntries={sourceArchiveEntries}
+        targetEntries={targetArchiveEntries}
         sourceLabel={sourceStats.name}
         targetLabel={targetStats.name}
         onClose={() => setPreviewOpen(false)}

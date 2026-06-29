@@ -988,6 +988,22 @@ class CloudFileProfileResponse(BaseModel):
         default=None,
         description="Pretty-printed JSON prefix for overview preview (JSON documents only).",
     )
+    archive_entry_count: int | None = Field(
+        default=None,
+        description="Number of file entries in an archive container.",
+    )
+    archive_entries_sample: list[str] | None = Field(
+        default=None,
+        description="Sample of archive member paths (first 20).",
+    )
+    archive_manifest_supported: bool | None = Field(
+        default=None,
+        description="Whether metadata-only manifest comparison is available.",
+    )
+    archive_warnings: list[str] | None = Field(
+        default=None,
+        description="Warnings from archive metadata inspection.",
+    )
 
 
 class CloudMatchFilePairsRequest(BaseModel):

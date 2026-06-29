@@ -1,4 +1,4 @@
-import { call, delay, fork, put, select, takeLatest, all } from 'redux-saga/effects';
+import { call, delay, fork, put, select, takeLatest, takeLeading, all } from 'redux-saga/effects';
 import { notification } from 'antd';
 import { AxiosError } from 'axios';
 import { PayloadAction } from '@reduxjs/toolkit';
@@ -399,9 +399,9 @@ export default function* validationSaga() {
     takeLatest(validationActions.runValidationFromHistoryRequest.type, runFromHistorySaga),
     takeLatest(validationActions.listCloudConnectionsRequest.type, listCloudConnectionsSaga),
     takeLatest(validationActions.browseCloudRequest.type, browseCloudSaga),
-    takeLatest(validationActions.profileCloudFilesRequest.type, profileCloudFilesSaga),
-    takeLatest(validationActions.previewValidationColumnsRequest.type, previewValidationColumnsSaga),
-    takeLatest(validationActions.previewFixedWidthLayoutRequest.type, previewFixedWidthLayoutSaga),
-    takeLatest(validationActions.saveDraftRequest.type, saveDraftSaga),
+    takeLeading(validationActions.profileCloudFilesRequest.type, profileCloudFilesSaga),
+    takeLeading(validationActions.previewValidationColumnsRequest.type, previewValidationColumnsSaga),
+    takeLeading(validationActions.previewFixedWidthLayoutRequest.type, previewFixedWidthLayoutSaga),
+    takeLeading(validationActions.saveDraftRequest.type, saveDraftSaga),
   ]);
 }

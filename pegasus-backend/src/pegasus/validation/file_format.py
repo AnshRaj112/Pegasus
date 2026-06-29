@@ -13,6 +13,13 @@ _AUTO_ALIASES = frozenset({"auto", "any", "detect", "unknown"})
 _JSON_ALIASES = frozenset({"json", "ndjson"})
 _FIXED_WIDTH_ALIASES = frozenset({"fixed-width", "fixedwidth", "fixed", "fw"})
 _COLUMNAR_ALIASES = frozenset({"parquet", "orc", "avro", "excel", "xlsx", "xls"})
+_ARCHIVE_ALIASES = frozenset({"zip", "tar", "tgz", "tar-gz", "tar.gz"})
+_ARCHIVE_SUFFIXES: dict[str, str] = {
+    ".zip": "zip",
+    ".tar": "tar",
+    ".tgz": "tar",
+    ".tar.gz": "tar",
+}
 
 _SUFFIX_TO_FORMAT: dict[str, str] = {
     ".csv": "csv",
@@ -36,6 +43,8 @@ def normalize_file_format(file_format: str | None) -> str:
     token = (file_format or "csv").strip().lower().replace("_", "-")
     if token in _AUTO_ALIASES:
         return "auto"
+    if token in _ARCHIVE_ALIASES or token.replace(".", "") in {"targz", "tgz"}:
+        return normalize_archive_format(token)
     if token in _JSON_ALIASES:
         return "json"
     if token in _FIXED_WIDTH_ALIASES:
@@ -66,6 +75,29 @@ def infer_file_format_from_path(path: Path, requested: str | None = None) -> str
 
 def is_columnar_format(file_format: str | None) -> bool:
     return normalize_file_format(file_format) in _COLUMNAR_ALIASES
+
+
+def normalize_archive_format(file_format: str | None) -> str:
+    token = (file_format or "zip").strip().lower().replace("_", "-")
+    if token in {"tgz", "tar-gz", "tar.gz"}:
+        return "tar"
+    if token == "zip":
+        return "zip"
+    if token == "tar":
+        return "tar"
+    return token
+
+
+def is_archive_format(file_format: str | None) -> bool:
+    return normalize_archive_format(file_format) in {"zip", "tar"}
+
+
+def infer_archive_format_from_name(name: str) -> str | None:
+    lower = name.lower().rstrip("/")
+    for suffix, fmt in sorted(_ARCHIVE_SUFFIXES.items(), key=lambda x: len(x[0]), reverse=True):
+        if lower.endswith(suffix):
+            return fmt
+    return None
 
 
 _COMPRESSED_SUFFIXES: tuple[str, ...] = (".gz", ".bz2", ".zip", ".zst")
@@ -108,6 +140,8 @@ def extensions_for_format(file_format: str | None) -> frozenset[str]:
         return (
             frozenset(_SUFFIX_TO_FORMAT.keys())
             | _AMBIGUOUS_TABULAR_SUFFIXES
-            | frozenset({".zip", ".fw", ".fixed"})
+            | frozenset({".zip", ".tar", ".tgz", ".tar.gz", ".fw", ".fixed"})
         )
+    if is_archive_format(fmt):
+        return frozenset({".zip", ".tar", ".tgz", ".tar.gz"})
     return frozenset({".csv", ".tsv", ".txt", ".dat"})

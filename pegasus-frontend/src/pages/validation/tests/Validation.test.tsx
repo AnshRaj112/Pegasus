@@ -93,4 +93,21 @@ describe('ValidationWizardView', () => {
     expect(store.getState().validation.saveDraftState.isFetching).toBe(true)
     expect(store.getState().validation.saveDraftState.intent).toBe('save')
   })
+
+  it('dispatches only saveDraftRequest when proceeding from step 1 (no parallel preview)', async () => {
+    const user = userEvent.setup()
+    const { store } = render(<ValidationWizardView />, {
+      route: '/validations',
+      preloadedState: { validation: validationStateStep1Ready },
+    })
+
+    await user.click(screen.getByRole('button', { name: /proceed to overview/i }))
+
+    const state = store.getState().validation
+    expect(state.saveDraftState.isFetching).toBe(true)
+    expect(state.saveDraftState.intent).toBe('proceed')
+    expect(state.previewColumnsState.isFetching).toBe(false)
+    expect(state.previewFixedWidthState.isFetching).toBe(false)
+    expect(state.overviewProfileFetchState.isFetching).toBe(false)
+  })
 })
