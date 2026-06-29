@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-29T07:09:43Z
+# Last edited: 2026-06-29T15:27:14+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Profile GCS delimited objects: format detection, column count, row count."""
