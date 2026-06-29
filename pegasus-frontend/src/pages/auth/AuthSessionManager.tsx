@@ -18,6 +18,24 @@ import {
 const INACTIVITY_MS = 15 * 60 * 1000;
 const PROMPT_GRACE_MS = 5 * 60 * 1000;
 const INACTIVITY_CHECK_MS = 10 * 1000;
+const SESSION_BOOTSTRAP_TIMEOUT_MS = 8_000;
+
+const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error('Session bootstrap timed out'));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error: unknown) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
 
 export const AuthSessionManager: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -45,7 +63,7 @@ export const AuthSessionManager: React.FC = () => {
     let cancelled = false;
     const bootstrap = async () => {
       try {
-        const me = await fetchAdminMe();
+        const me = await withTimeout(fetchAdminMe(), SESSION_BOOTSTRAP_TIMEOUT_MS);
         if (!cancelled) {
           resetSessionActivity();
           dispatch(authActions.setSession({ email: me.email }));

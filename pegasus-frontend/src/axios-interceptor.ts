@@ -1,6 +1,7 @@
 import { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
 import { httpClient } from '~/shared/api/httpClient';
+import { generateRequestId } from '~/shared/generateRequestId';
 import { PATHS } from '~/router/router.constants';
 
 const pendingGetRequests = new Map<string, AbortController>();
@@ -22,7 +23,7 @@ const redirectToLogin = (): void => {
 
 export const setupAxiosInterceptors = (): void => {
   httpClient.interceptors.request.use((config) => {
-    config.headers.set('X-Request-ID', crypto.randomUUID());
+    config.headers.set('X-Request-ID', generateRequestId());
 
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
     if (csrfToken) {

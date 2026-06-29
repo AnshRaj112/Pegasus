@@ -4,6 +4,7 @@ import { Spin } from 'antd';
 
 import AuthGuard from '~/components/auth-guard/AuthGuard';
 import AppShell from '~/layouts/AppShell';
+import Login from '~/pages/auth/Login';
 import { PATHS } from '~/router/router.constants';
 import NotFoundPage from '~/router/NotFoundPage';
 
@@ -11,7 +12,6 @@ const Dashboard = lazy(() => import('~/pages/dashboard/Dashboard'));
 const ValidationWizardView = lazy(() => import('~/pages/validation/ValidationWizardView'));
 const Report = lazy(() => import('~/pages/report/Report'));
 const AdminView = lazy(() => import('~/pages/admin/AdminView'));
-const Login = lazy(() => import('~/pages/auth/Login'));
 const SnippetViewRouter = lazy(() => import('~/pages/report/views/SnippetViewRouter'));
 const ExecutionHistory = lazy(() => import('~/pages/report/views/ExecutionHistory'));
 const Profile = lazy(() => import('~/pages/profile/Profile'));
@@ -35,11 +35,7 @@ const LazyRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 export const router = createHashRouter([
   {
     path: PATHS.LOGIN,
-    element: (
-      <LazyRoute>
-        <Login />
-      </LazyRoute>
-    ),
+    element: <Login />,
   },
   {
     element: <AuthGuard />,

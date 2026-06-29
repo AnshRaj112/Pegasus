@@ -8,7 +8,8 @@ const apiBase = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
 export const httpClient = axios.create({
   baseURL: `${apiBase}${PELICAN_BASE_PATH}`,
   headers: { 'Content-Type': 'application/json' },
-  withCredentials: true, // 
+  withCredentials: true,
+  timeout: 15_000,
 });
 
 httpClient.interceptors.response.use(
