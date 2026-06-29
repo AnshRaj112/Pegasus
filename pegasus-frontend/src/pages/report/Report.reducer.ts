@@ -68,8 +68,15 @@ const reportSlice = createSlice({
     },
 
     fetchHistoryRunRequest: (state, action: PayloadAction<string>) => {
+      const runId = action.payload;
+      if (
+        state.historyRunState.runId === runId
+        && (state.historyRunState.isFetching || state.historyRunState.data)
+      ) {
+        return;
+      }
       state.historyRunState = {
-        runId: action.payload,
+        runId,
         data: null,
         isFetching: true,
         error: null,
@@ -93,8 +100,15 @@ const reportSlice = createSlice({
     },
 
     fetchMismatchesRequest: (state, action: PayloadAction<string>) => {
+      const runId = action.payload;
+      if (
+        state.mismatchesState.runId === runId
+        && (state.mismatchesState.isFetching || state.mismatchesState.isComplete)
+      ) {
+        return;
+      }
       state.mismatchesState = {
-        runId: action.payload,
+        runId,
         items: [],
         total: 0,
         isFetching: true,

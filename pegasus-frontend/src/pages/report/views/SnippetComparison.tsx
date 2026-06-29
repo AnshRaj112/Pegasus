@@ -2,8 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { DownloadOutlined, RightOutlined, DatabaseOutlined, LeftOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { MismatchSampleRow } from '../../../shared/api/Api';
-import { useAppDispatch, useAppSelector } from '../../../redux/store';
-import { reportActions } from '../Report.reducer';
+import { useAppSelector } from '../../../redux/store';
 import { downloadSnippetCsv, downloadSnippetPdf, downloadSnippetXlsx } from '../snippetExport';
 import styles from './SnippetComparison.module.scss';
 
@@ -148,7 +147,6 @@ const isMatchedCell = (row: SnippetRow, col: string): boolean => {
 
 export const SnippetComparison: React.FC = () => {
   const navigate = useNavigate();
-  const dispatch = useAppDispatch();
   const { mappingId, runId } = useParams<{ mappingId: string; runId: string }>();
   const historyRunState = useAppSelector((state) => state.report.historyRunState);
   const mismatchesState = useAppSelector((state) => state.report.mismatchesState);
@@ -175,12 +173,6 @@ export const SnippetComparison: React.FC = () => {
     || (mismatchesReady && mismatchesState.error)
     || null;
   const allItems = mismatchesReady ? mismatchesState.items : [];
-
-  useEffect(() => {
-    if (!runId) return;
-    dispatch(reportActions.fetchHistoryRunRequest(runId));
-    dispatch(reportActions.fetchMismatchesRequest(runId));
-  }, [runId, dispatch]);
 
   useEffect(() => {
     if (!runReady || !historyRunState.data) return;

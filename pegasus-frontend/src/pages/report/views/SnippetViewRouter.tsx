@@ -22,6 +22,7 @@ const SnippetViewRouter: React.FC = () => {
   useEffect(() => {
     if (!runId) return;
     dispatch(reportActions.fetchHistoryRunRequest(runId));
+    dispatch(reportActions.fetchMismatchesRequest(runId));
   }, [runId, dispatch]);
 
   const useJsonView = useMemo(() => {
@@ -33,6 +34,9 @@ const SnippetViewRouter: React.FC = () => {
   }, [runId, historyRunState]);
 
   if (useJsonView === null) {
+    if (historyRunState.runId === runId && historyRunState.error) {
+      return <div className={styles.loading}>{historyRunState.error}</div>;
+    }
     return <div className={styles.loading}>Loading snippet view…</div>;
   }
 

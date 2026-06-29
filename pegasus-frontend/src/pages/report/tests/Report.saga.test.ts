@@ -82,8 +82,14 @@ describe('Report sagas', () => {
   describe('fetchHistoryRunSaga', () => {
     it('dispatches success when history run is fetched', () => {
       const action = { type: reportActions.fetchHistoryRunRequest.type, payload: 'run-completed-1' }
-      const iterator = fetchHistoryRunSaga(action)
-      expect(iterator.next().value).toEqual(call(ReportService.fetchHistoryRun, 'run-completed-1'))
+      const iterator = fetchHistoryRunSaga(action) as Generator<unknown, void, unknown>
+      iterator.next()
+      expect(iterator.next({
+        runId: null,
+        data: null,
+        isFetching: false,
+        error: null,
+      }).value).toEqual(call(ReportService.fetchHistoryRun, 'run-completed-1'))
       expect(iterator.next(mockHistoryRunDetail).value).toEqual(
         put(reportActions.fetchHistoryRunSuccess({ runId: 'run-completed-1', data: mockHistoryRunDetail })),
       )
@@ -91,8 +97,14 @@ describe('Report sagas', () => {
 
     it('dispatches error when history run fetch fails', () => {
       const action = { type: reportActions.fetchHistoryRunRequest.type, payload: 'run-completed-1' }
-      const iterator = fetchHistoryRunSaga(action)
+      const iterator = fetchHistoryRunSaga(action) as Generator<unknown, void, unknown>
       iterator.next()
+      iterator.next({
+        runId: null,
+        data: null,
+        isFetching: false,
+        error: null,
+      })
       const error = new Error('Load failed')
       expect(iterator.throw(error).value).toEqual(
         put(reportActions.fetchHistoryRunError({ runId: 'run-completed-1', error: 'Load failed' })),
@@ -104,7 +116,16 @@ describe('Report sagas', () => {
     it('dispatches success when mismatch page is returned', () => {
       const action = { type: reportActions.fetchMismatchesRequest.type, payload: 'run-completed-1' }
       const iterator = fetchMismatchesSaga(action) as Generator<unknown, void, unknown>
-      expect(iterator.next().value).toEqual(
+      iterator.next()
+      expect(iterator.next({
+        runId: null,
+        items: [],
+        total: 0,
+        isFetching: false,
+        isComplete: false,
+        progressMessage: '',
+        error: null,
+      }).value).toEqual(
         call(ReportService.fetchMismatchesPage, 'run-completed-1', { limit: 5000, offset: 0 }),
       )
       expect(
@@ -117,16 +138,6 @@ describe('Report sagas', () => {
         }).value,
       ).toEqual(
         put(
-          reportActions.fetchMismatchesProgress({
-            runId: 'run-completed-1',
-            items: [mockMismatchRow],
-            total: 1,
-            progressMessage: '',
-          }),
-        ),
-      )
-      expect(iterator.next().value).toEqual(
-        put(
           reportActions.fetchMismatchesSuccess({
             runId: 'run-completed-1',
             items: [mockMismatchRow],
@@ -136,10 +147,36 @@ describe('Report sagas', () => {
       )
     })
 
+    it('skips fetch when mismatches are already loaded for the run', () => {
+      const action = { type: reportActions.fetchMismatchesRequest.type, payload: 'run-completed-1' }
+      const iterator = fetchMismatchesSaga(action) as Generator<unknown, void, unknown>
+      iterator.next()
+      expect(
+        iterator.next({
+          runId: 'run-completed-1',
+          items: [mockMismatchRow],
+          total: 1,
+          isFetching: false,
+          isComplete: true,
+          progressMessage: '',
+          error: null,
+        }).done,
+      ).toBe(true)
+    })
+
     it('dispatches error when mismatch fetch fails', () => {
       const action = { type: reportActions.fetchMismatchesRequest.type, payload: 'run-completed-1' }
-      const iterator = fetchMismatchesSaga(action)
+      const iterator = fetchMismatchesSaga(action) as Generator<unknown, void, unknown>
       iterator.next()
+      iterator.next({
+        runId: null,
+        items: [],
+        total: 0,
+        isFetching: false,
+        isComplete: false,
+        progressMessage: '',
+        error: null,
+      })
       const axiosError = new AxiosError(
         'Server error',
         'ERR_BAD_REQUEST',

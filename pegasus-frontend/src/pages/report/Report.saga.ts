@@ -1,19 +1,21 @@
 import { notification } from 'antd';
 import { AxiosError } from 'axios';
 import { PayloadAction } from '@reduxjs/toolkit';
-import { all, call, delay, put, select, takeLatest } from 'redux-saga/effects';
+import { all, call, put, select, takeLatest } from 'redux-saga/effects';
 
-import { MismatchSampleRow } from '../../shared/api/Api';
 import { getApiErrorMessage } from '../../shared/api/apiError';
 import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
 
-import { ReportItem, TabType } from './Report.interface';
+import { ReportItem, ReportState, TabType } from './Report.interface';
 import { reportActions } from './Report.reducer';
 import { ReportService } from './Report.service';
 
-const FETCH_BATCH = 5000;
+/** Snippet view only needs the persisted sample; one request is enough (API max page size). */
+const SNIPPET_FETCH_LIMIT = 5000;
 
 const selectActiveTab = (state: { report: { activeTab: TabType } }): TabType => state.report.activeTab;
+const selectHistoryRunState = (state: { report: ReportState }) => state.report.historyRunState;
+const selectMismatchesState = (state: { report: ReportState }) => state.report.mismatchesState;
 
 export function* handleFetchReports() {
   const activeTab: TabType = yield select(selectActiveTab);
@@ -44,6 +46,10 @@ export function* handleFetchReports() {
 
 export function* fetchHistoryRunSaga(action: PayloadAction<string>) {
   const runId = action.payload;
+  const existing: ReportState['historyRunState'] = yield select(selectHistoryRunState);
+  if (existing.runId === runId && existing.data) {
+    return;
+  }
   try {
     const data: import('../../shared/api/Api').ValidationHistoryDetail = yield call(ReportService.fetchHistoryRun, runId);
     yield put(reportActions.fetchHistoryRunSuccess({ runId, data }));
@@ -61,52 +67,22 @@ export function* fetchHistoryRunSaga(action: PayloadAction<string>) {
 
 export function* fetchMismatchesSaga(action: PayloadAction<string>) {
   const runId = action.payload;
+  const existing: ReportState['mismatchesState'] = yield select(selectMismatchesState);
+  if (existing.runId === runId && existing.isComplete) {
+    return;
+  }
 
   try {
-    let offset = 0;
-    const collected: MismatchSampleRow[] = [];
-    let pageTotal = 0;
-
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      offset = 0;
-      collected.length = 0;
-
-      for (;;) {
-        const page: import('../../shared/api/Api').ValidationMismatchesResponse = yield call(
-          ReportService.fetchMismatchesPage,
-          runId,
-          { limit: FETCH_BATCH, offset },
-        );
-        pageTotal = page.total;
-        collected.push(...page.items);
-        yield put(reportActions.fetchMismatchesProgress({
-          runId,
-          items: [...collected],
-          total: page.total,
-          progressMessage: page.total > collected.length
-            ? `Loaded ${collected.length.toLocaleString()} / ${page.total.toLocaleString()} mismatch rows…`
-            : '',
-        }));
-        if (collected.length >= page.total && page.total > 0) break;
-        if (page.items.length < FETCH_BATCH) break;
-        offset += FETCH_BATCH;
-      }
-
-      if (collected.length > 0 || pageTotal > 0) break;
-
-      yield put(reportActions.fetchMismatchesProgress({
-        runId,
-        items: [],
-        total: 0,
-        progressMessage: 'Waiting for mismatch rows to finish saving…',
-      }));
-      yield delay(2000);
-    }
+    const page: import('../../shared/api/Api').ValidationMismatchesResponse = yield call(
+      ReportService.fetchMismatchesPage,
+      runId,
+      { limit: SNIPPET_FETCH_LIMIT, offset: 0 },
+    );
 
     yield put(reportActions.fetchMismatchesSuccess({
       runId,
-      items: collected,
-      total: pageTotal,
+      items: page.items,
+      total: page.total,
     }));
   } catch (error) {
     const errorMessage = getApiErrorMessage(error, 'Failed to load mismatch rows');
