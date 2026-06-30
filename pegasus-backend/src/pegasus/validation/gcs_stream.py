@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-30T10:37:33Z
+# Last edited: 2026-06-30T17:07:36+05:30
 # --- END GENERATED FILE METADATA ---
 
 """GCS streaming I/O — connection reuse, chunked reads, no full-object materialization."""
@@ -13,12 +13,14 @@ import threading
 import time
 from contextlib import contextmanager
 from io import BytesIO
+from pathlib import Path
 from typing import IO, Any, Iterator
 
 from pegasus.validation.gcs_object import GcsObjectRef
 
-_DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024
+_DEFAULT_CHUNK_BYTES = 16 * 1024 * 1024
 _DEFAULT_READAHEAD_CHUNKS = 2
+_DOWNLOAD_CHUNK_BYTES = 8 * 1024 * 1024
 
 _CLIENT_LOCK = threading.Lock()
 _CLIENTS: dict[str, Any] = {}
@@ -225,6 +227,24 @@ class GcsStreamSession:
                 if not block:
                     break
                 yield block
+
+    def download_to_path(
+        self,
+        dest: Path,
+        *,
+        chunk_size: int = _DOWNLOAD_CHUNK_BYTES,
+    ) -> None:
+        """Stream the full object to a local file (single sequential GCS read)."""
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        t0 = time.perf_counter()
+        with self.open_binary(chunk_size=chunk_size, read_ahead=True) as handle, open(dest, "wb") as out:
+            while True:
+                block = handle.read(chunk_size)
+                if not block:
+                    break
+                out.write(block)
+        self.network_transfer_seconds += time.perf_counter() - t0
 
     def metadata_fingerprint(self) -> str | None:
         """Stable digest from GCS metadata (no full-object read)."""

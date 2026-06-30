@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-30T10:37:33Z
+# Last edited: 2026-06-30T17:07:36+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Stream delimited objects from GCS — no full-object download or local materialization."""
@@ -84,6 +84,72 @@ def prefetch_gcs_delimited_pair(
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(_warm, adapters))
+
+
+def _materialize_gcs_delimited_adapter(
+    adapter: GcsDelimitedAdapter,
+    *,
+    work_dir: Path,
+) -> FileDelimitedAdapter:
+    """Download one GCS delimited object to *work_dir* and return a local file adapter."""
+    work_dir.mkdir(parents=True, exist_ok=True)
+    object_name = Path(adapter._ref.object_name).name or "object.csv"
+    dest = work_dir / object_name
+    expected_size = adapter.get_size_bytes()
+    if dest.is_file() and dest.stat().st_size == expected_size:
+        return FileDelimitedAdapter(
+            dest,
+            delimiter=adapter._delimiter,
+            has_header=adapter._has_header,
+            skip_rows=adapter._skip_rows,
+        )
+
+    session = adapter._stream_session()
+    session.download_to_path(dest)
+    adapter._network_transfer_seconds = max(
+        adapter._network_transfer_seconds,
+        session.network_transfer_seconds,
+    )
+    return FileDelimitedAdapter(
+        dest,
+        delimiter=adapter._delimiter,
+        has_header=adapter._has_header,
+        skip_rows=adapter._skip_rows,
+    )
+
+
+def materialize_gcs_delimited_pair(
+    source: FileDelimitedAdapter | GcsDelimitedAdapter,
+    target: FileDelimitedAdapter | GcsDelimitedAdapter,
+    *,
+    work_dir: Path,
+) -> tuple[FileDelimitedAdapter | GcsDelimitedAdapter, FileDelimitedAdapter | GcsDelimitedAdapter]:
+    """Download GCS delimited inputs in parallel so reconciliation runs at local disk speed."""
+    gcs_sides: list[tuple[str, GcsDelimitedAdapter]] = []
+    if isinstance(source, GcsDelimitedAdapter):
+        gcs_sides.append(("source", source))
+    if isinstance(target, GcsDelimitedAdapter):
+        gcs_sides.append(("target", target))
+    if not gcs_sides:
+        return source, target
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    materialized: dict[str, FileDelimitedAdapter] = {}
+
+    def _download(side: str, adapter: GcsDelimitedAdapter) -> None:
+        side_dir = work_dir / side
+        materialized[side] = _materialize_gcs_delimited_adapter(adapter, work_dir=side_dir)
+
+    if len(gcs_sides) == 1:
+        side, adapter = gcs_sides[0]
+        _download(side, adapter)
+    else:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(lambda item: _download(item[0], item[1]), gcs_sides))
+
+    out_source = materialized.get("source", source)
+    out_target = materialized.get("target", target)
+    return out_source, out_target
 
 
 class GcsDelimitedAdapter:
@@ -382,9 +448,9 @@ class GcsDelimitedAdapter:
     def get_row_count(self) -> int | None:
         if self._data_row_count is not None:
             return self._data_row_count
-        from pegasus.validation.row_count import count_delimited_data_rows
+        from pegasus.validation.row_count import profile_delimited_data_rows
 
-        self._data_row_count = count_delimited_data_rows(self)
+        self._data_row_count = profile_delimited_data_rows(self)
         return self._data_row_count
 
     def stream_records(self, chunk_rows: int) -> Iterator[list[dict[str, Any]]]:

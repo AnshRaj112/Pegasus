@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-30T10:37:33Z
+# Last edited: 2026-06-30T17:07:36+05:30
 # --- END GENERATED FILE METADATA ---
 
 """GCS objects use PyArrow batch streaming (never full-object load or dict round-trip)."""
@@ -52,6 +52,10 @@ def test_gcs_partition_side_uses_pyarrow_batches_not_dict_stream() -> None:
     writer = MagicMock(spec=PartitionWriter)
     timings = PipelineTimings()
     with (
+        patch(
+            "pegasus.validation.adapters.gcs_delimited.GcsDelimitedAdapter._load_header_prefix",
+            return_value=b"uid,amount\n10,5\n",
+        ),
         patch(
             "pegasus.validation.pipeline.polars_spill.partition_side_streaming_batches",
             return_value=42,

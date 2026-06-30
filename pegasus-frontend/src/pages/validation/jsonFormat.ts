@@ -22,11 +22,15 @@ export const resolveWizardJsonMode = (input: {
   detectedFileFormat: string | null | undefined;
   sourceFileName?: string | null;
   targetFileName?: string | null;
-  sourceProfile?: { suggested_file_format?: string | null; file_format?: string | null } | null;
-  targetProfile?: { suggested_file_format?: string | null; file_format?: string | null } | null;
+  sourceProfile?: { suggested_file_format?: string | null; file_format?: string | null; archive_entries_sample?: string[] | null } | null;
+  targetProfile?: { suggested_file_format?: string | null; file_format?: string | null; archive_entries_sample?: string[] | null } | null;
 }): boolean => {
   if (isJsonFormat(input.detectedFileFormat)) return true;
   const sourceLooksJson = profileLooksJson(input.sourceProfile ?? null, input.sourceFileName ?? null);
   const targetLooksJson = profileLooksJson(input.targetProfile ?? null, input.targetFileName ?? null);
-  return sourceLooksJson && targetLooksJson;
+  if (sourceLooksJson && targetLooksJson) return true;
+  // Lazy import avoided: inline archive json leaf check via file_format chain
+  const chainJson = (profile: typeof input.sourceProfile) =>
+    Boolean(profile?.file_format && isJsonFormat(profile.file_format));
+  return Boolean(chainJson(input.sourceProfile) && chainJson(input.targetProfile));
 };
