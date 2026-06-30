@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-30T08:29:07Z
+# Last edited: 2026-06-30T10:36:49Z
 # --- END GENERATED FILE METADATA ---
 
 """Fast multi-byte delimiter CSV load (no quotes) for generated / simple flat files."""
