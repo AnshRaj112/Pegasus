@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  RightOutlined, DatabaseOutlined, LeftOutlined,
+  RightOutlined, DatabaseOutlined,
 } from '@ant-design/icons';
 import { MismatchSampleRow } from '../../../shared/api/Api';
 import { useAppSelector } from '../../../redux/store';
 import styles from './JsonSnippetComparison.module.scss';
 
 type JsonIssueKind = 'value_mismatch' | 'missing_in_target' | 'extra_in_target';
+
+type JsonSectionTab = 'mismatches' | 'extras' | 'missing';
 
 type JsonIssueRow = {
   uid: string;
@@ -424,8 +426,7 @@ export const JsonSnippetComparison: React.FC = () => {
 
   const [sourceLabel, setSourceLabel] = useState('Source');
   const [targetLabel, setTargetLabel] = useState('Target');
-  const [rowPage, setRowPage] = useState(0);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [activeSection, setActiveSection] = useState<JsonSectionTab>('mismatches');
 
   const runReady = Boolean(runId && historyRunState.runId === runId);
   const mismatchesReady = Boolean(runId && mismatchesState.runId === runId);
@@ -445,14 +446,68 @@ export const JsonSnippetComparison: React.FC = () => {
   }, [runReady, historyRunState.data]);
 
   const issues = useMemo(() => buildJsonIssues(allItems), [allItems]);
-  const totalPages = Math.max(1, Math.ceil(issues.length / itemsPerPage));
-  const pageRows = issues.slice(rowPage * itemsPerPage, (rowPage + 1) * itemsPerPage);
+
+  const sectionIssues = useMemo(() => ({
+    mismatches: issues.filter((row) => row.kind === 'value_mismatch'),
+    extras: issues.filter((row) => row.kind === 'missing_in_target'),
+    missing: issues.filter((row) => row.kind === 'extra_in_target'),
+  }), [issues]);
+
+  const jsonSections: Array<{
+    key: JsonSectionTab;
+    title: string;
+    rows: JsonIssueRow[];
+    emptyMessage: string;
+  }> = [
+    {
+      key: 'mismatches' as const,
+      title: 'Mismatches',
+      rows: sectionIssues.mismatches,
+      emptyMessage: 'No value mismatches for this run.',
+    },
+    {
+      key: 'extras' as const,
+      title: 'Extras',
+      rows: sectionIssues.extras,
+      emptyMessage: 'No extra nodes in source for this run.',
+    },
+    {
+      key: 'missing' as const,
+      title: 'Missing',
+      rows: sectionIssues.missing,
+      emptyMessage: 'No missing nodes in target for this run.',
+    },
+  ];
+
+  const activeJsonSection = jsonSections.find((section) => section.key === activeSection)
+    ?? jsonSections[0]!;
+
   const pairLabel = mappingId ?? sourceLabel.split('/').pop() ?? 'Report';
   const isLoading = summaryLoading || rowsLoading;
 
-  useEffect(() => {
-    if (rowPage >= totalPages) setRowPage(Math.max(0, totalPages - 1));
-  }, [rowPage, totalPages]);
+  const renderJsonSection = (rows: JsonIssueRow[], emptyMessage: string, sectionKey: string) => (
+    <div className={styles.sectionPanel}>
+      <div className={styles.panelHeaders}>
+        <div className={styles.panelHeaderSource}>
+          <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Source &gt; {sourceLabel}</span>
+        </div>
+        <div className={styles.panelHeaderTarget}>
+          <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Target &gt; {targetLabel}</span>
+        </div>
+      </div>
+      <div className={styles.panelScroll}>
+        {isLoading ? (
+          Array.from({ length: SKELETON_ROWS }, (_, i) => (
+            <div key={`${sectionKey}-skeleton-${i}`} className={styles.skeletonWrap}><SkeletonBlock /></div>
+          ))
+        ) : rows.length === 0 ? (
+          <div className={styles.emptyCell}>{emptyMessage}</div>
+        ) : rows.map((row) => (
+          <JsonIssuePair key={`${sectionKey}-${row.uid}-${row.jsonPath}`} row={row} />
+        ))}
+      </div>
+    </div>
+  );
 
   if (error) return <div className={styles.error}>{error}</div>;
 
@@ -474,71 +529,43 @@ export const JsonSnippetComparison: React.FC = () => {
         </div>
       </div>
 
-      <div className={styles.legend}>
-        <span><span className={styles.legendRed}>Red row</span> = field value differs</span>
-        <span><span className={styles.legendOrange}>Orange</span> = missing / extra node</span>
-        <span>Each field is shown on its own line, source aligned with target</span>
-      </div>
-
-      <div className={styles.panel}>
-        <div className={styles.panelHeaders}>
-          <div className={styles.panelHeaderSource}>
-            <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Source &gt; {sourceLabel}</span>
-          </div>
-          <div className={styles.panelHeaderTarget}>
-            <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Target &gt; {targetLabel}</span>
+      <div className={styles.card}>
+        <div className={styles.toolbar}>
+          <div className={styles.tabs}>
+            {jsonSections.map((section) => (
+              <button
+                key={section.key}
+                type="button"
+                onClick={() => setActiveSection(section.key)}
+                className={`${styles.tabBtn} ${activeSection === section.key ? styles.tabBtnActive : ''}`}
+              >
+                {section.title}
+                <span className={styles.tabCount}>
+                  {isLoading ? '—' : section.rows.length.toLocaleString()}
+                </span>
+              </button>
+            ))}
           </div>
         </div>
-        <div className={styles.panelScroll}>
-          {isLoading ? (
-            Array.from({ length: SKELETON_ROWS }, (_, i) => (
-              <div key={i} className={styles.skeletonWrap}><SkeletonBlock /></div>
-            ))
-          ) : pageRows.length === 0 ? (
-            <div className={styles.emptyCell}>No JSON mismatches for this run.</div>
-          ) : pageRows.map((row) => (
-            <JsonIssuePair key={`${row.uid}-${row.jsonPath}`} row={row} />
-          ))}
+
+        <div className={styles.tabContent}>
+          <div className={styles.legend}>
+            <span><span className={styles.legendRed}>Red row</span> = field value differs</span>
+            <span><span className={styles.legendOrange}>Orange</span> = missing / extra node</span>
+            <span>Each field is shown on its own line, source aligned with target</span>
+          </div>
+          {renderJsonSection(
+            activeJsonSection.rows,
+            activeJsonSection.emptyMessage,
+            activeJsonSection.key,
+          )}
         </div>
       </div>
 
       <div className={styles.footer}>
         <span className={styles.footerNote}>
-          Each field on its own row — source on the left, target on the right, aligned one-to-one.
+          All mismatch, extra, and missing nodes are shown — source on the left, target on the right, aligned one-to-one.
         </span>
-        <div className={styles.footerControls}>
-          <div className={styles.rowsPerPage}>
-            Rows per page:
-            <select value={itemsPerPage} onChange={(e) => setItemsPerPage(Number(e.target.value))} className={styles.rowsPerPageSelect}>
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-              <option value={50}>50</option>
-            </select>
-          </div>
-          <div className={styles.pagination}>
-            <button
-              type="button"
-              disabled={rowPage <= 0}
-              onClick={() => rowPage > 0 && setRowPage((p) => p - 1)}
-              className={`${styles.paginationIcon} ${rowPage <= 0 ? styles.paginationIconDisabled : styles.paginationIconEnabled}`}
-            >
-              <LeftOutlined />
-            </button>
-            <span className={styles.paginationLabel}>
-              {isLoading ? '—' : (issues.length ? rowPage + 1 : 0)}
-              <span className={styles.paginationDivider}>/</span>
-              {isLoading ? '—' : totalPages}
-            </span>
-            <button
-              type="button"
-              disabled={rowPage >= totalPages - 1}
-              onClick={() => rowPage < totalPages - 1 && setRowPage((p) => p + 1)}
-              className={`${styles.paginationIcon} ${rowPage >= totalPages - 1 ? styles.paginationIconDisabled : styles.paginationIconEnabled}`}
-            >
-              <RightOutlined />
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

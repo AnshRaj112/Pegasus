@@ -75,7 +75,12 @@ Each feature module encapsulates its own components, reducers, sagas, services, 
 
 ---
 
-## 6. High-Level Coding Conventions
+## 6. `src/shared/` — Do Not Modify (Temporary)
+**CRITICAL:** Do **not** make any changes under `src/shared/` (including `api/`, `constants/`, and `styles/`) until the user has provided the API endpoints and parameters to use. All snippet/report work must use existing shared exports as-is; place new logic in feature modules (e.g. `src/pages/report/`) only.
+
+---
+
+## 7. High-Level Coding Conventions
 *(Refer to `docs/skills/` for the exhaustive rules)*
 
 * **Components:** Functional components only. Default exports for route-level features. Typed props via co-located `*.interface.ts` files.
