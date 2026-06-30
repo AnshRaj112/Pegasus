@@ -432,6 +432,46 @@ export const ConfigureMappingStep: React.FC = () => {
     dispatch(validationActions.setValidationForm({ uidColumn: joinColumn }));
   };
 
+  const globalAvailableTargets = useMemo(() => {
+    const usedTargets = new Set<string>();
+    columnsMatrix.forEach(row => {
+      row.targetCols.forEach(tc => usedTargets.add(tc.name));
+    });
+    return targetColumnsList.filter(col => !usedTargets.has(col));
+  }, [columnsMatrix, targetColumnsList]);
+
+  const filteredColumns = useMemo(() => {
+    let rows = columnsMatrix;
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      rows = rows.filter((col) => col.sourceCol.toLowerCase().includes(q));
+    }
+
+    if (showUnmappedOnly) {
+      rows = rows.filter((col) => col.targetCols.length === 0 && !col.isIgnored);
+    }
+    if (showConfiguredOnly) {
+      rows = rows.filter((col) => col.targetCols.length > 0 && !col.isIgnored);
+    }
+
+    if (actionFilters.pk) rows = rows.filter(col => col.isPk);
+    if (actionFilters.ignored) rows = rows.filter(col => col.isIgnored);
+    if (actionFilters.sensitive) rows = rows.filter(col => col.isSensitive);
+    if (actionFilters.expanded) rows = rows.filter(col => col.isExpanded);
+    if (actionFilters.orderStrict) {
+      rows = rows.filter((col) => col.isOrderSensitive && isComplexColumn(col, complexColumns));
+    }
+
+    return rows;
+  }, [columnsMatrix, searchQuery, showUnmappedOnly, showConfiguredOnly, actionFilters, complexColumns]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredColumns.length / itemsPerPage));
+  const safePage = Math.min(page, totalPages);
+  const pageStart = (safePage - 1) * itemsPerPage;
+  const pageRows = filteredColumns.slice(pageStart, pageStart + itemsPerPage);
+  const loadingClass = loadingPreview ? styles.isLoading : '';
+
   if (isJson) {
     return <JsonParentMappingStep />;
   }
@@ -500,46 +540,6 @@ export const ConfigureMappingStep: React.FC = () => {
     setActionFilters(prev => ({ ...prev, [key]: !prev[key] }));
     setPage(1);
   };
-
-  const globalAvailableTargets = useMemo(() => {
-    const usedTargets = new Set<string>();
-    columnsMatrix.forEach(row => {
-      row.targetCols.forEach(tc => usedTargets.add(tc.name));
-    });
-    return targetColumnsList.filter(col => !usedTargets.has(col));
-  }, [columnsMatrix, targetColumnsList]);
-
-  const filteredColumns = useMemo(() => {
-    let rows = columnsMatrix;
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      rows = rows.filter((col) => col.sourceCol.toLowerCase().includes(q));
-    }
-
-    if (showUnmappedOnly) {
-      rows = rows.filter((col) => col.targetCols.length === 0 && !col.isIgnored);
-    }
-    if (showConfiguredOnly) {
-      rows = rows.filter((col) => col.targetCols.length > 0 && !col.isIgnored);
-    }
-
-    if (actionFilters.pk) rows = rows.filter(col => col.isPk);
-    if (actionFilters.ignored) rows = rows.filter(col => col.isIgnored);
-    if (actionFilters.sensitive) rows = rows.filter(col => col.isSensitive);
-    if (actionFilters.expanded) rows = rows.filter(col => col.isExpanded);
-    if (actionFilters.orderStrict) {
-      rows = rows.filter((col) => col.isOrderSensitive && isComplexColumn(col, complexColumns));
-    }
-
-    return rows;
-  }, [columnsMatrix, searchQuery, showUnmappedOnly, showConfiguredOnly, actionFilters, complexColumns]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredColumns.length / itemsPerPage));
-  const safePage = Math.min(page, totalPages);
-  const pageStart = (safePage - 1) * itemsPerPage;
-  const pageRows = filteredColumns.slice(pageStart, pageStart + itemsPerPage);
-  const loadingClass = loadingPreview ? styles.isLoading : '';
 
   const rowClassName = (row: ComplexMappingRow) => [
     styles.dataRow,

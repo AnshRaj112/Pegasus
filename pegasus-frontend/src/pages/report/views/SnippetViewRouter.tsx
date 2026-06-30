@@ -40,7 +40,10 @@ const SnippetViewRouter: React.FC = () => {
     return <div className={styles.loading}>Loading snippet view…</div>;
   }
 
-  return useJsonView ? <JsonSnippetComparison /> : <SnippetComparison />;
+  const snippetKey = `${runId ?? 'unknown'}-${useJsonView ? 'json' : 'tabular'}`;
+  return useJsonView
+    ? <JsonSnippetComparison key={snippetKey} />
+    : <SnippetComparison key={snippetKey} />;
 };
 
 export default SnippetViewRouter;
