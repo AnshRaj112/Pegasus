@@ -1,0 +1,78 @@
+@use '~/assets/styles/variables' as tokens;
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 0 0;
+  border-top: 1px solid var(--border-1, #{tokens.$border-1});
+  margin-top: 1rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.footerNote {
+  font-size: 0.75rem;
+  color: tokens.$text-muted;
+  font-style: italic;
+}
+
+.footerControls {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.rowsPerPage {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: tokens.$text-muted;
+}
+
+.rowsPerPageSelect {
+  border: none;
+  font-weight: 600;
+  outline: none;
+  background-color: transparent;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background-color: tokens.$surface-container;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+}
+
+.paginationIcon {
+  font-size: 0.75rem;
+  cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+}
+
+.paginationIconDisabled {
+  color: #a0aabf;
+  cursor: not-allowed;
+}
+
+.paginationIconEnabled {
+  color: var(--on-surface-variant, #{tokens.$on-surface-variant});
+}
+
+.paginationLabel {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.paginationDivider {
+  color: #a0aabf;
+  margin: 0 0.25rem;
+  font-weight: 400;
+}

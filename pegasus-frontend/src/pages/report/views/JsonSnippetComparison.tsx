@@ -6,11 +6,21 @@ import {
 import { MismatchSampleRow } from '../../../shared/api/Api';
 import { useAppSelector } from '../../../redux/store';
 import { TruncatedPath } from '../components/TruncatedPath';
+import {
+  clampSectionRowPagination,
+  SnippetSectionPaginationFooter,
+} from '../components/SnippetSectionPaginationFooter';
+import {
+  createRowPaginationState,
+  paginateRows,
+  type SectionRowPagination,
+  type SnippetSectionKey,
+} from '../components/snippetSectionPagination';
 import styles from './JsonSnippetComparison.module.scss';
 
 type JsonIssueKind = 'value_mismatch' | 'missing_in_target' | 'extra_in_target';
 
-type JsonSectionTab = 'mismatches' | 'extras' | 'missing';
+type JsonSectionTab = SnippetSectionKey;
 
 type JsonIssueRow = {
   uid: string;
@@ -428,6 +438,7 @@ export const JsonSnippetComparison: React.FC = () => {
   const [sourceLabel, setSourceLabel] = useState('Source');
   const [targetLabel, setTargetLabel] = useState('Target');
   const [activeSection, setActiveSection] = useState<JsonSectionTab>('mismatches');
+  const [sectionPagination, setSectionPagination] = useState(createRowPaginationState);
 
   const runReady = Boolean(runId && historyRunState.runId === runId);
   const mismatchesReady = Boolean(runId && mismatchesState.runId === runId);
@@ -482,6 +493,27 @@ export const JsonSnippetComparison: React.FC = () => {
 
   const activeJsonSection = jsonSections.find((section) => section.key === activeSection)
     ?? jsonSections[0]!;
+
+  const activePagination = sectionPagination[activeSection];
+  const pageRows = paginateRows(activeJsonSection.rows, activePagination);
+
+  const patchSectionPagination = (
+    section: JsonSectionTab,
+    patch: Partial<SectionRowPagination>,
+  ) => {
+    setSectionPagination((prev) => ({
+      ...prev,
+      [section]: { ...prev[section], ...patch },
+    }));
+  };
+
+  useEffect(() => {
+    setSectionPagination((prev) => clampSectionRowPagination(prev, {
+      mismatches: sectionIssues.mismatches.length,
+      extras: sectionIssues.extras.length,
+      missing: sectionIssues.missing.length,
+    }));
+  }, [sectionIssues]);
 
   const pairLabel = mappingId ?? sourceLabel.split('/').pop() ?? 'Report';
   const isLoading = summaryLoading || rowsLoading;
@@ -562,17 +594,20 @@ export const JsonSnippetComparison: React.FC = () => {
             <span>Each field is shown on its own line, source aligned with target</span>
           </div>
           {renderJsonSection(
-            activeJsonSection.rows,
+            pageRows,
             activeJsonSection.emptyMessage,
             activeJsonSection.key,
           )}
+          <SnippetSectionPaginationFooter
+            sectionKey={activeSection}
+            sectionLabel={activeJsonSection.title}
+            rowCount={activeJsonSection.rows.length}
+            pagination={activePagination}
+            isLoading={isLoading}
+            note="Each field on its own row — source on the left, target on the right, aligned one-to-one."
+            onChange={patchSectionPagination}
+          />
         </div>
-      </div>
-
-      <div className={styles.footer}>
-        <span className={styles.footerNote}>
-          All mismatch, extra, and missing nodes are shown — source on the left, target on the right, aligned one-to-one.
-        </span>
       </div>
     </div>
   );

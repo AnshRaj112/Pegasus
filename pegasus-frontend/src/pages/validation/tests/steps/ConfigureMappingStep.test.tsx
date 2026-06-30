@@ -1,4 +1,3 @@
-import userEvent from '@testing-library/user-event'
 import { beforeEach, vi } from 'vitest'
 
 import { fireEvent, render, screen } from '~/utils/renderWithProviders'
@@ -30,8 +29,9 @@ describe('ConfigureMappingStep', () => {
 
     expect(screen.getByText('Delimiter')).toBeInTheDocument()
     expect(screen.getByDisplayValue('auto')).toBeInTheDocument()
-    expect(screen.getByLabelText('Header row')).toBeChecked()
+    expect(screen.queryByLabelText('Header row')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Configured \(2\)/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Ignored \(\d+\)/ })).toBeInTheDocument()
   })
 
   it('updates delimiter in the store when delimiter input changes', () => {
@@ -43,16 +43,5 @@ describe('ConfigureMappingStep', () => {
     fireEvent.change(delimiterInput, { target: { value: ',' } })
 
     expect(store.getState().validation.validationForm.delimiter).toBe(',')
-  })
-
-  it('updates hasHeader in the store when header checkbox is toggled', async () => {
-    const user = userEvent.setup()
-    const { store } = render(<ConfigureMappingStep />, {
-      preloadedState: { validation: validationStateStep3Ready },
-    })
-
-    await user.click(screen.getByLabelText('Header row'))
-
-    expect(store.getState().validation.validationForm.hasHeader).toBe(false)
   })
 })

@@ -430,9 +430,9 @@ const ValidationWizardView: React.FC = () => {
           : overviewPreviewPending && overviewPreviewStatus.ready && !overviewPreviewSatisfied
             ? 'Review preview to continue'
           : overviewIsJson
-            ? 'Proceed to JSON Mapping'
-            : 'Proceed to Mapping'
-      : 'Proceed to Overview';
+            ? 'Proceed'
+            : 'Proceed'
+      : 'Proceed';
 
   return (
     <div className={styles.wizardPage}>
@@ -478,7 +478,7 @@ const ValidationWizardView: React.FC = () => {
             disabled={!canSaveDraft || savingDraft}
             onClick={() => void handleSaveDraft()}
             aria-label="Save draft"
-            title="Save mapping configuration without running validation"
+            title="Save Mapping"
             className={`${styles.iconActionBtn} ${!canSaveDraft || savingDraft ? styles.iconActionBtnMuted : ''}`}
           >
             <SaveOutlined />

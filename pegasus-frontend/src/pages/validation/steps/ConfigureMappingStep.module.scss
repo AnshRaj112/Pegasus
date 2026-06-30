@@ -70,12 +70,19 @@
   gap: 1rem;
   font-size: 0.875rem;
   color: var(--on-surface-variant, #{tokens.$on-surface-variant});
+  flex-wrap: wrap;
 }
 
 .pathItem {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
+  flex: 1 1 240px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.headerIntro {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .codeChip {
@@ -160,6 +167,12 @@
   border-color: var(--status-pass, #{tokens.$status-pass});
   background-color: var(--status-pass-bg, #{tokens.$status-pass-bg});
   color: var(--status-pass, #{tokens.$status-pass});
+}
+
+.filterBtnIgnoredActive {
+  border-color: #f59e0b;
+  background-color: #fffbeb;
+  color: #b45309;
 }
 
 .tableCard {
