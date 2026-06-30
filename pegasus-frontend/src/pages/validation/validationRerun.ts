@@ -12,7 +12,12 @@ import { gcsUri } from '../report/reportPairId';
 import { fixedWidthConfigFromColumns } from './fixedWidthConfig';
 import { isFixedWidthFormat } from './fixedWidthFormat';
 import { isJsonFormat } from './jsonFormat';
-import { archiveUsesTabularValidation, resolveWizardArchiveMode } from './archiveFormat';
+import {
+  archiveUsesFixedWidthValidation,
+  archiveUsesJsonValidation,
+  archiveUsesTabularValidation,
+  resolveWizardArchiveMode,
+} from './archiveFormat';
 
 export const parseGsUri = (uri: string): GoogleCloudStorageConfig | null => {
   const trimmed = uri.trim();
@@ -107,22 +112,21 @@ export const validateRequestFromForm = (
     targetProfile?: CloudFileProfileResponse | null;
   },
 ): ValidateRequest => {
-  const isFixedWidth = isFixedWidthFormat(form.detectedFileFormat);
-  const isJson = isJsonFormat(form.detectedFileFormat);
-  const archiveKind = resolveWizardArchiveMode({
+  const profileInput = {
     detectedFileFormat: form.detectedFileFormat,
     sourceFileName: form.sourceFileName,
     targetFileName: form.targetFileName,
     sourceProfile: options?.sourceProfile ?? null,
     targetProfile: options?.targetProfile ?? null,
-  });
-  const archiveTabular = archiveUsesTabularValidation({
-    detectedFileFormat: form.detectedFileFormat,
-    sourceFileName: form.sourceFileName,
-    targetFileName: form.targetFileName,
-    sourceProfile: options?.sourceProfile ?? null,
-    targetProfile: options?.targetProfile ?? null,
-  }) || (Boolean(archiveKind) && form.columnMappings.length > 0);
+  };
+  const archiveKind = resolveWizardArchiveMode(profileInput);
+  const archiveJson = archiveUsesJsonValidation(profileInput);
+  const archiveFixedWidth = archiveUsesFixedWidthValidation(profileInput);
+  const archiveTabular = archiveUsesTabularValidation(profileInput)
+    || (Boolean(archiveKind) && form.columnMappings.length > 0 && !archiveJson && !archiveFixedWidth);
+  const isFixedWidth = isFixedWidthFormat(form.detectedFileFormat)
+    || archiveFixedWidth;
+  const isJson = isJsonFormat(form.detectedFileFormat) || archiveJson;
   const uidColumn = isFixedWidth && form.fixedWidthColumns.length > 0
     ? (form.uidColumn || form.fixedWidthColumns[0]?.field_name || 'record_id')
     : isJson
@@ -135,25 +139,37 @@ export const validateRequestFromForm = (
     has_header: form.hasHeader,
     column_mappings: isFixedWidth ? [] : form.columnMappings,
     test_mode: 'full',
-    ...(isFixedWidth
-      ? {
-        file_format: 'fixed-width',
-        fixed_width_config: fixedWidthConfigFromColumns(form.fixedWidthColumns, uidColumn),
-      }
-      : {}),
-    ...(isJson
-      ? {
-        file_format: 'json',
-        json_order_sensitive: form.structuredOrderSensitive,
-      }
-      : {}),
-    ...(archiveKind
-      ? {
-        file_format: archiveKind,
-        column_mappings: archiveTabular ? form.columnMappings : [],
-      }
-      : {}),
   };
+
+  if (archiveKind && (archiveJson || archiveFixedWidth || archiveTabular)) {
+    Object.assign(base, {
+      file_format: archiveKind,
+      column_mappings: archiveJson || archiveTabular ? form.columnMappings : [],
+      ...(archiveFixedWidth
+        ? {
+          fixed_width_config: fixedWidthConfigFromColumns(form.fixedWidthColumns, uidColumn),
+        }
+        : {}),
+      ...(archiveJson
+        ? { json_order_sensitive: form.structuredOrderSensitive }
+        : {}),
+    });
+  } else if (isFixedWidth) {
+    Object.assign(base, {
+      file_format: 'fixed-width',
+      fixed_width_config: fixedWidthConfigFromColumns(form.fixedWidthColumns, uidColumn),
+    });
+  } else if (isJson) {
+    Object.assign(base, {
+      file_format: 'json',
+      json_order_sensitive: form.structuredOrderSensitive,
+    });
+  } else if (archiveKind) {
+    Object.assign(base, {
+      file_format: archiveKind,
+      column_mappings: archiveTabular ? form.columnMappings : [],
+    });
+  }
 
   const srcPath = pathOverride?.source_path
     ?? (form.sourceCloud ? gcsUri(form.sourceCloud) : null);

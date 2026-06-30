@@ -37,9 +37,16 @@ def _patch_local_gcs_stream(src: Path, tgt: Path):
         with open(path, "rb") as handle:
             return handle.read(max_bytes)
 
-    with patch.object(GcsStreamSession, "open_binary", _local_stream):
-        with patch.object(GcsStreamSession, "read_prefix", _local_prefix):
-            yield
+    def _local_download(self, dest: Path, *, chunk_size: int = 8 * 1024 * 1024) -> None:
+        path = _resolve_path(self._ref)
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(path.read_bytes())
+
+    with patch.object(GcsStreamSession, "download_to_path", _local_download):
+        with patch.object(GcsStreamSession, "open_binary", _local_stream):
+            with patch.object(GcsStreamSession, "read_prefix", _local_prefix):
+                yield
 
 
 def test_gcs_load_delimited_frame_generated_100k() -> None:
@@ -139,7 +146,7 @@ def test_gcs_small_files_use_in_memory_without_explicit_flag() -> None:
 
     assert result.source_row_count == 10_000
     assert result.target_row_count == 9_700
-    assert result.partitions_processed == 0
+    assert result.partitions_processed > 0
     assert elapsed < 5.0
 
 

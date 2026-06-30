@@ -53,6 +53,10 @@ def test_gcs_partition_side_uses_pyarrow_batches_not_dict_stream() -> None:
     timings = PipelineTimings()
     with (
         patch(
+            "pegasus.validation.adapters.gcs_delimited.GcsDelimitedAdapter._load_header_prefix",
+            return_value=b"uid,amount\n10,5\n",
+        ),
+        patch(
             "pegasus.validation.pipeline.polars_spill.partition_side_streaming_batches",
             return_value=42,
         ) as batch_mock,

@@ -21,7 +21,12 @@ import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { validationActions } from '../Validation.reducer';
 import { isFixedWidthFormat } from '../fixedWidthFormat';
 import { resolveWizardJsonMode } from '../jsonFormat';
-import { resolveWizardArchiveMode, archiveUsesTabularValidation } from '../archiveFormat';
+import {
+  resolveWizardArchiveMode,
+  archiveUsesTabularValidation,
+  archiveUsesJsonValidation,
+  archiveUsesFixedWidthValidation,
+} from '../archiveFormat';
 import { FixedWidthLayoutPanel } from './FixedWidthLayoutPanel';
 import { ArchiveValidationStep } from './ArchiveValidationStep';
 import { JsonParentMappingStep } from './JsonParentMappingStep';
@@ -228,7 +233,9 @@ export const ConfigureMappingStep: React.FC = () => {
   const overviewCache = useAppSelector((s) => s.validation.overviewProfileCache);
   const previewColumnsState = useAppSelector((s) => s.validation.previewColumnsState);
   const previewFixedWidthState = useAppSelector((s) => s.validation.previewFixedWidthState);
-  const isFixedWidth = isFixedWidthFormat(validationForm.detectedFileFormat);
+  const isFixedWidth = isFixedWidthFormat(validationForm.detectedFileFormat)
+    || isFixedWidthFormat(overviewCache?.source?.file_format)
+    || isFixedWidthFormat(overviewCache?.target?.file_format);
   const isJson = resolveWizardJsonMode({
     detectedFileFormat: validationForm.detectedFileFormat,
     sourceFileName: validationForm.sourceFileName,
@@ -243,14 +250,18 @@ export const ConfigureMappingStep: React.FC = () => {
     sourceProfile: overviewCache?.source,
     targetProfile: overviewCache?.target,
   }));
-  const isArchiveTabular = archiveUsesTabularValidation({
+  const archiveProfileInput = {
     detectedFileFormat: validationForm.detectedFileFormat,
     sourceFileName: validationForm.sourceFileName,
     targetFileName: validationForm.targetFileName,
     sourceProfile: overviewCache?.source,
     targetProfile: overviewCache?.target,
-  });
-  const isArchiveMetadataOnly = isArchive && !isArchiveTabular;
+  };
+  const isArchiveTabular = archiveUsesTabularValidation(archiveProfileInput);
+  const isArchiveMetadataOnly = isArchive
+    && !isArchiveTabular
+    && !archiveUsesJsonValidation(archiveProfileInput)
+    && !archiveUsesFixedWidthValidation(archiveProfileInput);
 
   const [searchQuery, setSearchQuery] = useState('');
 

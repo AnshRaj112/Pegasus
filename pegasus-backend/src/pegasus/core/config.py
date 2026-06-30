@@ -482,7 +482,16 @@ class Settings(BaseSettings):
     validation_gcs_streaming_only: bool = Field(
         default=True,
         description=(
-            "When true (default), GCS validation streams objects via open_gcs_binary / PyArrow CSV only."
+            "When true (default), GCS profile/browse paths stream objects without full download. "
+            "Reconciliation still materializes GCS delimited inputs locally when "
+            "validation_gcs_materialize_for_reconcile is enabled."
+        ),
+    )
+    validation_gcs_materialize_for_reconcile: bool = Field(
+        default=True,
+        description=(
+            "Download GCS delimited objects to local temp before reconciliation so CSV "
+            "validation matches local-disk throughput (single network read per side)."
         ),
     )
     validation_auto_in_memory_max_bytes: int = Field(

@@ -233,4 +233,25 @@ export const validationStateStep3Ready = {
       { source_column: 'name', target_column: 'name' },
     ],
   },
+  previewColumnsState: {
+    pairKey: `${overviewSourceKey}|${overviewTargetKey}|id|auto|true`,
+    data: {
+      source_columns: ['id', 'name'],
+      target_columns: ['id', 'name'],
+      compare_columns: ['id', 'name'],
+      auto_mappings: [
+        { source_column: 'id', target_column: 'id' },
+        { source_column: 'name', target_column: 'name' },
+      ],
+      unmatched_source_columns: [],
+      unmatched_target_columns: [],
+      delimiter: ',',
+      has_header: true,
+      source_samples: { id: ['1'], name: ['alpha'] },
+      target_samples: { id: ['1'], name: ['alpha'] },
+      sample_row_count: 1,
+    },
+    isFetching: false,
+    error: null,
+  },
 }

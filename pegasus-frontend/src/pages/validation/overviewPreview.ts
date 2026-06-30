@@ -5,7 +5,7 @@ import type {
   LocalColumnPreviewResponse,
 } from '../../shared/api/Api';
 import type { OverviewProfileCache, PreviewRequestState, ValidationFormState } from './Validation.interface';
-import { archiveUsesTabularValidation, profileLooksArchive } from './archiveFormat';
+import { archiveUsesTabularValidation, archiveUsesJsonValidation, archiveUsesFixedWidthValidation, profileLooksArchive } from './archiveFormat';
 import { isFixedWidthFormat } from './fixedWidthFormat';
 import { profileLooksJson } from './jsonFormat';
 import { isValidationFileEmpty } from './validationEmptyFiles';
@@ -47,6 +47,13 @@ const profileFormatFlags = (
   const isFixedWidth = !sourceEmpty && !targetEmpty && (
     isFixedWidthFormat(sourceProfile?.suggested_file_format ?? sourceProfile?.file_format)
     || isFixedWidthFormat(targetProfile?.suggested_file_format ?? targetProfile?.file_format)
+    || archiveUsesFixedWidthValidation({
+      detectedFileFormat: form.detectedFileFormat,
+      sourceFileName: form.sourceFileName,
+      targetFileName: form.targetFileName,
+      sourceProfile,
+      targetProfile,
+    })
   );
   const isJson = !sourceEmpty && !targetEmpty && !isFixedWidth
     && profileLooksJson(sourceProfile, form.sourceFileName)
@@ -54,19 +61,22 @@ const profileFormatFlags = (
   const isArchiveContainer = !sourceEmpty && !targetEmpty && !isFixedWidth && !isJson
     && profileLooksArchive(sourceProfile, form.sourceFileName)
     && profileLooksArchive(targetProfile, form.targetFileName);
-  const isArchiveTabular = isArchiveContainer && archiveUsesTabularValidation({
+  const profileArchiveInput = {
     detectedFileFormat: form.detectedFileFormat,
     sourceFileName: form.sourceFileName,
     targetFileName: form.targetFileName,
     sourceProfile,
     targetProfile,
-  });
+  };
+  const isArchiveTabular = isArchiveContainer && archiveUsesTabularValidation(profileArchiveInput);
+  const isArchiveJson = isArchiveContainer && archiveUsesJsonValidation(profileArchiveInput);
+  const isArchiveFixedWidth = isArchiveContainer && archiveUsesFixedWidthValidation(profileArchiveInput);
   return {
     sourceEmpty,
     targetEmpty,
     isFixedWidth,
-    isJson,
-    isArchiveMetadataOnly: isArchiveContainer && !isArchiveTabular,
+    isJson: isJson || isArchiveJson,
+    isArchiveMetadataOnly: isArchiveContainer && !isArchiveTabular && !isArchiveJson && !isArchiveFixedWidth,
   };
 };
 

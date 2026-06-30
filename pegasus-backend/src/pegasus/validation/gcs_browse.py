@@ -338,7 +338,7 @@ def download_gcs_objects(
     return local_paths
 
 
-def _stream_blob_to_path(blob: Any, dest: Path, *, chunk_bytes: int = 256 * 1024) -> None:
+def _stream_blob_to_path(blob: Any, dest: Path, *, chunk_bytes: int = 8 * 1024 * 1024) -> None:
     """Write object to *dest* via chunked streaming (no download_to_filename)."""
     with blob.open("rb") as src, open(dest, "wb") as out:
         while True:
