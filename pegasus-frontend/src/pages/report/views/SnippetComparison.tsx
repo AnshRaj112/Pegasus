@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { DownloadOutlined, RightOutlined, DatabaseOutlined, LeftOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { DownloadOutlined, RightOutlined, DatabaseOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { MismatchSampleRow } from '../../../shared/api/Api';
 import { useAppSelector } from '../../../redux/store';
 import { downloadSnippetCsv, downloadSnippetPdf, downloadSnippetXlsx } from '../snippetExport';
 import styles from './SnippetComparison.module.scss';
 
 type RowStatus = 'match' | 'mismatch' | 'extra_source' | 'missing_target';
+
+type SnippetSectionTab = 'mismatches' | 'extras' | 'missing';
 
 type SnippetRow = {
   uid: string;
@@ -155,14 +157,12 @@ export const SnippetComparison: React.FC = () => {
   const [columns, setColumns] = useState<string[]>([]);
   const [sourceLabel, setSourceLabel] = useState('Source');
   const [targetLabel, setTargetLabel] = useState('Target');
-  const [colPage, setColPage] = useState(0);
-  const [rowPage, setRowPage] = useState(0);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [showMatchedOnly, setShowMatchedOnly] = useState(false);
   const [cleanRun, setCleanRun] = useState(false);
-  const sourceRef = useRef<HTMLDivElement>(null);
-  const targetRef = useRef<HTMLDivElement>(null);
+  const [activeSection, setActiveSection] = useState<SnippetSectionTab>('mismatches');
+  const sourceScrollRef = useRef<HTMLDivElement>(null);
+  const targetScrollRef = useRef<HTMLDivElement>(null);
 
   const runReady = Boolean(runId && historyRunState.runId === runId);
   const mismatchesReady = Boolean(runId && mismatchesState.runId === runId);
@@ -189,8 +189,6 @@ export const SnippetComparison: React.FC = () => {
     setExpectedMismatchTotal(expected);
     setCleanRun(expected === 0);
     setShowMatchedOnly(expected === 0);
-    setColPage(0);
-    setRowPage(0);
   }, [runReady, historyRunState.data]);
 
   const allRows = useMemo(() => buildSnippetRows(allItems, columns), [allItems, columns]);
@@ -215,42 +213,24 @@ export const SnippetComparison: React.FC = () => {
     );
   }, [issueRows, matchRows, columns, showMatchedOnly, cleanRun]);
 
-  const totalColPages = Math.max(1, Math.ceil(displayColumns.length / COLS_PER_PAGE));
-  const visibleCols = displayColumns.slice(colPage * COLS_PER_PAGE, (colPage + 1) * COLS_PER_PAGE);
+  const visibleCols = displayColumns;
   const displayCols = ['uid', ...visibleCols];
 
-  const totalRowPages = Math.max(1, Math.ceil(displayIssueRows.length / itemsPerPage));
-  const pageRows = displayIssueRows.slice(rowPage * itemsPerPage, (rowPage + 1) * itemsPerPage);
-
-  useEffect(() => {
-    setRowPage(0);
-  }, [colPage, itemsPerPage, showMatchedOnly]);
-
-  useEffect(() => {
-    setColPage(0);
-  }, [showMatchedOnly]);
-
-  useEffect(() => {
-    if (rowPage >= totalRowPages) setRowPage(Math.max(0, totalRowPages - 1));
-  }, [rowPage, totalRowPages]);
+  const sectionRows = useMemo(() => {
+    const mismatches: SnippetRow[] = [];
+    const extras: SnippetRow[] = [];
+    const missing: SnippetRow[] = [];
+    for (const row of displayIssueRows) {
+      if (row.status === 'extra_source') extras.push(row);
+      else if (row.status === 'missing_target') missing.push(row);
+      else mismatches.push(row);
+    }
+    return { mismatches, extras, missing };
+  }, [displayIssueRows]);
 
   const pairLabel = mappingId ?? sourceLabel.split('/').pop() ?? 'Report';
 
-  const handleSourceScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    if (targetRef.current) {
-      targetRef.current.scrollTop = e.currentTarget.scrollTop;
-      targetRef.current.scrollLeft = e.currentTarget.scrollLeft;
-    }
-  };
-
-  const handleTargetScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    if (sourceRef.current) {
-      sourceRef.current.scrollTop = e.currentTarget.scrollTop;
-      sourceRef.current.scrollLeft = e.currentTarget.scrollLeft;
-    }
-  };
-
-  const exportRows = () => pageRows.map((row) => ({
+  const exportRows = () => displayIssueRows.map((row) => ({
     uid: row.uid,
     status: row.status,
     columns: visibleCols,
@@ -290,20 +270,166 @@ export const SnippetComparison: React.FC = () => {
     );
   });
 
-  const emptyMessage = allItems.length === 0 && expectedMismatchTotal > 0
-    ? 'Mismatch rows were not saved for this run. Re-run validation to regenerate the snippet, or check that the database is reachable.'
-    : issueRows.length === 0 && matchRows.length === 0
-      ? cleanRun
-        ? 'No matching row samples were saved for this run. Re-run validation to regenerate the snippet.'
-        : 'No mismatches for this validation run.'
-      : showMatchedOnly
-        ? displayColumns.length === 0
-          ? 'No matched columns in this validation run.'
-          : 'No matched values in the current column window. Use “Next cols” to inspect other columns.'
-        : 'No issues in the current column window. Use “Next cols” to inspect other columns.';
+  const sectionEmptyMessage = (section: 'mismatches' | 'extras' | 'missing'): string => {
+    if (allItems.length === 0 && expectedMismatchTotal > 0) {
+      return 'Mismatch rows were not saved for this run. Re-run validation to regenerate the snippet, or check that the database is reachable.';
+    }
+    if (section === 'mismatches') {
+      if (cleanRun && matchRows.length === 0) {
+        return 'No matching row samples were saved for this run. Re-run validation to regenerate the snippet.';
+      }
+      if (issueRows.length === 0 && matchRows.length === 0) {
+        return 'No mismatches for this validation run.';
+      }
+      if (showMatchedOnly && displayColumns.length === 0) {
+        return 'No matched columns in this validation run.';
+      }
+      return showMatchedOnly
+        ? 'No matched values in the visible columns.'
+        : 'No value mismatches in the visible columns.';
+    }
+    if (section === 'extras') return 'No extra rows in source for this validation run.';
+    return 'No missing rows in target for this validation run.';
+  };
+
+  const snippetSections: Array<{
+    key: SnippetSectionTab;
+    title: string;
+    rows: SnippetRow[];
+    emptyMessage: string;
+  }> = [
+    {
+      key: 'mismatches' as const,
+      title: cleanRun ? 'Matched' : 'Mismatches',
+      rows: sectionRows.mismatches,
+      emptyMessage: sectionEmptyMessage('mismatches'),
+    },
+    {
+      key: 'extras' as const,
+      title: 'Extras',
+      rows: sectionRows.extras,
+      emptyMessage: sectionEmptyMessage('extras'),
+    },
+    {
+      key: 'missing' as const,
+      title: 'Missing',
+      rows: sectionRows.missing,
+      emptyMessage: sectionEmptyMessage('missing'),
+    },
+  ];
+
+  const mismatchesSection = snippetSections.find((s) => s.key === 'mismatches')!;
+  const extrasSection = snippetSections.find((s) => s.key === 'extras')!;
+  const missingSection = snippetSections.find((s) => s.key === 'missing')!;
+
+  const activeSnippetSection = snippetSections.find((section) => section.key === activeSection)
+    ?? snippetSections[0]!;
 
   const isDataLoading = summaryLoading || rowsLoading;
   const skeletonColCount = displayCols.length || COLS_PER_PAGE + 1;
+
+  const renderTab = (section: typeof mismatchesSection) => (
+    <button
+      key={section.key}
+      type="button"
+      onClick={() => setActiveSection(section.key)}
+      className={`${styles.tabBtn} ${activeSection === section.key ? styles.tabBtnActive : ''}`}
+    >
+      {section.title}
+      <span className={styles.tabCount}>
+        {isDataLoading ? '—' : section.rows.length.toLocaleString()}
+      </span>
+    </button>
+  );
+
+  const renderSectionTable = (
+    sectionRows: SnippetRow[],
+    emptyMessage: string,
+    sectionKey: string,
+  ) => (
+    <div className={styles.sectionPanels}>
+      <div className={styles.panel}>
+        <div className={styles.panelHeaderSource}>
+          <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Source &gt; {sourceLabel}</span>
+        </div>
+        <div
+          ref={sourceScrollRef}
+          onScroll={(e) => {
+            if (targetScrollRef.current) {
+              targetScrollRef.current.scrollTop = e.currentTarget.scrollTop;
+              targetScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
+            }
+          }}
+          className={styles.panelScroll}
+        >
+          <table className={styles.table}>
+            <thead className={styles.thead}>
+              <tr>
+                {isDataLoading && displayCols.length === 0
+                  ? Array.from({ length: skeletonColCount }, (_, i) => (
+                    <th key={i} className={styles.th}>
+                      {i === 0 ? 'UID' : <SkeletonCell colIdx={i} />}
+                    </th>
+                  ))
+                  : displayCols.map((col) => <th key={col} className={styles.th}>{col === 'uid' ? 'UID' : col}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {isDataLoading ? (
+                <SnippetSkeletonRows colCount={skeletonColCount} />
+              ) : sectionRows.length === 0 ? (
+                <tr><td colSpan={displayCols.length || 1} className={styles.emptyCell}>{emptyMessage}</td></tr>
+              ) : sectionRows.map((row) => (
+                <tr key={`src-${sectionKey}-${row.uid}`} className={rowClassName(row)}>
+                  {renderCells(row, 'source')}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className={styles.panel}>
+        <div className={styles.panelHeaderTarget}>
+          <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Target &gt; {targetLabel}</span>
+        </div>
+        <div
+          ref={targetScrollRef}
+          onScroll={(e) => {
+            if (sourceScrollRef.current) {
+              sourceScrollRef.current.scrollTop = e.currentTarget.scrollTop;
+              sourceScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
+            }
+          }}
+          className={styles.panelScroll}
+        >
+          <table className={styles.table}>
+            <thead className={styles.thead}>
+              <tr>
+                {isDataLoading && displayCols.length === 0
+                  ? Array.from({ length: skeletonColCount }, (_, i) => (
+                    <th key={i} className={styles.th}>
+                      {i === 0 ? 'UID' : <SkeletonCell colIdx={i} />}
+                    </th>
+                  ))
+                  : displayCols.map((col) => <th key={col} className={styles.th}>{col === 'uid' ? 'UID' : col}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {isDataLoading ? (
+                <SnippetSkeletonRows colCount={skeletonColCount} />
+              ) : sectionRows.length === 0 ? (
+                <tr><td colSpan={displayCols.length || 1} className={styles.emptyCell}>{emptyMessage}</td></tr>
+              ) : sectionRows.map((row) => (
+                <tr key={`tgt-${sectionKey}-${row.uid}`} className={rowClassName(row)}>
+                  {renderCells(row, 'target')}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 
   if (error) return <div className={styles.error}>{error}</div>;
 
@@ -331,7 +457,7 @@ export const SnippetComparison: React.FC = () => {
               {(['CSV', 'XLSX', 'PDF'] as const).map((fmt) => (
                 <button key={fmt} type="button" onClick={() => {
                   setDownloadOpen(false);
-                  const base = `snippet-${runId}-cols${colPage + 1}`;
+                  const base = `snippet-${runId}`;
                   const data = exportRows();
                   if (fmt === 'CSV') downloadSnippetCsv(data, visibleCols, `${base}.csv`);
                   else if (fmt === 'XLSX') downloadSnippetXlsx(data, visibleCols, `${base}.xlsx`);
@@ -345,140 +471,43 @@ export const SnippetComparison: React.FC = () => {
         </div>
       </div>
 
-      <div className={styles.controls}>
-        <span className={styles.controlText}>
-          Columns {displayColumns.length ? colPage * COLS_PER_PAGE + 1 : 0}–{Math.min((colPage + 1) * COLS_PER_PAGE, displayColumns.length)} of {displayColumns.length}
-          {showMatchedOnly && columns.length !== displayColumns.length ? ` (${columns.length} total)` : ''}
-        </span>
-        <button type="button" disabled={colPage <= 0} onClick={() => setColPage((p) => p - 1)} className={styles.navBtn}>← Prev cols</button>
-        <button type="button" disabled={colPage >= totalColPages - 1} onClick={() => setColPage((p) => p + 1)} className={styles.navBtn}>Next cols →</button>
-        <button
-          type="button"
-          onClick={() => setShowMatchedOnly((v) => !v)}
-          className={`${styles.matchToggle} ${showMatchedOnly ? styles.matchToggleActive : ''}`}
-        >
-          <CheckCircleOutlined />
-          {showMatchedOnly ? 'Showing matched only' : 'Show matched only'}
-        </button>
-        <span className={styles.controlText}>
-          {isDataLoading
-            ? 'Loading…'
-            : showMatchedOnly || cleanRun
-              ? `${displayIssueRows.length.toLocaleString()} UID(s) with matched values · ${displayColumns.length} matched column(s)`
-              : `${issueRows.length.toLocaleString()} UID(s) with issues · red cells are mismatches in the visible column window`}
-        </span>
-      </div>
-
-      <div className={styles.legend}>
-        <span><span className={styles.legendGreen}>Green</span> = matching</span>
-        <span><span className={styles.legendRed}>Red</span> = mismatch</span>
-        <span><span className={styles.legendOrange}>Orange</span> = missing / extra row</span>
-      </div>
-
-      <div className={styles.panels}>
-        <div className={styles.panel}>
-          <div className={styles.panelHeaderSource}>
-            <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Source &gt; {sourceLabel}</span>
-          </div>
-          <div ref={sourceRef} onScroll={handleSourceScroll} className={styles.panelScroll}>
-            <table className={styles.table}>
-              <thead className={styles.thead}>
-                <tr>
-                  {isDataLoading && displayCols.length === 0
-                    ? Array.from({ length: skeletonColCount }, (_, i) => (
-                      <th key={i} className={styles.th}>
-                        {i === 0 ? 'UID' : <SkeletonCell colIdx={i} />}
-                      </th>
-                    ))
-                    : displayCols.map((col) => <th key={col} className={styles.th}>{col === 'uid' ? 'UID' : col}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {isDataLoading ? (
-                  <SnippetSkeletonRows colCount={skeletonColCount} />
-                ) : pageRows.length === 0 ? (
-                  <tr><td colSpan={displayCols.length || 1} className={styles.emptyCell}>{emptyMessage}</td></tr>
-                ) : pageRows.map((row) => (
-                  <tr key={`src-${row.uid}`} className={rowClassName(row)}>
-                    {renderCells(row, 'source')}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div className={styles.card}>
+        <div className={styles.toolbar}>
+          <div className={styles.tabs}>
+            {renderTab(mismatchesSection)}
+            {renderTab(extrasSection)}
+            {renderTab(missingSection)}
+            <button
+              type="button"
+              onClick={() => setShowMatchedOnly((v) => !v)}
+              className={`${styles.matchToggle} ${showMatchedOnly ? styles.matchToggleActive : ''}`}
+            >
+              <CheckCircleOutlined />
+              {showMatchedOnly ? 'Showing matched only' : 'Show matched only'}
+            </button>
           </div>
         </div>
-        <div className={styles.panel}>
-          <div className={styles.panelHeaderTarget}>
-            <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Target &gt; {targetLabel}</span>
+
+        <div className={styles.tabContent}>
+          <div className={styles.legend}>
+            <span><span className={styles.legendGreen}>Green</span> = matching</span>
+            <span><span className={styles.legendRed}>Red</span> = mismatch</span>
+            <span><span className={styles.legendOrange}>Orange</span> = missing / extra row</span>
           </div>
-          <div ref={targetRef} onScroll={handleTargetScroll} className={styles.panelScroll}>
-            <table className={styles.table}>
-              <thead className={styles.thead}>
-                <tr>
-                  {isDataLoading && displayCols.length === 0
-                    ? Array.from({ length: skeletonColCount }, (_, i) => (
-                      <th key={i} className={styles.th}>
-                        {i === 0 ? 'UID' : <SkeletonCell colIdx={i} />}
-                      </th>
-                    ))
-                    : displayCols.map((col) => <th key={col} className={styles.th}>{col === 'uid' ? 'UID' : col}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {isDataLoading ? (
-                  <SnippetSkeletonRows colCount={skeletonColCount} />
-                ) : pageRows.length === 0 ? (
-                  <tr><td colSpan={displayCols.length || 1} className={styles.emptyCell}>{emptyMessage}</td></tr>
-                ) : pageRows.map((row) => (
-                  <tr key={`tgt-${row.uid}`} className={rowClassName(row)}>
-                    {renderCells(row, 'target')}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {renderSectionTable(
+            activeSnippetSection.rows,
+            activeSnippetSection.emptyMessage,
+            activeSnippetSection.key,
+          )}
         </div>
       </div>
 
       <div className={styles.footer}>
         <span className={styles.footerNote}>
           {cleanRun
-            ? 'Showing up to 10 matching rows per column. Use “Next cols” to inspect other columns.'
-            : 'Use “Next cols” to inspect mismatches in other columns. Row pages list every UID with a missing, extra, or value mismatch.'}
+            ? 'All rows are shown per section.'
+            : 'All mismatch, extra, and missing rows are shown.'}
         </span>
-        <div className={styles.footerControls}>
-          <div className={styles.rowsPerPage}>
-            Rows per page:
-            <select value={itemsPerPage} onChange={(e) => setItemsPerPage(Number(e.target.value))} className={styles.rowsPerPageSelect}>
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-              <option value={50}>50</option>
-            </select>
-          </div>
-          <div className={styles.pagination}>
-            <button
-              type="button"
-              disabled={rowPage <= 0}
-              onClick={() => rowPage > 0 && setRowPage((p) => p - 1)}
-              className={`${styles.paginationIcon} ${rowPage <= 0 ? styles.paginationIconDisabled : styles.paginationIconEnabled}`}
-            >
-              <LeftOutlined />
-            </button>
-            <span className={styles.paginationLabel}>
-              {isDataLoading ? '—' : (displayIssueRows.length ? rowPage + 1 : 0)}
-              <span className={styles.paginationDivider}>/</span>
-              {isDataLoading ? '—' : totalRowPages}
-            </span>
-            <button
-              type="button"
-              disabled={rowPage >= totalRowPages - 1}
-              onClick={() => rowPage < totalRowPages - 1 && setRowPage((p) => p + 1)}
-              className={`${styles.paginationIcon} ${rowPage >= totalRowPages - 1 ? styles.paginationIconDisabled : styles.paginationIconEnabled}`}
-            >
-              <RightOutlined />
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
