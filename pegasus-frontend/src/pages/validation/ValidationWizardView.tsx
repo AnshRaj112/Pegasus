@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRightOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, ArrowRightOutlined, SaveOutlined } from '@ant-design/icons';
 import { notification } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
@@ -52,6 +52,7 @@ const ValidationWizardView: React.FC = () => {
   const [loadingRun, setLoadingRun] = useState(false);
   const loadedRunIdRef = useRef<string | null>(null);
   const sessionSaveReadyRef = useRef(false);
+  const workspaceRef = useRef<HTMLElement>(null);
 
   useLayoutEffect(() => {
     const saved = loadValidationTabSession();
@@ -74,6 +75,11 @@ const ValidationWizardView: React.FC = () => {
   useEffect(() => {
     dispatch(validationActions.setWizardStep(currentStep));
   }, [currentStep, dispatch]);
+
+  useLayoutEffect(() => {
+    workspaceRef.current?.scrollTo(0, 0);
+    window.scrollTo(0, 0);
+  }, [currentStep, runId]);
 
   useEffect(() => {
     if (!runId) {
@@ -453,34 +459,29 @@ const ValidationWizardView: React.FC = () => {
             </span>
           </div>
         </div>
-      </div>
 
-      <main className={styles.wizardWorkspaceArea}>
-        {renderStepContent()}
-      </main>
-
-      <footer className={`${styles.wizardActionFooter} ${styles.wizardActionFooterSpread}`}>
-        <div>
+        <div className={styles.headerBtnGroup}>
           {currentStep > 1 && (
             <button
               type="button"
               onClick={handleBack}
               disabled={isActuallyLoading}
-              className={`${styles.secondaryBtn} ${isActuallyLoading ? styles.secondaryBtnDisabled : ''}`}
+              aria-label="Go back"
+              title="Go back"
+              className={`${styles.iconActionBtn} ${isActuallyLoading ? styles.iconActionBtnDisabled : ''}`}
             >
-              Back
+              <ArrowLeftOutlined />
             </button>
           )}
-        </div>
-        <div className={styles.footerBtnGroup}>
           <button
             type="button"
             disabled={!canSaveDraft || savingDraft}
             onClick={() => void handleSaveDraft()}
+            aria-label="Save draft"
             title="Save mapping configuration without running validation"
-            className={`${styles.secondaryBtn} ${!canSaveDraft || savingDraft ? styles.secondaryBtnMuted : ''}`}
+            className={`${styles.iconActionBtn} ${!canSaveDraft || savingDraft ? styles.iconActionBtnMuted : ''}`}
           >
-            {savingDraft ? 'Saving…' : 'Save Draft'}
+            <SaveOutlined />
           </button>
           <button
             type="button"
@@ -492,7 +493,11 @@ const ValidationWizardView: React.FC = () => {
             {!isActuallyLoading && <ArrowRightOutlined className={styles.proceedIcon} />}
           </button>
         </div>
-      </footer>
+      </div>
+
+      <main ref={workspaceRef} className={styles.wizardWorkspaceArea}>
+        {renderStepContent()}
+      </main>
     </div>
   );
 };

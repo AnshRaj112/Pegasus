@@ -20,6 +20,10 @@
 }
 
 .wizardStepTabBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: tokens.$spacing-lg;
   background-color: var(--surface-container-lowest, #{tokens.$surface-container-lowest});
   padding: 24px 40px 12px;
   border-left: 1px solid var(--outline-variant, #{tokens.$outline-variant});
@@ -80,17 +84,15 @@
   overflow-y: auto;
   border-left: 1px solid var(--outline-variant, #{tokens.$outline-variant});
   border-right: 1px solid var(--outline-variant, #{tokens.$outline-variant});
-}
-
-.wizardActionFooter {
-  display: flex;
-  align-items: center;
-  padding: 24px;
-  background-color: tokens.$row-hover;
-  border-left: 1px solid var(--outline-variant, #{tokens.$outline-variant});
-  border-right: 1px solid var(--outline-variant, #{tokens.$outline-variant});
   border-bottom: 1px solid var(--outline-variant, #{tokens.$outline-variant});
   border-radius: 0 0 12px 12px;
+}
+
+.headerBtnGroup {
+  display: flex;
+  align-items: center;
+  gap: tokens.$spacing-md;
+  flex-shrink: 0;
 }
 
 .wizardPage {
@@ -125,13 +127,28 @@
   color: tokens.$on-surface-variant;
 }
 
-.wizardActionFooterSpread {
-  justify-content: space-between;
+.iconActionBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: tokens.$spacing-sm;
+  border: 0.0625rem solid tokens.$outline-variant;
+  background: tokens.$surface-container-lowest;
+  color: tokens.$on-surface-variant;
+  font-size: 1rem;
+  cursor: pointer;
 }
 
-.footerBtnGroup {
-  display: flex;
-  gap: tokens.$spacing-md;
+.iconActionBtnDisabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.iconActionBtnMuted {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .secondaryBtn {
