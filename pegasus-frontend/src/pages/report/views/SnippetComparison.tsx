@@ -4,6 +4,7 @@ import { DownloadOutlined, RightOutlined, DatabaseOutlined, CheckCircleOutlined 
 import { MismatchSampleRow } from '../../../shared/api/Api';
 import { useAppSelector } from '../../../redux/store';
 import { downloadSnippetCsv, downloadSnippetPdf, downloadSnippetXlsx } from '../snippetExport';
+import { TruncatedPath } from '../components/TruncatedPath';
 import styles from './SnippetComparison.module.scss';
 
 type RowStatus = 'match' | 'mismatch' | 'extra_source' | 'missing_target';
@@ -350,7 +351,10 @@ export const SnippetComparison: React.FC = () => {
     <div className={styles.sectionPanels}>
       <div className={styles.panel}>
         <div className={styles.panelHeaderSource}>
-          <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Source &gt; {sourceLabel}</span>
+          <DatabaseOutlined />
+          <span className={styles.panelHeaderTitle}>
+            <TruncatedPath prefix="Source > " path={sourceLabel} />
+          </span>
         </div>
         <div
           ref={sourceScrollRef}
@@ -390,7 +394,10 @@ export const SnippetComparison: React.FC = () => {
       </div>
       <div className={styles.panel}>
         <div className={styles.panelHeaderTarget}>
-          <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Target &gt; {targetLabel}</span>
+          <DatabaseOutlined />
+          <span className={styles.panelHeaderTitle}>
+            <TruncatedPath prefix="Target > " path={targetLabel} />
+          </span>
         </div>
         <div
           ref={targetScrollRef}

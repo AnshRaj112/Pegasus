@@ -52,7 +52,7 @@
 
 .column {
   flex: 1;
-  min-width: 12.5rem;
+  min-width: 0;
 }
 
 .titleRow {
@@ -79,6 +79,8 @@
   color: tokens.$text-muted;
   font-size: tokens.$text-body-sm;
   font-family: tokens.$font-mono;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .dividerCol {
