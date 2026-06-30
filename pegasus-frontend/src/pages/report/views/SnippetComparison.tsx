@@ -5,11 +5,21 @@ import { MismatchSampleRow } from '../../../shared/api/Api';
 import { useAppSelector } from '../../../redux/store';
 import { downloadSnippetCsv, downloadSnippetPdf, downloadSnippetXlsx } from '../snippetExport';
 import { TruncatedPath } from '../components/TruncatedPath';
+import {
+  clampSectionRowPagination,
+  SnippetSectionPaginationFooter,
+} from '../components/SnippetSectionPaginationFooter';
+import {
+  createTabularPaginationState,
+  paginateRows,
+  type SectionTabularPagination,
+  type SnippetSectionKey,
+} from '../components/snippetSectionPagination';
 import styles from './SnippetComparison.module.scss';
 
 type RowStatus = 'match' | 'mismatch' | 'extra_source' | 'missing_target';
 
-type SnippetSectionTab = 'mismatches' | 'extras' | 'missing';
+type SnippetSectionTab = SnippetSectionKey;
 
 type SnippetRow = {
   uid: string;
@@ -158,6 +168,7 @@ export const SnippetComparison: React.FC = () => {
   const [columns, setColumns] = useState<string[]>([]);
   const [sourceLabel, setSourceLabel] = useState('Source');
   const [targetLabel, setTargetLabel] = useState('Target');
+  const [sectionPagination, setSectionPagination] = useState(createTabularPaginationState);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [showMatchedOnly, setShowMatchedOnly] = useState(false);
   const [cleanRun, setCleanRun] = useState(false);
@@ -190,6 +201,7 @@ export const SnippetComparison: React.FC = () => {
     setExpectedMismatchTotal(expected);
     setCleanRun(expected === 0);
     setShowMatchedOnly(expected === 0);
+    setSectionPagination(createTabularPaginationState());
   }, [runReady, historyRunState.data]);
 
   const allRows = useMemo(() => buildSnippetRows(allItems, columns), [allItems, columns]);
@@ -214,9 +226,6 @@ export const SnippetComparison: React.FC = () => {
     );
   }, [issueRows, matchRows, columns, showMatchedOnly, cleanRun]);
 
-  const visibleCols = displayColumns;
-  const displayCols = ['uid', ...visibleCols];
-
   const sectionRows = useMemo(() => {
     const mismatches: SnippetRow[] = [];
     const extras: SnippetRow[] = [];
@@ -229,9 +238,26 @@ export const SnippetComparison: React.FC = () => {
     return { mismatches, extras, missing };
   }, [displayIssueRows]);
 
+  const activePagination = sectionPagination[activeSection];
+  const { colPage } = activePagination;
+
+  const totalColPages = Math.max(1, Math.ceil(displayColumns.length / COLS_PER_PAGE));
+  const visibleCols = displayColumns.slice(colPage * COLS_PER_PAGE, (colPage + 1) * COLS_PER_PAGE);
+  const displayCols = ['uid', ...visibleCols];
+
+  const patchSectionPagination = (
+    section: SnippetSectionTab,
+    patch: Partial<SectionTabularPagination>,
+  ) => {
+    setSectionPagination((prev) => ({
+      ...prev,
+      [section]: { ...prev[section], ...patch },
+    }));
+  };
+
   const pairLabel = mappingId ?? sourceLabel.split('/').pop() ?? 'Report';
 
-  const exportRows = () => displayIssueRows.map((row) => ({
+  const exportRows = () => pageRows.map((row) => ({
     uid: row.uid,
     status: row.status,
     columns: visibleCols,
@@ -286,8 +312,8 @@ export const SnippetComparison: React.FC = () => {
         return 'No matched columns in this validation run.';
       }
       return showMatchedOnly
-        ? 'No matched values in the visible columns.'
-        : 'No value mismatches in the visible columns.';
+        ? 'No matched values in the current column window. Use “Next cols” to inspect other columns.'
+        : 'No value mismatches in the current column window. Use “Next cols” to inspect other columns.';
     }
     if (section === 'extras') return 'No extra rows in source for this validation run.';
     return 'No missing rows in target for this validation run.';
@@ -325,6 +351,24 @@ export const SnippetComparison: React.FC = () => {
 
   const activeSnippetSection = snippetSections.find((section) => section.key === activeSection)
     ?? snippetSections[0]!;
+
+  const pageRows = paginateRows(activeSnippetSection.rows, activePagination);
+
+  useEffect(() => {
+    setSectionPagination((prev) => clampSectionRowPagination(prev, {
+      mismatches: sectionRows.mismatches.length,
+      extras: sectionRows.extras.length,
+      missing: sectionRows.missing.length,
+    }));
+  }, [sectionRows]);
+
+  useEffect(() => {
+    setSectionPagination((prev) => ({
+      mismatches: { ...prev.mismatches, rowPage: 0, colPage: 0 },
+      extras: { ...prev.extras, rowPage: 0, colPage: 0 },
+      missing: { ...prev.missing, rowPage: 0, colPage: 0 },
+    }));
+  }, [showMatchedOnly]);
 
   const isDataLoading = summaryLoading || rowsLoading;
   const skeletonColCount = displayCols.length || COLS_PER_PAGE + 1;
@@ -464,7 +508,7 @@ export const SnippetComparison: React.FC = () => {
               {(['CSV', 'XLSX', 'PDF'] as const).map((fmt) => (
                 <button key={fmt} type="button" onClick={() => {
                   setDownloadOpen(false);
-                  const base = `snippet-${runId}`;
+                  const base = `snippet-${runId}-cols${colPage + 1}`;
                   const data = exportRows();
                   if (fmt === 'CSV') downloadSnippetCsv(data, visibleCols, `${base}.csv`);
                   else if (fmt === 'XLSX') downloadSnippetXlsx(data, visibleCols, `${base}.xlsx`);
@@ -476,6 +520,15 @@ export const SnippetComparison: React.FC = () => {
             </div>
           )}
         </div>
+      </div>
+
+      <div className={styles.controls}>
+        <span className={styles.controlText}>
+          Columns {displayColumns.length ? colPage * COLS_PER_PAGE + 1 : 0}–{Math.min((colPage + 1) * COLS_PER_PAGE, displayColumns.length)} of {displayColumns.length}
+          {showMatchedOnly && columns.length !== displayColumns.length ? ` (${columns.length} total)` : ''}
+        </span>
+        <button type="button" disabled={colPage <= 0} onClick={() => patchSectionPagination(activeSection, { colPage: colPage - 1, rowPage: 0 })} className={styles.navBtn}>← Prev cols</button>
+        <button type="button" disabled={colPage >= totalColPages - 1} onClick={() => patchSectionPagination(activeSection, { colPage: colPage + 1, rowPage: 0 })} className={styles.navBtn}>Next cols →</button>
       </div>
 
       <div className={styles.card}>
@@ -502,19 +555,22 @@ export const SnippetComparison: React.FC = () => {
             <span><span className={styles.legendOrange}>Orange</span> = missing / extra row</span>
           </div>
           {renderSectionTable(
-            activeSnippetSection.rows,
+            pageRows,
             activeSnippetSection.emptyMessage,
             activeSnippetSection.key,
           )}
+          <SnippetSectionPaginationFooter
+            sectionKey={activeSection}
+            sectionLabel={activeSnippetSection.title}
+            rowCount={activeSnippetSection.rows.length}
+            pagination={activePagination}
+            isLoading={isDataLoading}
+            note={cleanRun
+              ? 'Showing up to 10 matching rows per column. Use “Next cols” to inspect other columns.'
+              : 'Use “Next cols” to inspect mismatches in other columns. Row pages list every UID with a missing, extra, or value mismatch.'}
+            onChange={patchSectionPagination}
+          />
         </div>
-      </div>
-
-      <div className={styles.footer}>
-        <span className={styles.footerNote}>
-          {cleanRun
-            ? 'All rows are shown per section.'
-            : 'All mismatch, extra, and missing rows are shown.'}
-        </span>
       </div>
     </div>
   );

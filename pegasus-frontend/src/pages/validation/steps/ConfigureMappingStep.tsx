@@ -30,6 +30,7 @@ import {
 import { FixedWidthLayoutPanel } from './FixedWidthLayoutPanel';
 import { ArchiveValidationStep } from './ArchiveValidationStep';
 import { JsonParentMappingStep } from './JsonParentMappingStep';
+import { TruncatedPath } from '../../report/components/TruncatedPath';
 import styles from './ConfigureMappingStep.module.scss';
 
 import { cloudObjectKey, buildPreviewPairKey, buildFixedWidthPreviewPairKey } from '../overviewPreview';
@@ -43,8 +44,14 @@ import {
 } from '../mappingMatrixPreview';
 
 const PAGE_SIZE = 10;
+const TARGET_ONLY_ROW_PREFIX = '__unmapped_target__:';
 
 interface ComplexMappingRow extends MappingMatrixRow {}
+
+const formatMappingTitle = (title: string): string => title.replace(/_/g, ' ');
+
+const isTargetOnlyUnmappedRow = (row: ComplexMappingRow): boolean =>
+  row.id.startsWith(TARGET_ONLY_ROW_PREFIX);
 
 const looksStructured = (value: string): boolean => {
   const s = value.trim();
@@ -267,6 +274,7 @@ export const ConfigureMappingStep: React.FC = () => {
 
   const [showUnmappedOnly, setShowUnmappedOnly] = useState(false);
   const [showConfiguredOnly, setShowConfiguredOnly] = useState(false);
+  const [showIgnoredOnly, setShowIgnoredOnly] = useState(false);
 
   const [actionFilters, setActionFilters] = useState({
     pk: false,
@@ -451,19 +459,62 @@ export const ConfigureMappingStep: React.FC = () => {
     return targetColumnsList.filter(col => !usedTargets.has(col));
   }, [columnsMatrix, targetColumnsList]);
 
+  const mappedTargetNames = useMemo(() => {
+    const used = new Set<string>();
+    columnsMatrix.forEach((row) => {
+      if (row.isIgnored) return;
+      row.targetCols.forEach((target) => used.add(target.name));
+    });
+    return used;
+  }, [columnsMatrix]);
+
+  const targetOnlyUnmappedRows = useMemo((): ComplexMappingRow[] =>
+    targetColumnsList
+      .filter((col) => !mappedTargetNames.has(col))
+      .map((col) => ({
+        id: `${TARGET_ONLY_ROW_PREFIX}${col}`,
+        sourceCol: '',
+        sourceType: '',
+        targetCols: [{
+          name: col,
+          type: inferType(targetSamplesRecord[col] ?? '', false),
+          sample: targetSamplesRecord[col] ?? '',
+        }],
+        isPk: false,
+        isIgnored: false,
+        isSensitive: false,
+        isExpanded: false,
+        isOrderSensitive: false,
+        sourceExpr: '',
+        targetExpr: '',
+        previewValue: '',
+      })),
+  [targetColumnsList, mappedTargetNames, targetSamplesRecord]);
+
   const filteredColumns = useMemo(() => {
-    let rows = columnsMatrix;
+    let rows: ComplexMappingRow[];
+
+    if (showUnmappedOnly) {
+      const sourceUnmapped = columnsMatrix.filter((col) => col.targetCols.length === 0 && !col.isIgnored);
+      rows = [...sourceUnmapped, ...targetOnlyUnmappedRows];
+    } else {
+      rows = columnsMatrix;
+    }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      rows = rows.filter((col) => col.sourceCol.toLowerCase().includes(q));
+      rows = rows.filter((col) => {
+        const sourceMatch = col.sourceCol.toLowerCase().includes(q);
+        const targetMatch = col.targetCols.some((target) => target.name.toLowerCase().includes(q));
+        return sourceMatch || targetMatch;
+      });
     }
 
-    if (showUnmappedOnly) {
-      rows = rows.filter((col) => col.targetCols.length === 0 && !col.isIgnored);
-    }
     if (showConfiguredOnly) {
-      rows = rows.filter((col) => col.targetCols.length > 0 && !col.isIgnored);
+      rows = rows.filter((col) => col.targetCols.length > 0 && !col.isIgnored && !isTargetOnlyUnmappedRow(col));
+    }
+    if (showIgnoredOnly) {
+      rows = rows.filter((col) => col.isIgnored);
     }
 
     if (actionFilters.pk) rows = rows.filter(col => col.isPk);
@@ -475,7 +526,16 @@ export const ConfigureMappingStep: React.FC = () => {
     }
 
     return rows;
-  }, [columnsMatrix, searchQuery, showUnmappedOnly, showConfiguredOnly, actionFilters, complexColumns]);
+  }, [
+    columnsMatrix,
+    targetOnlyUnmappedRows,
+    searchQuery,
+    showUnmappedOnly,
+    showConfiguredOnly,
+    showIgnoredOnly,
+    actionFilters,
+    complexColumns,
+  ]);
 
   const totalPages = Math.max(1, Math.ceil(filteredColumns.length / itemsPerPage));
   const safePage = Math.min(page, totalPages);
@@ -496,11 +556,15 @@ export const ConfigureMappingStep: React.FC = () => {
       <div className={styles.page}>
         <div>
           <h2 className={styles.heading}>
-            Pegasus_Fixed_Width_Layout
+            {formatMappingTitle('Pegasus_Fixed_Width_Layout')}
           </h2>
           <div className={styles.pathRow}>
-            <span><strong>Source:</strong> <code className={styles.codeChip}>{getCloudLabel(validationForm.sourceCloud)}</code></span>
-            <span><strong>Target:</strong> <code className={styles.codeChip}>{getCloudLabel(validationForm.targetCloud)}</code></span>
+            <div className={styles.pathItem}>
+              <TruncatedPath prefix="Source: " path={getCloudLabel(validationForm.sourceCloud)} />
+            </div>
+            <div className={styles.pathItem}>
+              <TruncatedPath prefix="Target: " path={getCloudLabel(validationForm.targetCloud)} />
+            </div>
           </div>
         </div>
         <FixedWidthLayoutPanel
@@ -592,29 +656,20 @@ export const ConfigureMappingStep: React.FC = () => {
             disabled={loadingPreview}
           />
         </label>
-        <label className={styles.delimiterLabel}>
-          <input
-            type="checkbox"
-            checked={validationForm.hasHeader || false}
-            onChange={(e) => dispatch(validationActions.setValidationForm({ hasHeader: e.target.checked }))}
-            disabled={loadingPreview}
-          />
-          Header row
-        </label>
       </div>
 
       <div className={styles.headerRow}>
-        <div>
+        <div className={styles.headerIntro}>
           <h2 className={styles.heading}>
-            Pegasus Column Mapping
+            {formatMappingTitle('Pegasus_Column_Mapping')}
           </h2>
           <div className={styles.pathRow}>
-            <span className={styles.pathItem}>
-              <strong>Source:</strong> <code className={styles.codeChip}>{getCloudLabel(validationForm.sourceCloud)}</code>
-            </span>
-            <span className={styles.pathItem}>
-              <strong>Target:</strong> <code className={styles.codeChip}>{getCloudLabel(validationForm.targetCloud)}</code>
-            </span>
+            <div className={styles.pathItem}>
+              <TruncatedPath prefix="Source: " path={getCloudLabel(validationForm.sourceCloud)} />
+            </div>
+            <div className={styles.pathItem}>
+              <TruncatedPath prefix="Target: " path={getCloudLabel(validationForm.targetCloud)} />
+            </div>
           </div>
         </div>
       </div>
@@ -643,7 +698,12 @@ export const ConfigureMappingStep: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => { setShowUnmappedOnly(!showUnmappedOnly); setShowConfiguredOnly(false); setPage(1); }}
+          onClick={() => {
+            setShowUnmappedOnly(!showUnmappedOnly);
+            setShowConfiguredOnly(false);
+            setShowIgnoredOnly(false);
+            setPage(1);
+          }}
           disabled={loadingPreview}
           className={`${styles.filterBtn} ${showUnmappedOnly ? styles.filterBtnUnmappedActive : ''} ${loadingClass}`}
         >
@@ -652,11 +712,30 @@ export const ConfigureMappingStep: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => { setShowConfiguredOnly(!showConfiguredOnly); setShowUnmappedOnly(false); setPage(1); }}
+          onClick={() => {
+            setShowConfiguredOnly(!showConfiguredOnly);
+            setShowUnmappedOnly(false);
+            setShowIgnoredOnly(false);
+            setPage(1);
+          }}
           disabled={loadingPreview}
           className={`${styles.filterBtn} ${showConfiguredOnly ? styles.filterBtnConfiguredActive : ''} ${loadingClass}`}
         >
           <CheckCircleOutlined /> Configured ({configuredCount})
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setShowIgnoredOnly(!showIgnoredOnly);
+            setShowUnmappedOnly(false);
+            setShowConfiguredOnly(false);
+            setPage(1);
+          }}
+          disabled={loadingPreview}
+          className={`${styles.filterBtn} ${showIgnoredOnly ? styles.filterBtnIgnoredActive : ''} ${loadingClass}`}
+        >
+          <StopOutlined /> Ignored ({ignoredCount})
         </button>
       </div>
 
@@ -712,10 +791,13 @@ export const ConfigureMappingStep: React.FC = () => {
                   </tr>
                 ))
               ) : (
-                pageRows.map(row => (
+                pageRows.map(row => {
+                  const targetOnlyRow = isTargetOnlyUnmappedRow(row);
+                  return (
                   <React.Fragment key={row.id}>
                     <tr className={rowClassName(row)}>
                       <td className={styles.tdActions}>
+                        {!targetOnlyRow && (
                         <div className={styles.actionBtnGroup}>
                           <button type="button" onClick={() => toggleProperty(row.id, 'isPk')} className={`${styles.iconBtn} ${row.isPk ? styles.iconBtnPkActive : ''}`} title="Primary Key"><KeyOutlined /></button>
                           <button type="button" onClick={() => toggleProperty(row.id, 'isIgnored')} className={`${styles.iconBtn} ${row.isIgnored ? styles.iconBtnIgnoredActive : ''}`} title="Ignore"><StopOutlined /></button>
@@ -729,12 +811,19 @@ export const ConfigureMappingStep: React.FC = () => {
                             />
                           )}
                         </div>
+                        )}
                       </td>
                       <td className={`${styles.td} ${row.isIgnored ? styles.sourceColStrikethrough : ''}`}>
-                        <div className={styles.sourceColName}>{row.sourceCol}</div>
-                        <span className={`${styles.typeBadge} ${isComplexColumn(row, complexColumns) ? styles.typeBadgeStructured : ''}`}>
-                          {isComplexColumn(row, complexColumns) ? 'Structured' : row.sourceType}
-                        </span>
+                        {targetOnlyRow ? (
+                          <span className={styles.emptyDash}>—</span>
+                        ) : (
+                          <>
+                            <div className={styles.sourceColName}>{row.sourceCol}</div>
+                            <span className={`${styles.typeBadge} ${isComplexColumn(row, complexColumns) ? styles.typeBadgeStructured : ''}`}>
+                              {isComplexColumn(row, complexColumns) ? 'Structured' : row.sourceType}
+                            </span>
+                          </>
+                        )}
                       </td>
                       <td className={styles.td}>
                         <div className={styles.sampleCol}>
@@ -743,7 +832,12 @@ export const ConfigureMappingStep: React.FC = () => {
                       </td>
                       <td className={`${styles.tdCenter} ${styles.arrowMuted}`}><ArrowRightOutlined /></td>
                       <td className={styles.td}>
-                        {row.isIgnored ? <span className={styles.droppedText}>Dropped</span> : (
+                        {row.isIgnored ? <span className={styles.droppedText}>Dropped</span> : targetOnlyRow ? (
+                          <div className={styles.targetChipCol}>
+                            <span className={styles.targetChip}>{row.targetCols[0]?.name ?? ''}</span>
+                            <span className={styles.targetTypeBadge}>{row.targetCols[0]?.type ?? 'String'}</span>
+                          </div>
+                        ) : (
                           <TargetMappingField
                             targets={row.targetCols}
                             availableColumns={globalAvailableTargets}
@@ -765,7 +859,7 @@ export const ConfigureMappingStep: React.FC = () => {
                       </td>
                     </tr>
 
-                    {row.isExpanded && !row.isIgnored && (
+                    {row.isExpanded && !row.isIgnored && !targetOnlyRow && (
                       <tr className={styles.expressionRow}>
                         <td colSpan={6} className={styles.expressionCell}>
                           <div className={styles.expressionGrid}>
@@ -786,7 +880,8 @@ export const ConfigureMappingStep: React.FC = () => {
                       </tr>
                     )}
                   </React.Fragment>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
