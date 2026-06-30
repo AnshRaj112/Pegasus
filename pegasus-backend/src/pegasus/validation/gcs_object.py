@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-29T07:10:42Z
+# Last edited: 2026-06-30T10:56:05+05:30
 # --- END GENERATED FILE METADATA ---
 
 """GCS object references and bounded streaming reads (no full download)."""
