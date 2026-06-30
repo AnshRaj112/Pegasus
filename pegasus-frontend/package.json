@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:contract": "vitest run src/shared/api/tests/contract.test.ts",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {

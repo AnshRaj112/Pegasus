@@ -1,0 +1,4100 @@
+openapi: 3.1.0
+info:
+  title: Pegasus
+  version: 0.1.0
+paths:
+  /api/v1/health:
+    get:
+      tags:
+      - health
+      summary: Health
+      operationId: health_api_v1_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /api/v1/admin/auth/signup:
+    post:
+      tags:
+      - admin-auth
+      summary: Admin Signup
+      operationId: admin_signup_api_v1_admin_auth_signup_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminSignupRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAuthUserResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/auth/login:
+    post:
+      tags:
+      - admin-auth
+      summary: Admin Login
+      operationId: admin_login_api_v1_admin_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminLoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAuthUserResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/auth/logout:
+    post:
+      tags:
+      - admin-auth
+      summary: Admin Logout
+      operationId: admin_logout_api_v1_admin_auth_logout_post
+      parameters:
+      - name: pegasus_admin_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pegasus Admin Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/auth/me:
+    get:
+      tags:
+      - admin-auth
+      summary: Admin Me
+      operationId: admin_me_api_v1_admin_auth_me_get
+      parameters:
+      - name: pegasus_admin_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pegasus Admin Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAuthUserResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/auth/session:
+    get:
+      tags:
+      - admin-auth
+      summary: Admin Session Status
+      operationId: admin_session_status_api_v1_admin_auth_session_get
+      parameters:
+      - name: pegasus_admin_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pegasus Admin Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSessionStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/auth/extend:
+    post:
+      tags:
+      - admin-auth
+      summary: Admin Extend Session
+      operationId: admin_extend_session_api_v1_admin_auth_extend_post
+      parameters:
+      - name: pegasus_admin_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pegasus Admin Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSessionStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/cloud-connections:
+    get:
+      tags:
+      - admin
+      summary: List Cloud Connections
+      operationId: list_cloud_connections_api_v1_admin_cloud_connections_get
+      parameters:
+      - name: pegasus_admin_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pegasus Admin Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CloudConnectionResponse'
+                title: Response List Cloud Connections Api V1 Admin Cloud Connections Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - admin
+      summary: Create Cloud Connection
+      operationId: create_cloud_connection_api_v1_admin_cloud_connections_post
+      parameters:
+      - name: pegasus_admin_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pegasus Admin Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudConnectionCreateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudConnectionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/cloud-connections/{connection_id}:
+    patch:
+      tags:
+      - admin
+      summary: Update Cloud Connection
+      operationId: update_cloud_connection_api_v1_admin_cloud_connections__connection_id__patch
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Connection Id
+      - name: pegasus_admin_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pegasus Admin Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudConnectionUpdateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudConnectionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - admin
+      summary: Delete Cloud Connection
+      operationId: delete_cloud_connection_api_v1_admin_cloud_connections__connection_id__delete
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Connection Id
+      - name: pegasus_admin_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pegasus Admin Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/options:
+    get:
+      tags:
+      - validation
+      summary: Validation wizard options (test modes and snippet limits)
+      operationId: validation_options_api_v1_validate_options_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationOptionsResponse'
+  /api/v1/validate/local/browse/config:
+    get:
+      tags:
+      - validation
+      summary: Default browse directory and Docker path remap settings for the file picker
+      operationId: get_local_browse_config_api_v1_validate_local_browse_config_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocalPathBrowseConfigResponse'
+        '403':
+          description: Local path validation disabled
+  /api/v1/validate/local/browse:
+    get:
+      tags:
+      - validation
+      summary: List files and folders under a server directory (local-path picker)
+      operationId: browse_local_directory_api_v1_validate_local_browse_get
+      parameters:
+      - name: path
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Absolute directory to list; defaults to configured browse root when omitted
+          title: Path
+        description: Absolute directory to list; defaults to configured browse root when omitted
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocalBrowseResponse'
+        '400':
+          description: Path not found or not a directory
+        '403':
+          description: Local path validation disabled
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/local/detect:
+    get:
+      tags:
+      - validation
+      summary: Multi-layer file type detection report for a local path
+      operationId: detect_local_file_api_v1_validate_local_detect_get
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Absolute file path to inspect
+          title: Path
+        description: Absolute file path to inspect
+      - name: file_format
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Declared format hint (csv, auto, parquet, …)
+          title: File Format
+        description: Declared format hint (csv, auto, parquet, …)
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileDetectionResponse'
+        '400':
+          description: Invalid path
+        '403':
+          description: Local path validation disabled
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/local/columns:
+    get:
+      tags:
+      - validation
+      summary: Preview source and target headers for mapping
+      operationId: preview_local_csv_columns_api_v1_validate_local_columns_get
+      parameters:
+      - name: source_path
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Absolute source file path
+          title: Source Path
+        description: Absolute source file path
+      - name: target_path
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Absolute target file path
+          title: Target Path
+        description: Absolute target file path
+      - name: uid_column
+        in: query
+        required: false
+        schema:
+          type: string
+          description: Join key column to exclude from compare mapping
+          default: id
+          title: Uid Column
+        description: Join key column to exclude from compare mapping
+      - name: delimiter
+        in: query
+        required: false
+        schema:
+          type: string
+          description: Field separator or auto
+          default: auto
+          title: Delimiter
+        description: Field separator or auto
+      - name: has_header
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Whether the first row contains column names
+          default: true
+          title: Has Header
+        description: Whether the first row contains column names
+      - name: header_leading_rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          description: Leading rows to skip before reading columns
+          default: 0
+          title: Header Leading Rows
+        description: Leading rows to skip before reading columns
+      - name: file_format
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: File format or auto (inferred from extension)
+          title: File Format
+        description: File format or auto (inferred from extension)
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocalColumnPreviewResponse'
+        '400':
+          description: Invalid paths or delimiter
+        '403':
+          description: Local path validation disabled
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - validation
+      summary: Preview source and target headers for mapping (body variant)
+      operationId: preview_local_csv_columns_body_api_v1_validate_local_columns_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocalPathValidateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocalColumnPreviewResponse'
+        '400':
+          description: Invalid paths, cloud inputs, or delimiter
+        '403':
+          description: Local path validation disabled
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/local/fixed-width-layout:
+    post:
+      tags:
+      - validation
+      summary: Infer fixed-width column slices and date formats for mapping
+      operationId: preview_fixed_width_layout_body_api_v1_validate_local_fixed_width_layout_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocalPathValidateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FixedWidthLayoutPreviewResponse'
+        '400':
+          description: Invalid paths, cloud inputs, or unreadable files
+        '403':
+          description: Local path validation disabled
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/local/json-parent-preview:
+    post:
+      tags:
+      - validation
+      summary: Discover top-level JSON parents and suggest mappings
+      description: Return top-level JSON parent keys for source/target and auto-suggested pairings.
+      operationId: preview_json_parent_mapping_api_v1_validate_local_json_parent_preview_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocalPathValidateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonParentPreviewResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/cloud/browse:
+    post:
+      tags:
+      - validation
+      summary: Browse GCS bucket prefixes and objects for the cloud file picker
+      description: List child prefixes and objects under a bucket prefix (delimiter='/').
+      operationId: browse_cloud_prefix_api_v1_validate_cloud_browse_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudBrowseRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudBrowseResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/cloud/profile:
+    post:
+      tags:
+      - validation
+      summary: Detect format and count rows/columns for a GCS object
+      description: Run file-type detection and profile shape stats from GCS metadata + prefix sample.
+      operationId: profile_cloud_file_api_v1_validate_cloud_profile_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudFileProfileRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudFileProfileResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/cloud/match-pairs:
+    post:
+      tags:
+      - validation
+      summary: Auto-match GCS objects between two prefixes by filename
+      description: Suggest 1:1 object pairs from two bucket prefixes (basename match).
+      operationId: match_cloud_file_pairs_api_v1_validate_cloud_match_pairs_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudMatchFilePairsRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchFilePairsResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/local/match-pairs:
+    post:
+      tags:
+      - validation
+      summary: Auto-match files between two directories by filename
+      operationId: match_local_file_pairs_api_v1_validate_local_match_pairs_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MatchFilePairsRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchFilePairsResponse'
+        '400':
+          description: Invalid directories
+        '403':
+          description: Local path validation disabled
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/local:
+    post:
+      tags:
+      - validation
+      summary: Queue comparison of two on-disk files by UID (no upload)
+      operationId: validate_csv_local_paths_api_v1_validate_local_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocalPathValidateRequest'
+        required: true
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationJobAcceptedResponse'
+        '400':
+          description: Invalid paths, delimiter, or missing uid column
+        '403':
+          description: Local path validation disabled
+        '422':
+          description: Comparison cannot run (e.g. duplicate UIDs)
+  /api/v1/validate/local/batch:
+    post:
+      tags:
+      - validation
+      summary: Queue batch comparison of multiple local file pairs
+      operationId: validate_csv_local_batch_api_v1_validate_local_batch_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocalBatchValidateRequest'
+        required: true
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationJobAcceptedResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/jobs/{job_id}:
+    get:
+      tags:
+      - validation
+      summary: Poll a queued validation job
+      operationId: get_validation_job_api_v1_validate_jobs__job_id__get
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Job Id
+      - name: summary_only
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: When true (recommended for UI), return counts and metadata only without scanning the full mismatch
+            artifact. Mismatch rows are available via GET /validate/jobs/{job_id}/mismatches or history mismatches.
+          default: false
+          title: Summary Only
+        description: When true (recommended for UI), return counts and metadata only without scanning the full mismatch artifact.
+          Mismatch rows are available via GET /validate/jobs/{job_id}/mismatches or history mismatches.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationJobDetailResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/jobs/{job_id}/mismatches:
+    get:
+      tags:
+      - validation
+      summary: Paginated mismatch rows for a completed validation job (reads on-disk NDJSON)
+      operationId: list_validation_job_mismatches_api_v1_validate_jobs__job_id__mismatches_get
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Job Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 5000
+          minimum: 1
+          default: 100
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      - name: mismatch_type
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by missing_in_target | extra_in_target | value_mismatch
+          title: Mismatch Type
+        description: Filter by missing_in_target | extra_in_target | value_mismatch
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationHistoryMismatchesResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/queue:
+    get:
+      tags:
+      - validation
+      summary: Get validation job queue status, CPU info, and job list
+      operationId: get_validation_queue_status_api_v1_validate_queue_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueStatusResponse'
+    patch:
+      tags:
+      - validation
+      summary: Update queue settings (e.g. max parallel validations)
+      operationId: update_validation_queue_settings_api_v1_validate_queue_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateQueueSettingsRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/history:
+    get:
+      tags:
+      - validation-history
+      summary: List persisted validation runs (newest first)
+      operationId: list_validation_history_api_v1_validate_history_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      - name: source_path
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter to runs for this source file path
+          title: Source Path
+        description: Filter to runs for this source file path
+      - name: target_path
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter to runs for this target file path
+          title: Target Path
+        description: Filter to runs for this target file path
+      - name: kind
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: validation = completed/failed runs; mapping = saved/active mappings
+          title: Kind
+        description: validation = completed/failed runs; mapping = saved/active mappings
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationHistoryListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - validation-history
+      summary: Delete persisted validation runs (either all history or for a specific file pair)
+      operationId: delete_validation_history_api_v1_validate_history_delete
+      parameters:
+      - name: source_path
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Source file path to delete history for
+          title: Source Path
+        description: Source file path to delete history for
+      - name: target_path
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Target file path to delete history for
+          title: Target Path
+        description: Target file path to delete history for
+      - name: all
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Set to true to delete all history
+          default: false
+          title: All
+        description: Set to true to delete all history
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/history/daily-stats:
+    get:
+      tags:
+      - validation-history
+      summary: Daily passed/failed counts from persisted validation runs
+      operationId: validation_history_daily_stats_api_v1_validate_history_daily_stats_get
+      parameters:
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 366
+          minimum: 1
+          default: 30
+          title: Days
+      - name: from
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: From
+      - name: to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: To
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationDailyStatsResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/history/{run_id}:
+    get:
+      tags:
+      - validation-history
+      summary: Get one persisted validation run (mapping + report summary)
+      operationId: get_validation_history_run_api_v1_validate_history__run_id__get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationHistoryDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - validation-history
+      summary: Delete a persisted validation run
+      operationId: delete_validation_history_run_api_v1_validate_history__run_id__delete
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/history/{run_id}/mismatches:
+    get:
+      tags:
+      - validation-history
+      summary: Paginated mismatch rows for a persisted validation run
+      operationId: list_validation_history_mismatches_api_v1_validate_history__run_id__mismatches_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 5000
+          minimum: 1
+          default: 100
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      - name: mismatch_type
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by missing_in_target | extra_in_target | value_mismatch
+          title: Mismatch Type
+        description: Filter by missing_in_target | extra_in_target | value_mismatch
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationHistoryMismatchesResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/history/draft:
+    post:
+      tags:
+      - validation-history
+      summary: Save a mapping draft without running validation
+      operationId: save_validation_draft_api_v1_validate_history_draft_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveDraftRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationHistoryDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/history/entities:
+    post:
+      tags:
+      - validation-history
+      summary: Create or update an entity used for filename inference
+      operationId: create_validation_entity_api_v1_validate_history_entities_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidationEntityCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationEntityRecord'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/validate/history/entities/insights:
+    get:
+      tags:
+      - validation-history
+      summary: Infer entities from filenames and summarize pass/fail over recent runs
+      operationId: list_validation_entity_insights_api_v1_validate_history_entities_insights_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 50
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationEntityInsightsResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    AdminAuthUserResponse:
+      properties:
+        email:
+          type: string
+          title: Email
+      type: object
+      required:
+      - email
+      title: AdminAuthUserResponse
+    AdminLoginRequest:
+      properties:
+        email:
+          type: string
+          maxLength: 320
+          minLength: 3
+          title: Email
+        password:
+          type: string
+          maxLength: 256
+          minLength: 1
+          title: Password
+      type: object
+      required:
+      - email
+      - password
+      title: AdminLoginRequest
+    AdminSessionStatusResponse:
+      properties:
+        email:
+          type: string
+          title: Email
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+      type: object
+      required:
+      - email
+      - expires_at
+      title: AdminSessionStatusResponse
+    AdminSignupRequest:
+      properties:
+        email:
+          type: string
+          maxLength: 320
+          minLength: 3
+          title: Email
+        password:
+          type: string
+          maxLength: 256
+          minLength: 8
+          title: Password
+      type: object
+      required:
+      - email
+      - password
+      title: AdminSignupRequest
+    BatchFailureMode:
+      type: string
+      enum:
+      - stop
+      - continue
+      title: BatchFailureMode
+      description: How to proceed when one validation unit fails in a batch job.
+    BatchUnitResult:
+      properties:
+        unit_id:
+          type: string
+          title: Unit Id
+        source_paths:
+          items:
+            type: string
+          type: array
+          title: Source Paths
+        target_paths:
+          items:
+            type: string
+          type: array
+          title: Target Paths
+        status:
+          type: string
+          title: Status
+          description: completed | failed | skipped
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        result:
+          anyOf:
+          - $ref: '#/components/schemas/ValidateResponse'
+          - type: 'null'
+      type: object
+      required:
+      - unit_id
+      - status
+      title: BatchUnitResult
+      description: Outcome for one unit in a batch validation job.
+    BatchValidateResponse:
+      properties:
+        summary:
+          $ref: '#/components/schemas/BatchValidateSummary'
+        units:
+          items:
+            $ref: '#/components/schemas/BatchUnitResult'
+          type: array
+          title: Units
+        on_unit_failure:
+          $ref: '#/components/schemas/BatchFailureMode'
+          default: continue
+        durations:
+          anyOf:
+          - $ref: '#/components/schemas/ValidationDurations'
+          - type: 'null'
+      type: object
+      required:
+      - summary
+      title: BatchValidateResponse
+      description: Final payload for a completed batch validation job.
+    BatchValidateSummary:
+      properties:
+        total_units:
+          type: integer
+          minimum: 0.0
+          title: Total Units
+        completed_units:
+          type: integer
+          minimum: 0.0
+          title: Completed Units
+        failed_units:
+          type: integer
+          minimum: 0.0
+          title: Failed Units
+        skipped_units:
+          type: integer
+          minimum: 0.0
+          title: Skipped Units
+        passed_units:
+          type: integer
+          minimum: 0.0
+          title: Passed Units
+          description: Units with zero mismatch records
+        is_match:
+          type: boolean
+          title: Is Match
+          description: True when every completed unit has zero mismatches
+      type: object
+      required:
+      - total_units
+      - completed_units
+      - failed_units
+      - skipped_units
+      - passed_units
+      - is_match
+      title: BatchValidateSummary
+      description: Aggregate stats across all units in a batch job.
+    CloudBrowseEntry:
+      properties:
+        name:
+          type: string
+          title: Name
+        path:
+          type: string
+          title: Path
+          description: Object name or prefix path within the bucket
+        is_dir:
+          type: boolean
+          title: Is Dir
+        size_bytes:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Size Bytes
+          description: Object size from GCS metadata (files only; omitted for prefixes)
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+          description: Object creation time from GCS metadata (files only)
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+          description: Object last-modified time from GCS metadata (files only)
+        owner:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Owner
+          description: Object owner entity from GCS metadata or custom metadata
+        created_by:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created By
+          description: Creator from GCS custom object metadata when present
+      type: object
+      required:
+      - name
+      - path
+      - is_dir
+      title: CloudBrowseEntry
+      description: One prefix or object under a GCS browse listing.
+    CloudBrowseRequest:
+      properties:
+        bucket:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Bucket
+        prefix:
+          type: string
+          title: Prefix
+          description: Folder prefix inside the bucket (e.g. data/2024/)
+          default: ''
+        credentials_json:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Credentials Json
+        connection_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Connection Id
+        project_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project Id
+        file_format:
+          type: string
+          title: File Format
+          default: csv
+      type: object
+      title: CloudBrowseRequest
+      description: JSON body for POST /validate/cloud/browse.
+    CloudBrowseResponse:
+      properties:
+        bucket:
+          type: string
+          title: Bucket
+        prefix:
+          type: string
+          title: Prefix
+        parent_prefix:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Parent Prefix
+        entries:
+          items:
+            $ref: '#/components/schemas/CloudBrowseEntry'
+          type: array
+          title: Entries
+        truncated:
+          type: boolean
+          title: Truncated
+          default: false
+      type: object
+      required:
+      - bucket
+      - prefix
+      title: CloudBrowseResponse
+      description: GCS prefix listing for the cloud file picker.
+    CloudConnectionCreateRequest:
+      properties:
+        name:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Name
+        provider:
+          type: string
+          title: Provider
+          default: google-cloud-storage
+        bucket:
+          type: string
+          title: Bucket
+          description: Default GCS bucket; leave empty to browse any accessible bucket at validation time.
+          default: ''
+        project_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project Id
+        credentials_json:
+          type: string
+          minLength: 2
+          title: Credentials Json
+        active:
+          type: boolean
+          title: Active
+          default: true
+      type: object
+      required:
+      - name
+      - credentials_json
+      title: CloudConnectionCreateRequest
+    CloudConnectionResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        provider:
+          type: string
+          title: Provider
+        bucket:
+          type: string
+          title: Bucket
+        project_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project Id
+        active:
+          type: boolean
+          title: Active
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - provider
+      - bucket
+      - active
+      - created_at
+      - updated_at
+      title: CloudConnectionResponse
+    CloudConnectionUpdateRequest:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 128
+            minLength: 1
+          - type: 'null'
+          title: Name
+        provider:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Provider
+        bucket:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Bucket
+        project_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project Id
+        credentials_json:
+          anyOf:
+          - type: string
+            minLength: 2
+          - type: 'null'
+          title: Credentials Json
+        active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Active
+      type: object
+      title: CloudConnectionUpdateRequest
+    CloudFileProfileRequest:
+      properties:
+        cloud:
+          $ref: '#/components/schemas/GoogleCloudStorageConfig'
+        delimiter:
+          type: string
+          title: Delimiter
+          description: Field separator or auto
+          default: auto
+        has_header:
+          type: boolean
+          title: Has Header
+          description: Whether the first row contains column names
+          default: true
+      type: object
+      required:
+      - cloud
+      title: CloudFileProfileRequest
+      description: JSON body for POST /validate/cloud/profile.
+    CloudFileProfileResponse:
+      properties:
+        object_name:
+          type: string
+          title: Object Name
+        gcs_uri:
+          type: string
+          title: Gcs Uri
+        file_size_bytes:
+          type: integer
+          minimum: 0.0
+          title: File Size Bytes
+        file_format:
+          type: string
+          title: File Format
+          description: Detected format label (csv, fixed-width, parquet, …)
+        suggested_file_format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Suggested File Format
+        dataset_model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Dataset Model
+        column_count:
+          type: integer
+          minimum: 0.0
+          title: Column Count
+        row_count:
+          type: integer
+          minimum: 0.0
+          title: Row Count
+        delimiter:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Delimiter
+        has_header:
+          type: boolean
+          title: Has Header
+          default: true
+        inferred_has_header:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Inferred Has Header
+          description: Content-inferred header row presence (delimited files only).
+        json_preview:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Json Preview
+          description: Pretty-printed JSON prefix for overview preview (JSON documents only).
+        archive_entry_count:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Archive Entry Count
+          description: Number of file entries in an archive container.
+        archive_entries_sample:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Archive Entries Sample
+          description: Sample of archive member paths (first 20).
+        archive_manifest_supported:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Archive Manifest Supported
+          description: Whether metadata-only manifest comparison is available.
+        archive_warnings:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Archive Warnings
+          description: Warnings from archive metadata inspection.
+      type: object
+      required:
+      - object_name
+      - gcs_uri
+      - file_size_bytes
+      - file_format
+      - column_count
+      - row_count
+      title: CloudFileProfileResponse
+      description: Detected format and shape stats for one GCS object.
+    CloudMatchFilePairsRequest:
+      properties:
+        bucket:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Bucket
+        source_prefix:
+          type: string
+          title: Source Prefix
+          default: ''
+        target_prefix:
+          type: string
+          title: Target Prefix
+          default: ''
+        credentials_json:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Credentials Json
+        connection_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Connection Id
+        project_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project Id
+        file_format:
+          type: string
+          title: File Format
+          default: csv
+        recursive:
+          type: boolean
+          title: Recursive
+          default: false
+      type: object
+      title: CloudMatchFilePairsRequest
+      description: JSON body for POST /validate/cloud/match-pairs.
+    ColumnMapping:
+      properties:
+        source_column:
+          type: string
+          title: Source Column
+          description: Logical source column name (reporting key and primary source field)
+        target_column:
+          type: string
+          title: Target Column
+          description: Primary target column name (defaults to source_column when empty)
+          default: ''
+        source_columns:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Source Columns
+          description: Optional extra source columns for many-to-one mapping (N source -> 1 target)
+        target_columns:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Target Columns
+          description: Optional extra target columns for one-to-many mapping (1 source -> N targets)
+        compare_mode:
+          type: string
+          title: Compare Mode
+          description: 'How to compare values: auto (smart dates), text (exact string), date (calendar date with optional
+            formats), phone (digits only), digits (digits only), structured (list/dict/tuple literals in cells)'
+          default: auto
+        structured_order_sensitive:
+          type: boolean
+          title: Structured Order Sensitive
+          description: 'When compare_mode is structured: require list/tuple element order and dict key order to match. When
+            false, order is ignored but values and spelling must still match.'
+          default: false
+        source_date_format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Date Format
+          description: strptime/friendly date format for source when compare_mode is date
+        target_date_format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Date Format
+          description: strptime/friendly date format for target when compare_mode is date
+        source_strip_prefix:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Strip Prefix
+          description: Remove this prefix from source values before compare (e.g. +91)
+        target_strip_prefix:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Strip Prefix
+          description: Remove this prefix from target values before compare
+        source_regex_pattern:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Regex Pattern
+          description: Optional regex applied to source value before compare
+        source_regex_replacement:
+          type: string
+          title: Source Regex Replacement
+          description: Replacement for source_regex_pattern
+          default: ''
+        target_regex_pattern:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Regex Pattern
+          description: Optional regex applied to target value before compare
+        target_regex_replacement:
+          type: string
+          title: Target Regex Replacement
+          description: Replacement for target_regex_pattern
+          default: ''
+        is_sensitive:
+          type: boolean
+          title: Is Sensitive
+          description: When true, mismatch output values for this column are masked (e.g. ****) to protect PII.
+          default: false
+      type: object
+      required:
+      - source_column
+      title: ColumnMapping
+      description: Map source column(s) to target column(s) for reconciliation.
+    ColumnMappingFormatCheck:
+      properties:
+        source_column:
+          type: string
+          title: Source Column
+        target_column:
+          type: string
+          title: Target Column
+        source_format:
+          type: string
+          title: Source Format
+        target_format:
+          type: string
+          title: Target Format
+        source_confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Source Confidence
+        target_confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Target Confidence
+        compatible:
+          type: boolean
+          title: Compatible
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+        source_example:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Example
+        target_example:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Example
+      type: object
+      required:
+      - source_column
+      - target_column
+      - source_format
+      - target_format
+      - source_confidence
+      - target_confidence
+      - compatible
+      title: ColumnMappingFormatCheck
+      description: Format compatibility for one source→target column mapping.
+    FileDetectionResponse:
+      properties:
+        path:
+          type: string
+          title: Path
+        file_size_bytes:
+          type: integer
+          minimum: 0.0
+          title: File Size Bytes
+        bytes_read:
+          type: integer
+          minimum: 0.0
+          title: Bytes Read
+        dataset_model:
+          type: string
+          title: Dataset Model
+        mime_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Mime Type
+        suggested_file_format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Suggested File Format
+        suggested_delimiter:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Suggested Delimiter
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+        extension:
+          anyOf:
+          - $ref: '#/components/schemas/FileDetectionStageResponse'
+          - type: 'null'
+        magic_bytes:
+          anyOf:
+          - $ref: '#/components/schemas/FileDetectionStageResponse'
+          - type: 'null'
+        container:
+          anyOf:
+          - $ref: '#/components/schemas/FileDetectionStageResponse'
+          - type: 'null'
+        compression:
+          anyOf:
+          - $ref: '#/components/schemas/FileDetectionStageResponse'
+          - type: 'null'
+        encoding:
+          anyOf:
+          - $ref: '#/components/schemas/FileDetectionStageResponse'
+          - type: 'null'
+        text_binary:
+          anyOf:
+          - $ref: '#/components/schemas/FileDetectionStageResponse'
+          - type: 'null'
+        structured_format:
+          anyOf:
+          - $ref: '#/components/schemas/FileDetectionStageResponse'
+          - type: 'null'
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/FileDetectionStageResponse'
+          - type: 'null'
+        validation_strategy:
+          anyOf:
+          - $ref: '#/components/schemas/FileDetectionStageResponse'
+          - type: 'null'
+      type: object
+      required:
+      - path
+      - file_size_bytes
+      - bytes_read
+      - dataset_model
+      title: FileDetectionResponse
+      description: Full multi-layer detection report for a local file.
+    FileDetectionStageResponse:
+      properties:
+        detected_type:
+          type: string
+          title: Detected Type
+        confidence:
+          type: integer
+          maximum: 100.0
+          minimum: 0.0
+          title: Confidence
+        evidence:
+          items:
+            type: string
+          type: array
+          title: Evidence
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+      type: object
+      required:
+      - detected_type
+      - confidence
+      title: FileDetectionStageResponse
+      description: One layer of the file detection pipeline.
+    FilePairMatch:
+      properties:
+        unit_id:
+          type: string
+          title: Unit Id
+        source_path:
+          type: string
+          title: Source Path
+        target_path:
+          type: string
+          title: Target Path
+        source_name:
+          type: string
+          title: Source Name
+        target_name:
+          type: string
+          title: Target Name
+        auto_matched:
+          type: boolean
+          title: Auto Matched
+          default: true
+      type: object
+      required:
+      - unit_id
+      - source_path
+      - target_path
+      - source_name
+      - target_name
+      title: FilePairMatch
+      description: One suggested or user-confirmed file pair.
+    FixedWidthColumnPreview:
+      properties:
+        field_name:
+          type: string
+          title: Field Name
+        source_start:
+          type: integer
+          minimum: 0.0
+          title: Source Start
+        source_end:
+          type: integer
+          minimum: 0.0
+          title: Source End
+        target_start:
+          type: integer
+          minimum: 0.0
+          title: Target Start
+        target_end:
+          type: integer
+          minimum: 0.0
+          title: Target End
+        field_type:
+          type: string
+          title: Field Type
+          default: text
+        width:
+          type: integer
+          minimum: 0.0
+          title: Width
+          description: Character width (end − start)
+          default: 0
+        source_sample:
+          type: string
+          title: Source Sample
+          default: ''
+        target_sample:
+          type: string
+          title: Target Sample
+          default: ''
+        date_format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date Format
+          description: Inferred or user-edited friendly date format (e.g. DD/MM/YYYY)
+        source_date_format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Date Format
+        target_date_format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Date Format
+        structured_order_sensitive:
+          type: boolean
+          title: Structured Order Sensitive
+          default: false
+        compare_enabled:
+          type: boolean
+          title: Compare Enabled
+          default: true
+        is_sensitive:
+          type: boolean
+          title: Is Sensitive
+          default: false
+        source_regex_pattern:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Regex Pattern
+        source_regex_replacement:
+          type: string
+          title: Source Regex Replacement
+          default: ''
+        target_regex_pattern:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Regex Pattern
+        target_regex_replacement:
+          type: string
+          title: Target Regex Replacement
+          default: ''
+      type: object
+      required:
+      - field_name
+      - source_start
+      - source_end
+      - target_start
+      - target_end
+      title: FixedWidthColumnPreview
+      description: One inferred or user-edited fixed-width column slice.
+    FixedWidthConfig:
+      properties:
+        source_date_start:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Source Date Start
+          description: 0-indexed start position of source date
+        source_date_end:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Source Date End
+          description: 0-indexed end position of source date
+        source_date_format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Date Format
+          description: Strptime format of source date
+        target_date_start:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Target Date Start
+          description: 0-indexed start position of target date
+        target_date_end:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Target Date End
+          description: 0-indexed end position of target date
+        target_date_format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Date Format
+          description: Strptime format of target date
+        uid_column:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Uid Column
+          description: Join key column name
+        uid_source_start:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Uid Source Start
+          description: 0-indexed start of source join key
+        uid_source_end:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Uid Source End
+          description: 0-indexed end of source join key
+        uid_target_start:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Uid Target Start
+          description: 0-indexed start of target join key
+        uid_target_end:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Uid Target End
+          description: 0-indexed end of target join key
+        fields:
+          items:
+            $ref: '#/components/schemas/FixedWidthField'
+          type: array
+          title: Fields
+          description: List of fields to validate
+        match_strategy:
+          $ref: '#/components/schemas/FixedWidthMatchStrategy'
+          description: 'exact: join key must match; fuzzy: similar keys pair as value mismatches'
+          default: exact
+        fuzzy_similarity_threshold:
+          type: number
+          maximum: 1.0
+          minimum: 0.5
+          title: Fuzzy Similarity Threshold
+          description: Minimum join-key similarity (0–1) for fuzzy pairing
+          default: 0.75
+      type: object
+      title: FixedWidthConfig
+      description: Configuration for fixed-width validation.
+    FixedWidthField:
+      properties:
+        field_name:
+          type: string
+          title: Field Name
+          description: Name of the field
+        source_start:
+          type: integer
+          minimum: 0.0
+          title: Source Start
+          description: 0-indexed start position in source line
+        source_end:
+          type: integer
+          minimum: 0.0
+          title: Source End
+          description: 0-indexed end position in source line
+        target_start:
+          type: integer
+          minimum: 0.0
+          title: Target Start
+          description: 0-indexed start position in target line
+        target_end:
+          type: integer
+          minimum: 0.0
+          title: Target End
+          description: 0-indexed end position in target line
+        field_type:
+          type: string
+          title: Field Type
+          description: 'Field type: text, integer, float, date, structured (list/dict/tuple literals in the slice)'
+          default: text
+        structured_order_sensitive:
+          type: boolean
+          title: Structured Order Sensitive
+          description: 'When field_type is structured: require element/key order to match between source and target'
+          default: false
+        date_format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date Format
+          description: Optional strptime/friendly format if field_type is date (used for both sides when source/target formats
+            omitted)
+        source_date_format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Date Format
+          description: Source-side date format when field_type is date (overrides date_format)
+        target_date_format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Date Format
+          description: Target-side date format when field_type is date (overrides date_format)
+        compare_enabled:
+          type: boolean
+          title: Compare Enabled
+          description: When false, the field is excluded from value comparison (join key is always used)
+          default: true
+        is_sensitive:
+          type: boolean
+          title: Is Sensitive
+          description: Mask cell values in mismatch reports
+          default: false
+        source_regex_pattern:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Regex Pattern
+          description: Optional regex applied to the source slice before compare
+        source_regex_replacement:
+          type: string
+          title: Source Regex Replacement
+          description: Replacement for source_regex_pattern
+          default: ''
+        target_regex_pattern:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Regex Pattern
+          description: Optional regex applied to the target slice before compare
+        target_regex_replacement:
+          type: string
+          title: Target Regex Replacement
+          description: Replacement for target_regex_pattern
+          default: ''
+      type: object
+      required:
+      - field_name
+      - source_start
+      - source_end
+      - target_start
+      - target_end
+      title: FixedWidthField
+      description: Configuration for one mapped fixed-width field slice.
+    FixedWidthLayoutPreviewResponse:
+      properties:
+        columns:
+          items:
+            $ref: '#/components/schemas/FixedWidthColumnPreview'
+          type: array
+          title: Columns
+        suggested_join_column:
+          type: string
+          title: Suggested Join Column
+          default: record_id
+        source_sample:
+          type: string
+          title: Source Sample
+          default: ''
+        target_sample:
+          type: string
+          title: Target Sample
+          default: ''
+        line_width:
+          type: integer
+          minimum: 0.0
+          title: Line Width
+          default: 0
+      type: object
+      title: FixedWidthLayoutPreviewResponse
+      description: Detected columns and sample lines for the fixed-width mapping UI.
+    FixedWidthMatchStrategy:
+      type: string
+      enum:
+      - exact
+      - fuzzy
+      title: FixedWidthMatchStrategy
+      description: How rows are paired when the target file is not in the same order as the source.
+    FooterValidationResult:
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: true
+        match:
+          type: boolean
+          title: Match
+        source_trailing_rows:
+          items:
+            items:
+              type: string
+            type: array
+          type: array
+          title: Source Trailing Rows
+        target_trailing_rows:
+          items:
+            items:
+              type: string
+            type: array
+          type: array
+          title: Target Trailing Rows
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+      type: object
+      required:
+      - match
+      title: FooterValidationResult
+      description: Outcome of comparing trailing rows between source and target files.
+    GoogleCloudStorageConfig:
+      properties:
+        provider:
+          type: string
+          const: google-cloud-storage
+          title: Provider
+          description: Only Google Cloud Storage is supported for cloud validation inputs right now.
+          default: google-cloud-storage
+        bucket:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Bucket
+          description: GCS bucket name
+        object_name:
+          type: string
+          title: Object Name
+          description: Path of the CSV object inside the bucket
+        credentials_json:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Credentials Json
+          description: Raw service account JSON string copied from Google Cloud
+        connection_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Connection Id
+          description: Saved admin-managed cloud connection id (credentials_json may be omitted when set).
+        project_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project Id
+          description: Optional project id override
+      type: object
+      required:
+      - object_name
+      title: GoogleCloudStorageConfig
+      description: Google Cloud Storage object reference plus credentials.
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HealthResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+          description: Liveness indicator
+        service:
+          type: string
+          title: Service
+        version:
+          type: string
+          title: Version
+        environment:
+          type: string
+          title: Environment
+      type: object
+      required:
+      - status
+      - service
+      - version
+      - environment
+      title: HealthResponse
+    JsonParentField:
+      properties:
+        key:
+          type: string
+          title: Key
+        value_type:
+          type: string
+          title: Value Type
+          description: 'Coarse JSON type: object, array, string, number, boolean, null'
+      type: object
+      required:
+      - key
+      - value_type
+      title: JsonParentField
+      description: One top-level JSON parent key discovered in a document or NDJSON records.
+    JsonParentMappingRow:
+      properties:
+        source_parent:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Parent
+        target_parent:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Parent
+        ignored:
+          type: boolean
+          title: Ignored
+          default: false
+        source_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Type
+        target_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Type
+      type: object
+      title: JsonParentMappingRow
+      description: Suggested or user-edited mapping between source and target JSON parents.
+    JsonParentPreviewResponse:
+      properties:
+        document_mode:
+          type: string
+          title: Document Mode
+          description: document or ndjson
+        source_parents:
+          items:
+            $ref: '#/components/schemas/JsonParentField'
+          type: array
+          title: Source Parents
+        target_parents:
+          items:
+            $ref: '#/components/schemas/JsonParentField'
+          type: array
+          title: Target Parents
+        suggested_mappings:
+          items:
+            $ref: '#/components/schemas/JsonParentMappingRow'
+          type: array
+          title: Suggested Mappings
+        suggested_uid_field:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Suggested Uid Field
+      type: object
+      required:
+      - document_mode
+      title: JsonParentPreviewResponse
+      description: Top-level JSON parent keys and auto-suggested mappings for the wizard.
+    LitmusComparison:
+      properties:
+        checks_run:
+          items:
+            type: string
+          type: array
+          title: Checks Run
+        checks_passed:
+          items:
+            type: string
+          type: array
+          title: Checks Passed
+        checks_failed:
+          items:
+            type: string
+          type: array
+          title: Checks Failed
+        source:
+          $ref: '#/components/schemas/LitmusFileStats'
+        target:
+          $ref: '#/components/schemas/LitmusFileStats'
+        notes:
+          items:
+            type: string
+          type: array
+          title: Notes
+      type: object
+      required:
+      - source
+      - target
+      title: LitmusComparison
+      description: Result payload for fast metadata/shape checks.
+    LitmusFileStats:
+      properties:
+        path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Path
+        file_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: File Name
+        file_type:
+          type: string
+          title: File Type
+          default: csv
+        size_bytes:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Size Bytes
+        row_count:
+          type: integer
+          minimum: 0.0
+          title: Row Count
+        column_count:
+          type: integer
+          minimum: 0.0
+          title: Column Count
+        columns:
+          items:
+            type: string
+          type: array
+          title: Columns
+      type: object
+      required:
+      - row_count
+      - column_count
+      title: LitmusFileStats
+      description: Quick structural stats for one compared file.
+    LocalBatchValidateRequest:
+      properties:
+        file_format:
+          type: string
+          title: File Format
+          description: csv, fixed-width, or json
+          default: csv
+        units:
+          items:
+            $ref: '#/components/schemas/ValidationUnitSpec'
+          type: array
+          minItems: 1
+          title: Units
+        on_unit_failure:
+          $ref: '#/components/schemas/BatchFailureMode'
+          description: stop after first failed unit, or run all units and report per-pair status
+          default: continue
+        delimiter:
+          type: string
+          title: Delimiter
+          default: auto
+        has_header:
+          type: boolean
+          title: Has Header
+          default: true
+        header_leading_rows:
+          type: integer
+          maximum: 50.0
+          minimum: 0.0
+          title: Header Leading Rows
+          default: 0
+        validate_header_formats:
+          type: boolean
+          title: Validate Header Formats
+          default: false
+        validate_footers:
+          type: boolean
+          title: Validate Footers
+          default: false
+        footer_trailing_rows:
+          type: integer
+          maximum: 10.0
+          minimum: 0.0
+          title: Footer Trailing Rows
+          default: 1
+        cloud_bucket:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cloud Bucket
+          description: When set, unit source_paths/target_paths are object names in this bucket
+        cloud_credentials_json:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cloud Credentials Json
+          description: Service account JSON used with cloud_bucket for batch jobs
+        cloud_project_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cloud Project Id
+        test_mode:
+          $ref: '#/components/schemas/ValidationTestMode'
+          default: full
+        uid_gte:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Uid Gte
+      type: object
+      required:
+      - units
+      title: LocalBatchValidateRequest
+      description: JSON body for POST /validate/local/batch.
+    LocalBrowseEntry:
+      properties:
+        name:
+          type: string
+          title: Name
+        path:
+          type: string
+          title: Path
+        is_dir:
+          type: boolean
+          title: Is Dir
+      type: object
+      required:
+      - name
+      - path
+      - is_dir
+      title: LocalBrowseEntry
+      description: One file or directory under GET /validate/local/browse.
+    LocalBrowseResponse:
+      properties:
+        path:
+          type: string
+          title: Path
+          description: Absolute resolved directory that was listed
+        parent_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Parent Path
+          description: Absolute parent directory if the UI may navigate up; null at an allowed root
+        entries:
+          items:
+            $ref: '#/components/schemas/LocalBrowseEntry'
+          type: array
+          title: Entries
+          description: Sorted entries (directories first, then files); symlinks outside allowed roots are omitted
+        truncated:
+          type: boolean
+          title: Truncated
+          description: True when the directory had more children than the server returns (see cap in API docs)
+          default: false
+      type: object
+      required:
+      - path
+      title: LocalBrowseResponse
+      description: Directory listing for the local-path file picker UI.
+    LocalColumnPreviewResponse:
+      properties:
+        source_columns:
+          items:
+            type: string
+          type: array
+          title: Source Columns
+          description: All source columns, including the UID column
+        target_columns:
+          items:
+            type: string
+          type: array
+          title: Target Columns
+          description: All target columns, including the UID column
+        compare_columns:
+          items:
+            type: string
+          type: array
+          title: Compare Columns
+          description: Source columns available for value comparison after removing the selected UID column
+        auto_mappings:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Auto Mappings
+          description: Exact name matches discovered automatically from source and target headers
+        unmatched_source_columns:
+          items:
+            type: string
+          type: array
+          title: Unmatched Source Columns
+          description: Source columns with no automatic target match
+        unmatched_target_columns:
+          items:
+            type: string
+          type: array
+          title: Unmatched Target Columns
+          description: Target columns with no automatic source match
+        delimiter:
+          type: string
+          title: Delimiter
+          description: Resolved delimiter used to read the headers
+        has_header:
+          type: boolean
+          title: Has Header
+          description: Whether the first row was treated as column names
+          default: true
+        inferred_has_header:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Inferred Has Header
+          description: Heuristic guess from the first physical row (both files must look like headers)
+        source_samples:
+          additionalProperties:
+            items:
+              type: string
+            type: array
+          type: object
+          title: Source Samples
+          description: First sample rows per source column (string values) for mapping preview
+        target_samples:
+          additionalProperties:
+            items:
+              type: string
+            type: array
+          type: object
+          title: Target Samples
+          description: First sample rows per target column (string values) for mapping preview
+        sample_row_count:
+          type: integer
+          maximum: 20.0
+          minimum: 1.0
+          title: Sample Row Count
+          description: Number of data rows included in source_samples / target_samples
+          default: 6
+        complex_columns:
+          items:
+            type: string
+          type: array
+          title: Complex Columns
+          description: Compared columns whose sample cells contain list/dict/tuple literals
+        needs_order_preference:
+          type: boolean
+          title: Needs Order Preference
+          description: True when complex_columns is non-empty; client may ask about order sensitivity
+          default: false
+      type: object
+      required:
+      - delimiter
+      title: LocalColumnPreviewResponse
+      description: Header preview for the local-path mapping UI.
+    LocalPathBrowseConfigResponse:
+      properties:
+        default_browse_path:
+          type: string
+          title: Default Browse Path
+          description: Directory used when browse is opened without a path (display form)
+        path_remap_enabled:
+          type: boolean
+          title: Path Remap Enabled
+          description: True when host and container path prefixes are configured
+        host_path_prefix:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Host Path Prefix
+          description: Host-side path prefix shown in the UI when remap is enabled
+        container_path_prefix:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Container Path Prefix
+          description: In-container mount path paired with host_path_prefix
+      type: object
+      required:
+      - default_browse_path
+      - path_remap_enabled
+      title: LocalPathBrowseConfigResponse
+      description: Server-local path picker defaults (host/container remap for Docker).
+    LocalPathValidateRequest:
+      properties:
+        source_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Path
+          description: Absolute or user-home path to the expected / golden file on the server
+        target_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Path
+          description: Absolute or user-home path to the actual / candidate file on the server
+        source_cloud:
+          anyOf:
+          - $ref: '#/components/schemas/GoogleCloudStorageConfig'
+          - type: 'null'
+          description: Google Cloud Storage source reference used when the source file is not local
+        target_cloud:
+          anyOf:
+          - $ref: '#/components/schemas/GoogleCloudStorageConfig'
+          - type: 'null'
+          description: Google Cloud Storage target reference used when the target file is not local
+        uid_column:
+          type: string
+          title: Uid Column
+          description: Column name to join on (must exist in both CSV files, ignored for fixed-width)
+          default: line
+        column_mappings:
+          items:
+            $ref: '#/components/schemas/ColumnMapping'
+          type: array
+          title: Column Mappings
+          description: Optional source->target column mappings used when header names differ. Each mapped target column is
+            renamed to the source column name before comparison.
+        delimiter:
+          type: string
+          title: Delimiter
+          description: 'Field separator: auto, tab, or explicit delimiter (ignored for fixed-width)'
+          default: auto
+        validate_header_formats:
+          type: boolean
+          title: Validate Header Formats
+          description: When true, infer formats on mapped columns and attach compatibility checks to the result.
+          default: false
+        validate_footers:
+          type: boolean
+          title: Validate Footers
+          description: When true, compare trailing rows between source and target files.
+          default: false
+        footer_trailing_rows:
+          type: integer
+          maximum: 10.0
+          minimum: 0.0
+          title: Footer Trailing Rows
+          description: Number of trailing physical rows to treat as footer when validate_footers is true.
+          default: 1
+        has_header:
+          type: boolean
+          title: Has Header
+          description: When false, the first row is data and columns are named column_1, column_2, … for mapping and UID selection.
+          default: true
+        header_leading_rows:
+          type: integer
+          maximum: 50.0
+          minimum: 0.0
+          title: Header Leading Rows
+          description: Number of physical rows at the start of each file to treat as header/preamble and exclude from row-level
+            comparison. Applied before has_header.
+          default: 0
+        file_format:
+          type: string
+          title: File Format
+          description: 'File format: csv, fixed-width, json, parquet, orc, avro, excel, or auto (multi-layer detection when
+            auto_detect is enabled on the server)'
+          default: csv
+        fixed_width_config:
+          anyOf:
+          - $ref: '#/components/schemas/FixedWidthConfig'
+          - type: 'null'
+          description: Detailed configuration when file_format is 'fixed-width'
+        json_order_sensitive:
+          type: boolean
+          title: Json Order Sensitive
+          description: 'When file_format is json: require list element order and dict key order to match. When false, reordered
+            lists and dict keys still match.'
+          default: false
+        test_mode:
+          $ref: '#/components/schemas/ValidationTestMode'
+          description: 'litmus: full reconciliation with no snippets; fails immediately when row counts differ; full: full
+            reconciliation with capped mismatch snippets (admin default, user-adjustable).'
+          default: full
+        mismatch_snippet_limit:
+          anyOf:
+          - type: integer
+            maximum: 50.0
+            minimum: 1.0
+          - type: 'null'
+          title: Mismatch Snippet Limit
+          description: Per-category snippet cap for full mode (missing, extra, and per-column value mismatches). Defaults
+            to the admin-configured value; cannot exceed validation_mismatch_snippet_limit_max.
+        uid_gte:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Uid Gte
+          description: 'Optional full-test filter: compare only rows where uid_column >= this value (numeric when possible,
+            otherwise lexical string compare).'
+      type: object
+      title: LocalPathValidateRequest
+      description: JSON body for POST /validate/local (server-side paths).
+    MatchFilePairsRequest:
+      properties:
+        source_directory:
+          type: string
+          title: Source Directory
+        target_directory:
+          type: string
+          title: Target Directory
+        file_format:
+          type: string
+          title: File Format
+          description: Used to filter files by extension
+          default: csv
+        recursive:
+          type: boolean
+          title: Recursive
+          description: When true, include files in subdirectories (matched by basename only)
+          default: false
+      type: object
+      required:
+      - source_directory
+      - target_directory
+      title: MatchFilePairsRequest
+      description: JSON body for POST /validate/local/match-pairs.
+    MatchFilePairsResponse:
+      properties:
+        pairs:
+          items:
+            $ref: '#/components/schemas/FilePairMatch'
+          type: array
+          title: Pairs
+        unmatched_sources:
+          items:
+            type: string
+          type: array
+          title: Unmatched Sources
+        unmatched_targets:
+          items:
+            type: string
+          type: array
+          title: Unmatched Targets
+      type: object
+      title: MatchFilePairsResponse
+      description: Auto filename pairing between two directories.
+    MismatchCounts:
+      properties:
+        missing_in_target:
+          type: integer
+          minimum: 0.0
+          title: Missing In Target
+        extra_in_target:
+          type: integer
+          minimum: 0.0
+          title: Extra In Target
+        value_mismatch:
+          type: integer
+          minimum: 0.0
+          title: Value Mismatch
+          description: Total cell-level value mismatches
+        value_mismatch_rows:
+          type: integer
+          minimum: 0.0
+          title: Value Mismatch Rows
+          description: Distinct rows (UIDs) with at least one cell value mismatch
+          default: 0
+      type: object
+      required:
+      - missing_in_target
+      - extra_in_target
+      - value_mismatch
+      title: MismatchCounts
+      description: Counts keyed by :class:`MismatchType` string values.
+    MismatchPersistenceNote:
+      properties:
+        mismatch_rows_persisted:
+          type: boolean
+          title: Mismatch Rows Persisted
+        mismatch_artifact_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Mismatch Artifact Path
+        mismatch_row_cap:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Mismatch Row Cap
+        validation_job_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Validation Job Id
+          description: Worker job directory id (differs from run_id) for on-disk mismatch NDJSON
+      type: object
+      required:
+      - mismatch_rows_persisted
+      title: MismatchPersistenceNote
+      description: Recorded when mismatch rows exceed the DB persistence cap.
+    MismatchSampleGroups:
+      properties:
+        missing_in_target:
+          items:
+            $ref: '#/components/schemas/MismatchSampleRow'
+          type: array
+          title: Missing In Target
+        extra_in_target:
+          items:
+            $ref: '#/components/schemas/MismatchSampleRow'
+          type: array
+          title: Extra In Target
+        value_mismatch:
+          items:
+            $ref: '#/components/schemas/MismatchSampleRow'
+          type: array
+          title: Value Mismatch
+      type: object
+      title: MismatchSampleGroups
+      description: Mismatch rows split by category (missing/extra are complete up to the presence cap).
+    MismatchSampleRow:
+      properties:
+        uid:
+          type: string
+          title: Uid
+          description: Business UID that triggered the mismatch
+        mismatch_type:
+          type: string
+          title: Mismatch Type
+          description: missing_in_target | extra_in_target | value_mismatch
+        column_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Column Name
+          description: Compared column for value_mismatch; null for row presence issues
+        source_value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Value
+          description: Serialized source cell; null when not applicable
+        target_value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Value
+          description: Serialized target cell; null when not applicable
+        row_detail:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Row Detail
+          description: Optional JSON object with source_record and/or target_record (full CSV rows)
+      type: object
+      required:
+      - uid
+      - mismatch_type
+      title: MismatchSampleRow
+      description: One row in the long-form mismatch report.
+    QueueStatusResponse:
+      properties:
+        max_concurrency:
+          type: integer
+          title: Max Concurrency
+          description: User-set parallel cap (0 = no fixed cap; resource advisor decides)
+        effective_max_concurrency:
+          type: integer
+          title: Effective Max Concurrency
+          description: Parallel slots the drain loop uses right now (resource recommendation when auto-tune is on and max_concurrency
+            is 0)
+        cpu_cores_available:
+          type: integer
+          title: Cpu Cores Available
+          description: Logical CPU cores detected on the server
+        auto_tune_enabled:
+          type: boolean
+          title: Auto Tune Enabled
+          description: Whether resource-based auto-tuning is active
+        threads_per_job:
+          type: integer
+          title: Threads Per Job
+          description: Configured worker threads per validation job (0 = auto / all cores)
+        disk_headroom_multiplier:
+          type: number
+          title: Disk Headroom Multiplier
+          description: Configured disk headroom multiplier per validation job
+        effective_threads_per_job:
+          type: integer
+          title: Effective Threads Per Job
+          description: Resolved thread cap used when a worker starts (after auto=host cores)
+        pending:
+          type: integer
+          title: Pending
+          description: Jobs waiting in the queue
+        running:
+          type: integer
+          title: Running
+          description: Jobs currently executing
+        finished:
+          type: integer
+          title: Finished
+          description: Completed/failed jobs still tracked in memory
+        total_tracked:
+          type: integer
+          title: Total Tracked
+          description: Total jobs tracked in memory
+        resource_advisor:
+          additionalProperties: true
+          type: object
+          title: Resource Advisor
+          description: 'Live resource snapshot: system RAM/disk/swap stats, per-job estimates, safe limits (max_safe_by_ram,
+            max_safe_by_disk, max_safe_by_cpu), and the system-recommended max_concurrency.'
+        jobs:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Jobs
+          description: Recent job snapshots
+      type: object
+      required:
+      - max_concurrency
+      - effective_max_concurrency
+      - cpu_cores_available
+      - auto_tune_enabled
+      - threads_per_job
+      - disk_headroom_multiplier
+      - effective_threads_per_job
+      - pending
+      - running
+      - finished
+      - total_tracked
+      title: QueueStatusResponse
+      description: Response for GET /validate/queue.
+    SaveDraftRequest:
+      properties:
+        source_path:
+          type: string
+          title: Source Path
+          description: Source CSV file path
+        target_path:
+          type: string
+          title: Target Path
+          description: Target CSV file path
+        uid_column:
+          type: string
+          title: Uid Column
+          description: Join key column
+        delimiter:
+          type: string
+          title: Delimiter
+          description: Delimiter
+          default: auto
+        column_mappings:
+          items:
+            $ref: '#/components/schemas/ColumnMapping'
+          type: array
+          title: Column Mappings
+          description: Column mappings
+        validate_header_formats:
+          type: boolean
+          title: Validate Header Formats
+          description: Header formats validation flag
+          default: false
+        validate_footers:
+          type: boolean
+          title: Validate Footers
+          description: Footers validation flag
+          default: false
+      type: object
+      required:
+      - source_path
+      - target_path
+      - uid_column
+      title: SaveDraftRequest
+      description: Payload to save a mapping draft in history.
+    UpdateQueueSettingsRequest:
+      properties:
+        max_concurrency:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Max Concurrency
+          description: Maximum parallel validation jobs. Running jobs are never killed; the new limit affects when queued
+            jobs start.
+        auto_tune_enabled:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Auto Tune Enabled
+          description: When true, every job that fits current resources starts immediately; the rest wait in the FIFO queue.
+            When false, only max_concurrency is used (0 falls back to CPU core count).
+        threads_per_job:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Threads Per Job
+          description: Threads/processes for partition comparison inside each validation worker. 0 = auto (all logical CPUs
+            for that worker).
+        disk_headroom_multiplier:
+          anyOf:
+          - type: number
+            maximum: 10.0
+            minimum: 1.0
+          - type: 'null'
+          title: Disk Headroom Multiplier
+          description: 'Disk safety factor per job: required free bytes >= multiplier × (source + target CSV size) before
+            spill/sort.'
+      type: object
+      title: UpdateQueueSettingsRequest
+      description: JSON body for PATCH /validate/queue — lets users tune concurrency at runtime.
+    ValidateResponse:
+      properties:
+        summary:
+          $ref: '#/components/schemas/ValidationSummary'
+        mismatch_counts:
+          $ref: '#/components/schemas/MismatchCounts'
+        mismatch_sample_groups:
+          $ref: '#/components/schemas/MismatchSampleGroups'
+          description: Missing/extra rows (with source_record / target_record in row_detail when available) up to PEGASUS_VALIDATION_PRESENCE_MISMATCH_RESPONSE_MAX_ROWS
+            per side; value_mismatch obeys PEGASUS_VALIDATION_MISMATCH_SAMPLE_LIMIT.
+        value_mismatch_by_column:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Value Mismatch By Column
+          description: Total value_mismatch row counts per compared column (full report, not just samples)
+        compared_columns:
+          items:
+            type: string
+          type: array
+          title: Compared Columns
+          description: Shared non-UID column names that were compared (order is stable for UI grouping)
+        run_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Run Id
+          description: Database id of the persisted run when PEGASUS_ENABLE_VALIDATION_PERSISTENCE is true
+        value_mismatch_by_column_omitted:
+          type: boolean
+          title: Value Mismatch By Column Omitted
+          description: True when per-column value_mismatch_by_column was skipped because value_mismatch row count exceeded
+            validation_value_mismatch_column_stats_max_rows (saves memory).
+          default: false
+        mapping_format_checks:
+          items:
+            $ref: '#/components/schemas/ColumnMappingFormatCheck'
+          type: array
+          title: Mapping Format Checks
+          description: Present when validate_header_formats was true on the request.
+        footer_validation:
+          anyOf:
+          - $ref: '#/components/schemas/FooterValidationResult'
+          - type: 'null'
+          description: Present when validate_footers was true on the request.
+        durations:
+          anyOf:
+          - $ref: '#/components/schemas/ValidationDurations'
+          - type: 'null'
+          description: Wall-clock timings when available from the validation worker.
+        test_mode:
+          $ref: '#/components/schemas/ValidationTestMode'
+          description: Validation depth used for this run.
+          default: full
+        litmus:
+          anyOf:
+          - $ref: '#/components/schemas/LitmusComparison'
+          - type: 'null'
+          description: Present when test_mode is litmus.
+        pipeline_metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Pipeline Metadata
+          description: Category-1 six-stage pipeline metrics (partition counts, timings, etc.).
+      type: object
+      required:
+      - summary
+      - mismatch_counts
+      title: ValidateResponse
+      description: Response body for POST /validate.
+    ValidationDailyStatRow:
+      properties:
+        date:
+          type: string
+          format: date-time
+          title: Date
+        passed:
+          type: integer
+          minimum: 0.0
+          title: Passed
+          description: Completed runs with full data match
+        failed:
+          type: integer
+          minimum: 0.0
+          title: Failed
+          description: Failed runs or completed with mismatches
+        total:
+          type: integer
+          minimum: 0.0
+          title: Total
+      type: object
+      required:
+      - date
+      - passed
+      - failed
+      - total
+      title: ValidationDailyStatRow
+      description: Passed vs failed validation counts for one day or hourly bucket (UTC ``completed_at``).
+    ValidationDailyStatsResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ValidationDailyStatRow'
+          type: array
+          title: Items
+        totals:
+          $ref: '#/components/schemas/ValidationDailyTotals'
+      type: object
+      required:
+      - totals
+      title: ValidationDailyStatsResponse
+    ValidationDailyTotals:
+      properties:
+        passed:
+          type: integer
+          minimum: 0.0
+          title: Passed
+        failed:
+          type: integer
+          minimum: 0.0
+          title: Failed
+        total:
+          type: integer
+          minimum: 0.0
+          title: Total
+      type: object
+      required:
+      - passed
+      - failed
+      - total
+      title: ValidationDailyTotals
+    ValidationDurations:
+      properties:
+        upload_seconds:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: 'null'
+          title: Upload Seconds
+        validation_seconds:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: 'null'
+          title: Validation Seconds
+        total_seconds:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: 'null'
+          title: Total Seconds
+      type: object
+      title: ValidationDurations
+      description: Upload, validation, and total wall-clock seconds for a completed job.
+    ValidationEntityCreateRequest:
+      properties:
+        display_name:
+          type: string
+          maxLength: 128
+          minLength: 2
+          title: Display Name
+        aliases:
+          items:
+            type: string
+          type: array
+          title: Aliases
+          description: Additional aliases/keywords
+      type: object
+      required:
+      - display_name
+      title: ValidationEntityCreateRequest
+    ValidationEntityInsight:
+      properties:
+        inferred_entity:
+          type: string
+          title: Inferred Entity
+        display_name:
+          type: string
+          title: Display Name
+        confidence:
+          type: string
+          title: Confidence
+        matched_existing_entity:
+          type: boolean
+          title: Matched Existing Entity
+          default: false
+        needs_confirmation:
+          type: boolean
+          title: Needs Confirmation
+          default: false
+        candidate_tokens:
+          items:
+            type: string
+          type: array
+          title: Candidate Tokens
+        success_count:
+          type: integer
+          minimum: 0.0
+          title: Success Count
+          default: 0
+        failed_count:
+          type: integer
+          minimum: 0.0
+          title: Failed Count
+          default: 0
+        total_count:
+          type: integer
+          minimum: 0.0
+          title: Total Count
+          default: 0
+        details:
+          items:
+            $ref: '#/components/schemas/ValidationEntityRunDetail'
+          type: array
+          title: Details
+      type: object
+      required:
+      - inferred_entity
+      - display_name
+      - confidence
+      title: ValidationEntityInsight
+    ValidationEntityInsightsResponse:
+      properties:
+        limit:
+          type: integer
+          minimum: 1.0
+          title: Limit
+        entities:
+          items:
+            $ref: '#/components/schemas/ValidationEntityInsight'
+          type: array
+          title: Entities
+      type: object
+      required:
+      - limit
+      title: ValidationEntityInsightsResponse
+    ValidationEntityRecord:
+      properties:
+        name:
+          type: string
+          title: Name
+        display_name:
+          type: string
+          title: Display Name
+        aliases:
+          items:
+            type: string
+          type: array
+          title: Aliases
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - name
+      - display_name
+      - created_at
+      title: ValidationEntityRecord
+    ValidationEntityRunDetail:
+      properties:
+        run_id:
+          type: string
+          format: uuid
+          title: Run Id
+        status:
+          type: string
+          title: Status
+        source_filename:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Filename
+        target_filename:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Filename
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        is_match:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Match
+        mismatch_counts:
+          $ref: '#/components/schemas/MismatchCounts'
+      type: object
+      required:
+      - run_id
+      - status
+      - mismatch_counts
+      title: ValidationEntityRunDetail
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    ValidationHistoryDetail:
+      properties:
+        run_id:
+          type: string
+          format: uuid
+          title: Run Id
+        status:
+          type: string
+          title: Status
+        source_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Path
+        target_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Path
+        source_filename:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Filename
+        target_filename:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Filename
+        uid_column:
+          type: string
+          title: Uid Column
+        delimiter:
+          type: string
+          title: Delimiter
+        is_match:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Match
+        mismatch_counts:
+          $ref: '#/components/schemas/MismatchCounts'
+        mapping_count:
+          type: integer
+          minimum: 0.0
+          title: Mapping Count
+          description: Number of source→target column mappings used
+        durations:
+          $ref: '#/components/schemas/ValidationDurations'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        source_row_count:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Source Row Count
+        target_row_count:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Target Row Count
+        test_mode:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Test Mode
+          description: Validation depth for this run (litmus or full).
+        column_mappings:
+          items:
+            $ref: '#/components/schemas/ColumnMapping'
+          type: array
+          title: Column Mappings
+        compared_columns:
+          items:
+            type: string
+          type: array
+          title: Compared Columns
+        mapping_format_checks:
+          items:
+            $ref: '#/components/schemas/ColumnMappingFormatCheck'
+          type: array
+          title: Mapping Format Checks
+        footer_validation:
+          anyOf:
+          - $ref: '#/components/schemas/FooterValidationResult'
+          - type: 'null'
+        mismatch_persistence:
+          anyOf:
+          - $ref: '#/components/schemas/MismatchPersistenceNote'
+          - type: 'null'
+        validate_header_formats:
+          type: boolean
+          title: Validate Header Formats
+          default: false
+        validate_footers:
+          type: boolean
+          title: Validate Footers
+          default: false
+        compared_column_count:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Compared Column Count
+        error_detail:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Detail
+      type: object
+      required:
+      - run_id
+      - status
+      - uid_column
+      - delimiter
+      - mismatch_counts
+      - mapping_count
+      - created_at
+      title: ValidationHistoryDetail
+      description: Full persisted record for one validation run.
+    ValidationHistoryListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ValidationHistorySummary'
+          type: array
+          title: Items
+        total:
+          type: integer
+          minimum: 0.0
+          title: Total
+        file_pair_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: File Pair Key
+          description: Present when filtered by source_path + target_path
+      type: object
+      required:
+      - total
+      title: ValidationHistoryListResponse
+      description: Paginated validation history.
+    ValidationHistoryMismatchRow:
+      properties:
+        uid:
+          type: string
+          title: Uid
+        mismatch_type:
+          type: string
+          title: Mismatch Type
+        column_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Column Name
+        source_value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Value
+        target_value:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Value
+        row_detail:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Row Detail
+      type: object
+      required:
+      - uid
+      - mismatch_type
+      title: ValidationHistoryMismatchRow
+      description: One mismatch row from the database.
+    ValidationHistoryMismatchesResponse:
+      properties:
+        run_id:
+          type: string
+          format: uuid
+          title: Run Id
+        items:
+          items:
+            $ref: '#/components/schemas/ValidationHistoryMismatchRow'
+          type: array
+          title: Items
+        total:
+          type: integer
+          minimum: 0.0
+          title: Total
+        offset:
+          type: integer
+          minimum: 0.0
+          title: Offset
+        limit:
+          type: integer
+          minimum: 1.0
+          title: Limit
+      type: object
+      required:
+      - run_id
+      - total
+      - offset
+      - limit
+      title: ValidationHistoryMismatchesResponse
+      description: Paginated mismatch rows for a historical run.
+    ValidationHistorySummary:
+      properties:
+        run_id:
+          type: string
+          format: uuid
+          title: Run Id
+        status:
+          type: string
+          title: Status
+        source_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Path
+        target_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Path
+        source_filename:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Filename
+        target_filename:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Filename
+        uid_column:
+          type: string
+          title: Uid Column
+        delimiter:
+          type: string
+          title: Delimiter
+        is_match:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Match
+        mismatch_counts:
+          $ref: '#/components/schemas/MismatchCounts'
+        mapping_count:
+          type: integer
+          minimum: 0.0
+          title: Mapping Count
+          description: Number of source→target column mappings used
+        durations:
+          $ref: '#/components/schemas/ValidationDurations'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        source_row_count:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Source Row Count
+        target_row_count:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Target Row Count
+        test_mode:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Test Mode
+          description: Validation depth for this run (litmus or full).
+      type: object
+      required:
+      - run_id
+      - status
+      - uid_column
+      - delimiter
+      - mismatch_counts
+      - mapping_count
+      - created_at
+      title: ValidationHistorySummary
+      description: One row in the validation history list.
+    ValidationJobAcceptedResponse:
+      properties:
+        job_id:
+          type: string
+          format: uuid
+          title: Job Id
+        status:
+          type: string
+          title: Status
+          description: queued when waiting for a worker slot; running when started immediately
+          default: queued
+        poll_url:
+          type: string
+          title: Poll Url
+          description: Relative URL to poll for status and the final ValidateResponse payload
+        queue_position:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Queue Position
+          description: 0-based position in the queue (0 = next to run); null when already running
+        queue_pending:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Queue Pending
+          description: Total number of jobs waiting in the queue (including this one)
+        queue_running:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Queue Running
+          description: Number of validation jobs currently executing
+        max_concurrency:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Concurrency
+          description: Configured maximum number of parallel validation workers
+      type: object
+      required:
+      - job_id
+      - poll_url
+      title: ValidationJobAcceptedResponse
+      description: Returned immediately when a validation job is accepted (queued or already running).
+    ValidationJobDetailResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+        phase:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Phase
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+        progress:
+          additionalProperties: true
+          type: object
+          title: Progress
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        result:
+          anyOf:
+          - $ref: '#/components/schemas/ValidateResponse'
+          - type: 'null'
+        batch_result:
+          anyOf:
+          - $ref: '#/components/schemas/BatchValidateResponse'
+          - type: 'null'
+          description: Present when the job was queued via POST /validate/local/batch
+        resource_profile:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Resource Profile
+          description: Memory, disk, and CPU footprint snapshots captured before, during, and after validation. Includes peak
+            RSS, job workspace disk usage, and CPU utilization samples.
+      type: object
+      required:
+      - status
+      title: ValidationJobDetailResponse
+      description: 'Poll response: while running only *status* is set; when completed *result* contains the API payload.'
+    ValidationOptionsResponse:
+      properties:
+        test_modes:
+          items:
+            $ref: '#/components/schemas/ValidationTestMode'
+          type: array
+          title: Test Modes
+          description: Test modes exposed in the validation wizard.
+        mismatch_snippet_limit_default:
+          type: integer
+          maximum: 50.0
+          minimum: 1.0
+          title: Mismatch Snippet Limit Default
+        mismatch_snippet_limit_max:
+          type: integer
+          maximum: 50.0
+          minimum: 1.0
+          title: Mismatch Snippet Limit Max
+      type: object
+      required:
+      - mismatch_snippet_limit_default
+      - mismatch_snippet_limit_max
+      title: ValidationOptionsResponse
+      description: Public validation wizard options (snippet caps and supported test modes).
+    ValidationSummary:
+      properties:
+        source_row_count:
+          type: integer
+          minimum: 0.0
+          title: Source Row Count
+        target_row_count:
+          type: integer
+          minimum: 0.0
+          title: Target Row Count
+        compared_column_count:
+          type: integer
+          minimum: 0.0
+          title: Compared Column Count
+          description: Shared non-UID columns considered in value comparison
+        total_mismatch_records:
+          type: integer
+          minimum: 0.0
+          title: Total Mismatch Records
+          description: Rows in the long-form mismatch table (one per column diff or presence issue)
+        is_match:
+          type: boolean
+          title: Is Match
+          description: True when there are zero mismatch records
+      type: object
+      required:
+      - source_row_count
+      - target_row_count
+      - compared_column_count
+      - total_mismatch_records
+      - is_match
+      title: ValidationSummary
+      description: High-level stats for the compared files.
+    ValidationTestMode:
+      type: string
+      enum:
+      - litmus
+      - full
+      title: ValidationTestMode
+      description: Execution depth for file validation.
+    ValidationUnitSpec:
+      properties:
+        unit_id:
+          type: string
+          title: Unit Id
+          description: Stable id for UI pairing and per-pair column mapping
+        source_paths:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          title: Source Paths
+          description: One or more source files (merged when >1)
+        target_paths:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          title: Target Paths
+          description: One or more target files (merged when >1)
+        uid_column:
+          type: string
+          title: Uid Column
+          description: Join column for CSV validation
+          default: id
+        column_mappings:
+          items:
+            $ref: '#/components/schemas/ColumnMapping'
+          type: array
+          title: Column Mappings
+        fixed_width_config:
+          anyOf:
+          - $ref: '#/components/schemas/FixedWidthConfig'
+          - type: 'null'
+          description: Per-pair fixed-width layout when file_format is fixed-width
+      type: object
+      required:
+      - unit_id
+      - source_paths
+      - target_paths
+      title: ValidationUnitSpec
+      description: One logical source/target comparison (may merge multiple paths per side).

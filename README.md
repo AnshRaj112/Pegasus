@@ -476,6 +476,8 @@ Run and develop with HMR using `npm run dev`.
 
 Refer to the backend code comments for the exact request/response shapes or open the interactive Swagger UI at `/docs`.
 
+The committed OpenAPI contract is [`api/openapi.yaml`](api/openapi.yaml). After API changes run `python scripts/sync_openapi_contract.py --write`, then `python scripts/sync_openapi_contract.py --check`. See [`api/README.md`](api/README.md).
+
 ## Diagrams included (source)
 
 - [docs/diagrams/system_architecture.mmd](docs/diagrams/system_architecture.mmd) — system components and interactions
@@ -495,6 +497,13 @@ Frontend (if configured)
 ```bash
 cd pegasus-frontend
 npm test
+npm run test:contract   # frontend paths vs api/openapi.yaml
+```
+
+API contract (backend + frontend):
+
+```bash
+python scripts/sync_openapi_contract.py --check
 ```
 
 ## Troubleshooting & tips

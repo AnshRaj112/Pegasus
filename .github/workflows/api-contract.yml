@@ -1,0 +1,62 @@
+name: API contract
+
+on:
+  push:
+    paths:
+      - "api/**"
+      - "pegasus-backend/src/pegasus/api/**"
+      - "pegasus-backend/src/pegasus/schemas/**"
+      - "pegasus-backend/src/pegasus/main.py"
+      - "pegasus-frontend/src/shared/api/**"
+      - "scripts/sync_openapi_contract.py"
+      - ".github/workflows/api-contract.yml"
+  pull_request:
+    paths:
+      - "api/**"
+      - "pegasus-backend/src/pegasus/api/**"
+      - "pegasus-backend/src/pegasus/schemas/**"
+      - "pegasus-backend/src/pegasus/main.py"
+      - "pegasus-frontend/src/shared/api/**"
+      - "scripts/sync_openapi_contract.py"
+      - ".github/workflows/api-contract.yml"
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r pegasus-backend/requirements-dev.txt
+
+      - name: Validate OpenAPI contract file
+        run: python scripts/sync_openapi_contract.py --validate
+
+      - name: Check backend matches contract
+        run: python scripts/sync_openapi_contract.py --check-backend
+
+      - name: Check frontend clients match contract
+        run: python scripts/sync_openapi_contract.py --check-frontend
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: pegasus-frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: pegasus-frontend
+        run: npm ci
+
+      - name: Run frontend contract test
+        working-directory: pegasus-frontend
+        run: npm test -- src/shared/api/tests/contract.test.ts
