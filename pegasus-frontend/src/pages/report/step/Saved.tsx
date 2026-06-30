@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../redux/store';
 import { ReportItem, ReportBadge } from '../Report.interface';
 import { validationActions } from '../../validation/Validation.reducer';
+import { TruncatedPath } from '../components/TruncatedPath';
 import styles from './ReportStep.module.scss';
 
 const renderBadges = (badges: ReportBadge[]) => badges.map((badge, bIdx) => (
@@ -49,7 +50,9 @@ export const Saved: React.FC = () => {
                 <TableOutlined className={styles.fileIcon} />
                 <span className={styles.sourceTitle}>{report.sourceTitle}</span>
               </div>
-              <div className={styles.monoPath}>{report.sourceSubtitle}</div>
+              <div className={styles.monoPath}>
+                <TruncatedPath path={report.sourceSubtitle} />
+              </div>
             </div>
 
             <div className={styles.dividerCol}>

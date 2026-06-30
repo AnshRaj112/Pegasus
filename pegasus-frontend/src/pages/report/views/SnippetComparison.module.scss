@@ -185,6 +185,7 @@
   align-items: center;
   gap: 0.5rem;
   color: tokens.$on-primary;
+  min-width: 0;
 }
 
 .panelHeaderTarget {
@@ -194,11 +195,14 @@
   align-items: center;
   gap: 0.5rem;
   color: var(--on-surface, #{tokens.$on-surface});
+  min-width: 0;
 }
 
 .panelHeaderTitle {
   font-size: 0.875rem;
   font-weight: 600;
+  flex: 1;
+  min-width: 0;
 }
 
 .panelScroll {

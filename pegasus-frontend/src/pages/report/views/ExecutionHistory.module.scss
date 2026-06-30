@@ -144,6 +144,7 @@
 
 .fileSection {
   flex: 1;
+  min-width: 0;
 }
 
 .fileTitleRow {
@@ -178,6 +179,8 @@
   color: tokens.$text-muted;
   font-size: 0.75rem;
   font-family: var(--font-mono);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .runsList {

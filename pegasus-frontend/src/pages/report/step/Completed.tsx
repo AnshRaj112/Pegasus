@@ -3,6 +3,7 @@ import { HistoryOutlined, FileOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAppSelector } from '../../../redux/store';
 import { ReportItem, ReportBadge } from '../Report.interface';
+import { TruncatedPath } from '../components/TruncatedPath';
 import styles from './ReportStep.module.scss';
 
 const renderBadges = (report: ReportItem, badges: ReportBadge[]) => badges.map((badge, bIdx) => (
@@ -48,7 +49,9 @@ export const Completed: React.FC = () => {
               <FileOutlined className={styles.fileIcon} />
               <span className={styles.sourceTitle}>{report.sourceTitle}</span>
             </div>
-            <div className={styles.monoPath}>{report.sourcePath}</div>
+            <div className={styles.monoPath}>
+              <TruncatedPath path={report.sourcePath} />
+            </div>
           </div>
 
           <div className={styles.dividerCol}>
@@ -61,7 +64,9 @@ export const Completed: React.FC = () => {
               <FileOutlined className={styles.fileIcon} />
               <span className={styles.sourceTitle}>{report.jobTitle}</span>
             </div>
-            <div className={styles.monoPath}>{report.targetPath}</div>
+            <div className={styles.monoPath}>
+              <TruncatedPath path={report.targetPath} />
+            </div>
           </div>
 
           <div className={styles.badgesCol}>

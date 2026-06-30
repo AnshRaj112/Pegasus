@@ -5,6 +5,7 @@ import {
 } from '@ant-design/icons';
 import { MismatchSampleRow } from '../../../shared/api/Api';
 import { useAppSelector } from '../../../redux/store';
+import { TruncatedPath } from '../components/TruncatedPath';
 import styles from './JsonSnippetComparison.module.scss';
 
 type JsonIssueKind = 'value_mismatch' | 'missing_in_target' | 'extra_in_target';
@@ -488,12 +489,18 @@ export const JsonSnippetComparison: React.FC = () => {
   const renderJsonSection = (rows: JsonIssueRow[], emptyMessage: string, sectionKey: string) => (
     <div className={styles.sectionPanel}>
       <div className={styles.panelHeaders}>
-        <div className={styles.panelHeaderSource}>
-          <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Source &gt; {sourceLabel}</span>
-        </div>
-        <div className={styles.panelHeaderTarget}>
-          <DatabaseOutlined /> <span className={styles.panelHeaderTitle}>Target &gt; {targetLabel}</span>
-        </div>
+          <div className={styles.panelHeaderSource}>
+            <DatabaseOutlined />
+            <span className={styles.panelHeaderTitle}>
+              <TruncatedPath prefix="Source > " path={sourceLabel} />
+            </span>
+          </div>
+          <div className={styles.panelHeaderTarget}>
+            <DatabaseOutlined />
+            <span className={styles.panelHeaderTitle}>
+              <TruncatedPath prefix="Target > " path={targetLabel} />
+            </span>
+          </div>
       </div>
       <div className={styles.panelScroll}>
         {isLoading ? (

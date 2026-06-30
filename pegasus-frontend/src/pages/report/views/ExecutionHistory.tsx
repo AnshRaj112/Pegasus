@@ -13,6 +13,7 @@ import { useAppDispatch } from '../../../redux/store';
 import { ReportService } from '../Report.service';
 import { ValidationHistorySummary } from '../../../shared/api/Api';
 import { validationActions } from '../../validation/Validation.reducer';
+import { TruncatedPath } from '../components/TruncatedPath';
 import styles from './ExecutionHistory.module.scss';
 
 const formatEnd = (iso: string | null | undefined) => {
@@ -129,7 +130,9 @@ const ExecutionHistory: React.FC = () => {
               <span className={styles.fileName}>{sourceFileInfo.name}</span>
               <span className={styles.fileLabel}>(Source)</span>
             </div>
-            <div className={styles.filePath}>{sourceFileInfo.path}</div>
+            <div className={styles.filePath}>
+              <TruncatedPath path={sourceFileInfo.path} />
+            </div>
           </div>
 
           <div className={styles.fileSection}>
@@ -138,7 +141,9 @@ const ExecutionHistory: React.FC = () => {
               <span className={styles.fileName}>{targetFileInfo.name}</span>
               <span className={styles.fileLabel}>(Target)</span>
             </div>
-            <div className={styles.filePath}>{targetFileInfo.path}</div>
+            <div className={styles.filePath}>
+              <TruncatedPath path={targetFileInfo.path} />
+            </div>
           </div>
         </div>
       )}

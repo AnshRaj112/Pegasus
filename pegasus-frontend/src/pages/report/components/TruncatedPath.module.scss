@@ -1,0 +1,42 @@
+.tooltipWrap {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  cursor: default;
+}
+
+.wrap {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.path {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.labelRow {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.prefix {
+  flex-shrink: 0;
+}
+
+.labelPath {
+  flex: 1;
+  min-width: 0;
+}
