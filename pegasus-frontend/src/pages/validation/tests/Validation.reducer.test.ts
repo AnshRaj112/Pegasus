@@ -200,6 +200,68 @@ describe('Validation reducer', () => {
     })
   })
 
+  describe('preview cache', () => {
+    const cachedPreviewState = {
+      pairKey: 'pair-1',
+      data: { source_columns: ['id'], target_columns: ['id'] } as import('~/shared/api/Api').LocalColumnPreviewResponse,
+      isFetching: false,
+      error: null,
+    }
+
+    it('skips previewValidationColumnsRequest when data is already cached for the pair key', () => {
+      const withCache = {
+        ...initialState,
+        previewColumnsState: cachedPreviewState,
+      }
+      const result = validationReducer(withCache, validationActions.previewValidationColumnsRequest('pair-1'))
+      expect(result).toBe(withCache)
+    })
+
+    it('clears preview cache when uid column changes', () => {
+      const withCache = {
+        ...initialState,
+        validationForm: validationFormWithFiles,
+        previewColumnsState: cachedPreviewState,
+        overviewProfileCache: {
+          sourceKey: 'a',
+          targetKey: 'b',
+          source: null,
+          target: null,
+          sourceError: false,
+          targetError: false,
+        },
+      }
+      const result = validationReducer(
+        withCache,
+        validationActions.setValidationForm({ uidColumn: 'other_id' }),
+      )
+      expect(result.previewColumnsState).toEqual(initialState.previewColumnsState)
+      expect(result.overviewProfileCache).not.toBeNull()
+    })
+
+    it('clears overview and preview cache when delimiter changes', () => {
+      const withCache = {
+        ...initialState,
+        validationForm: validationFormWithFiles,
+        overviewProfileCache: {
+          sourceKey: 'a',
+          targetKey: 'b',
+          source: null,
+          target: null,
+          sourceError: false,
+          targetError: false,
+        },
+        previewColumnsState: cachedPreviewState,
+      }
+      const result = validationReducer(
+        withCache,
+        validationActions.setValidationForm({ delimiter: ',' }),
+      )
+      expect(result.previewColumnsState).toEqual(initialState.previewColumnsState)
+      expect(result.overviewProfileCache).toBeNull()
+    })
+  })
+
   describe('history navigation', () => {
     it('stores pending history navigation', () => {
       const result = validationReducer(
