@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-30T10:54:38Z
+# Last edited: 2026-06-30T11:41:59Z
 # --- END GENERATED FILE METADATA ---
 
 """Database source adapters — streaming cursors only, no heavy source-side computation."""
