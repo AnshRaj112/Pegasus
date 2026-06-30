@@ -87,8 +87,22 @@ export function resolveOverviewPreviewStatus(input: {
   }
 
   const cache = input.cache;
-  const cacheHit = cache?.sourceKey === sourceKey && cache?.targetKey === targetKey
-    && !cache?.sourceError && !cache?.targetError;
+  const keysMatch = cache?.sourceKey === sourceKey && cache?.targetKey === targetKey;
+
+  if (keysMatch && (cache?.sourceError || cache?.targetError)) {
+    const parts: string[] = [];
+    if (cache?.sourceError) parts.push('source');
+    if (cache?.targetError) parts.push('target');
+    return {
+      kind: 'tabular',
+      loading: false,
+      ready: false,
+      error: `Could not profile ${parts.join(' and ')} file(s). Check GCS connection and retry.`,
+      sessionKey,
+    };
+  }
+
+  const cacheHit = keysMatch && !cache?.sourceError && !cache?.targetError;
 
   if (!cache || !cacheHit) {
     return { kind: 'tabular', loading: true, ready: false, error: null, sessionKey };

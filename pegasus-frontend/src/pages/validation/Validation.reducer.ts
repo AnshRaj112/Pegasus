@@ -31,6 +31,16 @@ const shouldClearOverviewCache = (
   return false;
 };
 
+const shouldClearColumnMappings = (
+  prev: ValidationFormState,
+  patch: Partial<ValidationFormState>,
+): boolean => {
+  if (patch.hasHeader !== undefined && patch.hasHeader !== prev.hasHeader) {
+    return true;
+  }
+  return false;
+};
+
 const shouldResetFixedWidthLayout = (
   prev: ValidationFormState,
   patch: Partial<ValidationFormState>,
@@ -129,9 +139,18 @@ const validationSlice = createSlice({
           fixedWidthLineWidth: null,
         }
         : {};
+      const clearedMappings = shouldClearColumnMappings(state.validationForm, action.payload)
+        && action.payload.columnMappings === undefined
+        ? { columnMappings: [] as ValidationFormState['columnMappings'] }
+        : {};
       return {
         ...state,
-        validationForm: { ...state.validationForm, ...action.payload, ...clearedFixedWidth },
+        validationForm: {
+          ...state.validationForm,
+          ...action.payload,
+          ...clearedFixedWidth,
+          ...clearedMappings,
+        },
         overviewProfileCache: shouldClearOverviewCache(state.validationForm, action.payload)
           ? null
           : state.overviewProfileCache,
@@ -156,6 +175,15 @@ const validationSlice = createSlice({
       },
       overviewPreviewShown: false,
       overviewPreviewSessionKey: null,
+    }),
+    retryOverviewProfiles: (state) => ({
+      ...state,
+      overviewProfileCache: null,
+      overviewProfileFetchState: initialState.overviewProfileFetchState,
+      overviewPreviewShown: false,
+      overviewPreviewSessionKey: null,
+      previewColumnsState: initialState.previewColumnsState,
+      previewFixedWidthState: initialState.previewFixedWidthState,
     }),
     setOverviewPreviewShown: (state, action: PayloadAction<{ sessionKey: string }>) => ({
       ...state,

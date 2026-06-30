@@ -79,6 +79,9 @@ export const formFromHistory = (detail: ValidationHistoryDetail): Partial<Valida
   const sourceCloud = cloudFromPath(detail.source_path);
   const targetCloud = cloudFromPath(detail.target_path);
   const isJson = (detail.delimiter ?? '').trim().toLowerCase() === 'json';
+  const mappings = (detail.column_mappings ?? []) as ColumnMapping[];
+  const looksHeaderless = detail.uid_column === 'column_1'
+    || mappings.some((m) => /^column_\d+$/.test(m.source_column));
   return {
     sourceCloud,
     targetCloud,
@@ -86,8 +89,8 @@ export const formFromHistory = (detail: ValidationHistoryDetail): Partial<Valida
     targetFileName: detail.target_filename,
     uidColumn: isJson ? (detail.uid_column || 'document') : detail.uid_column,
     delimiter: detail.delimiter || 'auto',
-    hasHeader: true,
-    columnMappings: (detail.column_mappings ?? []) as ColumnMapping[],
+    hasHeader: !looksHeaderless,
+    columnMappings: mappings,
     detectedFileFormat: isJson ? 'json' : null,
   };
 };

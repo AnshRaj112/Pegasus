@@ -231,6 +231,7 @@ const ValidationWizardView: React.FC = () => {
   const overviewPreviewPending = currentStep === 2
     && !overviewBlocksMapping
     && overviewPreviewStatus.kind !== 'skipped'
+    && !overviewPreviewStatus.error
     && (!overviewPreviewStatus.ready || !overviewPreviewSatisfied);
 
   const isFixedWidth = isFixedWidthFormat(validationForm.detectedFileFormat);

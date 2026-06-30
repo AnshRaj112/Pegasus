@@ -27,6 +27,25 @@ from pegasus.validation.file_format import infer_file_format_from_path, is_colum
 from pegasus.validation.pipeline.fingerprint import parse_identity_columns
 
 _MAPPING_PREVIEW_SAMPLE_ROWS = 6
+_MAX_PREVIEW_COLUMNS = 200
+
+
+class PreviewColumnLimitError(ValueError):
+    """Raised when parsed column count exceeds the preview safety cap."""
+
+
+def _enforce_preview_column_cap(
+    source_columns: list[str],
+    target_columns: list[str],
+    *,
+    max_columns: int = _MAX_PREVIEW_COLUMNS,
+) -> None:
+    if len(source_columns) > max_columns or len(target_columns) > max_columns:
+        raise PreviewColumnLimitError(
+            f"Too many columns for preview (max {max_columns}). "
+            f"Source has {len(source_columns)}, target has {len(target_columns)}. "
+            "Check delimiter or file format detection."
+        )
 
 
 def normalize_column_name(name: str) -> str:
@@ -49,7 +68,13 @@ def auto_map_columns(source_columns: list[str], target_columns: list[str]) -> li
 def _read_columnar_sample(path: Path, file_format: str, sample_rows: int) -> pl.DataFrame:
     fmt = normalize_file_format(file_format)
     if fmt == "parquet":
-        return pl.read_parquet(path).head(sample_rows)
+        import pyarrow.parquet as pq
+
+        pf = pq.ParquetFile(path)
+        batch = next(pf.iter_batches(max_chunksize=sample_rows), None)
+        if batch is None:
+            return pl.DataFrame()
+        return pl.from_arrow(batch.slice(0, sample_rows))
     if fmt == "orc":
         return pl.read_orc(path).head(sample_rows)
     if fmt == "avro":
@@ -165,6 +190,7 @@ def build_column_preview_from_columnar_adapters(
     sample_rows = _MAPPING_PREVIEW_SAMPLE_ROWS
     source_columns = source.get_schema().column_names
     target_columns = target.get_schema().column_names
+    _enforce_preview_column_cap(source_columns, target_columns)
     source_frame = _sample_columnar_frame(source, sample_rows=sample_rows)
     target_frame = _sample_columnar_frame(target, sample_rows=sample_rows)
 
@@ -213,6 +239,7 @@ def build_column_preview_from_adapters(
     sample_rows = _MAPPING_PREVIEW_SAMPLE_ROWS
     source_columns = source.get_schema().column_names
     target_columns = target.get_schema().column_names
+    _enforce_preview_column_cap(source_columns, target_columns)
     inferred_has_header = _infer_has_header_pair(source, target, resolved_delimiter)
     source_frame = _sample_delimited_frame(source, sample_rows=sample_rows)
     target_frame = _sample_delimited_frame(target, sample_rows=sample_rows)
@@ -272,6 +299,7 @@ def build_column_preview(
         tgt_adapter = FileColumnarAdapter(target_path, file_format=src_fmt)
         source_columns = src_adapter.get_schema().column_names
         target_columns = tgt_adapter.get_schema().column_names
+        _enforce_preview_column_cap(source_columns, target_columns)
         resolved_delimiter = src_fmt
         inferred_has_header = None
         source_frame = _read_columnar_sample(source_path, src_fmt, sample_rows)
@@ -295,6 +323,7 @@ def build_column_preview(
         )
         source_columns = src_adapter.get_schema().column_names
         target_columns = tgt_adapter.get_schema().column_names
+        _enforce_preview_column_cap(source_columns, target_columns)
         inferred_has_header = infer_csv_has_header(source_path, resolved_delimiter) and infer_csv_has_header(
             target_path, resolved_delimiter
         )

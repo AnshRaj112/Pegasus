@@ -389,7 +389,8 @@ export const ConfigureMappingStep: React.FC = () => {
     const preview = previewColumnsState.data;
 
     if (preview.inferred_has_header === false && validationForm.hasHeader) {
-      dispatch(validationActions.setValidationForm({ hasHeader: false }));
+      dispatch(validationActions.setValidationForm({ hasHeader: false, columnMappings: [] }));
+      hydratedMappingsRef.current = false;
       return;
     }
 

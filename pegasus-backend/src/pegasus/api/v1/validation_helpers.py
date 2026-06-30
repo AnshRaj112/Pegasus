@@ -645,6 +645,7 @@ async def maybe_persist_completed_job(
     run_id: uuid.UUID | None,
     run_result: ValidationRunResult,
     job_meta: dict[str, object] | None = None,
+    session_factory=AsyncSessionLocal,
 ) -> float:
     """Persist run results; return wall seconds spent in DB (0 when skipped)."""
     if not settings.enable_validation_persistence or run_id is None:
@@ -660,7 +661,7 @@ async def maybe_persist_completed_job(
     t0 = time.perf_counter()
     mappings_raw = list((job_meta or {}).get("column_mappings") or [])
     column_mappings = [m for m in mappings_raw if isinstance(m, dict)]
-    async with AsyncSessionLocal() as session:
+    async with session_factory() as session:
         run = await ValidationRunRepository.get_run(session, run_id)
         if run is None:
             return 0.0
@@ -699,15 +700,23 @@ def persist_completed_job_blocking(
         return
     import asyncio
 
-    try:
-        asyncio.run(
-            maybe_persist_completed_job(
+    from pegasus.core.database import create_isolated_async_sessionmaker
+
+    async def _run() -> None:
+        engine, session_factory = create_isolated_async_sessionmaker()
+        try:
+            await maybe_persist_completed_job(
                 settings,
                 run_id=run_id,
                 run_result=run_result,
                 job_meta=job_meta,
+                session_factory=session_factory,
             )
-        )
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(_run())
     except Exception:
         logger.exception("Synchronous mismatch persistence failed for run %s", run_id)
 

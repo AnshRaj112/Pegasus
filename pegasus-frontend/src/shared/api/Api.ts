@@ -183,6 +183,7 @@ export interface CloudFileProfileResponse {
   row_count: number;
   delimiter?: string | null;
   has_header?: boolean;
+  inferred_has_header?: boolean | null;
   json_preview?: string | null;
   archive_entry_count?: number | null;
   archive_entries_sample?: string[] | null;

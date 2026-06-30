@@ -27,6 +27,7 @@ from pegasus.validation.file_detection.types import FileDetectionReport
 from pegasus.validation.file_format import (
     infer_archive_format_from_name,
     infer_file_format_from_path,
+    is_ambiguous_tabular_suffix,
     is_archive_format,
     is_columnar_format,
     normalize_file_format,
@@ -237,6 +238,29 @@ def resolve_cloud_pair_file_format(
             raise ValueError("Source and target must both be JSON documents")
         return "json"
 
+    src_archive = resolve_gcs_archive_format(src_ref)
+    tgt_archive = resolve_gcs_archive_format(tgt_ref)
+    if src_archive or tgt_archive:
+        if src_archive != tgt_archive:
+            raise ValueError("Source and target must both be archives of the same kind")
+        if src_archive:
+            return src_archive
+
+    src_ambiguous = is_ambiguous_tabular_suffix(Path(src_ref.object_name).suffix)
+    tgt_ambiguous = is_ambiguous_tabular_suffix(Path(tgt_ref.object_name).suffix)
+    if src_ambiguous or tgt_ambiguous:
+        src_report = detect_gcs_object_format(src_ref)
+        tgt_report = detect_gcs_object_format(tgt_ref)
+        src_detected = normalize_file_format(src_report.suggested_file_format or "csv")
+        tgt_detected = normalize_file_format(tgt_report.suggested_file_format or "csv")
+        if src_detected != tgt_detected:
+            raise ValueError(
+                f"Source and target file formats differ after detection: "
+                f"source={src_detected!r}, target={tgt_detected!r}"
+            )
+        if src_detected in {"fixed-width", "csv"}:
+            return src_detected
+
     if src_ext == "json":
         return "json"
     return "csv"
@@ -397,6 +421,11 @@ def build_delimited_profile(
 
     schema = adapter.get_schema()
     column_count = len(schema.columns)
+    inferred_has_header: bool | None = None
+    if report.suggested_file_format != "fixed-width":
+        from pegasus.validation.column_preview import _infer_has_header_adapter
+
+        inferred_has_header = _infer_has_header_adapter(adapter, resolved_delimiter)
     if report.suggested_file_format == "fixed-width":
         from pegasus.validation.fixed_width_layout import build_column_previews, sample_lines_from_adapter
 
@@ -421,6 +450,7 @@ def build_delimited_profile(
         row_count=row_count,
         delimiter=resolved_delimiter,
         has_header=has_header,
+        inferred_has_header=inferred_has_header,
     )
 
 

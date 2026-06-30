@@ -84,6 +84,89 @@ def test_resolve_cloud_pair_file_format_parquet_extension() -> None:
     assert resolve_cloud_pair_file_format(source, target, declared="auto") == "parquet"
 
 
+def test_resolve_cloud_pair_file_format_declared_zip() -> None:
+    from pegasus.schemas.validation import GoogleCloudStorageConfig
+    from pegasus.validation.cloud_profile import resolve_cloud_pair_file_format
+
+    source = GoogleCloudStorageConfig(
+        bucket="b",
+        object_name="nested.tar",
+        credentials_json='{"type":"service_account"}',
+    )
+    target = GoogleCloudStorageConfig(
+        bucket="b",
+        object_name="nested.tar",
+        credentials_json='{"type":"service_account"}',
+    )
+    assert resolve_cloud_pair_file_format(source, target, declared="tar") == "tar"
+    assert resolve_cloud_pair_file_format(source, target, declared="zip") == "zip"
+
+
+def test_resolve_cloud_pair_file_format_declared_fixed_width() -> None:
+    from pegasus.schemas.validation import GoogleCloudStorageConfig
+    from pegasus.validation.cloud_profile import resolve_cloud_pair_file_format
+
+    source = GoogleCloudStorageConfig(
+        bucket="b",
+        object_name="payroll.dat",
+        credentials_json='{"type":"service_account"}',
+    )
+    target = GoogleCloudStorageConfig(
+        bucket="b",
+        object_name="payroll.dat",
+        credentials_json='{"type":"service_account"}',
+    )
+    assert resolve_cloud_pair_file_format(source, target, declared="fixed-width") == "fixed-width"
+
+
+def test_resolve_cloud_pair_file_format_dat_uses_content_detection(monkeypatch) -> None:
+    from pegasus.schemas.validation import GoogleCloudStorageConfig
+    from pegasus.validation.cloud_profile import resolve_cloud_pair_file_format
+    from pegasus.validation.file_detection.types import FileDetectionReport
+
+    def _fw_report(_ref: object) -> FileDetectionReport:
+        return FileDetectionReport(
+            path="/tmp/sample.dat",
+            file_size_bytes=128,
+            bytes_read=128,
+            dataset_model="tabular",
+            suggested_file_format="fixed-width",
+        )
+
+    monkeypatch.setattr(
+        "pegasus.validation.cloud_profile.detect_gcs_object_format",
+        _fw_report,
+    )
+
+    source = GoogleCloudStorageConfig(
+        bucket="b",
+        object_name="payroll.dat",
+        credentials_json='{"type":"service_account"}',
+    )
+    target = GoogleCloudStorageConfig(
+        bucket="b",
+        object_name="payroll.dat",
+        credentials_json='{"type":"service_account"}',
+    )
+    assert resolve_cloud_pair_file_format(source, target, declared="auto") == "fixed-width"
+
+
+def test_build_delimited_profile_includes_inferred_has_header(tmp_path) -> None:
+    path = tmp_path / "headerless.csv"
+    path.write_text("ID001,John Doe,05/19/2026\nID002,Jane Doe,06/01/2026\n", encoding="utf-8")
+    from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+
+    adapter = FileDelimitedAdapter(path, delimiter=",", has_header=True)
+    profile = build_delimited_profile(
+        adapter,
+        object_name="headerless.csv",
+        gcs_uri="gs://bucket/headerless.csv",
+        resolved_delimiter=",",
+        has_header=True,
+    )
+    assert profile.inferred_has_header is False
+
+
 def test_count_adapter_rows_from_local_file(tmp_path: Path) -> None:
     csv_path = tmp_path / "sample.csv"
     csv_path.write_text("id,name\n1,alice\n2,bob\n", encoding="utf-8")

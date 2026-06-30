@@ -70,4 +70,74 @@ describe('resolveOverviewPreviewStatus', () => {
     expect(status.loading).toBe(false);
     expect(status.ready).toBe(true);
   });
+
+  it('reports profile errors instead of loading forever', () => {
+    const sourceKey = 'c:b:a.csv';
+    const targetKey = 'c:b:b.csv';
+
+    const status = resolveOverviewPreviewStatus({
+      form: {
+        ...baseForm,
+        sourceCloud: { provider: 'google-cloud-storage', bucket: 'b', object_name: 'a.csv', connection_id: 'c' },
+        targetCloud: { provider: 'google-cloud-storage', bucket: 'b', object_name: 'b.csv', connection_id: 'c' },
+        sourceFileSize: 1024,
+        targetFileSize: 1024,
+      },
+      cache: {
+        sourceKey,
+        targetKey,
+        source: null,
+        target: mockTargetProfile,
+        sourceError: true,
+        targetError: false,
+      },
+      previewColumnsState: initialState.previewColumnsState,
+      previewFixedWidthState: initialState.previewFixedWidthState,
+    });
+
+    expect(status.loading).toBe(false);
+    expect(status.ready).toBe(false);
+    expect(status.error).toMatch(/Could not profile/);
+  });
+
+  it('reports archive metadata-only preview as ready without column preview', () => {
+    const sourceKey = 'c:b:bundle.zip';
+    const targetKey = 'c:b:bundle2.zip';
+
+    const status = resolveOverviewPreviewStatus({
+      form: {
+        ...baseForm,
+        sourceCloud: { provider: 'google-cloud-storage', bucket: 'b', object_name: 'bundle.zip', connection_id: 'c' },
+        targetCloud: { provider: 'google-cloud-storage', bucket: 'b', object_name: 'bundle2.zip', connection_id: 'c' },
+        sourceFileSize: 1024,
+        targetFileSize: 1024,
+        detectedFileFormat: 'zip',
+      },
+      cache: {
+        sourceKey,
+        targetKey,
+        source: {
+          ...mockSourceProfile,
+          suggested_file_format: 'zip',
+          dataset_model: 'container',
+          archive_entries_sample: ['META-INF/MANIFEST.MF'],
+          file_format: 'zip',
+        },
+        target: {
+          ...mockTargetProfile,
+          suggested_file_format: 'zip',
+          dataset_model: 'container',
+          archive_entries_sample: ['META-INF/MANIFEST.MF'],
+          file_format: 'zip',
+        },
+        sourceError: false,
+        targetError: false,
+      },
+      previewColumnsState: initialState.previewColumnsState,
+      previewFixedWidthState: initialState.previewFixedWidthState,
+    });
+
+    expect(status.kind).toBe('archive');
+    expect(status.ready).toBe(true);
+  });
 });

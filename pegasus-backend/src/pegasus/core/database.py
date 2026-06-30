@@ -7,7 +7,12 @@
 
 from collections.abc import AsyncIterator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from pegasus.core.config import get_settings
 from pegasus.core.database_url import (
@@ -44,6 +49,40 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,
     autocommit=False,
 )
+
+
+def create_isolated_async_sessionmaker(
+    *,
+    echo: bool | None = None,
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+    """Return a dedicated engine + session factory for ``asyncio.run()`` callers.
+
+    Validation workers call ``asyncio.run()`` after each job. Reusing the module-level
+    async engine across closed event loops leaves asyncpg connections bound to the
+    wrong loop, so worker-side persistence must use a fresh engine per run.
+    """
+    settings = get_settings()
+    database_url = resolve_database_url()
+    database_schema = resolve_database_schema()
+    connect_args: dict[str, object] = {}
+    if database_schema:
+        connect_args["server_settings"] = {
+            "search_path": postgres_search_path(database_schema),
+        }
+    isolated_engine = create_async_engine(
+        database_url,
+        echo=settings.debug if echo is None else echo,
+        pool_pre_ping=True,
+        connect_args=connect_args,
+    )
+    session_factory = async_sessionmaker(
+        isolated_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        autocommit=False,
+    )
+    return isolated_engine, session_factory
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:

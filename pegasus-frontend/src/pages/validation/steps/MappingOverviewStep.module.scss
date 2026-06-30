@@ -228,3 +228,14 @@
   margin: 0;
   font-size: 0.8125rem;
 }
+
+.retryBtn {
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  border: 1px solid tokens.$outline-variant;
+  border-radius: 4px;
+  background: tokens.$surface-container-lowest;
+  color: tokens.$on-surface-variant;
+}

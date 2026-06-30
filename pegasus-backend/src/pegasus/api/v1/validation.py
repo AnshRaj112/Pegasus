@@ -942,10 +942,10 @@ async def validate_csv_local_paths(
             )
         except ValueError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        if file_format == "fixed-width":
+        if file_format == "fixed-width" and body.fixed_width_config is None:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
-                detail="Use POST /validate/local/fixed-width-layout for fixed-width files",
+                detail="fixed_width_config is required when file_format is fixed-width",
             )
         if is_columnar_format(file_format):
             source_input = resolve_columnar_input(

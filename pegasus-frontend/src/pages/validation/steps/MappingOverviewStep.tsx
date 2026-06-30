@@ -181,6 +181,7 @@ export const MappingOverviewStep: React.FC = () => {
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const autoPreviewedRef = useRef<string | null>(null);
+  const [archiveTabularPreviewFailed, setArchiveTabularPreviewFailed] = useState(false);
 
   const sourceKey = cloudObjectKey(form.sourceCloud);
   const targetKey = cloudObjectKey(form.targetCloud);
@@ -218,15 +219,15 @@ export const MappingOverviewStep: React.FC = () => {
     profileLooksArchive(sourceProfile.profile, form.sourceFileName)
     && profileLooksArchive(targetProfile.profile, form.targetFileName)
   );
-  const isArchiveTabular = isArchiveContainer && archiveUsesTabularValidation({
+  const wantsArchiveTabular = isArchiveContainer && archiveUsesTabularValidation({
     detectedFileFormat: form.detectedFileFormat,
     sourceFileName: form.sourceFileName,
     targetFileName: form.targetFileName,
     sourceProfile: sourceProfile.profile,
     targetProfile: targetProfile.profile,
   });
-  const isArchive = isArchiveContainer && !isArchiveTabular;
-  const isArchiveMetadataOnly = isArchive;
+  const isArchiveTabular = wantsArchiveTabular && !archiveTabularPreviewFailed;
+  const isArchiveMetadataOnly = isArchiveContainer && !isArchiveTabular;
 
   const fixedWidthPreviewData = previewFixedWidthState.pairKey === fixedWidthPairKey
     ? previewFixedWidthState.data
@@ -258,7 +259,80 @@ export const MappingOverviewStep: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!isArchive || isFetching) return;
+    setArchiveTabularPreviewFailed(false);
+  }, [sourceKey, targetKey]);
+
+  useEffect(() => {
+    if (!cacheHit || isFetching || isFixedWidth || isJson || isArchiveContainer) return;
+    const srcInfer = sourceProfile.profile?.inferred_has_header;
+    const tgtInfer = targetProfile.profile?.inferred_has_header;
+    if ((srcInfer === false || tgtInfer === false) && form.hasHeader) {
+      dispatch(validationActions.setValidationForm({ hasHeader: false, columnMappings: [] }));
+    }
+  }, [
+    cacheHit,
+    isFetching,
+    isFixedWidth,
+    isJson,
+    isArchiveContainer,
+    sourceProfile.profile,
+    targetProfile.profile,
+    form.hasHeader,
+    dispatch,
+  ]);
+
+  useEffect(() => {
+    if (!wantsArchiveTabular || previewLoading || !previewError || archiveTabularPreviewFailed) return;
+    setArchiveTabularPreviewFailed(true);
+    const kind = resolveWizardArchiveMode({
+      detectedFileFormat: form.detectedFileFormat,
+      sourceFileName: form.sourceFileName,
+      targetFileName: form.targetFileName,
+      sourceProfile: sourceProfile.profile,
+      targetProfile: targetProfile.profile,
+    });
+    if (kind) {
+      dispatch(validationActions.setValidationForm({
+        detectedFileFormat: kind,
+        columnMappings: [],
+      }));
+    }
+  }, [
+    wantsArchiveTabular,
+    previewLoading,
+    previewError,
+    archiveTabularPreviewFailed,
+    dispatch,
+    form.detectedFileFormat,
+    form.sourceFileName,
+    form.targetFileName,
+    sourceProfile.profile,
+    targetProfile.profile,
+  ]);
+
+  useEffect(() => {
+    if (!previewData || isFixedWidth || isJson || isArchiveMetadataOnly) return;
+    const srcCols = previewData.source_columns;
+    const tgtCols = previewData.target_columns;
+    if (!srcCols.length) return;
+
+    const currentUid = form.uidColumn || 'id';
+    const uidInBoth = srcCols.includes(currentUid) && tgtCols.includes(currentUid);
+    if (uidInBoth) return;
+
+    let nextUid: string | null = null;
+    if (srcCols.includes('column_1') && tgtCols.includes('column_1')) {
+      nextUid = 'column_1';
+    } else {
+      nextUid = srcCols.find((col) => tgtCols.includes(col)) ?? srcCols[0] ?? null;
+    }
+    if (nextUid && nextUid !== form.uidColumn) {
+      dispatch(validationActions.setValidationForm({ uidColumn: nextUid }));
+    }
+  }, [previewData, isFixedWidth, isJson, isArchiveMetadataOnly, form.uidColumn, dispatch]);
+
+  useEffect(() => {
+    if (!isArchiveMetadataOnly || isFetching) return;
     const kind = resolveWizardArchiveMode({
       detectedFileFormat: form.detectedFileFormat,
       sourceFileName: form.sourceFileName,
@@ -271,7 +345,7 @@ export const MappingOverviewStep: React.FC = () => {
       detectedFileFormat: kind,
       columnMappings: [],
     }));
-  }, [isArchive, isFetching, dispatch, form.detectedFileFormat, form.sourceFileName, form.targetFileName, sourceProfile.profile, targetProfile.profile]);
+  }, [isArchiveMetadataOnly, isFetching, dispatch, form.detectedFileFormat, form.sourceFileName, form.targetFileName, sourceProfile.profile, targetProfile.profile]);
 
   useEffect(() => {
     if (!isJson || isFetching) return;
@@ -521,6 +595,15 @@ export const MappingOverviewStep: React.FC = () => {
         blocksMapping: false,
       };
     }
+    if (sourceProfile.error || targetProfile.error) {
+      return {
+        status: 'error' as const,
+        title: 'Profile failed',
+        message: 'Could not read file metadata from GCS. Check your connection and retry.',
+        mismatches: { size: false, columns: false, rows: false },
+        blocksMapping: true,
+      };
+    }
     if (previewError && !isJson && !isArchiveMetadataOnly && !isFixedWidth) {
       return {
         status: 'error' as const,
@@ -581,6 +664,13 @@ export const MappingOverviewStep: React.FC = () => {
   };
 
   const alert = runComparison();
+
+  const handleRetryProfile = () => {
+    dispatch(validationActions.retryOverviewProfiles());
+    if (sourceKey && targetKey) {
+      dispatch(validationActions.profileCloudFilesRequest({ sourceKey, targetKey }));
+    }
+  };
 
   const alertClass = alert.status === 'success'
     ? styles.alertSuccess
@@ -647,6 +737,16 @@ export const MappingOverviewStep: React.FC = () => {
         <div>
           <h5 className={styles.alertTitle}>{alert.title}</h5>
           <p className={styles.alertMessage}>{alert.message}</p>
+          {archiveTabularPreviewFailed && (
+            <p className={styles.alertMessage}>
+              Tabular preview inside the archive failed; continuing with metadata-only archive validation.
+            </p>
+          )}
+          {(sourceProfile.error || targetProfile.error) && (
+            <button type="button" className={styles.retryBtn} onClick={handleRetryProfile}>
+              Retry profile
+            </button>
+          )}
         </div>
       </div>
     </div>

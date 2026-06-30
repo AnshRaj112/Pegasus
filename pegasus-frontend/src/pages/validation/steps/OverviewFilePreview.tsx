@@ -44,6 +44,15 @@ const maxSampleRows = (
 ): number =>
   columns.reduce((max, col) => Math.max(max, samples[col]?.length ?? 0), 0);
 
+const MAX_RENDER_COLUMNS = 50;
+
+const capColumns = (columns: string[]): { visible: string[]; hiddenCount: number } => {
+  if (columns.length <= MAX_RENDER_COLUMNS) {
+    return { visible: columns, hiddenCount: 0 };
+  }
+  return { visible: columns.slice(0, MAX_RENDER_COLUMNS), hiddenCount: columns.length - MAX_RENDER_COLUMNS };
+};
+
 type OverviewFilePreviewProps = {
   open: boolean;
   preview: LocalColumnPreviewResponse | null;
@@ -68,21 +77,23 @@ export const OverviewFilePreview: React.FC<OverviewFilePreviewProps> = ({
 
   const sourceColumns = preview?.source_columns ?? [];
   const targetColumns = preview?.target_columns ?? [];
+  const cappedSource = useMemo(() => capColumns(sourceColumns), [sourceColumns]);
+  const cappedTarget = useMemo(() => capColumns(targetColumns), [targetColumns]);
   const rowCount = preview
     ? Math.max(
       preview.sample_row_count ?? 0,
-      maxSampleRows(sourceColumns, preview.source_samples ?? {}),
-      maxSampleRows(targetColumns, preview.target_samples ?? {}),
+      maxSampleRows(cappedSource.visible, preview.source_samples ?? {}),
+      maxSampleRows(cappedTarget.visible, preview.target_samples ?? {}),
     )
     : 0;
 
   const sourceRows = useMemo(
-    () => buildDataRows(sourceColumns, preview?.source_samples ?? {}, rowCount),
-    [sourceColumns, preview?.source_samples, rowCount],
+    () => buildDataRows(cappedSource.visible, preview?.source_samples ?? {}, rowCount),
+    [cappedSource.visible, preview?.source_samples, rowCount],
   );
   const targetRows = useMemo(
-    () => buildDataRows(targetColumns, preview?.target_samples ?? {}, rowCount),
-    [targetColumns, preview?.target_samples, rowCount],
+    () => buildDataRows(cappedTarget.visible, preview?.target_samples ?? {}, rowCount),
+    [cappedTarget.visible, preview?.target_samples, rowCount],
   );
 
   const handleSourceScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -188,10 +199,18 @@ export const OverviewFilePreview: React.FC<OverviewFilePreviewProps> = ({
         </div>
       )}
 
+      {(cappedSource.hiddenCount > 0 || cappedTarget.hiddenCount > 0) && (
+        <div className={styles.errorBanner}>
+          Showing first {MAX_RENDER_COLUMNS} columns only
+          {cappedSource.hiddenCount > 0 ? ` (source: +${cappedSource.hiddenCount} more)` : ''}
+          {cappedTarget.hiddenCount > 0 ? ` (target: +${cappedTarget.hiddenCount} more)` : ''}.
+        </div>
+      )}
+
       <div className={styles.panelsRow}>
         {renderTable(
           'source',
-          sourceColumns,
+          cappedSource.visible,
           sourceRows,
           sourceRef,
           handleSourceScroll,
@@ -201,7 +220,7 @@ export const OverviewFilePreview: React.FC<OverviewFilePreviewProps> = ({
         )}
         {renderTable(
           'target',
-          targetColumns,
+          cappedTarget.visible,
           targetRows,
           targetRef,
           handleTargetScroll,

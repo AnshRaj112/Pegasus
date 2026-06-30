@@ -984,6 +984,10 @@ class CloudFileProfileResponse(BaseModel):
     row_count: int = Field(ge=0)
     delimiter: str | None = None
     has_header: bool = True
+    inferred_has_header: bool | None = Field(
+        default=None,
+        description="Content-inferred header row presence (delimited files only).",
+    )
     json_preview: str | None = Field(
         default=None,
         description="Pretty-printed JSON prefix for overview preview (JSON documents only).",
