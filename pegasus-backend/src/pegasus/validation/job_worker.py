@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-30T10:36:49Z
+# Last edited: 2026-06-30T17:07:36+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Subprocess / pool entrypoint: run one validation job from files under *job_dir*."""
@@ -139,9 +139,14 @@ def _resolve_mismatch_lookup_inputs(
     tgt: object,
     result: ValidationRunResult,
 ) -> tuple[object, object]:
-    """Use extracted CSV paths for nested archive tabular validation."""
+    """Use extracted leaf paths for nested archive content validation."""
     meta = getattr(result, "pipeline_metadata", None) or {}
-    if meta.get("path") != "archive_tabular_leaf":
+    path_kind = meta.get("path")
+    if path_kind not in {
+        "archive_tabular_leaf",
+        "archive_json_leaf",
+        "archive_fixed_width_leaf",
+    }:
         return src, tgt
     src_leaf = meta.get("source_leaf_local")
     tgt_leaf = meta.get("target_leaf_local")
@@ -595,6 +600,8 @@ def _run_job_body(
                 mismatch_snippet_limit=mismatch_snippet_limit,
             )
         elif file_format in _ARCHIVE_FORMATS or is_archive_format(file_format):
+            raw_fw = meta.get("fixed_width_config")
+            archive_fw = raw_fw if isinstance(raw_fw, dict) else None
             result = service.validate_archive_pair_sync(
                 src,
                 tgt,
@@ -611,6 +618,8 @@ def _run_job_body(
                 header_leading_rows=header_leading_rows,
                 progress_callback=_progress_cb,
                 resource_policy=resource_policy,
+                fixed_width_config=archive_fw,
+                json_order_sensitive=bool(meta.get("json_order_sensitive", False)),
             )
         elif file_format in _COLUMNAR_FORMATS:
             result = service.validate_columnar_pair_sync(

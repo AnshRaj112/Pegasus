@@ -16,7 +16,7 @@ describe('ConfigureMappingStep', () => {
       preloadedState: { validation: validationStateStep3Ready },
     })
 
-    expect(screen.getByRole('heading', { name: 'Pegasus_Data_Mapping' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Pegasus Column Mapping' })).toBeInTheDocument()
     expect(screen.getByText(/Source:/)).toBeInTheDocument()
     expect(screen.getByText(/Target:/)).toBeInTheDocument()
     expect(screen.getByText('gs://test-bucket/data/source.csv')).toBeInTheDocument()

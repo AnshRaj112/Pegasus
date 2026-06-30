@@ -1,4 +1,5 @@
 import type { CloudFileProfileResponse } from '../../shared/api/Api';
+import { isFixedWidthFormat } from './fixedWidthFormat';
 
 const ARCHIVE_KINDS = new Set(['zip', 'tar', '7z', 'rar']);
 const CHAIN_SEP = /\s*->\s*/;
@@ -41,9 +42,22 @@ export const archiveKindFromProfile = (
   return null;
 };
 
+const JSON_LEAF_SUFFIXES = /\.(json|ndjson)$/i;
 const TABULAR_LEAF_SUFFIXES = /\.(csv|tsv|psv|txt|dat)$/i;
 
-const formatChainHasTabularLeaf = (format: string | null | undefined): boolean => {
+const formatChainHasJsonLeaf = (format: string | null | undefined): boolean => {
+  const chain = parseFormatChain(format);
+  return chain.some((segment) => {
+    const normalized = segment.toLowerCase().replace(/_/g, '-');
+    return normalized === 'json' || normalized === 'ndjson';
+  });
+};
+
+const formatChainHasFixedWidthLeaf = (format: string | null | undefined): boolean =>
+  isFixedWidthFormat(format);
+
+const formatChainHasDelimitedTabularLeaf = (format: string | null | undefined): boolean => {
+  if (formatChainHasJsonLeaf(format) || formatChainHasFixedWidthLeaf(format)) return false;
   const chain = parseFormatChain(format);
   return chain.some((segment) => {
     const normalized = segment.toLowerCase().replace(/_/g, '-');
@@ -51,16 +65,79 @@ const formatChainHasTabularLeaf = (format: string | null | undefined): boolean =
   });
 };
 
+export const archiveHasJsonLeaf = (
+  profile: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format'> | null | undefined,
+): boolean => {
+  if (formatChainHasJsonLeaf(profile?.file_format)) return true;
+  const sample = profile?.archive_entries_sample;
+  if (!sample?.length) return false;
+  return sample.some((path) => JSON_LEAF_SUFFIXES.test(path.split('/').pop() ?? ''));
+};
+
+export const archiveHasFixedWidthLeaf = (
+  profile: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format'> | null | undefined,
+): boolean => {
+  if (formatChainHasFixedWidthLeaf(profile?.file_format)) return true;
+  const sample = profile?.archive_entries_sample;
+  if (!sample?.length) return false;
+  return sample.some((path) => /\.fw$/i.test(path.split('/').pop() ?? ''));
+};
+
 export const archiveHasTabularLeaf = (
   profile: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format'> | null | undefined,
 ): boolean => {
-  const sample = profile?.archive_entries_sample;
-  if (sample?.length) {
-    if (sample.some((path) => TABULAR_LEAF_SUFFIXES.test(path.split('/').pop() ?? ''))) {
-      return true;
-    }
+  if (formatChainHasJsonLeaf(profile?.file_format) || formatChainHasFixedWidthLeaf(profile?.file_format)) {
+    return false;
   }
-  return formatChainHasTabularLeaf(profile?.file_format);
+  if (formatChainHasDelimitedTabularLeaf(profile?.file_format)) {
+    return true;
+  }
+  const sample = profile?.archive_entries_sample;
+  if (!sample?.length) return false;
+  if (sample.some((path) => TABULAR_LEAF_SUFFIXES.test(path.split('/').pop() ?? ''))) {
+    return true;
+  }
+  return false;
+};
+
+const archivePairHasInnerLeaf = (
+  input: {
+    sourceProfile?: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format'> | null;
+    targetProfile?: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format'> | null;
+  },
+  predicate: (profile: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format'> | null | undefined) => boolean,
+): boolean => predicate(input.sourceProfile) && predicate(input.targetProfile);
+
+export const archiveUsesJsonValidation = (input: {
+  sourceProfile?: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format' | 'suggested_file_format' | 'dataset_model' | 'object_name'> | null;
+  targetProfile?: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format' | 'suggested_file_format' | 'dataset_model' | 'object_name'> | null;
+  sourceFileName?: string | null;
+  targetFileName?: string | null;
+  detectedFileFormat?: string | null | undefined;
+}): boolean => {
+  if (!resolveWizardArchiveMode(input)) return false;
+  return archivePairHasInnerLeaf(input, archiveHasJsonLeaf);
+};
+
+export const archiveMayBeFixedWidth = (
+  profile: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format'> | null | undefined,
+): boolean => {
+  if (archiveHasFixedWidthLeaf(profile)) return true;
+  if (formatChainHasJsonLeaf(profile?.file_format)) return false;
+  const sample = profile?.archive_entries_sample;
+  if (!sample?.length) return false;
+  return sample.some((path) => /\.(txt|dat|fw)$/i.test(path.split('/').pop() ?? ''));
+};
+
+export const archiveUsesFixedWidthValidation = (input: {
+  sourceProfile?: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format' | 'suggested_file_format' | 'dataset_model' | 'object_name'> | null;
+  targetProfile?: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format' | 'suggested_file_format' | 'dataset_model' | 'object_name'> | null;
+  sourceFileName?: string | null;
+  targetFileName?: string | null;
+  detectedFileFormat?: string | null | undefined;
+}): boolean => {
+  if (!resolveWizardArchiveMode(input)) return false;
+  return archivePairHasInnerLeaf(input, archiveMayBeFixedWidth);
 };
 
 export const archiveUsesTabularValidation = (input: {
@@ -70,15 +147,8 @@ export const archiveUsesTabularValidation = (input: {
   targetFileName?: string | null;
   detectedFileFormat?: string | null | undefined;
 }): boolean => {
-  const kind = resolveWizardArchiveMode({
-    detectedFileFormat: input.detectedFileFormat ?? null,
-    sourceFileName: input.sourceFileName,
-    targetFileName: input.targetFileName,
-    sourceProfile: input.sourceProfile,
-    targetProfile: input.targetProfile,
-  });
-  if (!kind) return false;
-  return archiveHasTabularLeaf(input.sourceProfile) && archiveHasTabularLeaf(input.targetProfile);
+  if (!resolveWizardArchiveMode(input)) return false;
+  return archivePairHasInnerLeaf(input, archiveHasTabularLeaf);
 };
 
 export const archiveKindFromFileName = (fileName: string | null | undefined): 'zip' | 'tar' | null => {
@@ -99,7 +169,7 @@ export const profileLooksArchive = (
 };
 
 export const resolveWizardArchiveMode = (input: {
-  detectedFileFormat: string | null | undefined;
+  detectedFileFormat?: string | null | undefined;
   sourceFileName?: string | null;
   targetFileName?: string | null;
   sourceProfile?: Pick<CloudFileProfileResponse, 'suggested_file_format' | 'file_format' | 'dataset_model' | 'object_name'> | null;
@@ -117,3 +187,15 @@ export const resolveWizardArchiveMode = (input: {
   }
   return null;
 };
+
+/** True when archive containers hold typed inner content (not metadata-only). */
+export const archiveHasTypedInnerContent = (input: {
+  sourceProfile?: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format' | 'suggested_file_format' | 'dataset_model' | 'object_name'> | null;
+  targetProfile?: Pick<CloudFileProfileResponse, 'archive_entries_sample' | 'file_format' | 'suggested_file_format' | 'dataset_model' | 'object_name'> | null;
+  sourceFileName?: string | null;
+  targetFileName?: string | null;
+  detectedFileFormat?: string | null | undefined;
+}): boolean =>
+  archiveUsesJsonValidation(input)
+  || archiveUsesFixedWidthValidation(input)
+  || archiveUsesTabularValidation(input);

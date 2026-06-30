@@ -140,4 +140,46 @@ describe('resolveOverviewPreviewStatus', () => {
     expect(status.kind).toBe('archive');
     expect(status.ready).toBe(true);
   });
+
+  it('reports json preview ready for archives with JSON leaves', () => {
+    const sourceKey = 'c:b:bundle.zip';
+    const targetKey = 'c:b:bundle2.zip';
+
+    const status = resolveOverviewPreviewStatus({
+      form: {
+        ...baseForm,
+        sourceCloud: { provider: 'google-cloud-storage', bucket: 'b', object_name: 'bundle.zip', connection_id: 'c' },
+        targetCloud: { provider: 'google-cloud-storage', bucket: 'b', object_name: 'bundle2.zip', connection_id: 'c' },
+        sourceFileSize: 1024,
+        targetFileSize: 1024,
+      },
+      cache: {
+        sourceKey,
+        targetKey,
+        source: {
+          ...mockSourceProfile,
+          suggested_file_format: 'zip',
+          dataset_model: 'container',
+          archive_entries_sample: ['data.json'],
+          file_format: 'zip -> json',
+          json_preview: '{\n  "id": 1\n}',
+        },
+        target: {
+          ...mockTargetProfile,
+          suggested_file_format: 'zip',
+          dataset_model: 'container',
+          archive_entries_sample: ['data.json'],
+          file_format: 'zip -> json',
+          json_preview: '{\n  "id": 1\n}',
+        },
+        sourceError: false,
+        targetError: false,
+      },
+      previewColumnsState: initialState.previewColumnsState,
+      previewFixedWidthState: initialState.previewFixedWidthState,
+    });
+
+    expect(status.kind).toBe('json');
+    expect(status.ready).toBe(true);
+  });
 });

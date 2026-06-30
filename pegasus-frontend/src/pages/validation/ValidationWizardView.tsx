@@ -23,7 +23,7 @@ import { dispatchOverviewProfileFetch } from './overviewPrefetch';
 import { FileSelectionStep } from './steps/FileSelectionStep';
 import { MappingOverviewStep } from './steps/MappingOverviewStep';
 import { ConfigureMappingStep } from './steps/ConfigureMappingStep';
-import { resolveWizardArchiveMode, archiveUsesTabularValidation } from './archiveFormat';
+import { resolveWizardArchiveMode, archiveUsesTabularValidation, archiveUsesJsonValidation, archiveUsesFixedWidthValidation } from './archiveFormat';
 import { isFixedWidthFormat } from './fixedWidthFormat';
 import { resolveWizardJsonMode } from './jsonFormat';
 
@@ -240,7 +240,9 @@ const ValidationWizardView: React.FC = () => {
     && !overviewPreviewStatus.error
     && (!overviewPreviewStatus.ready || !overviewPreviewSatisfied);
 
-  const isFixedWidth = isFixedWidthFormat(validationForm.detectedFileFormat);
+  const isFixedWidth = isFixedWidthFormat(validationForm.detectedFileFormat)
+    || isFixedWidthFormat(overviewCache?.source?.file_format)
+    || isFixedWidthFormat(overviewCache?.target?.file_format);
   const isJson = resolveWizardJsonMode({
     detectedFileFormat: validationForm.detectedFileFormat,
     sourceFileName: validationForm.sourceFileName,
@@ -256,6 +258,18 @@ const ValidationWizardView: React.FC = () => {
     targetProfile: overviewCache?.target,
   }));
   const isArchiveMetadataOnly = isArchive && !archiveUsesTabularValidation({
+    detectedFileFormat: validationForm.detectedFileFormat,
+    sourceFileName: validationForm.sourceFileName,
+    targetFileName: validationForm.targetFileName,
+    sourceProfile: overviewCache?.source,
+    targetProfile: overviewCache?.target,
+  }) && !archiveUsesJsonValidation({
+    detectedFileFormat: validationForm.detectedFileFormat,
+    sourceFileName: validationForm.sourceFileName,
+    targetFileName: validationForm.targetFileName,
+    sourceProfile: overviewCache?.source,
+    targetProfile: overviewCache?.target,
+  }) && !archiveUsesFixedWidthValidation({
     detectedFileFormat: validationForm.detectedFileFormat,
     sourceFileName: validationForm.sourceFileName,
     targetFileName: validationForm.targetFileName,
@@ -305,12 +319,6 @@ const ValidationWizardView: React.FC = () => {
 
     if (currentStep === 2) {
       if (!runId || overviewBlocksMapping) return;
-      if (overviewIsJson) {
-        dispatch(validationActions.setValidationForm({
-          detectedFileFormat: 'json',
-          delimiter: 'json',
-        }));
-      }
       const archiveKind = resolveWizardArchiveMode({
         detectedFileFormat: validationForm.detectedFileFormat,
         sourceFileName: validationForm.sourceFileName,
@@ -318,7 +326,19 @@ const ValidationWizardView: React.FC = () => {
         sourceProfile: overviewCache?.source,
         targetProfile: overviewCache?.target,
       });
-      if (archiveKind) {
+      if (overviewIsJson) {
+        dispatch(validationActions.setValidationForm({
+          detectedFileFormat: 'json',
+          delimiter: 'json',
+        }));
+      } else if (overviewIsFixedWidth) {
+        const label = overviewCache?.source?.file_format
+          ?? overviewCache?.target?.file_format
+          ?? 'fixed-width';
+        dispatch(validationActions.setValidationForm({
+          detectedFileFormat: label,
+        }));
+      } else if (archiveKind) {
         const archiveTabular = archiveUsesTabularValidation({
           detectedFileFormat: validationForm.detectedFileFormat,
           sourceFileName: validationForm.sourceFileName,

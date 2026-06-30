@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-30T10:36:49Z
+# Last edited: 2026-06-30T17:07:36+05:30
 # --- END GENERATED FILE METADATA ---
 
 """Validation service — routes tabular full validation through Category-1 pipeline."""
@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -273,7 +275,11 @@ class ValidationService:
             target, delimiter=sep, has_header=has_header, skip_rows=header_leading_rows
         )
 
-        from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter, prefetch_gcs_delimited_pair
+        from pegasus.validation.adapters.gcs_delimited import (
+            GcsDelimitedAdapter,
+            materialize_gcs_delimited_pair,
+            prefetch_gcs_delimited_pair,
+        )
         from pegasus.validation.lifecycle_profiler import get_active_profiler, lifecycle_span
 
         needs_warm = any(
@@ -288,6 +294,70 @@ class ValidationService:
         if needs_warm:
             with lifecycle_span("GCS Prefetch"):
                 prefetch_gcs_delimited_pair(source, target)
+
+        gcs_materialize_dir: Path | None = None
+        owns_gcs_materialize_dir = False
+        materialized_from_gcs = False
+        if self._settings.validation_gcs_materialize_for_reconcile and any(
+            isinstance(adapter, GcsDelimitedAdapter) for adapter in (source, target)
+        ):
+            if artifact_export_parent is not None:
+                gcs_materialize_dir = artifact_export_parent / "gcs_materialized"
+            else:
+                gcs_materialize_dir = Path(tempfile.mkdtemp(prefix="pegasus-gcs-materialize-"))
+                owns_gcs_materialize_dir = True
+            with lifecycle_span("GCS Materialize"):
+                source, target = materialize_gcs_delimited_pair(
+                    source,
+                    target,
+                    work_dir=gcs_materialize_dir,
+                )
+            materialized_from_gcs = True
+
+        try:
+            return self._run_delimited_reconciliation(
+                source=source,
+                target=target,
+                uid_column=uid_column,
+                column_mappings=column_mappings,
+                source_label=source_label,
+                target_label=target_label,
+                artifact_export_parent=artifact_export_parent,
+                progress_callback=progress_callback,
+                has_header=has_header,
+                header_leading_rows=header_leading_rows,
+                file_format=file_format,
+                resource_policy=resource_policy,
+                test_mode=test_mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
+                sep=sep,
+                materialized_from_gcs=materialized_from_gcs,
+            )
+        finally:
+            if owns_gcs_materialize_dir and gcs_materialize_dir is not None:
+                shutil.rmtree(gcs_materialize_dir, ignore_errors=True)
+
+    def _run_delimited_reconciliation(
+        self,
+        *,
+        source: FileDelimitedAdapter | GcsDelimitedAdapter,
+        target: FileDelimitedAdapter | GcsDelimitedAdapter,
+        uid_column: str,
+        column_mappings: list[ColumnMapping] | None,
+        source_label: str,
+        target_label: str,
+        artifact_export_parent: Path | None,
+        progress_callback: Callable[[dict[str, Any]], None] | None,
+        has_header: bool,
+        header_leading_rows: int,
+        file_format: str,
+        resource_policy: dict[str, Any] | None,
+        test_mode: ValidationTestMode,
+        mismatch_snippet_limit: int | None,
+        sep: str,
+        materialized_from_gcs: bool = False,
+    ) -> ValidationRunResult:
+        from pegasus.validation.lifecycle_profiler import get_active_profiler, lifecycle_span
 
         with lifecycle_span("Schema And Planning"):
             schema = source.get_schema()
@@ -309,7 +379,9 @@ class ValidationService:
             mismatch_snippet_limit=mismatch_snippet_limit,
             compare_column_count=len(compare_columns),
         )
-        if collection_policy.fail_on_row_count_mismatch:
+        combined_bytes = source.get_size_bytes() + target.get_size_bytes()
+        defer_row_count_litmus = combined_bytes > 32 * 1024 * 1024
+        if collection_policy.fail_on_row_count_mismatch and not defer_row_count_litmus:
             source_count = int(source.get_row_count() or 0)
             target_count = int(target.get_row_count() or 0)
             if source_count != target_count:
@@ -328,12 +400,19 @@ class ValidationService:
             collection_policy=collection_policy,
         )
         cfg.compare_policy = compare_policy
+        if materialized_from_gcs:
+            # GCS objects are on local disk now — use mmap/native spill (disk-heavy, low RAM).
+            cfg.force_disk_spill = True
+            cfg.enable_in_memory_reconcile = False
+            cfg.enable_column_drilldown = False
+            cfg.lazy_column_drilldown = False
+            cfg.fingerprint_only_spill = True
+            cfg.streaming_spill_min_bytes = 0
         if artifact_export_parent is not None:
             cfg.distributed_job_id = str(artifact_export_parent.name)
-        combined_bytes = source.get_size_bytes() + target.get_size_bytes()
         logger.info(
             "reconciliation delimiter=%r source_bytes=%s target_bytes=%s in_memory=%s "
-            "chunk_rows=%s partitions=%s reconcile_workers=%s",
+            "chunk_rows=%s partitions=%s reconcile_workers=%s materialized_from_gcs=%s",
             sep,
             source.get_size_bytes(),
             target.get_size_bytes(),
@@ -342,6 +421,7 @@ class ValidationService:
             cfg.chunk_rows,
             cfg.resolved_partition_count(),
             cfg.partition_reconcile_workers,
+            materialized_from_gcs,
         )
 
         workspace = None
@@ -427,6 +507,16 @@ class ValidationService:
             if test_mode == ValidationTestMode.FULL
             else None
         )
+        if (
+            collection_policy.fail_on_row_count_mismatch
+            and defer_row_count_litmus
+            and run_result.source_row_count != run_result.target_row_count
+        ):
+            return build_litmus_row_count_failure(
+                source_row_count=run_result.source_row_count,
+                target_row_count=run_result.target_row_count,
+                compared_columns=compare_columns,
+            )
         return finalize_litmus_run_result(run_result)
 
     def validate_fixed_width_pair_sync(
@@ -698,8 +788,10 @@ class ValidationService:
         header_leading_rows: int = 0,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         resource_policy: dict[str, Any] | None = None,
+        fixed_width_config: FixedWidthConfig | dict[str, Any] | None = None,
+        json_order_sensitive: bool = False,
     ) -> ValidationRunResult:
-        """Compare archives; when a nested tabular leaf exists, validate CSV rows/columns."""
+        """Compare archives; when a nested leaf exists, validate inner JSON/CSV/fixed-width content."""
         from pegasus.api.v1.mismatch_sample import build_grouped_mismatch_samples
         from pegasus.validation.adapters.gcs_delimited import GcsDelimitedAdapter
         from pegasus.validation.archive_compare import (
@@ -748,15 +840,48 @@ class ValidationService:
         )
 
         from pegasus.validation.archive_leaf import (
+            archive_sample_has_json_leaf,
             archive_sample_has_tabular_leaf,
+            archive_sample_may_be_fixed_width,
             cleanup_work_dir,
+            deepest_json_leaf_path,
+            deepest_tabular_leaf_path,
+            materialize_archive_fixed_width_leaf,
+            materialize_archive_json_leaf,
             materialize_archive_tabular_leaf,
+            materialize_gcs_archive_fixed_width_leaf,
+            materialize_gcs_archive_json_leaf,
             materialize_gcs_archive_tabular_leaf,
         )
+        from pegasus.validation.file_detection.display_label import (
+            format_display_label_from_archive_members,
+        )
 
-        if archive_sample_has_tabular_leaf(src_sample) and archive_sample_has_tabular_leaf(tgt_sample):
-            import tempfile
+        src_format_label = (
+            format_display_label_from_archive_members(
+                src_sample,
+                outer=fmt,
+                object_name=source_object_name,
+            )
+            or ""
+        )
+        tgt_format_label = (
+            format_display_label_from_archive_members(
+                tgt_sample,
+                outer=fmt,
+                object_name=target_object_name,
+            )
+            or ""
+        )
 
+        import tempfile
+
+        def _extract_archive_leaf_pair(
+            materialize_local,
+            materialize_gcs,
+            *,
+            error_prefix: str,
+        ) -> tuple[Path, Path, Path]:
             owns_work_dir = artifact_export_parent is None
             if artifact_export_parent is not None:
                 work_dir = artifact_export_parent / "archive_leaf"
@@ -765,25 +890,25 @@ class ValidationService:
                 work_dir = Path(tempfile.mkdtemp(prefix="pegasus-archive-leaf-"))
             try:
                 if source_side.local_path is not None:
-                    src_leaf = materialize_archive_tabular_leaf(
+                    src_leaf = materialize_local(
                         source_side.local_path,
                         settings=self._settings,
                         work_dir=work_dir / "source",
                     )
                 else:
-                    src_leaf = materialize_gcs_archive_tabular_leaf(
+                    src_leaf = materialize_gcs(
                         source_side.gcs_ref,
                         settings=self._settings,
                         work_dir=work_dir / "source",
                     )
                 if target_side.local_path is not None:
-                    tgt_leaf = materialize_archive_tabular_leaf(
+                    tgt_leaf = materialize_local(
                         target_side.local_path,
                         settings=self._settings,
                         work_dir=work_dir / "target",
                     )
                 else:
-                    tgt_leaf = materialize_gcs_archive_tabular_leaf(
+                    tgt_leaf = materialize_gcs(
                         target_side.gcs_ref,
                         settings=self._settings,
                         work_dir=work_dir / "target",
@@ -791,50 +916,137 @@ class ValidationService:
             except (OSError, ValueError, TypeError) as exc:
                 if owns_work_dir:
                     cleanup_work_dir(work_dir)
-                raise ValidationBadRequestError(
-                    f"Could not extract tabular leaf from archive pair: {exc}"
-                ) from exc
+                raise ValidationBadRequestError(f"{error_prefix}: {exc}") from exc
+            return src_leaf, tgt_leaf, work_dir
 
+        def _finalize_archive_leaf_result(
+            result: ValidationRunResult,
+            *,
+            path_key: str,
+            src_leaf: Path,
+            tgt_leaf: Path,
+            work_dir: Path,
+            source_leaf_manifest: str | None,
+            target_leaf_manifest: str | None,
+        ) -> ValidationRunResult:
+            owns_work_dir = artifact_export_parent is None
             try:
-                result = self._validate_csv_pair_sync(
-                    src_leaf,
-                    tgt_leaf,
-                    uid_column,
-                    delimiter,
-                    column_mappings,
-                    artifact_export_parent=artifact_export_parent,
-                    progress_callback=progress_callback,
-                    has_header=has_header,
-                    header_leading_rows=header_leading_rows,
-                    file_format="csv",
-                    resource_policy=resource_policy,
-                    test_mode=test_mode,
-                    mismatch_snippet_limit=mismatch_snippet_limit,
+                pipeline_meta = dict(result.pipeline_metadata or {})
+                pipeline_meta.update(
+                    {
+                        "path": path_key,
+                        "source_leaf": source_leaf_manifest,
+                        "target_leaf": target_leaf_manifest,
+                        "source_leaf_local": str(src_leaf.resolve()),
+                        "target_leaf_local": str(tgt_leaf.resolve()),
+                    }
+                )
+                return ValidationRunResult(
+                    report=result.report,
+                    source_row_count=result.source_row_count,
+                    target_row_count=result.target_row_count,
+                    compared_column_count=result.compared_column_count,
+                    compared_columns=result.compared_columns,
+                    test_mode=result.test_mode,
+                    mismatch_snippet_limit=result.mismatch_snippet_limit,
+                    mismatch_artifact_path=result.mismatch_artifact_path,
+                    pipeline_metadata=pipeline_meta,
                 )
             finally:
                 if owns_work_dir:
                     cleanup_work_dir(work_dir)
 
-            pipeline_meta = dict(result.pipeline_metadata or {})
-            pipeline_meta.update(
-                {
-                    "path": "archive_tabular_leaf",
-                    "source_leaf": str(src_sample[0]) if src_sample else None,
-                    "target_leaf": str(tgt_sample[0]) if tgt_sample else None,
-                    "source_leaf_local": str(src_leaf.resolve()),
-                    "target_leaf_local": str(tgt_leaf.resolve()),
-                }
+        if archive_sample_has_json_leaf(
+            src_sample, file_format=src_format_label
+        ) and archive_sample_has_json_leaf(tgt_sample, file_format=tgt_format_label):
+            src_leaf, tgt_leaf, work_dir = _extract_archive_leaf_pair(
+                materialize_archive_json_leaf,
+                materialize_gcs_archive_json_leaf,
+                error_prefix="Could not extract JSON leaf from archive pair",
             )
-            return ValidationRunResult(
-                report=result.report,
-                source_row_count=result.source_row_count,
-                target_row_count=result.target_row_count,
-                compared_column_count=result.compared_column_count,
-                compared_columns=result.compared_columns,
-                test_mode=result.test_mode,
-                mismatch_snippet_limit=result.mismatch_snippet_limit,
-                mismatch_artifact_path=result.mismatch_artifact_path,
-                pipeline_metadata=pipeline_meta,
+            result = self.validate_json_pair_sync(
+                src_leaf,
+                tgt_leaf,
+                uid_column=uid_column,
+                order_sensitive=json_order_sensitive,
+                parent_mappings=column_mappings,
+                artifact_export_parent=artifact_export_parent,
+                test_mode=test_mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
+            )
+            return _finalize_archive_leaf_result(
+                result,
+                path_key="archive_json_leaf",
+                src_leaf=src_leaf,
+                tgt_leaf=tgt_leaf,
+                work_dir=work_dir,
+                source_leaf_manifest=deepest_json_leaf_path(src_sample),
+                target_leaf_manifest=deepest_json_leaf_path(tgt_sample),
+            )
+
+        if (
+            fixed_width_config is not None
+            and archive_sample_may_be_fixed_width(
+                src_sample, file_format=src_format_label
+            )
+            and archive_sample_may_be_fixed_width(
+                tgt_sample, file_format=tgt_format_label
+            )
+        ):
+            src_leaf, tgt_leaf, work_dir = _extract_archive_leaf_pair(
+                materialize_archive_fixed_width_leaf,
+                materialize_gcs_archive_fixed_width_leaf,
+                error_prefix="Could not extract fixed-width leaf from archive pair",
+            )
+            result = self.validate_fixed_width_pair_sync(
+                src_leaf,
+                tgt_leaf,
+                fixed_width_config,
+                artifact_export_parent=artifact_export_parent,
+                test_mode=test_mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
+            )
+            return _finalize_archive_leaf_result(
+                result,
+                path_key="archive_fixed_width_leaf",
+                src_leaf=src_leaf,
+                tgt_leaf=tgt_leaf,
+                work_dir=work_dir,
+                source_leaf_manifest=deepest_tabular_leaf_path(src_sample),
+                target_leaf_manifest=deepest_tabular_leaf_path(tgt_sample),
+            )
+
+        if archive_sample_has_tabular_leaf(
+            src_sample, file_format=src_format_label
+        ) and archive_sample_has_tabular_leaf(tgt_sample, file_format=tgt_format_label):
+            src_leaf, tgt_leaf, work_dir = _extract_archive_leaf_pair(
+                materialize_archive_tabular_leaf,
+                materialize_gcs_archive_tabular_leaf,
+                error_prefix="Could not extract tabular leaf from archive pair",
+            )
+            result = self._validate_csv_pair_sync(
+                src_leaf,
+                tgt_leaf,
+                uid_column,
+                delimiter,
+                column_mappings,
+                artifact_export_parent=artifact_export_parent,
+                progress_callback=progress_callback,
+                has_header=has_header,
+                header_leading_rows=header_leading_rows,
+                file_format="csv",
+                resource_policy=resource_policy,
+                test_mode=test_mode,
+                mismatch_snippet_limit=mismatch_snippet_limit,
+            )
+            return _finalize_archive_leaf_result(
+                result,
+                path_key="archive_tabular_leaf",
+                src_leaf=src_leaf,
+                tgt_leaf=tgt_leaf,
+                work_dir=work_dir,
+                source_leaf_manifest=deepest_tabular_leaf_path(src_sample),
+                target_leaf_manifest=deepest_tabular_leaf_path(tgt_sample),
             )
 
         compared = list(("compressed_size", "uncompressed_size", "crc32", "compress_type"))
@@ -933,12 +1145,20 @@ class ValidationService:
         import tempfile
 
         from pegasus.validation.archive_leaf import (
+            archive_sample_has_fixed_width_leaf,
+            archive_sample_has_json_leaf,
             archive_sample_has_tabular_leaf,
+            archive_sample_may_be_fixed_width,
             cleanup_work_dir,
+            materialize_archive_fixed_width_leaf,
+            materialize_archive_json_leaf,
             materialize_archive_tabular_leaf,
+            materialize_gcs_archive_fixed_width_leaf,
+            materialize_gcs_archive_json_leaf,
             materialize_gcs_archive_tabular_leaf,
+            _leaf_is_fixed_width,
         )
-        from pegasus.validation.cloud_profile import build_archive_profile
+        from pegasus.validation.cloud_profile import build_archive_profile, build_json_preview_sample
         from pegasus.validation.csv_header import infer_csv_has_header
 
         profile = build_archive_profile(
@@ -949,7 +1169,78 @@ class ValidationService:
             file_format=file_format,
             settings=self._settings,
         )
-        if not archive_sample_has_tabular_leaf(profile.archive_entries_sample):
+
+        if archive_sample_has_json_leaf(
+            profile.archive_entries_sample,
+            file_format=profile.file_format,
+        ):
+            work_dir = Path(tempfile.mkdtemp(prefix="pegasus-archive-profile-"))
+            try:
+                if local_path is not None:
+                    leaf_path = materialize_archive_json_leaf(
+                        local_path,
+                        settings=self._settings,
+                        work_dir=work_dir / "leaf",
+                    )
+                elif isinstance(adapter, GcsDelimitedAdapter):
+                    leaf_path = materialize_gcs_archive_json_leaf(
+                        adapter,
+                        settings=self._settings,
+                        work_dir=work_dir / "leaf",
+                    )
+                else:
+                    return profile
+                leaf_adapter = FileDelimitedAdapter(
+                    leaf_path,
+                    delimiter="json",
+                    has_header=False,
+                )
+                json_preview = build_json_preview_sample(leaf_adapter)
+            except (OSError, ValueError, TypeError):
+                return profile
+            finally:
+                cleanup_work_dir(work_dir)
+            if json_preview:
+                return profile.model_copy(update={"json_preview": json_preview})
+            return profile
+
+        if archive_sample_has_fixed_width_leaf(
+            profile.archive_entries_sample,
+            file_format=profile.file_format,
+        ):
+            return profile
+
+        if archive_sample_may_be_fixed_width(
+            profile.archive_entries_sample,
+            file_format=profile.file_format,
+        ):
+            work_dir = Path(tempfile.mkdtemp(prefix="pegasus-archive-profile-"))
+            try:
+                if local_path is not None:
+                    probe_leaf = materialize_archive_fixed_width_leaf(
+                        local_path,
+                        settings=self._settings,
+                        work_dir=work_dir / "leaf",
+                    )
+                elif isinstance(adapter, GcsDelimitedAdapter):
+                    probe_leaf = materialize_gcs_archive_fixed_width_leaf(
+                        adapter,
+                        settings=self._settings,
+                        work_dir=work_dir / "leaf",
+                    )
+                else:
+                    return profile
+                if _leaf_is_fixed_width(probe_leaf):
+                    return profile
+            except (OSError, ValueError, TypeError):
+                pass
+            finally:
+                cleanup_work_dir(work_dir)
+
+        if not archive_sample_has_tabular_leaf(
+            profile.archive_entries_sample,
+            file_format=profile.file_format,
+        ):
             return profile
 
         work_dir = Path(tempfile.mkdtemp(prefix="pegasus-archive-profile-"))

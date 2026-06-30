@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-30T10:36:49Z
+# Last edited: 2026-06-30T17:07:36+05:30
 # --- END GENERATED FILE METADATA ---
 
 """CSV validation endpoints (local paths, browse, job polling)."""
@@ -384,8 +384,12 @@ async def preview_local_csv_columns_body(
                 gcs_uri=target_ref.uri,
                 file_format=target_archive,
             )
-            if archive_sample_has_tabular_leaf(src_profile.archive_entries_sample) and archive_sample_has_tabular_leaf(
-                tgt_profile.archive_entries_sample
+            if archive_sample_has_tabular_leaf(
+                src_profile.archive_entries_sample,
+                file_format=src_profile.file_format,
+            ) and archive_sample_has_tabular_leaf(
+                tgt_profile.archive_entries_sample,
+                file_format=tgt_profile.file_format,
             ):
                 import tempfile
                 from pathlib import Path
@@ -504,6 +508,171 @@ async def preview_fixed_width_layout_body(
     )
     source_cloud = await ensure_resolved_cloud_config(session, source_cloud)
     target_cloud = await ensure_resolved_cloud_config(session, target_cloud)
+
+    if source_cloud is not None and target_cloud is not None:
+        try:
+            source_ref = gcs_object_ref_from_config(source_cloud)
+            target_ref = gcs_object_ref_from_config(target_cloud)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        source_archive = infer_archive_format_from_name(source_ref.object_name) or resolve_gcs_archive_format(
+            source_ref
+        )
+        target_archive = infer_archive_format_from_name(target_ref.object_name) or resolve_gcs_archive_format(
+            target_ref
+        )
+        if source_archive or target_archive:
+            if source_archive != target_archive:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Source and target must both be archives of the same kind",
+                )
+            from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+            from pegasus.validation.archive_leaf import (
+                archive_sample_may_be_fixed_width,
+                cleanup_work_dir,
+                materialize_gcs_archive_fixed_width_leaf,
+            )
+
+            src_adapter = GcsDelimitedAdapter(source_ref, delimiter=body.delimiter, has_header=body.has_header)
+            tgt_adapter = GcsDelimitedAdapter(target_ref, delimiter=body.delimiter, has_header=body.has_header)
+            src_profile = service.profile_archive_adapter(
+                src_adapter,
+                local_path=None,
+                object_name=source_cloud.object_name,
+                gcs_uri=source_ref.uri,
+                file_format=source_archive,
+            )
+            tgt_profile = service.profile_archive_adapter(
+                tgt_adapter,
+                local_path=None,
+                object_name=target_cloud.object_name,
+                gcs_uri=target_ref.uri,
+                file_format=target_archive,
+            )
+            if archive_sample_may_be_fixed_width(
+                src_profile.archive_entries_sample,
+                file_format=src_profile.file_format,
+            ) and archive_sample_may_be_fixed_width(
+                tgt_profile.archive_entries_sample,
+                file_format=tgt_profile.file_format,
+            ):
+                import tempfile
+                from pathlib import Path
+
+                work_dir = Path(tempfile.mkdtemp(prefix="pegasus-archive-fw-preview-"))
+                try:
+                    src_leaf = materialize_gcs_archive_fixed_width_leaf(
+                        src_adapter,
+                        settings=settings,
+                        work_dir=work_dir / "source",
+                    )
+                    tgt_leaf = materialize_gcs_archive_fixed_width_leaf(
+                        tgt_adapter,
+                        settings=settings,
+                        work_dir=work_dir / "target",
+                    )
+                    preview = service.preview_fixed_width_layout_from_adapters(
+                        source=FileDelimitedAdapter(
+                            src_leaf,
+                            delimiter=body.delimiter,
+                            has_header=body.has_header,
+                            skip_rows=body.header_leading_rows,
+                        ),
+                        target=FileDelimitedAdapter(
+                            tgt_leaf,
+                            delimiter=body.delimiter,
+                            has_header=body.has_header,
+                            skip_rows=body.header_leading_rows,
+                        ),
+                    )
+                    return FixedWidthLayoutPreviewResponse(**preview)
+                except (OSError, ValueError, TypeError) as exc:
+                    raise HTTPException(
+                        status.HTTP_400_BAD_REQUEST,
+                        detail=f"Could not preview fixed-width leaf inside archive: {exc}",
+                    ) from exc
+                finally:
+                    cleanup_work_dir(work_dir)
+
+    if source_path and target_path:
+        require_local_path_access(settings)
+        resolved_source = resolve_local_path_on_disk(source_path, settings, must_be_file=True)
+        resolved_target = resolve_local_path_on_disk(target_path, settings, must_be_file=True)
+        source_archive = infer_archive_format_from_name(resolved_source.name)
+        target_archive = infer_archive_format_from_name(resolved_target.name)
+        if source_archive and target_archive:
+            if source_archive != target_archive:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Source and target must both be archives of the same kind",
+                )
+            from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+            from pegasus.validation.archive_leaf import (
+                archive_sample_may_be_fixed_width,
+                cleanup_work_dir,
+                materialize_archive_fixed_width_leaf,
+            )
+
+            src_profile = service.profile_archive_adapter(
+                None,
+                local_path=resolved_source,
+                object_name=resolved_source.name,
+                gcs_uri=str(resolved_source),
+                file_format=source_archive,
+            )
+            tgt_profile = service.profile_archive_adapter(
+                None,
+                local_path=resolved_target,
+                object_name=resolved_target.name,
+                gcs_uri=str(resolved_target),
+                file_format=target_archive,
+            )
+            if archive_sample_may_be_fixed_width(
+                src_profile.archive_entries_sample,
+                file_format=src_profile.file_format,
+            ) and archive_sample_may_be_fixed_width(
+                tgt_profile.archive_entries_sample,
+                file_format=tgt_profile.file_format,
+            ):
+                import tempfile
+                from pathlib import Path
+
+                work_dir = Path(tempfile.mkdtemp(prefix="pegasus-archive-fw-preview-"))
+                try:
+                    src_leaf = materialize_archive_fixed_width_leaf(
+                        resolved_source,
+                        settings=settings,
+                        work_dir=work_dir / "source",
+                    )
+                    tgt_leaf = materialize_archive_fixed_width_leaf(
+                        resolved_target,
+                        settings=settings,
+                        work_dir=work_dir / "target",
+                    )
+                    preview = service.preview_fixed_width_layout_from_adapters(
+                        source=FileDelimitedAdapter(
+                            src_leaf,
+                            delimiter=body.delimiter,
+                            has_header=body.has_header,
+                            skip_rows=body.header_leading_rows,
+                        ),
+                        target=FileDelimitedAdapter(
+                            tgt_leaf,
+                            delimiter=body.delimiter,
+                            has_header=body.has_header,
+                            skip_rows=body.header_leading_rows,
+                        ),
+                    )
+                    return FixedWidthLayoutPreviewResponse(**preview)
+                except (OSError, ValueError, TypeError) as exc:
+                    raise HTTPException(
+                        status.HTTP_400_BAD_REQUEST,
+                        detail=f"Could not preview fixed-width leaf inside archive: {exc}",
+                    ) from exc
+                finally:
+                    cleanup_work_dir(work_dir)
+
     source_input = resolve_delimited_input(
         settings=settings,
         label="source",
@@ -573,55 +742,229 @@ async def preview_json_parent_mapping(
             target_ref = gcs_object_ref_from_config(target_cloud)
         except ValueError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        if not (resolve_gcs_json_format(source_ref) and resolve_gcs_json_format(target_ref)):
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                detail="Source and target must both be JSON documents",
+        if resolve_gcs_json_format(source_ref) and resolve_gcs_json_format(target_ref):
+            source_input = resolve_delimited_input(
+                settings=settings,
+                label="source",
+                path=None,
+                cloud=source_cloud,
+                delimiter="json",
+                has_header=body.has_header,
+                skip_rows=body.header_leading_rows,
             )
-        source_input = resolve_delimited_input(
-            settings=settings,
-            label="source",
-            path=None,
-            cloud=source_cloud,
-            delimiter="json",
-            has_header=body.has_header,
-            skip_rows=body.header_leading_rows,
-        )
-        target_input = resolve_delimited_input(
-            settings=settings,
-            label="target",
-            path=None,
-            cloud=target_cloud,
-            delimiter="json",
-            has_header=body.has_header,
-            skip_rows=body.header_leading_rows,
-        )
+            target_input = resolve_delimited_input(
+                settings=settings,
+                label="target",
+                path=None,
+                cloud=target_cloud,
+                delimiter="json",
+                has_header=body.has_header,
+                skip_rows=body.header_leading_rows,
+            )
+        else:
+            source_archive = infer_archive_format_from_name(source_ref.object_name) or resolve_gcs_archive_format(
+                source_ref
+            )
+            target_archive = infer_archive_format_from_name(target_ref.object_name) or resolve_gcs_archive_format(
+                target_ref
+            )
+            if not source_archive or not target_archive:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Source and target must both be JSON documents or archives with JSON leaves",
+                )
+            if source_archive != target_archive:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Source and target must both be archives of the same kind",
+                )
+            from pegasus.validation.adapters.file_delimited import FileDelimitedAdapter
+            from pegasus.validation.archive_leaf import (
+                archive_sample_has_json_leaf,
+                cleanup_work_dir,
+                materialize_gcs_archive_json_leaf,
+            )
+
+            src_adapter = GcsDelimitedAdapter(source_ref, delimiter="json", has_header=False)
+            tgt_adapter = GcsDelimitedAdapter(target_ref, delimiter="json", has_header=False)
+            src_profile = service.profile_archive_adapter(
+                src_adapter,
+                local_path=None,
+                object_name=source_cloud.object_name,
+                gcs_uri=source_ref.uri,
+                file_format=source_archive,
+            )
+            tgt_profile = service.profile_archive_adapter(
+                tgt_adapter,
+                local_path=None,
+                object_name=target_cloud.object_name,
+                gcs_uri=target_ref.uri,
+                file_format=target_archive,
+            )
+            if not (
+                archive_sample_has_json_leaf(
+                    src_profile.archive_entries_sample,
+                    file_format=src_profile.file_format,
+                )
+                and archive_sample_has_json_leaf(
+                    tgt_profile.archive_entries_sample,
+                    file_format=tgt_profile.file_format,
+                )
+            ):
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Source and target archives must both contain JSON leaves",
+                )
+            import tempfile
+            from pathlib import Path
+
+            work_dir = Path(tempfile.mkdtemp(prefix="pegasus-archive-json-preview-"))
+            try:
+                src_leaf = materialize_gcs_archive_json_leaf(
+                    src_adapter,
+                    settings=settings,
+                    work_dir=work_dir / "source",
+                )
+                tgt_leaf = materialize_gcs_archive_json_leaf(
+                    tgt_adapter,
+                    settings=settings,
+                    work_dir=work_dir / "target",
+                )
+                source_input = resolve_delimited_input(
+                    settings=settings,
+                    label="source",
+                    path=str(src_leaf),
+                    cloud=None,
+                    delimiter="json",
+                    has_header=body.has_header,
+                    skip_rows=body.header_leading_rows,
+                )
+                target_input = resolve_delimited_input(
+                    settings=settings,
+                    label="target",
+                    path=str(tgt_leaf),
+                    cloud=None,
+                    delimiter="json",
+                    has_header=body.has_header,
+                    skip_rows=body.header_leading_rows,
+                )
+            except (OSError, ValueError, TypeError) as exc:
+                cleanup_work_dir(work_dir)
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail=f"Could not preview JSON leaf inside archive: {exc}",
+                ) from exc
     else:
         require_local_path_access(settings)
         resolved_source = resolve_local_path_on_disk(source_path or "", settings, must_be_file=True)
         resolved_target = resolve_local_path_on_disk(target_path or "", settings, must_be_file=True)
-        if infer_file_format_from_path(resolved_source, "auto") != "json":
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Source file must be JSON")
-        if infer_file_format_from_path(resolved_target, "auto") != "json":
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Target file must be JSON")
-        source_input = resolve_delimited_input(
-            settings=settings,
-            label="source",
-            path=str(resolved_source),
-            cloud=None,
-            delimiter="json",
-            has_header=body.has_header,
-            skip_rows=body.header_leading_rows,
-        )
-        target_input = resolve_delimited_input(
-            settings=settings,
-            label="target",
-            path=str(resolved_target),
-            cloud=None,
-            delimiter="json",
-            has_header=body.has_header,
-            skip_rows=body.header_leading_rows,
-        )
+        source_archive = infer_archive_format_from_name(resolved_source.name)
+        target_archive = infer_archive_format_from_name(resolved_target.name)
+        if source_archive and target_archive:
+            if source_archive != target_archive:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Source and target must both be archives of the same kind",
+                )
+            from pegasus.validation.archive_leaf import (
+                archive_sample_has_json_leaf,
+                cleanup_work_dir,
+                materialize_archive_json_leaf,
+            )
+
+            src_profile = service.profile_archive_adapter(
+                None,
+                local_path=resolved_source,
+                object_name=resolved_source.name,
+                gcs_uri=str(resolved_source),
+                file_format=source_archive,
+            )
+            tgt_profile = service.profile_archive_adapter(
+                None,
+                local_path=resolved_target,
+                object_name=resolved_target.name,
+                gcs_uri=str(resolved_target),
+                file_format=target_archive,
+            )
+            if not (
+                archive_sample_has_json_leaf(
+                    src_profile.archive_entries_sample,
+                    file_format=src_profile.file_format,
+                )
+                and archive_sample_has_json_leaf(
+                    tgt_profile.archive_entries_sample,
+                    file_format=tgt_profile.file_format,
+                )
+            ):
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Source and target archives must both contain JSON leaves",
+                )
+            import tempfile
+            from pathlib import Path
+
+            work_dir = Path(tempfile.mkdtemp(prefix="pegasus-archive-json-preview-"))
+            try:
+                src_leaf = materialize_archive_json_leaf(
+                    resolved_source,
+                    settings=settings,
+                    work_dir=work_dir / "source",
+                )
+                tgt_leaf = materialize_archive_json_leaf(
+                    resolved_target,
+                    settings=settings,
+                    work_dir=work_dir / "target",
+                )
+            except (OSError, ValueError, TypeError) as exc:
+                cleanup_work_dir(work_dir)
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail=f"Could not preview JSON leaf inside archive: {exc}",
+                ) from exc
+            source_input = resolve_delimited_input(
+                settings=settings,
+                label="source",
+                path=str(src_leaf),
+                cloud=None,
+                delimiter="json",
+                has_header=body.has_header,
+                skip_rows=body.header_leading_rows,
+            )
+            target_input = resolve_delimited_input(
+                settings=settings,
+                label="target",
+                path=str(tgt_leaf),
+                cloud=None,
+                delimiter="json",
+                has_header=body.has_header,
+                skip_rows=body.header_leading_rows,
+            )
+        elif infer_file_format_from_path(resolved_source, "auto") == "json" and infer_file_format_from_path(
+            resolved_target, "auto"
+        ) == "json":
+            source_input = resolve_delimited_input(
+                settings=settings,
+                label="source",
+                path=str(resolved_source),
+                cloud=None,
+                delimiter="json",
+                has_header=body.has_header,
+                skip_rows=body.header_leading_rows,
+            )
+            target_input = resolve_delimited_input(
+                settings=settings,
+                label="target",
+                path=str(resolved_target),
+                cloud=None,
+                delimiter="json",
+                has_header=body.has_header,
+                skip_rows=body.header_leading_rows,
+            )
+        else:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Source and target must both be JSON documents or archives with JSON leaves",
+            )
 
     try:
         preview = service.preview_json_parent_mapping(

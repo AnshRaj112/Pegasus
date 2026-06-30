@@ -25,6 +25,25 @@ const shouldClearOverviewCache = (
   if (patch.targetCloud !== undefined && cloudObjectKey(patch.targetCloud ?? null) !== cloudObjectKey(prev.targetCloud)) {
     return true;
   }
+  if (patch.delimiter !== undefined && patch.delimiter !== prev.delimiter) {
+    return true;
+  }
+  if (patch.hasHeader !== undefined && patch.hasHeader !== prev.hasHeader) {
+    return true;
+  }
+  return false;
+};
+
+const shouldClearPreviewCache = (
+  prev: ValidationFormState,
+  patch: Partial<ValidationFormState>,
+): boolean => {
+  if (patch.uidColumn !== undefined && patch.uidColumn !== prev.uidColumn) {
+    return true;
+  }
+  if (patch.delimiter !== undefined && patch.delimiter !== prev.delimiter) {
+    return true;
+  }
   if (patch.hasHeader !== undefined && patch.hasHeader !== prev.hasHeader) {
     return true;
   }
@@ -163,6 +182,14 @@ const validationSlice = createSlice({
         overviewProfileFetchState: shouldClearOverviewCache(state.validationForm, action.payload)
           ? initialState.overviewProfileFetchState
           : state.overviewProfileFetchState,
+        previewColumnsState: shouldClearPreviewCache(state.validationForm, action.payload)
+          || shouldClearOverviewCache(state.validationForm, action.payload)
+          ? initialState.previewColumnsState
+          : state.previewColumnsState,
+        previewFixedWidthState: shouldClearPreviewCache(state.validationForm, action.payload)
+          || shouldResetFixedWidthLayout(state.validationForm, action.payload)
+          ? initialState.previewFixedWidthState
+          : state.previewFixedWidthState,
       };
     },
     setOverviewProfileCache: (state, action: PayloadAction<OverviewProfileCache>) => ({
