@@ -2,7 +2,13 @@
 #   docker compose up --build
 #
 # UI:  http://127.0.0.1:8080  (nginx proxies /api → backend; override with PEGASUS_UI_PORT)
-# API: http://127.0.0.1:8000  (direct access, optional)
+# API: http://127.0.0.1:8000  (direct backend access, optional)
+# Docs (Docker UI on :8080 — **no** `/#/` hash; those are React app routes):
+#   http://127.0.0.1:8080/docs
+#   http://127.0.0.1:8080/api/docs
+#   http://127.0.0.1:8080/openapi.json
+#   http://127.0.0.1:8080/api/openapi.json
+# Direct backend (:8000): same paths without going through nginx.
 #
 # Copy docker-compose.override.example.yml → docker-compose.override.yml for extra volume mounts.
 

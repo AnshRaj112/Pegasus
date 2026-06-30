@@ -33,4 +33,16 @@ Placeholder frontend services (`Test.service.ts`, `Setting.service.ts`) are excl
 
 ## Interactive docs
 
-When the backend is running, Swagger UI is still available at `/docs` and the live spec at `/openapi.json`. The committed `api/openapi.yaml` is the contract of record for CI and code review.
+When the backend is running, Swagger UI is available at `/docs` and the live spec at `/openapi.json`. The committed `api/openapi.yaml` is the contract of record for CI and code review.
+
+**Docker Compose** (UI on port 8080 by default). Use these URLs **without** `/#/` — hash paths are React app routes, not the API:
+
+- http://127.0.0.1:8080/docs — Swagger UI
+- http://127.0.0.1:8080/api/docs — same Swagger UI (under `/api`)
+- http://127.0.0.1:8080/openapi.json — live JSON spec
+- http://127.0.0.1:8080/api/openapi.json — same JSON spec (under `/api`)
+
+**Direct backend** (port 8000):
+
+- http://127.0.0.1:8000/docs
+- http://127.0.0.1:8000/openapi.json
