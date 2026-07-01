@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Spin } from 'antd';
-import { SafetyCertificateOutlined, AppstoreOutlined, ApiOutlined, LogoutOutlined, SettingOutlined } from '@ant-design/icons';
+import { SafetyCertificateOutlined, /* AppstoreOutlined, */ ApiOutlined, LogoutOutlined, /* SettingOutlined */ } from '@ant-design/icons';
 import { useAppDispatch } from '../../redux/store';
 import { adminLogout, fetchAdminMe } from '../../shared/api/adminAuth';
 import { authActions } from '../auth/Auth.reducer';
@@ -64,14 +64,14 @@ const AdminView: React.FC = () => {
         </div>
 
         <nav className={styles.sidebarNav}>
-          <button
+          {/* <button
             type="button"
             onClick={() => navigate('/admin/workspace-management')}
             className={`${styles.navButton} ${location.pathname.includes('/workspace-management') ? styles.navButtonActive : ''}`}
           >
             <AppstoreOutlined className={styles.navIcon} />
             Workspace Management
-          </button>
+          </button> */}
 
           <button
             type="button"
@@ -82,14 +82,14 @@ const AdminView: React.FC = () => {
             Configure Store
           </button>
 
-          <button
+          {/* <button
             type="button"
             onClick={() => navigate('/admin/settings')}
             className={`${styles.navButton} ${location.pathname.includes('/settings') ? styles.navButtonActive : ''}`}
           >
             <SettingOutlined className={styles.navIcon} />
             Configure Settings
-          </button>
+          </button> */}
         </nav>
 
         <button

@@ -5,15 +5,16 @@ import styles from './BaseLayout.module.scss';
 
 interface BaseLayoutProps {
   children: React.ReactNode;
+  fullHeight?: boolean;
 }
 
-export const BaseLayout: React.FC<BaseLayoutProps> = ({ children }) => {
+export const BaseLayout: React.FC<BaseLayoutProps> = ({ children, fullHeight = false }) => {
   return (
     <div className={styles.shell}>
       <Header />
       <ValidationTabSessionGuard />
 
-      <main className={styles.main}>
+      <main className={`${styles.main} ${fullHeight ? styles.mainFullHeight : ''}`}>
         {children}
       </main>
 
