@@ -1116,328 +1116,268 @@ The space cost is bounded by:
 
 That means the memory profile is small, but the temporary disk requirement can still be large when the extracted leaf is much bigger than the compressed member.
 
-### 15.5 Practical 40 GB note
-
-This section gives a worked estimate instead of a summary.
-
-Assume:
-
-- combined source + target size = 40 GiB
-- total rows across both sides = 100,000,000
-- total columns = 12
-- fingerprint algorithm = `xxhash64`
-- partition preset = `medium` = 2048 partitions
-
-#### 15.5.1 Average raw row size
-
-First compute the average raw bytes per row:
-
-$$
-\frac{40 \times 2^{30}}{100,000,000} = \frac{42,949,672,960}{100,000,000} = 429.4967296 \text{ bytes/row}
-$$
-
-So the average row is about 429.5 bytes across the combined source and target dataset.
-
-If the 12 columns are evenly distributed, the average raw bytes per column are:
-
-$$
-\frac{429.4967296}{12} = 35.79139413 \text{ bytes/column/row}
-$$
-
-That is only an average. Real columns will be uneven, but it is good enough for a planning estimate.
-
-#### 15.5.2 Hash storage
-
-With `xxhash64`, each row fingerprint is 8 bytes.
-
-So the raw fingerprint storage is:
-
-$$
-100,000,000 \times 8 = 800,000,000 \text{ bytes}
-$$
-
-Convert that to MiB:
-
-$$
-\frac{800,000,000}{2^{20}} = 762.939453125 \text{ MiB}
-$$
-
-So the fingerprints alone take about 763 MiB for 100 million total rows.
-
-If you meant 100 million rows per side rather than total across both sides, double that to about 1.49 GiB of raw digest storage.
-
-#### 15.5.3 Partition sizing
-
-With 2048 partitions, the average rows per partition are:
-
-$$
-\frac{100,000,000}{2048} = 48,828.125 \text{ rows/partition}
-$$
-
-The average raw bytes per partition pair are:
-
-$$
-\frac{40 \times 2^{30}}{2048} = 20,971,520 \text{ bytes}
-$$
-
-$$
-= 20 \text{ MiB}
-$$
-
-If the data is split evenly between source and target, that is about 10 MiB per side per partition on average.
-
-The planner may choose fewer partitions for smaller jobs. The configured presets are:
-
-- `small` = 1024
-- `medium` = 2048
-- `large` = 4096
-- `xlarge` = 8192
-
-The final partition count is the smaller of the explicit request and the preset cap, then further constrained by the file-size tier and estimated row count. The practical effect is that tiny files use fewer buckets and large files use more.
-
-For example:
-
-- if a tiny job estimates only a few thousand rows, the planner may stop at 16, 64, or 256 buckets even if the preset is `medium`
-- if a 40 GiB job estimates about 100 million rows, the planner can legitimately use the full `medium` preset of 2048 buckets or more if the config allows it
-
-This is why the number of files on disk scales with job size, but does not explode for very small inputs.
-
-#### 15.5.4 UID and compare payload estimate
-
-If the 12 columns are split as 2 UID columns and 10 compare columns, then the average bytes per row are:
-
-$$
-2 \times 35.79139413 = 71.58278826 \text{ bytes}
-$$
-
-$$
-10 \times 35.79139413 = 357.9139413 \text{ bytes}
-$$
-
-Per partition, that becomes approximately:
-
-$$
-71.58278826 \times 48,828.125 \approx 3,495,000 \text{ bytes}
-$$
-
-$$
-357.9139413 \times 48,828.125 \approx 17,456,520 \text{ bytes}
-$$
-
-So one average partition pair carries about:
-
-- 3.33 MiB of UID payload
-- 16.65 MiB of compare payload
-- 0.37 MiB of fingerprint bytes
-
-which sums back to about 20 MiB of raw partition data.
-
-#### 15.5.5 Peak RAM estimate
-
-The pipeline does not need to hold the full 40 GiB in memory at once because it spills partitions and reconciles them in waves.
-
-A rough working-set estimate for one partition pair is:
-
-$$
-\approx \text{source partition} + \text{target partition} + \text{join overhead} + \text{drilldown overhead}
-$$
-
-If we treat the raw partition pair as 20 MiB, then a conservative multiplier of 2x to 4x for join tables, frame overhead, and intermediate buffers gives:
-
-$$
-20 \text{ MiB} \times 2 = 40 \text{ MiB}
-$$
-
-$$
-20 \text{ MiB} \times 4 = 80 \text{ MiB}
-$$
-
-So a practical per-partition working set is often in the rough range of 40 to 80 MiB, before any unusually large mismatch export or drilldown expansion.
-
-That estimate comes from the wave-based execution model:
-
-- source partition frame
-- target partition frame
-- join state for the current partition
-- temporary drilldown rows for changed keys
-- Polars/frame metadata and Python object overhead
-
-The disk guard also plans per wave, not for the full dataset at once. The wave estimate uses the combined input size, number of partitions, and wave size, then multiplies by a conservative disk factor before validating headroom. That is why a job can be too large for RAM but still proceed safely on disk-backed reconciliation.
-
-#### 15.5.6 Why the job still does not fit in RAM as a whole
-
-Even though a single partition is small, the whole job is not just one partition. The backend still has to:
-
-- maintain partition metadata
-- read and write partition files
-- build joins or hashes for each partition
-- keep drilldown rows for changed keys
-- assemble the final mismatch output
-
-That is why the correct conclusion for a 40 GiB combined job is:
-
-- do not expect the in-memory fast path
-- expect spill-based reconciliation
-- expect the full dataset to live on disk, not in RAM
-
-#### 15.5.7 Concrete planning answer
-
-For a 40 GiB combined source + target dataset with 100 million total rows and 12 columns:
-
-- raw average row size: about 429.5 bytes
-- raw average column size: about 35.8 bytes
-- raw fingerprint storage: about 763 MiB
-- average partition pair size at 2048 partitions: 20 MiB
-- rough peak RAM per partition pair: about 40 to 80 MiB
-- overall job memory use: dominated by spill files and partition processing, not by holding all 40 GiB in memory
-
-#### 15.5.8 Scaling the same math to 10 GiB and 20 GiB
-
-If the row shape stays the same, the math scales linearly with size.
-
-Using the 40 GiB case as the baseline:
-
-- 10 GiB is one quarter of 40 GiB, so it has about 25,000,000 total rows
-- 20 GiB is one half of 40 GiB, so it has about 50,000,000 total rows
-- 40 GiB is the baseline, so it has about 100,000,000 total rows
-
-##### 10 GiB case
-
-- total rows: 25,000,000
-- fingerprint storage: $25,000,000 \times 8 = 200,000,000$ bytes, about 190.7 MiB
-- average partition pair size: $10 \text{ GiB} / 2048 \approx 5 \text{ MiB}$
-- rough peak RAM per partition pair: about 10 to 20 MiB
-- if the planner keeps the `medium` preset, the bucket count can still be capped lower for very small jobs, so the actual partition size may be larger than 5 MiB if the dataset is tiny
-
-##### 20 GiB case
-
-- total rows: 50,000,000
-- fingerprint storage: $50,000,000 \times 8 = 400,000,000$ bytes, about 381.5 MiB
-- average partition pair size: $20 \text{ GiB} / 2048 \approx 10 \text{ MiB}$
-- rough peak RAM per partition pair: about 20 to 40 MiB
-- at this size the planner generally has enough rows to justify the medium-to-large bucket range
-
-##### 40 GiB case
-
-- total rows: 100,000,000
-- fingerprint storage: $100,000,000 \times 8 = 800,000,000$ bytes, about 762.9 MiB
-- average partition pair size: $40 \text{ GiB} / 2048 \approx 20 \text{ MiB}$
-- rough peak RAM per partition pair: about 40 to 80 MiB
-- if the config is allowed to use a larger preset than `medium`, the same row shape can be spread across 4096 or 8192 buckets instead, reducing the per-partition working set further
-
-##### 15.5.9 Assumptions used in the per-format estimates
-
-The numbers below are planning estimates for validation work, not exact byte-for-byte measurements.
-
-They assume:
-
-- the source and target files are completely unsorted
-- the backend uses identity hashing and joins rather than positional scanning
-- `2048` partitions are used for the large spill path
-- the disk figures are additional validation working disk, not the original input files already stored on disk
-- mismatch output is small compared with the input size
-
-Because the files are unsorted, the validator does not need a sort buffer. It pays for hash tables, partition files, extracted leaves, and drilldown lookups instead.
-
-##### 15.5.10 Tabular, CSV-like, PSV, TSV, and DAT
-
-These are the base numbers for the hash-join pipeline.
-
-| Combined input size | Average partition pair | Rough peak RAM | Additional temp disk |
-| --- | ---: | ---: | ---: |
-| 10 GiB | about 5 MiB | about 10 to 20 MiB | about 10 to 11 GiB |
-| 20 GiB | about 10 MiB | about 20 to 40 MiB | about 20 to 22 GiB |
-| 40 GiB | about 20 MiB | about 40 to 80 MiB | about 40 to 44 GiB |
-
-The disk number is higher than the raw input because the backend writes normalized partition spill files, join state, and drilldown artifacts. The job still stays bounded because only one partition wave is active at a time.
-
-##### 15.5.11 Fixed-width
-
-Fixed-width jobs use the same identity-and-drilldown idea, but they do not pay delimiter-sniffing overhead.
-
-| Combined input size | Average partition pair | Rough peak RAM | Additional temp disk |
-| --- | ---: | ---: | ---: |
-| 10 GiB | about 5 MiB | about 8 to 15 MiB | about 10 to 11 GiB |
-| 20 GiB | about 10 MiB | about 15 to 30 MiB | about 20 to 22 GiB |
-| 40 GiB | about 20 MiB | about 30 to 60 MiB | about 40 to 44 GiB |
-
-The width itself is not inferred from the content. Because the layout is declared up front, fixed-width validation tends to be a little lighter on parser overhead than free-form delimited text, but the spill footprint is still broadly similar.
-
-##### 15.5.12 JSON and NDJSON
-
-JSON is the least uniform case because the memory profile depends on whether Pegasus is comparing NDJSON rows or a single recursive JSON document.
-
-For NDJSON / JSONL, the numbers are usually close to the tabular path.
-
-| Combined input size | Average partition pair | Rough peak RAM | Additional temp disk |
-| --- | ---: | ---: | ---: |
-| 10 GiB | about 5 MiB | about 12 to 25 MiB | about 10 to 12 GiB |
-| 20 GiB | about 10 MiB | about 25 to 50 MiB | about 20 to 24 GiB |
-| 40 GiB | about 20 MiB | about 50 to 100 MiB | about 40 to 48 GiB |
-
-For a single large JSON document, use the higher end of the memory range because the recursive tree can keep more nested structure alive while the diff walks the object graph.
-
-##### 15.5.13 Parquet, ORC, and Avro
-
-These columnar formats are converted into a tabular representation before reconciliation, so their memory behavior is close to the base tabular pipeline.
-
-| Combined input size | Average partition pair | Rough peak RAM | Additional temp disk |
-| --- | ---: | ---: | ---: |
-| 10 GiB | about 5 MiB | about 10 to 20 MiB | about 10 to 12 GiB |
-| 20 GiB | about 10 MiB | about 20 to 40 MiB | about 20 to 24 GiB |
-| 40 GiB | about 20 MiB | about 40 to 80 MiB | about 40 to 48 GiB |
-
-The disk is a little higher than the raw size estimate because the reader expands columnar data into row-oriented validation artifacts and then writes partitioned spill files.
-
-##### 15.5.14 ZIP, TAR, and nested archives
-
-Archive validation has two different modes:
-
-- manifest-only comparison, where the backend checks archive entries and metadata
-- nested leaf validation, where extracted files are handed to the inner validator
-
-For manifest-only work, memory is tiny compared with the file size, and the additional temp disk is usually just the archive manifest and metadata frame.
-
-| Combined archive size | Rough peak RAM | Additional temp disk |
-| --- | ---: | ---: |
-| 10 GiB | a few MiB | about 0.1 to 0.5 GiB |
-| 20 GiB | a few MiB | about 0.1 to 0.5 GiB |
-| 40 GiB | a few MiB | about 0.1 to 0.5 GiB |
-
-For nested leaf validation, the archive must first be expanded into a leaf payload, and then that leaf is validated using its own file-type rules. In practice, the temp disk requirement is:
-
-temp disk is roughly archive size + extracted leaf size + leaf spill
-
-So if an archive expands to roughly 2x its compressed size, a planning estimate is:
-
-| Combined archive size | Rough peak RAM | Additional temp disk |
-| --- | ---: | ---: |
-| 10 GiB | about 10 to 25 MiB for the active leaf partition | about 20 to 30 GiB |
-| 20 GiB | about 20 to 50 MiB for the active leaf partition | about 40 to 60 GiB |
-| 40 GiB | about 40 to 100 MiB for the active leaf partition | about 80 to 120 GiB |
-
-Nested archives add another layer of extraction, so the real disk requirement can be higher if the inner archive also expands significantly. The safety limits in the archive extractor keep that from becoming unbounded, but they do not remove the need for enough temporary disk.
-
-##### 15.5.15 Quick cross-format summary
-
-If you want one short planning rule, use this:
-
-- tabular, fixed-width, Parquet, ORC, Avro, and NDJSON: expect roughly the input size again on temporary disk, plus a small overhead for partitioning and drilldown
-- single-document JSON: expect a similar disk profile, but a higher and less predictable memory peak
-- ZIP and TAR without leaf validation: expect very small disk and memory overhead
-- ZIP, TAR, and nested archives with leaf validation: expect archive size plus extracted-leaf size on disk, then apply the leaf validator’s own memory profile
-
-##### Practical reading
-
-The key pattern is:
-
-- disk and partition volume scale linearly with file size
-- fingerprint bytes scale linearly with row count
-- peak RAM does not scale to the full dataset because only one partition wave is active at a time
-
-So the overall answer is not “40 GiB in RAM.” It is “40 GiB on disk, partitioned into about 20 MiB logical chunks, with a working set sized to one chunk plus join/drilldown overhead.”
-
-If you want the short version in one line: the row-level math is manageable, but the full 40 GiB dataset is far above the in-memory thresholds, so the backend must spill and reconcile partition by partition.
+### 15.5 Detailed Resource Calculations and Scaling (10 GiB to 100 GiB)
+
+This section provides a rigorous mathematical model and worked examples to estimate the RAM and disk footprints across different data volumes and formats.
+
+#### 15.5.1 Variable Definitions
+
+*   $F$: Combined size of source and target inputs in bytes (e.g., $F = F_{\text{source}} + F_{\text{target}}$).
+*   $C$: Total number of compare columns under validation.
+*   $U$: Total number of identity columns.
+*   $N$: Combined estimated row count across both source and target.
+*   $N_c$: Chunk size in rows (default is 500,000 for Polars spill).
+*   $W$: Number of parallel worker threads active in the pipeline wave (capped by CPU cores and memory limits).
+*   $P$: Partition bucket count (chosen adaptively, e.g., 2048 for large jobs).
+*   $M$: Estimated number of mismatching rows requiring column-level drilldown.
+*   $W_r$: Estimated logical row width in bytes.
+*   $E$: Number of entries (files) in an archive container.
+*   $R_c$: Compression ratio of archive files (e.g., 3.0 for standard CSV compression).
+
+---
+
+#### 15.5.2 Mathematical Models for Resource Allocation
+
+##### 1. Delimited / Tabular (CSV, TSV, PSV, DAT) & Columnar (Parquet, ORC, Avro, Excel)
+*   **In-Memory Mode** ($F \le \text{auto\_in\_memory\_max\_bytes}$):
+    *   **RAM**: Data is loaded entirely into RAM. Polars representation and decompression buffers introduce an overhead multiplier (default 1.5x - 3.0x).
+        $$\text{RAM}_{\text{in-memory}} = \max\left(\text{min\_ram\_per\_job}, \text{int}(F \times \text{ram\_multiplier}) + \text{base\_overhead}\right)$$
+        Where $\text{base\_overhead} \approx 384 \text{ MiB}$ (for Python interpreter and loaded libraries) and $\text{ram\_multiplier} \approx 2.0$.
+    *   **Disk**: Negligible ($O(1)$) as no files are spilled.
+*   **Spill/Partitioned Mode** ($F > \text{auto\_in\_memory\_max\_bytes}$):
+    *   **RAM**: RAM usage is decoupled from the full file size $F$ and instead scales with worker concurrency $W$, chunk size $N_c$, and active partition wave size.
+        $$\text{RAM}_{\text{spill}} = \text{base\_overhead} + W \times \left( N_c \times W_r \times \text{buffers} + 3.0 \times \frac{F}{P} \right)$$
+        Where:
+        *   $\text{buffers} = 2$ (double-buffering for reader and spill writer).
+        *   $W_r = \text{max}(32, \text{min}(512, 8 \times C + 24))$ for native extension spill, or $\text{max}(64, \text{min}(2048, 32 \times (C + U)))$ for Python/Polars spill.
+        *   $\frac{F}{P}$ represents the average physical size of a partition pair. The factor $3.0$ accounts for Polars dataframe representation and join index structures during reconciliation.
+    *   **Disk**: Bounded by the spill files and drilldown caches:
+        $$\text{Disk}_{\text{spill}} = F \times \text{disk\_multiplier} + M \times W_r + W \times \frac{F}{P} \times 2.0$$
+        Where $\text{disk\_multiplier} \approx 1.2$ to $1.5$ (due to normalized character expansion in partition files). $M \times W_r$ represents the space for the lazy drilldown cache.
+
+##### 2. Fixed-Width Files
+Fixed-width parsing processes lines sequentially using character slicing. Since it avoids sniffer overhead but incurs high Python dictionary overhead when matching UIDs in memory:
+*   **RAM**:
+    *   *In-Memory*: $\text{RAM}_{\text{fixed-width}} = \text{base\_overhead} + F \times 3.5$ (due to Python object overhead for storing parsed field values in string hash maps).
+    *   *Spilled*: Follows the Tabular Spill formula, but with $W_r = \text{declared layout width}$.
+*   **Disk**: Same as Tabular Spill when spilled; negligible if fully in-memory.
+
+##### 3. JSON and NDJSON Files
+*   **Single JSON Document**:
+    *   **RAM**: The entire JSON tree structure is parsed into a Python dictionary. Every nested element, dictionary key, and scalar value incurs heavy Python pointer overhead.
+        $$\text{RAM}_{\text{json}} = \text{base\_overhead} + F \times 6.0$$
+    *   **Disk**: Negligible (only final mismatch report).
+*   **NDJSON (Line-delimited JSON)**:
+    *   **RAM**: NDJSON uses the tabular spill pipeline, but parsing dictionary rows in memory has a higher overhead factor.
+        $$\text{RAM}_{\text{ndjson}} = \text{base\_overhead} + W \times \left( N_c \times W_r \times \text{buffers} + 4.5 \times \frac{F}{P} \right)$$
+    *   **Disk**: Spilled partitions write nested data in flattened formats:
+        $$\text{Disk}_{\text{ndjson}} = F \times 1.5 + M \times W_r \times 1.5$$
+
+##### 4. Archives (ZIP and TAR)
+Archive validation operates in two modes:
+*   **Manifest-Only Comparison**:
+    *   **RAM**: Stores only manifest records.
+        $$\text{RAM}_{\text{manifest}} = \text{base\_overhead} + E \times 512 \text{ bytes}$$
+    *   **Disk**: Negligible ($< 1 \text{ MiB}$ for temporary manifest files).
+*   **Nested Leaf Validation**:
+    *   **RAM**: Governed by the memory profile of the leaf validator on the extracted contents.
+        $$\text{RAM}_{\text{archive\_leaf}} = \text{RAM}_{\text{leaf\_validator}}(F \times R_c)$$
+    *   **Disk**: Temporary extraction of leaf files must be maintained alongside the archive container:
+        $$\text{Disk}_{\text{archive\_leaf}} = F \times R_c \times (1.0 + \text{spill\_multiplier}) + \text{reserve\_bytes}$$
+        Where $R_c \approx 3.0$ and $\text{spill\_multiplier} \approx 1.2$.
+
+---
+
+#### 15.5.3 Worked Scenarios on Target System (4 Cores, 15 GiB RAM, 200 GB SSD)
+
+Here we evaluate two concrete delimited/tabular validation scenarios on a target system with the following specs:
+*   **CPU**: 4 Cores (allowing up to $W = 4$ parallel worker threads)
+*   **RAM**: 15 GiB (with a 1 GiB OS reserve, usable memory budget is 14 GiB, auto-capped for safety at $15 \times 0.7 = 10.5 \text{ GiB}$)
+*   **SSD**: 200 GB available disk space (with a 500 MiB disk reserve)
+
+##### Scenario A: 40 GiB Delimited File (100 Million Rows, 12 Columns)
+*   **Inputs**: Combined size ($F$) = $40 \text{ GiB} = 42,949,672,960 \text{ bytes}$
+*   **Row count ($N$)**: $100,000,000$ total rows
+*   **Column count ($C$)**: $12$ columns
+*   **Workers ($W$)**: $4$
+*   **Partition count ($P$)**: $2048$ (preset: `medium`)
+
+1.  **Average Row and Column Size**:
+    *   Average raw row size:
+        $$\frac{42,949,672,960}{100,000,000} \approx 429.5 \text{ bytes/row}$$
+    *   Average raw column size (assuming even distribution):
+        $$\frac{429.5}{12} \approx 35.8 \text{ bytes/column/row}$$
+2.  **Raw Fingerprint Storage**:
+    Using `xxhash64` (8 bytes per digest):
+    $$\text{Storage}_{\text{fingerprint}} = 100,000,000 \times 8 \text{ bytes} \approx 762.9 \text{ MiB}$$
+3.  **Partition Sizing**:
+    *   Average rows per partition pair:
+        $$\frac{100,000,000}{2048} \approx 48,828 \text{ rows}$$
+    *   Average partition pair size on disk:
+        $$\frac{40 \text{ GiB}}{2048} = 20 \text{ MiB per partition pair (10 MiB per side)}$$
+4.  **Working RAM Sizing (for $W = 4$ Workers)**:
+    *   Estimated row width ($W_r$) = $8 \times 12 + 24 = 120 \text{ bytes}$
+    *   Chunk buffer RAM ($500,000 \text{ rows} \times 120 \text{ bytes} \times 2$) = $114.4 \text{ MiB}$
+    *   Active partition join overhead ($3 \times 20 \text{ MiB}$) = $60 \text{ MiB}$
+    *   Peak RAM for $W=4$ workers:
+        $$\text{RAM}_{\text{spill}} = 384 \text{ MiB} + 4 \times (114.4 \text{ MiB} + 60 \text{ MiB}) \approx 1081.6 \text{ MiB} \approx 1.06 \text{ GiB}$$
+        *Fits comfortably inside the 15 GiB RAM / 10.5 GiB usable safety cap.*
+5.  **SSD Disk Sizing**:
+    $$\text{Disk}_{\text{spill}} = 40 \text{ GiB} \times 1.2 + M \times W_r + 4 \times 20 \text{ MiB} \times 2 \approx 48 \text{ GiB} + \text{drilldown cache} + 160 \text{ MiB}$$
+    With a $5\%$ mismatch rate ($M = 5,000,000$ changed rows), the drilldown cache takes:
+    $$\text{Disk}_{\text{drilldown}} = 5,000,000 \times 120 \text{ bytes} \approx 572.2 \text{ MiB}$$
+    Total additional SSD space needed $\approx 48.7 \text{ GiB}$.
+    *Fits comfortably within the 200 GB SSD.*
+
+##### Scenario B: 10 GiB Delimited File (100 Million Rows, 4 Columns)
+*   **Inputs**: Combined size ($F$) = $10 \text{ GiB} = 10,737,418,240 \text{ bytes}$
+*   **Row count ($N$)**: $100,000,000$ total rows
+*   **Column count ($C$)**: $4$ columns
+*   **Workers ($W$)**: $4$
+*   **Partition count ($P$)**: $2048$ (preset: `medium`)
+
+1.  **Average Row and Column Size**:
+    *   Average raw row size:
+        $$\frac{10,737,418,240}{100,000,000} \approx 107.4 \text{ bytes/row}$$
+    *   Average raw column size (assuming even distribution):
+        $$\frac{107.4}{4} \approx 26.8 \text{ bytes/column/row}$$
+2.  **Raw Fingerprint Storage**:
+    Using `xxhash64` (8 bytes per digest):
+    $$\text{Storage}_{\text{fingerprint}} = 100,000,000 \times 8 \text{ bytes} \approx 762.9 \text{ MiB}$$
+3.  **Partition Sizing**:
+    *   Average rows per partition pair:
+        $$\frac{100,000,000}{2048} \approx 48,828 \text{ rows}$$
+    *   Average partition pair size on disk:
+        $$\frac{10 \text{ GiB}}{2048} = 5 \text{ MiB per partition pair (2.5 MiB per side)}$$
+4.  **Working RAM Sizing (for $W = 4$ Workers)**:
+    *   Estimated row width ($W_r$) = $8 \times 4 + 24 = 56 \text{ bytes}$
+    *   Chunk buffer RAM ($500,000 \text{ rows} \times 56 \text{ bytes} \times 2$) = $53.4 \text{ MiB}$
+    *   Active partition join overhead ($3 \times 5 \text{ MiB}$) = $15 \text{ MiB}$
+    *   Peak RAM for $W=4$ workers:
+        $$\text{RAM}_{\text{spill}} = 384 \text{ MiB} + 4 \times (53.4 \text{ MiB} + 15 \text{ MiB}) \approx 384 \text{ MiB} + 273.6 \text{ MiB} = 657.6 \text{ MiB} \approx 0.64 \text{ GiB}$$
+        *Fits comfortably inside the 15 GiB RAM / 10.5 GiB usable safety cap.*
+5.  **SSD Disk Sizing**:
+    $$\text{Disk}_{\text{spill}} = 10 \text{ GiB} \times 1.2 + M \times W_r + 4 \times 5 \text{ MiB} \times 2 \approx 12 \text{ GiB} + \text{drilldown cache} + 40 \text{ MiB}$$
+    With a $5\%$ mismatch rate ($M = 5,000,000$ changed rows), the drilldown cache takes:
+    $$\text{Disk}_{\text{drilldown}} = 5,000,000 \times 56 \text{ bytes} \approx 267.0 \text{ MiB} \approx 0.26 \text{ GiB}$$
+    Total additional SSD space needed $\approx 12.3 \text{ GiB}$.
+    *Fits comfortably within the 200 GB SSD.*
+
+---
+
+#### 15.5.4 Resource Scaling Across Dataset Sizes
+
+If the row shape stays the same (429.5 bytes/row, 12 columns, 2048 partitions), resource requirements scale linearly with dataset size:
+
+##### 1. 10 GiB Scenario
+*   **Total Rows**: $25,000,000$
+*   **Fingerprint Storage**: $25,000,000 \times 8 \text{ bytes} \approx 190.7 \text{ MiB}$
+*   **Average Partition Pair Size**: $10 \text{ GiB} / 2048 \approx 5 \text{ MiB}$
+*   **Peak RAM per Partition Pair**: $\approx 10 \text{ to } 20 \text{ MiB}$
+
+##### 2. 20 GiB Scenario
+*   **Total Rows**: $50,000,000$
+*   **Fingerprint Storage**: $50,000,000 \times 8 \text{ bytes} \approx 381.5 \text{ MiB}$
+*   **Average Partition Pair Size**: $20 \text{ GiB} / 2048 \approx 10 \text{ MiB}$
+*   **Peak RAM per Partition Pair**: $\approx 20 \text{ to } 40 \text{ MiB}$
+
+##### 3. 40 GiB Scenario (Baseline)
+*   **Total Rows**: $100,000,000$
+*   **Fingerprint Storage**: $100,000,000 \times 8 \text{ bytes} \approx 762.9 \text{ MiB}$
+*   **Average Partition Pair Size**: $40 \text{ GiB} / 2048 \approx 20 \text{ MiB}$
+*   **Peak RAM per Partition Pair**: $\approx 40 \text{ to } 80 \text{ MiB}$
+
+##### 4. 80 GiB Scenario
+*   **Total Rows**: $200,000,000$
+*   **Fingerprint Storage**: $200,000,000 \times 8 \text{ bytes} \approx 1.49 \text{ GiB}$
+*   **Average Partition Pair Size**: $80 \text{ GiB} / 2048 \approx 40 \text{ MiB}$
+*   **Peak RAM per Partition Pair**: $\approx 80 \text{ to } 160 \text{ MiB}$
+
+##### 5. 100 GiB Scenario
+*   **Total Rows**: $250,000,000$
+*   **Fingerprint Storage**: $250,000,000 \times 8 \text{ bytes} \approx 1.86 \text{ GiB}$
+*   **Average Partition Pair Size**: $100 \text{ GiB} / 2048 \approx 50 \text{ MiB}$
+*   **Peak RAM per Partition Pair**: $\approx 100 \text{ to } 200 \text{ MiB}$
+
+---
+
+#### 15.5.5 Quick Reference Tables by File Format (10 GiB to 100 GiB)
+
+> [!NOTE]
+> Peak RAM is the working memory allocated to active workers during partition waves. Temporary disk is the additional workspace storage needed beyond the source and target files already present.
+
+##### 1. Tabular / CSV-like
+| Combined Input Size | Average Partition Pair | Rough Peak RAM | Additional Temp Disk |
+| :--- | :---: | :---: | :---: |
+| **10 GiB** | 5 MiB | 10 - 20 MiB | 10 - 11 GiB |
+| **20 GiB** | 10 MiB | 20 - 40 MiB | 20 - 22 GiB |
+| **40 GiB** | 20 MiB | 40 - 80 MiB | 40 - 44 GiB |
+| **80 GiB** | 40 MiB | 80 - 160 MiB | 80 - 88 GiB |
+| **100 GiB** | 50 MiB | 100 - 200 MiB | 100 - 110 GiB |
+
+##### 2. Fixed-Width
+| Combined Input Size | Average Partition Pair | Rough Peak RAM | Additional Temp Disk |
+| :--- | :---: | :---: | :---: |
+| **10 GiB** | 5 MiB | 8 - 15 MiB | 10 - 11 GiB |
+| **20 GiB** | 10 MiB | 15 - 30 MiB | 20 - 22 GiB |
+| **40 GiB** | 20 MiB | 30 - 60 MiB | 40 - 44 GiB |
+| **80 GiB** | 40 MiB | 60 - 120 MiB | 80 - 88 GiB |
+| **100 GiB** | 50 MiB | 75 - 150 MiB | 100 - 110 GiB |
+
+##### 3. JSON & NDJSON
+| Combined Input Size | Average Partition Pair | Rough Peak RAM | Additional Temp Disk |
+| :--- | :---: | :---: | :---: |
+| **10 GiB** | 5 MiB | 12 - 25 MiB | 10 - 12 GiB |
+| **20 GiB** | 10 MiB | 25 - 50 MiB | 20 - 24 GiB |
+| **40 GiB** | 20 MiB | 50 - 100 MiB | 40 - 48 GiB |
+| **80 GiB** | 40 MiB | 100 - 200 MiB | 80 - 96 GiB |
+| **100 GiB** | 50 MiB | 125 - 250 MiB | 100 - 120 GiB |
+
+##### 4. Columnar (Parquet, ORC, Avro)
+| Combined Input Size | Average Partition Pair | Rough Peak RAM | Additional Temp Disk |
+| :--- | :---: | :---: | :---: |
+| **10 GiB** | 5 MiB | 10 - 20 MiB | 10 - 12 GiB |
+| **20 GiB** | 10 MiB | 20 - 40 MiB | 20 - 24 GiB |
+| **40 GiB** | 20 MiB | 40 - 80 MiB | 40 - 48 GiB |
+| **80 GiB** | 40 MiB | 80 - 160 MiB | 80 - 96 GiB |
+| **100 GiB** | 50 MiB | 100 - 200 MiB | 100 - 120 GiB |
+
+##### 5. Archives (ZIP and TAR)
+*   **Manifest-Only**:
+    | Combined Archive Size | Rough Peak RAM | Additional Temp Disk |
+    | :--- | :---: | :---: |
+    | **10 GiB** - **100 GiB** | A few MiB | 0.1 - 0.5 GiB |
+*   **Nested Leaf Validation** (assumes $3.0\times$ decompression ratio):
+    | Combined Archive Size | Rough Peak RAM (Active Leaf Partition) | Additional Temp Disk |
+    | :--- | :---: | :---: |
+    | **10 GiB** | 10 - 25 MiB | 20 - 30 GiB |
+    | **20 GiB** | 20 - 50 MiB | 40 - 60 GiB |
+    | **40 GiB** | 40 - 100 MiB | 80 - 120 GiB |
+    | **80 GiB** | 80 - 200 MiB | 160 - 240 GiB |
+    | **100 GiB** | 100 - 250 MiB | 200 - 300 GiB |
+
+---
+
+#### 15.5.6 Key Performance Drivers
+1.  **Column Count ($C$)**: Linearly expands the logical row width ($W_r$), which dictates both the size of the fingerprint buffers and the memory loaded during drilldown.
+2.  **Row Count ($N$)**: Directly increases fingerprint storage size in RAM. If $N$ increases while combined bytes $F$ remain low (e.g., highly dense integer keys), memory footprint shifts from disk-based partitioning overhead to hash map index storage.
+3.  **Partition Count ($P$)**: Higher partition counts reduce the memory requirement of individual waves but increase filesystem I/O operations and file descriptor limits.
+4.  **Parallel Workers ($W$)**: Linear scaling factor for RAM. Memory usage scales directly with thread count. Reduce workers under resource-constrained systems to avoid Out-Of-Memory (OOM) failures.
+5.  **Text Cardinality / Size**: Highly unique string columns increase the hash digest collisions and require larger buffers for canonicalization.
+6.  **Mismatch Density**: Higher density increases $M$, which swells the drilldown cache on disk and consumes additional I/O to output mismatch reports.
+
+---
+
+#### 15.5.7 Configuration Tuning Flags for Tuning Resource Allocations
+
+To control resource utilization on systems with constraints, adjust these flags in your environment or configuration settings:
+
+*   `validation_memory_budget_bytes`: Sets the hard cap on memory usage per validation job. The queue advisor uses this to determine safe max concurrency.
+*   `validation_reconciliation_chunk_rows` (Default: `500,000`): Lower this to `100,000` or `250,000` to shrink the size of chunk buffers, drastically reducing worker RAM overhead.
+*   `validation_reconciliation_partition_buckets` (Default: adaptive): Explicitly request a higher bucket count (e.g., `4096` or `8192`) to reduce individual partition sizes for multi-GB runs.
+*   `validation_queue_ram_multiplier` (Default: `1.5`): Multiplier used by the advisor to estimate in-memory footprint. Increase to `2.5` to configure a safer, more conservative boundary.
+*   `validation_reconciliation_disk_headroom_multiplier` (Default: `1.5`): Increase this if spilling large fixed-width or NDJSON files where text expansions are expected.
+*   `validation_gcs_streaming_only` (Default: `True`): Force streaming mode to avoid loading raw cloud files directly to local workspace disks.
 
 ---
 
