@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-07-01T08:46:25Z
+# Last edited: 2026-07-01T09:36:09Z
 # --- END GENERATED FILE METADATA ---
 
 """Export full mismatch rows from reconciliation spill files to NDJSON."""
