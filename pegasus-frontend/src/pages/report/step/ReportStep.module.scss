@@ -37,6 +37,7 @@
   display: flex;
   align-items: center;
   gap: tokens.$spacing-md;
+  min-width: 0;
   cursor: pointer;
 
   &:hover {
@@ -60,6 +61,7 @@
   align-items: center;
   gap: tokens.$spacing-sm;
   margin-bottom: 0.25rem;
+  min-width: 0;
 }
 
 .fileIcon {
@@ -68,6 +70,11 @@
 }
 
 .sourceTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
   color: tokens.$on-surface;
   font-size: 0.8125rem;
@@ -102,6 +109,10 @@
 }
 
 .jobTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: tokens.$on-surface;
   font-size: 0.8125rem;
   font-weight: 500;

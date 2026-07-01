@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-07-01T08:45:53Z
+# Last edited: 2026-07-01T08:46:25Z
 # --- END GENERATED FILE METADATA ---
 
 """GCS helpers for archive manifest listing without full-object download."""
