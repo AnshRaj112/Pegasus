@@ -985,24 +985,136 @@ This is the short version of the scaling behavior.
 
 ### 15.1 Tabular and columnar
 
-- runtime: roughly $O(n \cdot c)$ plus drilldown on changed rows
-- space: roughly $O(n \cdot c)$ logical volume, but bounded peak memory through partitioning
-- unsorted inputs: handled by hashing and joins, not by positional scanning
+For tabular and columnar inputs, let:
+
+- $n$ = rows per side
+- $c$ = compare columns per row
+- $u$ = unique identities after hashing
+- $p$ = number of partitions actually chosen by the planner
+- $m$ = changed identities that require drilldown
+
+The runtime breaks down like this:
+
+- canonicalization of identity parts: $O(n \cdot \lvert UID \rvert)$
+- canonicalization of compare parts: $O(n \cdot c)$
+- row fingerprint generation: $O(n \cdot c)$
+- partition routing: $O(n)$
+- reconciliation of all partitions: about $O(n)$ average with hash joins
+- drilldown for changed rows: $O(m \cdot c)$
+
+So the total tabular and columnar runtime is approximately:
+
+$$
+O(n \cdot c + m \cdot c)
+$$
+
+The important detail is that the $O(n \cdot c)$ part happens once during partitioning, and the $O(m \cdot c)$ part only happens for the changed rows that need explanation.
+
+The space breakdown is also layered:
+
+- in-memory working set: one chunk or one partition wave at a time
+- spill files: roughly $O(n)$ stored on disk in partition form
+- drilldown payload: roughly $O(m \cdot c)$ for the changed-key subset
+
+So the logical space cost is close to $O(n \cdot c)$, but the peak resident memory is closer to:
+
+$$
+O(\max(\text{one partition wave}, \text{drilldown subset}))
+$$
+
+Because the validator uses hashing and joins, unsorted input does not change the asymptotic cost. It changes only which rows get routed to which bucket.
 
 ### 15.2 Fixed-width
 
-- runtime: roughly $O(n \cdot c)$ because each UID row is compared field by field
-- space: roughly $O(n)$ for UID maps plus mismatch output
+For fixed-width inputs, let:
+
+- $n$ = rows per side
+- $c$ = compare fields per row
+- $w$ = total declared width of one row
+
+The runtime is:
+
+- slice each line by layout: $O(n \cdot w)$, which is effectively linear in input size
+- build UID maps: $O(n)$
+- compare shared rows field by field: $O(n \cdot c)$
+
+So fixed-width validation is roughly:
+
+$$
+O(n \cdot w + n \cdot c)
+$$
+
+In practice, $w$ is fixed by layout, so the cost grows linearly with row count and row width.
+
+The space cost is:
+
+- UID maps: $O(u)$
+- mismatch output: $O(m \cdot c)$
+
+So the peak memory is usually dominated by the UID maps and the output rows, not by the whole file.
 
 ### 15.3 JSON and NDJSON
 
-- runtime: roughly $O(s)$ where $s$ is the size of the JSON tree or records visited, plus path recursion and list matching cost
-- space: roughly $O(d)$ recursion depth for tree walk, plus the output rows
+For JSON and NDJSON, let:
+
+- $s$ = total nodes or records visited during comparison
+- $d$ = maximum recursion depth of the object tree
+- $a$ = total array elements visited
+
+The runtime depends on structure:
+
+- single JSON document diff: about $O(s)$ for dictionary keys, list traversal, and scalar comparison
+- NDJSON row matching: about $O(n \cdot c)$ at the outer row level plus recursive path comparison inside each matched record
+
+So a practical bound is:
+
+$$
+O(s + a)
+$$
+
+for one document, or:
+
+$$
+O(n \cdot c + s)
+$$
+
+for NDJSON with row-level matching.
+
+The space cost is:
+
+- recursion stack: $O(d)$
+- current path state and temporary comparison frames: proportional to the active branch, not the whole tree
+- mismatch output: $O(m)$ or $O(m \cdot c)$ depending on how many path differences appear
+
+The recursion depth matters more than the total file size when the JSON is deeply nested.
 
 ### 15.4 Archives
 
-- runtime: roughly $O(e)$ for manifest work plus the cost of any extracted leaf validation
-- space: bounded by manifest size, extracted leaf size, and safety limits
+For archives, let:
+
+- $e$ = archive entries in the manifest
+- $b$ = bytes streamed from the selected member or members
+- $k$ = number of nested levels actually followed
+
+The runtime is:
+
+- manifest scan and metadata comparison: $O(e)$
+- chunked member extraction: $O(b)$ for the selected member bytes
+- nested recursion: bounded by $O(k \cdot e)$ under the safety limits
+
+So archive validation is usually:
+
+$$
+O(e + b + \text{leaf validation cost})
+$$
+
+The space cost is bounded by:
+
+- manifest metadata: $O(e)$
+- one streamed member at a time: $O(\text{chunk size})$ in memory, plus temp file usage on disk
+- nested extraction depth: bounded by the configured depth limit
+
+That means the memory profile is small, but the temporary disk requirement can still be large when the extracted leaf is much bigger than the compressed member.
 
 ### 15.5 Practical 40 GB note
 
@@ -1074,6 +1186,22 @@ $$
 
 If the data is split evenly between source and target, that is about 10 MiB per side per partition on average.
 
+The planner may choose fewer partitions for smaller jobs. The configured presets are:
+
+- `small` = 1024
+- `medium` = 2048
+- `large` = 4096
+- `xlarge` = 8192
+
+The final partition count is the smaller of the explicit request and the preset cap, then further constrained by the file-size tier and estimated row count. The practical effect is that tiny files use fewer buckets and large files use more.
+
+For example:
+
+- if a tiny job estimates only a few thousand rows, the planner may stop at 16, 64, or 256 buckets even if the preset is `medium`
+- if a 40 GiB job estimates about 100 million rows, the planner can legitimately use the full `medium` preset of 2048 buckets or more if the config allows it
+
+This is why the number of files on disk scales with job size, but does not explode for very small inputs.
+
 #### 15.5.4 UID and compare payload estimate
 
 If the 12 columns are split as 2 UID columns and 10 compare columns, then the average bytes per row are:
@@ -1126,6 +1254,16 @@ $$
 
 So a practical per-partition working set is often in the rough range of 40 to 80 MiB, before any unusually large mismatch export or drilldown expansion.
 
+That estimate comes from the wave-based execution model:
+
+- source partition frame
+- target partition frame
+- join state for the current partition
+- temporary drilldown rows for changed keys
+- Polars/frame metadata and Python object overhead
+
+The disk guard also plans per wave, not for the full dataset at once. The wave estimate uses the combined input size, number of partitions, and wave size, then multiplies by a conservative disk factor before validating headroom. That is why a job can be too large for RAM but still proceed safely on disk-backed reconciliation.
+
 #### 15.5.6 Why the job still does not fit in RAM as a whole
 
 Even though a single partition is small, the whole job is not just one partition. The backend still has to:
@@ -1169,6 +1307,7 @@ Using the 40 GiB case as the baseline:
 - fingerprint storage: $25,000,000 \times 8 = 200,000,000$ bytes, about 190.7 MiB
 - average partition pair size: $10 \text{ GiB} / 2048 \approx 5 \text{ MiB}$
 - rough peak RAM per partition pair: about 10 to 20 MiB
+- if the planner keeps the `medium` preset, the bucket count can still be capped lower for very small jobs, so the actual partition size may be larger than 5 MiB if the dataset is tiny
 
 ##### 20 GiB case
 
@@ -1176,6 +1315,7 @@ Using the 40 GiB case as the baseline:
 - fingerprint storage: $50,000,000 \times 8 = 400,000,000$ bytes, about 381.5 MiB
 - average partition pair size: $20 \text{ GiB} / 2048 \approx 10 \text{ MiB}$
 - rough peak RAM per partition pair: about 20 to 40 MiB
+- at this size the planner generally has enough rows to justify the medium-to-large bucket range
 
 ##### 40 GiB case
 
@@ -1183,6 +1323,7 @@ Using the 40 GiB case as the baseline:
 - fingerprint storage: $100,000,000 \times 8 = 800,000,000$ bytes, about 762.9 MiB
 - average partition pair size: $40 \text{ GiB} / 2048 \approx 20 \text{ MiB}$
 - rough peak RAM per partition pair: about 40 to 80 MiB
+- if the config is allowed to use a larger preset than `medium`, the same row shape can be spread across 4096 or 8192 buckets instead, reducing the per-partition working set further
 
 ##### 15.5.9 Assumptions used in the per-format estimates
 
