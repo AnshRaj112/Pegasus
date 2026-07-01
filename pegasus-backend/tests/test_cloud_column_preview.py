@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-30T14:52:27Z
+# Last edited: 2026-06-30T14:53:09Z
 # --- END GENERATED FILE METADATA ---
 
 """Cloud column preview streams headers from GCS without full download."""
