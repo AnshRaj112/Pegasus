@@ -18,7 +18,6 @@ const Profile = lazy(() => import('~/pages/profile/Profile'));
 const WorkspaceMgmtSubView = lazy(() => import('~/pages/admin/sections/WorkspaceMgmtSubView'));
 const ConfigureStoreSubView = lazy(() => import('~/pages/admin/sections/ConfigureStoreSubView'));
 const Setting = lazy(() => import('~/pages/admin/sections/setting/Setting'));
-const TestView = lazy(() => import('~/pages/test/TestView'));
 
 const LazyRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <Suspense
@@ -120,14 +119,6 @@ export const router = createHashRouter([
                 ),
               },
             ],
-          },
-          {
-            path: PATHS.TEST,
-            element: (
-              <LazyRoute>
-                <TestView />
-              </LazyRoute>
-            ),
           },
           {
             path: PATHS.PROFILE,

@@ -1,10 +1,7 @@
 import React, { useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '../../redux/store';
-import { EntityCustomizer } from './components/EntityCustomizer';
-import { ActiveTasksPanel } from './components/ActiveTasksPanel';
 import { MetricsPanel } from './components/MetricsPanel';
 import { PerformanceChartPanel } from './components/PerformanceChartPanel';
-import { WorkspacesPanel } from './components/WorkspacesPanel';
 import { dashboardActions } from './Dashboard.reducer';
 import styles from './Dashboard.module.scss';
 
@@ -18,22 +15,14 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className={styles.dashboardContainer}>
-      <div className={styles.row1Grid}>
-        <MetricsPanel
-          runningCount={data?.runningTasksCount ?? 0}
-          passed={data?.totals.passed ?? 0}
-          failed={data?.totals.failed ?? 0}
-          totalValidated={data?.totals.total ?? 0}
-          isLoading={isFetching}
-        />
-        <PerformanceChartPanel dailyStats={data?.dailyStats ?? []} isLoading={isFetching} />
-      </div>
-
-      <div className={`${styles.row2Grid} ${styles.row2GridAlignStart}`}>
-        <ActiveTasksPanel tasks={data?.tasks ?? []} isLoading={isFetching} />
-        <WorkspacesPanel entities={data?.entities ?? []} isLoading={isFetching} />
-        <EntityCustomizer entities={data?.entities ?? []} />
-      </div>
+      <PerformanceChartPanel dailyStats={data?.dailyStats ?? []} isLoading={isFetching} />
+      <MetricsPanel
+        runningCount={data?.runningTasksCount ?? 0}
+        passed={data?.totals.passed ?? 0}
+        failed={data?.totals.failed ?? 0}
+        totalValidated={data?.totals.total ?? 0}
+        isLoading={isFetching}
+      />
     </div>
   );
 };

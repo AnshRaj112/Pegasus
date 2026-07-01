@@ -9,39 +9,35 @@
   gap: var(--lg);
 }
 
-.row1Grid {
-  display: grid;
-  grid-template-columns: repeat(24, minmax(0, 1fr));
-  gap: var(--lg);
-}
-
 .leftMetricsCol {
-  grid-column: span 24 / span 24;
+  width: 100%;
 }
 
 .rightChartCol {
-  grid-column: span 24 / span 24;
+  width: 100%;
   background: var(--surface);
   border: 1px solid var(--surface-variant);
-  padding: var(--lg);
+  padding: 2rem var(--xl) 3rem;
   border-radius: var(--lg);
-}
-
-@media (min-width: 768px) {
-  .leftMetricsCol {
-    grid-column: span 8 / span 8;
-  }
-
-  .rightChartCol {
-    grid-column: span 16 / span 16;
-  }
 }
 
 .metricsSubGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(1, minmax(0, 1fr));
   gap: var(--md);
   height: 100%;
+}
+
+@media (min-width: 576px) {
+  .metricsSubGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 992px) {
+  .metricsSubGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .chartHeader {
@@ -61,21 +57,71 @@
   align-items: center;
   gap: var(--xs);
   font-size: var(--body-sm);
+  cursor: pointer;
+  padding: var(--xs) var(--sm);
+  border-radius: var(--xs);
+  transition: background-color 0.2s ease;
+
+  &:hover:not(.legendItemDisabled) {
+    background-color: var(--surface-container-low);
+  }
+}
+
+.legendItemDisabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .chartWrapper {
-  height: 200px;
+  height: 350px;
   width: 100%;
   position: relative;
 }
 
-.chartDaysLabel {
+
+/* Day-label row rendered as HTML below the SVG — gives natural CSS-controlled gap */
+.chartAxisLabels {
   display: flex;
   justify-content: space-between;
-  margin-top: var(--sm);
+  /* Left padding mirrors the y-axis gutter (≈60/850 of chart width) */
+  padding-left: 7.06%;
+  /* Right padding mirrors the right margin (≈50/850) */
+  padding-right: 5.88%;
+  margin-top: 16px;
+}
+
+.chartAxisLabel {
   font-size: var(--body-sm);
   color: var(--on-surface-variant);
+  font-family: var(--font-body-sm);
+  text-align: center;
+  transition: color 0.15s ease, font-weight 0.15s ease;
+  user-select: none;
 }
+
+.chartAxisLabelActive {
+  color: var(--on-surface);
+  font-weight: 600;
+}
+
+/* Y-axis value labels — absolutely positioned in chartWrapper's left gutter */
+.chartYLabel {
+  position: absolute;
+  left: 0;
+  width: 52px;         /* matches the SVG left gutter (x=0…60 = ~7% of 850) */
+  text-align: right;
+  padding-right: 10px; /* gap between number and the grid line */
+  transform: translateY(-50%);
+  font-size: var(--body-sm);
+  font-family: var(--font-body-sm);
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  /* Only show within the SVG portion, not over the X-label row */
+  z-index: 1;
+}
+
 
 .row2Grid {
   display: grid;
@@ -170,7 +216,7 @@
 }
 
 .legendDotPass {
-  background: var(--color-midnight-green);
+  background: var(--status-pass);
 }
 
 .legendDotFail {
@@ -195,19 +241,91 @@
 
 .chartPassLine {
   fill: none;
-  stroke: var(--color-midnight-green);
+  stroke: var(--status-pass);
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 3;
+  transition: stroke-width 0.2s ease, opacity 0.2s ease, stroke 0.2s ease;
 }
 
 .chartFailLine {
   fill: none;
   stroke: var(--status-fail);
-  stroke-dasharray: 4;
   stroke-linecap: round;
-  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-width: 3;
+  transition: stroke-width 0.2s ease, opacity 0.2s ease, stroke 0.2s ease;
 }
+
+.chartLineDimmed {
+  opacity: 0.15;
+  stroke-width: 1.5;
+}
+
+.chartLineHighlighted {
+  stroke-width: 5;
+  opacity: 1;
+}
+
+.chartMarker {
+  cursor: pointer;
+  transition: r 0.2s ease, fill-opacity 0.2s ease, stroke-width 0.2s ease;
+}
+
+.chartGuideLine {
+  stroke: var(--outline-variant);
+  stroke-dasharray: 4 4;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.chartTooltip {
+  position: absolute;
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--outline-variant);
+  border-radius: 8px;
+  padding: var(--sm) var(--md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+  z-index: 10;
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--xs);
+  transition: left 0.15s ease-out, top 0.15s ease-out;
+}
+
+.tooltipDate {
+  font-weight: 600;
+  font-size: var(--label-md);
+  color: var(--on-surface);
+  border-bottom: 1px solid var(--surface-variant);
+  padding-bottom: 4px;
+  margin-bottom: 2px;
+}
+
+.tooltipRow {
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+  font-size: var(--body-sm);
+  color: var(--on-surface-variant);
+}
+
+.tooltipPassDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-pass);
+}
+
+.tooltipFailDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-fail);
+}
+
 
 .tableHeadCell {
   padding: var(--md);

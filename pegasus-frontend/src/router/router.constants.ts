@@ -10,7 +10,6 @@ export const PATHS = {
   ADMIN_WORKSPACE: '/admin/workspace-management',
   ADMIN_CONFIGURE_STORE: '/admin/configure-store',
   ADMIN_SETTINGS: '/admin/settings',
-  TEST: '/test',
   PROFILE: '/profile',
   SETTING: '/setting',
 } as const;

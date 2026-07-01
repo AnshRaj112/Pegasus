@@ -27,13 +27,14 @@ describe('Dashboard', () => {
     vi.clearAllMocks()
   })
 
-  it('renders all dashboard panels after data loads', async () => {
+  it('renders chart and metrics after data loads', async () => {
     await prepareDashboardView()
 
     expect(screen.getByRole('heading', { name: 'Validation Performance' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Active Tasks' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Workspaces' })).toBeInTheDocument()
-    expect(screen.getByText('Entity Customizer')).toBeInTheDocument()
+    expect(screen.getByText('355')).toBeInTheDocument()
+    expect(screen.getByText('25')).toBeInTheDocument()
+    expect(screen.getByText('380')).toBeInTheDocument()
+    expect(screen.getByText('Active processing tasks')).toBeInTheDocument()
   })
 
   it('dispatches fetchDashboardDataRequest on mount', async () => {
