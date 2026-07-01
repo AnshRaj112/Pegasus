@@ -13,6 +13,7 @@ import { reportActions } from '../Report.reducer'
 import {
   fetchHistoryRunSaga,
   fetchMismatchesSaga,
+  handleFetchActiveReports,
   handleFetchReports,
   reportSaga,
 } from '../Report.saga'
@@ -38,6 +39,16 @@ vi.mock('antd', () => ({
 describe('Report sagas', () => {
   afterEach(() => {
     vi.clearAllMocks()
+  })
+
+  describe('handleFetchActiveReports', () => {
+    it('fetches active reports regardless of selected tab', () => {
+      const iterator = handleFetchActiveReports() as Generator<unknown, void, unknown>
+      expect(iterator.next().value).toEqual(call(ReportService.fetchActive))
+      expect(iterator.next([mockActiveReport]).value).toEqual(
+        put(reportActions.fetchReportsSuccess({ tab: 'Active', data: [mockActiveReport] })),
+      )
+    })
   })
 
   describe('handleFetchReports', () => {
@@ -202,6 +213,7 @@ describe('Report sagas', () => {
       expect(iterator.next().value).toEqual(
         all([
           takeLatest(reportActions.fetchReportsRequest.type, handleFetchReports),
+          takeLatest(reportActions.fetchActiveReportsRequest.type, handleFetchActiveReports),
           takeLatest(reportActions.setTab.type, handleFetchReports),
           takeLatest(reportActions.fetchHistoryRunRequest.type, fetchHistoryRunSaga),
           takeLatest(reportActions.fetchMismatchesRequest.type, fetchMismatchesSaga),

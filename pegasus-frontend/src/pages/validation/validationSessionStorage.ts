@@ -6,6 +6,8 @@ export interface ActiveValidationSession {
   jobId: string;
   sourcePath: string;
   targetPath: string;
+  sourceFileName?: string | null;
+  targetFileName?: string | null;
   startedAt: number;
   formSnapshot?: {
     sourceCloud: GoogleCloudStorageConfig | null;

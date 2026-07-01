@@ -114,7 +114,16 @@ const ExecutionHistory: React.FC = () => {
           <button
             type="button"
             disabled={!runs[0]?.run_id}
-            onClick={() => runs[0]?.run_id && dispatch(validationActions.runValidationFromHistoryRequest(runs[0].run_id))}
+            onClick={() => {
+              if (!runs[0]?.run_id || !sourceFileInfo || !targetFileInfo) return;
+              dispatch(validationActions.runValidationFromHistoryRequest({
+                runId: runs[0].run_id,
+                sourcePath: sourceFileInfo.path,
+                targetPath: targetFileInfo.path,
+                sourceTitle: sourceFileInfo.name,
+                targetTitle: targetFileInfo.name,
+              }));
+            }}
             className={styles.runBtn}
           >
             <PlayCircleOutlined /> Run Validation

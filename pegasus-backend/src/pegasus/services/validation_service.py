@@ -332,6 +332,16 @@ class ValidationService:
                 mismatch_snippet_limit=mismatch_snippet_limit,
                 sep=sep,
                 materialized_from_gcs=materialized_from_gcs,
+                materialized_source_path=(
+                    source.path
+                    if materialized_from_gcs and isinstance(source, FileDelimitedAdapter)
+                    else None
+                ),
+                materialized_target_path=(
+                    target.path
+                    if materialized_from_gcs and isinstance(target, FileDelimitedAdapter)
+                    else None
+                ),
             )
         finally:
             if owns_gcs_materialize_dir and gcs_materialize_dir is not None:
@@ -356,6 +366,8 @@ class ValidationService:
         mismatch_snippet_limit: int | None,
         sep: str,
         materialized_from_gcs: bool = False,
+        materialized_source_path: Path | None = None,
+        materialized_target_path: Path | None = None,
     ) -> ValidationRunResult:
         from pegasus.validation.lifecycle_profiler import get_active_profiler, lifecycle_span
 
@@ -405,7 +417,6 @@ class ValidationService:
             cfg.force_disk_spill = True
             cfg.enable_in_memory_reconcile = False
             cfg.enable_column_drilldown = False
-            cfg.lazy_column_drilldown = False
             cfg.fingerprint_only_spill = True
             cfg.streaming_spill_min_bytes = 0
         if artifact_export_parent is not None:
@@ -500,6 +511,13 @@ class ValidationService:
                 result.extra_stats = extra
 
         run_result = pipeline_result_to_run_result(result)
+        if materialized_from_gcs:
+            meta = dict(run_result.pipeline_metadata or {})
+            if materialized_source_path is not None:
+                meta["source_materialized_local"] = str(materialized_source_path.resolve())
+            if materialized_target_path is not None:
+                meta["target_materialized_local"] = str(materialized_target_path.resolve())
+            run_result.pipeline_metadata = meta
         run_result.durations = ValidationRunDurations(validation_seconds=elapsed)
         run_result.test_mode = test_mode.value
         run_result.mismatch_snippet_limit = (

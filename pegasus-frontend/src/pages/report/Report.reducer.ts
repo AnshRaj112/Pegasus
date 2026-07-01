@@ -51,9 +51,39 @@ const reportSlice = createSlice({
     setSearchQuery: (state, action: PayloadAction<string>) => {
       state.searchQuery = action.payload;
     },
+    showActiveValidation: (state, action: PayloadAction<ReportItem>) => {
+      state.activeTab = 'Active';
+      const existingIdx = state.activeReports.data.findIndex(
+        (r) => r.sourcePath === action.payload.sourcePath && r.targetPath === action.payload.targetPath,
+      );
+      if (existingIdx >= 0) {
+        state.activeReports.data[existingIdx] = action.payload;
+      } else {
+        state.activeReports.data = [action.payload, ...state.activeReports.data];
+      }
+      state.activeReports.isFetching = false;
+      state.activeReports.error = null;
+    },
+    reconcileActiveValidationJobId: (
+      state,
+      action: PayloadAction<{ pendingJobId: string; jobId: string }>,
+    ) => {
+      const item = state.activeReports.data.find((r) => r.jobId === action.payload.pendingJobId);
+      if (!item) return;
+      item.jobId = action.payload.jobId;
+      item.latestRunId = action.payload.jobId;
+    },
+    fetchActiveReportsRequest: (state) => {
+      state.activeReports.error = null;
+      if (state.activeReports.data.length === 0) {
+        state.activeReports.isFetching = true;
+      }
+    },
     fetchReportsRequest: (state) => {
       const listKey = tabToListKey(state.activeTab);
-      state[listKey].isFetching = true;
+      if (state[listKey].data.length === 0) {
+        state[listKey].isFetching = true;
+      }
       state[listKey].error = null;
     },
     fetchReportsSuccess: (state, action: PayloadAction<{ tab: TabType; data: ReportItem[] }>) => {

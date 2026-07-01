@@ -31,6 +31,16 @@ const basename = (path: string | null | undefined, fallback: string | null) => {
   return fallback ?? '—';
 };
 
+const sessionSourceTitle = (session: ReturnType<typeof getActiveSessions>[number] | undefined, sourcePath: string) => {
+  if (session?.sourceFileName?.trim()) return session.sourceFileName.trim();
+  return basename(session?.formSnapshot?.sourceCloud?.object_name ?? sourcePath, null);
+};
+
+const sessionTargetTitle = (session: ReturnType<typeof getActiveSessions>[number] | undefined, targetPath: string) => {
+  if (session?.targetFileName?.trim()) return session.targetFileName.trim();
+  return basename(session?.formSnapshot?.targetCloud?.object_name ?? targetPath, null);
+};
+
 const groupByPair = (items: ValidationHistorySummary[]) => {
   const map = new Map<string, ValidationHistorySummary[]>();
   for (const item of items) {
@@ -125,10 +135,15 @@ export const ReportService = {
 
   fetchActive: async (): Promise<ReportItem[]> => {
     const sessions = getActiveSessions();
-    const { data: queue } = await Api.getValidationQueue();
-    const activeJobs = queue.jobs.filter(
-      (j) => j.state === 'queued' || j.state === 'running',
-    );
+    let activeJobs: import('../../shared/api/Api').QueueJobSnapshot[] = [];
+    try {
+      const { data: queue } = await Api.getValidationQueue();
+      activeJobs = queue.jobs.filter(
+        (j) => j.state === 'queued' || j.state === 'running',
+      );
+    } catch {
+      // Fall back to browser session entries when the queue API is unavailable.
+    }
     const seen = new Set<string>();
     const items: ReportItem[] = [];
 
@@ -140,6 +155,8 @@ export const ReportService = {
       const mappingId = sourcePath && targetPath
         ? pairIdToPathSegment(encodeReportPairId(sourcePath, targetPath))
         : job.job_id;
+      const sourceTitle = sessionSourceTitle(session, sourcePath);
+      const targetTitle = sessionTargetTitle(session, targetPath);
       const latest = {
         run_id: job.job_id,
         status: job.state,
@@ -149,8 +166,8 @@ export const ReportService = {
         mapping_count: 0,
         source_path: sourcePath || null,
         target_path: targetPath || null,
-        source_filename: sourcePath ? sourcePath.replace(/\\/g, '/').split('/').pop() ?? null : null,
-        target_filename: targetPath ? targetPath.replace(/\\/g, '/').split('/').pop() ?? null : null,
+        source_filename: sourceTitle !== '—' ? sourceTitle : null,
+        target_filename: targetTitle !== '—' ? targetTitle : null,
         completed_at: null,
         created_at: new Date(job.enqueued_at * 1000).toISOString(),
         is_match: null,
@@ -171,6 +188,8 @@ export const ReportService = {
       const mappingId = pairIdToPathSegment(
         encodeReportPairId(session.sourcePath, session.targetPath),
       );
+      const sourceTitle = sessionSourceTitle(session, session.sourcePath);
+      const targetTitle = sessionTargetTitle(session, session.targetPath);
       const latest = {
         run_id: session.jobId,
         status: 'running',
@@ -180,8 +199,8 @@ export const ReportService = {
         mapping_count: 0,
         source_path: session.sourcePath,
         target_path: session.targetPath,
-        source_filename: session.sourcePath.replace(/\\/g, '/').split('/').pop() ?? null,
-        target_filename: session.targetPath.replace(/\\/g, '/').split('/').pop() ?? null,
+        source_filename: sourceTitle !== '—' ? sourceTitle : null,
+        target_filename: targetTitle !== '—' ? targetTitle : null,
         completed_at: null,
         created_at: new Date(session.startedAt).toISOString(),
         is_match: null,

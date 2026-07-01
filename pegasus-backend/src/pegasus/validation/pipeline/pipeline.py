@@ -343,6 +343,7 @@ class TabularReconciliationPipeline:
         )
         if lazy_drilldown and not native_disk_drilldown and est_rows > 250_000:
             lazy_drilldown = False
+        effective_lazy_drilldown = lazy_drilldown or native_disk_drilldown
         drilldown_cache = (
             DrilldownCache(compare_columns)
             if lazy_drilldown and not native_disk_drilldown
@@ -376,7 +377,7 @@ class TabularReconciliationPipeline:
                 schema_diffs=schema_diffs,
                 spill_payload=spill_payload,
                 algo=algo,
-                lazy_drilldown=lazy_drilldown,
+                lazy_drilldown=effective_lazy_drilldown,
                 drilldown_cache=drilldown_cache,
                 progress_callback=progress_callback,
                 est_rows=est_rows,

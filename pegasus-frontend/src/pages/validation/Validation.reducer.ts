@@ -105,6 +105,7 @@ export const initialState: ValidationReducerState = {
     isFetching: false,
   },
   validationDataState: initializeNullState,
+  pendingReportsNavigation: false,
   pendingHistoryNavigation: null,
   cloudConnectionsState: initializeNullState,
   browseCloudState: {
@@ -229,6 +230,7 @@ const validationSlice = createSlice({
       overviewProfileCache: null,
       overviewProfileFetchState: initialState.overviewProfileFetchState,
       validationDataState: initializeNullState,
+      pendingReportsNavigation: false,
       pendingHistoryNavigation: null,
       cloudConnectionsState: initializeNullState,
       browseCloudState: initialState.browseCloudState,
@@ -246,6 +248,7 @@ const validationSlice = createSlice({
       overviewProfileCache: action.payload.overviewProfileCache,
       overviewProfileFetchState: initialState.overviewProfileFetchState,
       validationDataState: initializeNullState,
+      pendingReportsNavigation: false,
       pendingHistoryNavigation: null,
       cloudConnectionsState: initializeNullState,
       browseCloudState: initialState.browseCloudState,
@@ -273,6 +276,15 @@ const validationSlice = createSlice({
       ...state,
       validationDataState: { ...initializeNullState, error: action.payload },
     }),
+    navigateToReportsActive: (state) => ({
+      ...state,
+      pendingReportsNavigation: true,
+      validationDataState: { ...initializeNullState, isFetching: false },
+    }),
+    clearPendingReportsNavigation: (state) => ({
+      ...state,
+      pendingReportsNavigation: false,
+    }),
     navigateToPairHistory: (
       state,
       action: PayloadAction<{ sourcePath: string; targetPath: string }>,
@@ -285,7 +297,7 @@ const validationSlice = createSlice({
       ...state,
       pendingHistoryNavigation: null,
     }),
-    runValidationFromHistoryRequest: (state, _action: PayloadAction<string>) => ({
+    runValidationFromHistoryRequest: (state, _action: PayloadAction<import('./Validation.interface').RunValidationFromHistoryPayload>) => ({
       ...state,
       validationDataState: { ...initializeNullState, isFetching: true },
     }),

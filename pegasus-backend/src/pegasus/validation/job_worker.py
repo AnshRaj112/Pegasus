@@ -139,22 +139,28 @@ def _resolve_mismatch_lookup_inputs(
     tgt: object,
     result: ValidationRunResult,
 ) -> tuple[object, object]:
-    """Use extracted leaf paths for nested archive content validation."""
+    """Prefer local materialized paths for snippet enrichment (GCS, archive leaves)."""
     meta = getattr(result, "pipeline_metadata", None) or {}
+    src_materialized = meta.get("source_materialized_local")
+    tgt_materialized = meta.get("target_materialized_local")
+    if src_materialized and tgt_materialized:
+        src_path = Path(str(src_materialized))
+        tgt_path = Path(str(tgt_materialized))
+        if src_path.is_file() and tgt_path.is_file():
+            return src_path, tgt_path
     path_kind = meta.get("path")
-    if path_kind not in {
+    if path_kind in {
         "archive_tabular_leaf",
         "archive_json_leaf",
         "archive_fixed_width_leaf",
     }:
-        return src, tgt
-    src_leaf = meta.get("source_leaf_local")
-    tgt_leaf = meta.get("target_leaf_local")
-    if src_leaf and tgt_leaf:
-        src_path = Path(str(src_leaf))
-        tgt_path = Path(str(tgt_leaf))
-        if src_path.is_file() and tgt_path.is_file():
-            return src_path, tgt_path
+        src_leaf = meta.get("source_leaf_local")
+        tgt_leaf = meta.get("target_leaf_local")
+        if src_leaf and tgt_leaf:
+            src_path = Path(str(src_leaf))
+            tgt_path = Path(str(tgt_leaf))
+            if src_path.is_file() and tgt_path.is_file():
+                return src_path, tgt_path
     return src, tgt
 
 

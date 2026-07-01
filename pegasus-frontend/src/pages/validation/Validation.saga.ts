@@ -1,15 +1,16 @@
-import { call, delay, fork, put, select, takeLatest, takeLeading, all } from 'redux-saga/effects';
+import { call, fork, put, select, takeLatest, takeLeading, all } from 'redux-saga/effects';
 import { notification } from 'antd';
 import { AxiosError } from 'axios';
 import { PayloadAction } from '@reduxjs/toolkit';
 
 import { Api, ValidationJobAcceptedResponse } from '../../shared/api/Api';
-import { getApiErrorMessage, isTransientPollError, pollRecoveryHint } from '../../shared/api/apiError';
+import { getApiErrorMessage } from '../../shared/api/apiError';
 import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
 import { reportActions } from '../report/Report.reducer';
+import { buildActiveReportItem, fileDisplayName } from '../report/reportActiveItem';
 import { gcsUri } from '../report/reportPairId';
 
-import { ValidationDataResponse, ValidationReducerState } from './Validation.interface';
+import { ValidationReducerState } from './Validation.interface';
 import { validationActions } from './Validation.reducer';
 import { ValidationServiceApi } from './Validation.service';
 import {
@@ -18,30 +19,32 @@ import {
 } from './validationSessionStorage';
 import { formFromHistory, enrichFormWithConnections, validateRequestFromForm } from './validationRerun';
 
-const DEFER_TO_HISTORY_MS = 10_000;
-const POLL_INTERVAL_MS = 2_000;
+function* navigateToReportsActive() {
+  yield put(validationActions.navigateToReportsActive());
+}
+
+function* queueActiveValidation(
+  sourcePath: string,
+  targetPath: string,
+  sourceTitle: string,
+  targetTitle: string,
+) {
+  const pendingJobId = `pending-${Date.now()}`;
+  yield put(reportActions.showActiveValidation(buildActiveReportItem({
+    jobId: pendingJobId,
+    sourcePath,
+    targetPath,
+    sourceTitle,
+    targetTitle,
+    status: 'queued',
+  })));
+  yield* navigateToReportsActive();
+  return pendingJobId;
+}
 
 function* navigateToPairHistory(sourcePath: string, targetPath: string) {
   if (!sourcePath || !targetPath) return;
   yield put(validationActions.navigateToPairHistory({ sourcePath, targetPath }));
-}
-
-function* submitValidationSuccess(
-  jobId: string,
-  result: import('../../shared/api/Api').ValidateResult,
-  sourcePath: string,
-  targetPath: string,
-) {
-  removeActiveSession(jobId);
-  const payload: ValidationDataResponse = {
-    jobId,
-    runId: result.run_id ?? null,
-    status: 'Complete',
-    results: result,
-  };
-  yield put(validationActions.submitValidationSuccess(payload));
-  yield put(reportActions.fetchReportsRequest());
-  yield* navigateToPairHistory(sourcePath, targetPath);
 }
 
 function* backgroundPollSaga(jobId: string, sourcePath: string, targetPath: string) {
@@ -55,52 +58,43 @@ function* backgroundPollSaga(jobId: string, sourcePath: string, targetPath: stri
       message: 'Validation complete',
       description: result.summary.is_match ? 'All checks passed.' : 'View results in execution history.',
     });
-    yield put(reportActions.fetchReportsRequest());
+    yield put(reportActions.fetchActiveReportsRequest());
     yield* navigateToPairHistory(sourcePath, targetPath);
   } catch {
     removeActiveSession(jobId);
-    yield put(reportActions.fetchReportsRequest());
+    yield put(reportActions.fetchActiveReportsRequest());
   }
 }
 
-function* pollUntilCompleteOrDefer(
-  jobId: string,
-  sourcePath: string,
-  targetPath: string,
-) {
-  const started = Date.now();
-  let deferred = false;
-
-  for (;;) {
-    let job: import('axios').AxiosResponse<import('../../shared/api/Api').ValidationJobDetailResponse>;
-    try {
-      job = yield call(Api.getValidationJob, jobId, { summaryOnly: true });
-    } catch (error: unknown) {
-      if (!isTransientPollError(error)) throw error;
-      yield delay(POLL_INTERVAL_MS);
-      continue;
-    }
-
-    if (job.data.status === 'completed' && job.data.result) {
-      return job.data.result;
-    }
-    if (job.data.status === 'failed') {
-      throw new Error(job.data.error || 'Validation failed');
-    }
-
-    if (!deferred && Date.now() - started >= DEFER_TO_HISTORY_MS) {
-      deferred = true;
-      yield* navigateToPairHistory(sourcePath, targetPath);
-      yield fork(backgroundPollSaga, jobId, sourcePath, targetPath);
-      return null;
-    }
-
-    yield delay(POLL_INTERVAL_MS);
-  }
-}
+const persistActiveSession = (params: {
+  jobId: string;
+  sourcePath: string;
+  targetPath: string;
+  sourceTitle: string;
+  targetTitle: string;
+  validationForm: ValidationReducerState['validationForm'];
+}) => {
+  upsertActiveSession({
+    jobId: params.jobId,
+    sourcePath: params.sourcePath,
+    targetPath: params.targetPath,
+    sourceFileName: params.sourceTitle !== '—' ? params.sourceTitle : null,
+    targetFileName: params.targetTitle !== '—' ? params.targetTitle : null,
+    startedAt: Date.now(),
+    formSnapshot: {
+      sourceCloud: params.validationForm.sourceCloud,
+      targetCloud: params.validationForm.targetCloud,
+      uidColumn: params.validationForm.uidColumn,
+      delimiter: params.validationForm.delimiter,
+      hasHeader: params.validationForm.hasHeader,
+      columnMappings: params.validationForm.columnMappings,
+    },
+  });
+};
 
 function* submitValidationSaga() {
   let jobId: string | null = null;
+  let pendingJobId: string | null = null;
   let sourcePath = '';
   let targetPath = '';
   try {
@@ -113,6 +107,18 @@ function* submitValidationSaga() {
 
     sourcePath = gcsUri(validationForm.sourceCloud);
     targetPath = gcsUri(validationForm.targetCloud);
+    const sourceTitle = fileDisplayName(validationForm.sourceFileName, validationForm.sourceCloud, sourcePath);
+    const targetTitle = fileDisplayName(validationForm.targetFileName, validationForm.targetCloud, targetPath);
+
+    pendingJobId = yield* queueActiveValidation(sourcePath, targetPath, sourceTitle, targetTitle);
+    yield call(persistActiveSession, {
+      jobId: pendingJobId,
+      sourcePath,
+      targetPath,
+      sourceTitle,
+      targetTitle,
+      validationForm,
+    });
 
     const accepted: import('axios').AxiosResponse<ValidationJobAcceptedResponse> = yield call(
       Api.submitValidation,
@@ -123,63 +129,39 @@ function* submitValidationSaga() {
     );
     jobId = accepted.data.job_id;
 
-    upsertActiveSession({
+    removeActiveSession(pendingJobId);
+    yield call(persistActiveSession, {
       jobId,
       sourcePath,
       targetPath,
-      startedAt: Date.now(),
-      formSnapshot: {
-        sourceCloud: validationForm.sourceCloud,
-        targetCloud: validationForm.targetCloud,
-        uidColumn: validationForm.uidColumn,
-        delimiter: validationForm.delimiter,
-        hasHeader: validationForm.hasHeader,
-        columnMappings: validationForm.columnMappings,
-      },
+      sourceTitle,
+      targetTitle,
+      validationForm,
     });
-    yield put(reportActions.fetchReportsRequest());
-
-    const result: import('../../shared/api/Api').ValidateResult | null = yield call(
-      pollUntilCompleteOrDefer,
-      jobId,
-      sourcePath,
-      targetPath,
-    );
-    if (result) {
-      yield* submitValidationSuccess(jobId, result, sourcePath, targetPath);
-    }
+    yield put(reportActions.reconcileActiveValidationJobId({ pendingJobId, jobId }));
+    yield put(reportActions.fetchActiveReportsRequest());
+    yield fork(backgroundPollSaga, jobId, sourcePath, targetPath);
   } catch (error: unknown) {
-    if (jobId) {
-      try {
-        const recovered: import('axios').AxiosResponse<import('../../shared/api/Api').ValidationJobDetailResponse> = yield call(
-          Api.getValidationJob,
-          jobId,
-          { summaryOnly: true },
-        );
-        if (recovered.data.status === 'completed' && recovered.data.result) {
-          yield* submitValidationSuccess(jobId, recovered.data.result, sourcePath, targetPath);
-          return;
-        }
-      } catch {
-        // fall through to user-visible error
-      }
-      const base = getApiErrorMessage(error, 'Validation failed');
-      const hint = isTransientPollError(error) ? pollRecoveryHint(jobId) : '';
-      removeActiveSession(jobId);
-      yield put(validationActions.submitValidationError(base + hint));
-      yield put(reportActions.fetchReportsRequest());
-      return;
+    if (pendingJobId) removeActiveSession(pendingJobId);
+    if (jobId) removeActiveSession(jobId);
+    if (pendingJobId || jobId) {
+      yield put(reportActions.fetchActiveReportsRequest());
     }
     yield put(validationActions.submitValidationError(getApiErrorMessage(error, 'Validation submission failed')));
   }
 }
 
 function* runFromHistorySaga(action: ReturnType<typeof validationActions.runValidationFromHistoryRequest>) {
-  const runId = action.payload;
+  const { runId, sourcePath: hintSourcePath, targetPath: hintTargetPath, sourceTitle: hintSourceTitle, targetTitle: hintTargetTitle } = action.payload;
   let jobId: string | null = null;
-  let sourcePath = '';
-  let targetPath = '';
+  let pendingJobId: string | null = null;
+  let sourcePath = hintSourcePath ?? '';
+  let targetPath = hintTargetPath ?? '';
   try {
+    if (hintSourcePath && hintTargetPath && hintSourceTitle && hintTargetTitle) {
+      pendingJobId = yield* queueActiveValidation(hintSourcePath, hintTargetPath, hintSourceTitle, hintTargetTitle);
+    }
+
     const { data: detail } = yield call(Api.getValidationHistoryRun, runId);
     const { data: connections } = yield call(ValidationServiceApi.listCloudConnections);
     const formPatch = enrichFormWithConnections(formFromHistory(detail), connections);
@@ -198,6 +180,28 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
     targetPath = validationForm.targetCloud
       ? gcsUri(validationForm.targetCloud)
       : (detail.target_path ?? '');
+    const sourceTitle = fileDisplayName(
+      validationForm.sourceFileName ?? detail.source_filename,
+      validationForm.sourceCloud,
+      sourcePath,
+    );
+    const targetTitle = fileDisplayName(
+      validationForm.targetFileName ?? detail.target_filename,
+      validationForm.targetCloud,
+      targetPath,
+    );
+
+    if (!pendingJobId) {
+      pendingJobId = yield* queueActiveValidation(sourcePath, targetPath, sourceTitle, targetTitle);
+    }
+    yield call(persistActiveSession, {
+      jobId: pendingJobId,
+      sourcePath,
+      targetPath,
+      sourceTitle,
+      targetTitle,
+      validationForm,
+    });
 
     const accepted: import('axios').AxiosResponse<ValidationJobAcceptedResponse> = yield call(
       Api.submitValidation,
@@ -211,24 +215,20 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
     );
     jobId = accepted.data.job_id;
 
-    upsertActiveSession({
+    removeActiveSession(pendingJobId);
+    yield call(persistActiveSession, {
       jobId,
       sourcePath,
       targetPath,
-      startedAt: Date.now(),
-      formSnapshot: {
-        sourceCloud: validationForm.sourceCloud,
-        targetCloud: validationForm.targetCloud,
-        uidColumn: validationForm.uidColumn,
-        delimiter: validationForm.delimiter,
-        hasHeader: validationForm.hasHeader,
-        columnMappings: validationForm.columnMappings,
-      },
+      sourceTitle,
+      targetTitle,
+      validationForm,
     });
-    yield put(reportActions.fetchReportsRequest());
-    yield* navigateToPairHistory(sourcePath, targetPath);
+    yield put(reportActions.reconcileActiveValidationJobId({ pendingJobId, jobId }));
+    yield put(reportActions.fetchActiveReportsRequest());
     yield fork(backgroundPollSaga, jobId, sourcePath, targetPath);
   } catch (error: unknown) {
+    if (pendingJobId) removeActiveSession(pendingJobId);
     if (jobId) removeActiveSession(jobId);
     notification.error({
       message: 'Could not start validation',

@@ -74,7 +74,13 @@ export const Saved: React.FC = () => {
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                dispatch(validationActions.runValidationFromHistoryRequest(report.draftRunId!));
+                dispatch(validationActions.runValidationFromHistoryRequest({
+                  runId: report.draftRunId!,
+                  sourcePath: report.sourcePath,
+                  targetPath: report.targetPath,
+                  sourceTitle: report.sourceTitle,
+                  targetTitle: report.jobTitle,
+                }));
               }}
               className={styles.runBtn}
             >
