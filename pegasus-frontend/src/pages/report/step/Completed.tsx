@@ -6,13 +6,17 @@ import { ReportItem, ReportBadge } from '../Report.interface';
 import { TruncatedPath } from '../components/TruncatedPath';
 import styles from './ReportStep.module.scss';
 
-const renderBadges = (report: ReportItem, badges: ReportBadge[]) => badges.map((badge, bIdx) => (
+const resultBoxClass = (content: ReportBadge['content']) => {
+  if (content === 'P') return styles.badgeBoxPass;
+  if (content === 'F') return styles.badgeBoxFail;
+  return styles.badgeBox;
+};
+
+const renderBadges = (badges: ReportBadge[]) => badges.map((badge, bIdx) => (
   <React.Fragment key={bIdx}>
     {bIdx > 0 && <span className={styles.badgeSep}>|</span>}
     {badge.type === 'box' ? (
-      <span className={styles.badgeBox}>
-        {report.jobSubtitle ? report.jobSubtitle.split('·').pop()?.trim() : ''}
-      </span>
+      <span className={resultBoxClass(badge.content)}>{badge.content}</span>
     ) : (
       <span className={styles.badgeContent}>{badge.content}</span>
     )}
@@ -70,7 +74,7 @@ export const Completed: React.FC = () => {
           </div>
 
           <div className={styles.badgesCol}>
-            <div className={styles.badgePill}>{renderBadges(report, report.badges)}</div>
+            <div className={styles.badgePill}>{renderBadges(report.badges)}</div>
           </div>
         </div>
       ))}

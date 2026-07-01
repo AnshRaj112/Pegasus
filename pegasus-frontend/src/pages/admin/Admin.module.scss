@@ -174,6 +174,108 @@
   }
 }
 
+.connectStorageModal {
+  :global(.ant-modal-content) {
+    background-color: tokens.$surface-container-lowest;
+    border: 1px solid tokens.$outline-variant;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    padding: 0;
+  }
+
+  :global(.ant-modal-header) {
+    background: transparent;
+    border-bottom: 1px solid tokens.$outline-variant;
+    margin-bottom: 0;
+    padding: 20px 24px 16px;
+  }
+
+  :global(.ant-modal-title) {
+    color: tokens.$on-surface;
+    font-family: tokens.$font-h3;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  :global(.ant-modal-body) {
+    padding: 20px 24px 24px;
+  }
+
+  :global(.ant-modal-close) {
+    color: tokens.$on-surface-variant;
+
+    &:hover {
+      color: tokens.$on-surface;
+      background-color: tokens.$surface-container;
+    }
+  }
+
+  :global(.ant-input),
+  :global(textarea.ant-input) {
+    border-color: tokens.$outline-variant;
+    background-color: tokens.$surface-container-lowest;
+    color: tokens.$on-surface;
+    border-radius: 8px;
+
+    &::placeholder {
+      color: tokens.$text-muted;
+    }
+
+    &:hover {
+      border-color: tokens.$primary;
+    }
+
+    &:focus {
+      border-color: tokens.$primary;
+      box-shadow: 0 0 0 2px rgba(35, 75, 95, 0.1);
+    }
+  }
+
+  :global(.ant-upload-wrapper .ant-upload-drag) {
+    border-color: tokens.$outline-variant;
+    background-color: tokens.$surface-container-low;
+    border-radius: 8px;
+
+    &:hover {
+      border-color: tokens.$primary;
+    }
+  }
+
+  :global(.ant-upload-text) {
+    color: tokens.$on-surface !important;
+    font-size: 14px;
+  }
+
+  :global(.ant-upload-hint) {
+    color: tokens.$on-surface-variant !important;
+    font-size: 12px;
+  }
+
+  :global(.ant-btn-default) {
+    border-color: tokens.$outline-variant;
+    color: tokens.$on-surface;
+    background: tokens.$surface-container-lowest;
+    border-radius: 8px;
+
+    &:hover {
+      border-color: tokens.$primary !important;
+      color: tokens.$on-surface !important;
+      background: tokens.$surface-container-low !important;
+    }
+  }
+
+  :global(.ant-btn-primary) {
+    background-color: tokens.$color-midnight-green;
+    border-color: tokens.$color-midnight-green;
+    border-radius: 8px;
+
+    &:hover {
+      background-color: tokens.$on-primary-fixed-variant !important;
+      border-color: tokens.$on-primary-fixed-variant !important;
+    }
+  }
+}
+
 .connectModalBody {
   display: flex;
   flex-direction: column;
@@ -191,9 +293,9 @@
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  border: 1px solid #d9d9d9;
+  border: 1px solid tokens.$outline-variant;
   border-radius: 10px;
-  background: #fafafa;
+  background: tokens.$surface-container-low;
 }
 
 .providerCardSelected {
@@ -226,7 +328,7 @@
 
 .providerCardSubtitle {
   font-size: 12px;
-  color: #727786;
+  color: tokens.$on-surface-variant;
   margin-top: 2px;
 }
 
@@ -247,11 +349,17 @@
 
 .optionalTag {
   font-weight: 400;
-  color: #727786;
+  color: tokens.$text-muted;
 }
 
 .jsonDragger {
   margin-top: 2px;
+}
+
+.jsonDragIcon {
+  :global(.anticon) {
+    color: tokens.$color-midnight-green !important;
+  }
 }
 
 .jsonTextarea {

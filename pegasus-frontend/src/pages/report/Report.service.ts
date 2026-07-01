@@ -60,11 +60,14 @@ const groupByPair = (items: ValidationHistorySummary[]) => {
   return map;
 };
 
+const passFailLabel = (isMatch: boolean | null | undefined): string =>
+  isMatch === true ? 'P' : isMatch === false ? 'F' : '?';
+
 const toReportItem = (runs: ValidationHistorySummary[], mappingId: string): ReportItem => {
   const latest = runs[0];
   const sourcePath = latest.source_path ?? latest.source_filename ?? '';
   const targetPath = latest.target_path ?? latest.target_filename ?? '';
-  const passFail = latest.is_match === true ? 'P' : latest.is_match === false ? 'F' : '?';
+  const recentResults = runs.slice(0, 3).map((run) => passFailLabel(run.is_match));
   return {
     id: mappingId,
     sourcePath,
@@ -72,13 +75,13 @@ const toReportItem = (runs: ValidationHistorySummary[], mappingId: string): Repo
     sourceTitle: basename(latest.source_path, latest.source_filename),
     sourceSubtitle: sourcePath,
     jobTitle: basename(latest.target_path, latest.target_filename),
-    jobSubtitle: `Latest: ${formatWhen(latest.completed_at ?? latest.created_at)} · ${runs.length} run(s)`,
+    jobSubtitle: `Latest: ${formatWhen(latest.completed_at ?? latest.created_at)}`,
     latestRunId: latest.run_id,
     latestIsMatch: latest.is_match,
     badges: [
       { type: 'text', content: formatWhen(latest.completed_at ?? latest.created_at) },
       { type: 'icon', content: React.createElement(ClockCircleOutlined, { style: { fontSize: '12px' } }) },
-      { type: 'box', content: passFail },
+      ...recentResults.map((result) => ({ type: 'box' as const, content: result })),
     ],
   };
 };
@@ -189,9 +192,8 @@ export const ReportService = {
         ...toReportItem(runs, pairId),
         id: pairId,
         draftRunId: latest.run_id,
-        jobSubtitle: `Draft · ${formatWhen(latest.created_at)}`,
+        jobSubtitle: formatWhen(latest.created_at),
         badges: [
-          { type: 'text', content: 'Draft' },
           { type: 'icon', content: React.createElement(ClockCircleOutlined, { style: { fontSize: '12px' } }) },
         ],
       };

@@ -140,7 +140,9 @@ export const ConnectStorageModal: React.FC<ConnectStorageModalProps> = ({
       onCancel={onClose}
       footer={null}
       width={560}
+      centered
       destroyOnHidden
+      className={styles.connectStorageModal}
     >
       <div className={styles.connectModalBody}>
         <div className={styles.providerPicker}>
@@ -199,7 +201,7 @@ export const ConnectStorageModal: React.FC<ConnectStorageModalProps> = ({
               className={styles.jsonDragger}
               openFileDialogOnClick
             >
-              <p className="ant-upload-drag-icon">
+              <p className={`ant-upload-drag-icon ${styles.jsonDragIcon}`}>
                 <InboxOutlined />
               </p>
               <p className="ant-upload-text">Drop your service account key here, or click to browse</p>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { TableOutlined, HistoryOutlined } from '@ant-design/icons';
+import { HistoryOutlined, FileOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAppSelector } from '../../../redux/store';
 import { ReportItem, ReportBadge } from '../Report.interface';
@@ -42,7 +42,7 @@ export const Active: React.FC = () => {
 
           <div className={styles.column}>
             <div className={styles.titleRow}>
-              <TableOutlined className={styles.fileIcon} />
+              <FileOutlined className={styles.fileIcon} />
               <span className={styles.sourceTitle}>{report.sourceTitle}</span>
             </div>
             <div className={styles.monoPath}>
