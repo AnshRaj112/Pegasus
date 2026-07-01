@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-06-30T14:53:09Z
+# Last edited: 2026-07-01T07:31:26Z
 # --- END GENERATED FILE METADATA ---
 
 """Native Parquet file reader — reads row groups without external columnar libraries."""
