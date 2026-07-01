@@ -17,6 +17,22 @@ const selectActiveTab = (state: { report: { activeTab: TabType } }): TabType => 
 const selectHistoryRunState = (state: { report: ReportState }) => state.report.historyRunState;
 const selectMismatchesState = (state: { report: ReportState }) => state.report.mismatchesState;
 
+export function* handleFetchActiveReports() {
+  try {
+    const data: ReportItem[] = yield call(ReportService.fetchActive);
+    yield put(reportActions.fetchReportsSuccess({ tab: 'Active', data }));
+  } catch (error) {
+    const errorMessage = getApiErrorMessage(error, 'Failed to fetch active reports');
+    yield put(reportActions.fetchReportsFailure({ tab: 'Active', error: errorMessage }));
+    if (error instanceof AxiosError) {
+      notification.error({
+        message: NOTIFICATION_SERVICE_TYPES.ERROR,
+        description: errorMessage,
+      });
+    }
+  }
+}
+
 export function* handleFetchReports() {
   const activeTab: TabType = yield select(selectActiveTab);
 
@@ -99,6 +115,7 @@ export function* fetchMismatchesSaga(action: PayloadAction<string>) {
 export function* reportSaga() {
   yield all([
     takeLatest(reportActions.fetchReportsRequest.type, handleFetchReports),
+    takeLatest(reportActions.fetchActiveReportsRequest.type, handleFetchActiveReports),
     takeLatest(reportActions.setTab.type, handleFetchReports),
     takeLatest(reportActions.fetchHistoryRunRequest.type, fetchHistoryRunSaga),
     takeLatest(reportActions.fetchMismatchesRequest.type, fetchMismatchesSaga),

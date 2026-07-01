@@ -32,11 +32,12 @@ describe('Report', () => {
     expect(screen.getByPlaceholderText('Search by Test or Group Name')).toBeInTheDocument()
   })
 
-  it('dispatches fetchReportsRequest on mount', async () => {
+  it('dispatches fetchReportsRequest on mount without hiding existing active rows', async () => {
     const view = render(<Report />, { preloadedState: { report: reportStateWithActiveData } })
 
     await waitFor(() => {
-      expect(view.store.getState().report.activeReports.isFetching).toBe(true)
+      expect(view.store.getState().report.activeReports.isFetching).toBe(false)
+      expect(view.store.getState().report.activeReports.data).toHaveLength(1)
     })
   })
 

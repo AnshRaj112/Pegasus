@@ -105,6 +105,14 @@ export interface OverviewProfileFetchState {
   isFetching: boolean;
 }
 
+export interface RunValidationFromHistoryPayload {
+  runId: string;
+  sourcePath?: string;
+  targetPath?: string;
+  sourceTitle?: string;
+  targetTitle?: string;
+}
+
 export interface ValidationReducerState {
   currentStep: number;
   isStep1Valid: boolean;
@@ -117,7 +125,9 @@ export interface ValidationReducerState {
     isFetching: boolean;
     error: string | null;
   };
-  /** Navigate to execution history for this file pair after validation starts or completes. */
+  /** Navigate to Reports → Active after validation is queued. */
+  pendingReportsNavigation: boolean;
+  /** Navigate to execution history for this file pair after validation completes. */
   pendingHistoryNavigation: { sourcePath: string; targetPath: string } | null;
   cloudConnectionsState: AsyncState<import('../../shared/api/Api').CloudConnection[]>;
   browseCloudState: BrowseCloudState;

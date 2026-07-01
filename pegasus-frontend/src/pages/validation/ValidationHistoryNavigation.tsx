@@ -6,21 +6,28 @@ import { ReportService } from '../report/Report.service';
 
 import { validationActions } from './Validation.reducer';
 
-/** Redirects to `/reports/:mappingId/history` after validation is queued or completes. */
+/** Redirects after validation is queued (Reports → Active) or completes (execution history). */
 export const ValidationHistoryNavigation: React.FC = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const pending = useAppSelector((s) => s.validation.pendingHistoryNavigation);
+  const pendingReports = useAppSelector((s) => s.validation.pendingReportsNavigation);
+  const pendingHistory = useAppSelector((s) => s.validation.pendingHistoryNavigation);
 
   useEffect(() => {
-    if (!pending) return;
+    if (!pendingReports) return;
+    navigate('/reports');
+    dispatch(validationActions.clearPendingReportsNavigation());
+  }, [pendingReports, navigate, dispatch]);
+
+  useEffect(() => {
+    if (!pendingHistory) return;
     let cancelled = false;
 
     void (async () => {
       try {
         const mappingId = await ReportService.getMappingIdForPaths(
-          pending.sourcePath,
-          pending.targetPath,
+          pendingHistory.sourcePath,
+          pendingHistory.targetPath,
         );
         if (!cancelled) {
           navigate(`/reports/${mappingId}/history`);
@@ -35,7 +42,7 @@ export const ValidationHistoryNavigation: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [pending, navigate, dispatch]);
+  }, [pendingHistory, navigate, dispatch]);
 
   return null;
 };

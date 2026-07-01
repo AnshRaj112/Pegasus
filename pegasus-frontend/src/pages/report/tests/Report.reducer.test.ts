@@ -32,9 +32,23 @@ describe('Report reducer', () => {
   })
 
   describe('fetchReports', () => {
-    it('sets loading on active tab fetchReportsRequest', () => {
+    it('sets loading on active tab fetchReportsRequest when list is empty', () => {
       const result = reportReducer(initialState, reportActions.fetchReportsRequest())
       expect(result.activeReports).toEqual(activeReportsLoading)
+    })
+
+    it('keeps active reports visible while refreshing when list already has data', () => {
+      const state = { ...initialState, activeReports: activeReportsSuccess }
+      const result = reportReducer(state, reportActions.fetchReportsRequest())
+      expect(result.activeReports.isFetching).toBe(false)
+      expect(result.activeReports.data).toEqual(activeReportsSuccess.data)
+    })
+
+    it('shows an optimistic active row on showActiveValidation', () => {
+      const result = reportReducer(initialState, reportActions.showActiveValidation(mockActiveReport))
+      expect(result.activeTab).toBe('Active')
+      expect(result.activeReports.data).toEqual([mockActiveReport])
+      expect(result.activeReports.isFetching).toBe(false)
     })
 
     it('stores active reports on fetchReportsSuccess', () => {

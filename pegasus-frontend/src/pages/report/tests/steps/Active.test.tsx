@@ -13,6 +13,23 @@ describe('Active', () => {
     expect(screen.getByText('Running')).toBeInTheDocument()
   })
 
+  it('keeps visible rows while refreshing when active reports already exist', () => {
+    render(<Active />, {
+      preloadedState: {
+        report: {
+          ...reportStateWithActiveData,
+          activeReports: {
+            ...activeReportsSuccess,
+            isFetching: true,
+          },
+        },
+      },
+    })
+
+    expect(screen.getByText('source.csv')).toBeInTheDocument()
+    expect(screen.queryByText('Loading active reports...')).not.toBeInTheDocument()
+  })
+
   it('shows loading message while active reports are fetching', () => {
     render(<Active />, {
       preloadedState: {

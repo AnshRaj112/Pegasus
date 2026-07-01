@@ -263,6 +263,21 @@ describe('Validation reducer', () => {
   })
 
   describe('history navigation', () => {
+    it('stores pending reports navigation and clears loading state', () => {
+      const loading = {
+        ...initialState,
+        validationDataState: { data: null, isFetching: true, error: null },
+      };
+      const result = validationReducer(loading, validationActions.navigateToReportsActive());
+      expect(result.pendingReportsNavigation).toBe(true);
+      expect(result.validationDataState.isFetching).toBe(false);
+    });
+
+    it('clears pending reports navigation', () => {
+      const withPending = { ...initialState, pendingReportsNavigation: true };
+      expect(validationReducer(withPending, validationActions.clearPendingReportsNavigation()).pendingReportsNavigation).toBe(false);
+    });
+
     it('stores pending history navigation', () => {
       const result = validationReducer(
         initialState,

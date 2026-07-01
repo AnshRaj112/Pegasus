@@ -27,7 +27,7 @@ export const Active: React.FC = () => {
     || r.sourceTitle.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  if (isFetching) return <div className={styles.empty}>Loading active reports...</div>;
+  if (isFetching && filtered.length === 0) return <div className={styles.empty}>Loading active reports...</div>;
   if (filtered.length === 0) return <div className={styles.empty}>No active reports found.</div>;
 
   return (
