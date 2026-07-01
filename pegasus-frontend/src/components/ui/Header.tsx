@@ -53,20 +53,6 @@ export const Header: React.FC = () => {
 
         {/* Right Side: Quick Actions */}
         <div className={styles.quickActions}>
-          <span
-            className={`material-symbols-outlined ${styles.iconButton}`}
-            role="button"
-            aria-label="Notifications"
-          >
-            Notifications
-          </span>
-          <span
-            className={`material-symbols-outlined ${styles.iconButton}`}
-            role="button"
-            aria-label="Help"
-          >
-            Help
-          </span>
 
           <div className={styles.profileContainer} ref={dropdownRef}>
             <div

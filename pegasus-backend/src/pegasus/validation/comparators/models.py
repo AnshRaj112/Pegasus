@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-07-01T07:31:26Z
+# Last edited: 2026-07-01T07:31:54Z
 # --- END GENERATED FILE METADATA ---
 
 """Structured mismatch report types (retained for API/history compatibility)."""
