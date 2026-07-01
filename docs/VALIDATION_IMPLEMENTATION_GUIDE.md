@@ -15,19 +15,20 @@ The important idea is that validation is layered:
 
 1. [Chapter 1: What the backend returns](#chapter-1-what-the-backend-returns)
 2. [Chapter 2: How the service chooses a validator](#chapter-2-how-the-service-chooses-a-validator)
-3. [Chapter 3: The core tabular idea](#chapter-3-the-core-tabular-idea)
-4. [Chapter 4: How Pegasus decides which column is mismatching](#chapter-4-how-pegasus-decides-which-column-is-mismatching)
-5. [Chapter 5: Tabular pipeline for CSV-like and columnar files](#chapter-5-tabular-pipeline-for-csv-like-and-columnar-files)
-6. [Chapter 6: CSV, TSV, PSV, DAT, and other delimited files](#chapter-6-csv-tsv-psv-dat-and-other-delimited-files)
-7. [Chapter 7: Fixed-width files](#chapter-7-fixed-width-files)
-8. [Chapter 8: JSON and NDJSON files](#chapter-8-json-and-ndjson-files)
-9. [Chapter 9: Parquet, ORC, and Avro](#chapter-9-parquet-orc-and-avro)
-10. [Chapter 10: Archives: ZIP and TAR](#chapter-10-archives-zip-and-tar)
-11. [Chapter 11: How the final API report is assembled](#chapter-11-how-the-final-api-report-is-assembled)
-12. [Chapter 12: Practical meaning of the mismatch types](#chapter-12-practical-meaning-of-the-mismatch-types)
-13. [Chapter 13: End-to-end example for tabular data](#chapter-13-end-to-end-example-for-tabular-data)
-14. [Chapter 14: Complexity summary](#chapter-14-complexity-summary)
-15. [Chapter 15: Short summary](#chapter-15-short-summary)
+3. [Chapter 3: Supported file types](#chapter-3-supported-file-types)
+4. [Chapter 4: The core tabular idea](#chapter-4-the-core-tabular-idea)
+5. [Chapter 5: How Pegasus decides which column is mismatching](#chapter-5-how-pegasus-decides-which-column-is-mismatching)
+6. [Chapter 6: Tabular pipeline for CSV-like and columnar files](#chapter-6-tabular-pipeline-for-csv-like-and-columnar-files)
+7. [Chapter 7: CSV, TSV, PSV, DAT, and other delimited files](#chapter-7-csv-tsv-psv-dat-and-other-delimited-files)
+8. [Chapter 8: Fixed-width files](#chapter-8-fixed-width-files)
+9. [Chapter 9: JSON and NDJSON files](#chapter-9-json-and-ndjson-files)
+10. [Chapter 10: Parquet, ORC, and Avro](#chapter-10-parquet-orc-and-avro)
+11. [Chapter 11: Archives: ZIP and TAR](#chapter-11-archives-zip-and-tar)
+12. [Chapter 12: How the final API report is assembled](#chapter-12-how-the-final-api-report-is-assembled)
+13. [Chapter 13: Practical meaning of the mismatch types](#chapter-13-practical-meaning-of-the-mismatch-types)
+14. [Chapter 14: End-to-end example for tabular data](#chapter-14-end-to-end-example-for-tabular-data)
+15. [Chapter 15: Complexity summary](#chapter-15-complexity-summary)
+16. [Chapter 16: Short summary](#chapter-16-short-summary)
 
 ---
 
@@ -87,7 +88,32 @@ flowchart TD
 
 ---
 
-## Chapter 3: The core tabular idea
+## Chapter 3: Supported file types
+
+The backend can validate the following file families:
+
+- delimited text files such as CSV, TSV, PSV, TXT, and DAT
+- ambiguous flat files that are resolved as delimited text after sniffing
+- columnar files such as Parquet, ORC, and Avro
+- fixed-width text files
+- JSON documents and NDJSON / JSONL streams
+- archive files such as ZIP and TAR
+
+The route chosen depends on the detected format and the adapter that can read it.
+
+How that maps to the implementation:
+
+- delimited and ambiguous flat files go through the tabular pipeline after delimiter/header resolution
+- Parquet, ORC, and Avro are converted into a tabular representation and then sent through the same tabular reconciliation path
+- fixed-width files use the fixed-width parser and field layout rules
+- JSON and NDJSON use the JSON comparator and recursive path diffing
+- ZIP and TAR use the archive comparator, with optional nested leaf validation when a payload file is found
+
+Supported file types are therefore not just a list of extensions; they are a list of backend execution paths.
+
+---
+
+## Chapter 4: The core tabular idea
 
 For CSV-like and columnar data, Pegasus compares rows in two stages:
 
@@ -189,7 +215,7 @@ That is only the hash bytes. Real memory is higher because the pipeline also sto
 
 ---
 
-## Chapter 4: How Pegasus decides which column is mismatching
+## Chapter 5: How Pegasus decides which column is mismatching
 
 This is the part most people care about.
 
@@ -297,7 +323,7 @@ That is how the backend knows which column changed.
 
 ---
 
-## Chapter 5: Tabular pipeline for CSV-like and columnar files
+## Chapter 6: Tabular pipeline for CSV-like and columnar files
 
 The main high-throughput path is the tabular reconciliation pipeline in [pegasus-backend/src/pegasus/validation/pipeline/pipeline.py](../pegasus-backend/src/pegasus/validation/pipeline/pipeline.py).
 
@@ -446,7 +472,7 @@ for the full logical data volume, but the peak resident memory is reduced by par
 
 ---
 
-## Chapter 6: CSV, TSV, PSV, DAT, and other delimited files
+## Chapter 7: CSV, TSV, PSV, DAT, and other delimited files
 
 Delimited files use the tabular path after the adapter resolves the file layout.
 
@@ -489,7 +515,7 @@ If the row differs in three columns, the report will contain three mismatch rows
 
 ---
 
-## Chapter 7: Fixed-width files
+## Chapter 8: Fixed-width files
 
 Fixed-width validation uses explicit field positions instead of delimiters.
 
@@ -557,7 +583,7 @@ flowchart TD
 
 ---
 
-## Chapter 8: JSON and NDJSON files
+## Chapter 9: JSON and NDJSON files
 
 JSON validation is recursive and path-based.
 
@@ -605,11 +631,11 @@ This means NDJSON can behave like tabular validation at the outer level and JSON
 
 ---
 
-## Chapter 9: Parquet, ORC, and Avro
+## Chapter 10: Parquet, ORC, and Avro
 
 Columnar formats are not compared with a separate bespoke diff algorithm. They are converted into a tabular representation and sent through the same tabular pipeline used for delimited files.
 
-### 9.1 What changes and what does not
+### 10.1 What changes and what does not
 
 What changes:
 
@@ -628,11 +654,59 @@ That is why Parquet, ORC, and Avro behave like tabular inputs from the validatio
 
 ---
 
-## Chapter 10: Archives: ZIP and TAR
+## Chapter 11: Archives: ZIP and TAR
 
 Archive validation is layered. The backend can stop early on metadata or digest differences, or continue deeper into manifest and nested-leaf validation.
 
-### 10.1 First checks
+### 11.1 What kinds of ZIP and TAR are handled
+
+The archive backend treats ZIP and TAR as container families, but it also recognizes the concrete archive forms that usually appear in practice:
+
+- ZIP: standard `.zip` archives
+- TAR: plain `.tar` archives
+- compressed TAR: `.tar.gz`, `.tgz`, `.tar.bz2`, and `.tar.xz`
+
+So the backend is not just saying “zip” or “tar” in the abstract. It is reading the actual container type and, for TAR, the compression wrapper around it.
+
+### 11.2 What is inside those archives
+
+ZIP and TAR are only the outer container. The backend then inspects the members inside them and decides whether the archive contains a payload that can be validated more deeply.
+
+The nested member types it knows how to recognize include:
+
+- tabular payloads such as CSV, TSV, PSV, TXT, and DAT
+- JSON and NDJSON payloads
+- fixed-width payloads
+- nested archives again, such as ZIP inside ZIP or TAR inside ZIP
+
+In other words:
+
+- a ZIP file may contain a CSV, a JSON document, a fixed-width file, or another archive
+- a TAR file may contain the same kinds of payloads
+- the validator then chooses the right inner validator for that leaf file
+
+### 11.3 Archive support matrix
+
+The archive layer supports these top-level container formats:
+
+- `.zip`
+- `.tar`
+- `.tgz`
+- `.tar.gz`
+- `.tar.bz2`
+- `.tar.xz`
+
+The important detail is that `.tgz` and `.tar.gz` are treated as TAR containers after archive-format normalization.
+
+Not supported as first-class top-level archive validators:
+
+- `.7z`
+- `.rar`
+- a reversed name like `.gz.tar`
+
+Those formats may still appear in nested-member detection logic or as names inside archive manifests, but the backend does not have a dedicated top-level validation path for them.
+
+### 11.4 First checks
 
 The archive comparator may inspect:
 
@@ -643,7 +717,7 @@ The archive comparator may inspect:
 
 If those checks already prove the archives differ, the backend can emit a fast mismatch.
 
-### 10.2 Manifest comparison
+### 11.5 Manifest comparison
 
 If the byte-level precheck does not settle the answer, the comparator reads the archive manifest and compares entry paths and metadata.
 
@@ -653,11 +727,11 @@ That can produce:
 - `extra_in_target` for unexpected entries
 - `value_mismatch` for entry metadata differences such as digest or size
 
-### 10.3 How archive column names work
+### 11.6 How archive column names work
 
 In archive comparison, `column_name` is usually a manifest or metadata field. For example, a digest mismatch may use `content_digest`.
 
-### 10.4 Nested archives and leaf validation
+### 11.7 Nested archives and leaf validation
 
 The archive code can also inspect nested archive members and, if a leaf file is recognized, hand it off to the correct validator.
 
@@ -678,7 +752,7 @@ flowchart TD
     F --> G
 ```
 
-### 10.5 Safety limits
+### 11.8 Safety limits
 
 Nested expansion is bounded by limits such as:
 
@@ -689,7 +763,7 @@ Nested expansion is bounded by limits such as:
 
 That keeps archive inspection from exploding on pathological inputs.
 
-### 10.6 Complexity for archive validation
+### 11.9 Complexity for archive validation
 
 Let $e$ be the number of archive entries and $d$ be the nesting depth.
 
@@ -708,7 +782,7 @@ with safety bounds preventing unbounded recursive expansion.
 
 ---
 
-## Chapter 11: How the final API report is assembled
+## Chapter 12: How the final API report is assembled
 
 After validation completes, the backend builds the API response from the mismatch report and summary counters.
 
@@ -720,7 +794,7 @@ The summary includes counts for:
 
 The API layer also computes a per-column breakdown for value mismatches when the result set is small enough.
 
-### 11.1 Per-column aggregation in the API
+### 12.1 Per-column aggregation in the API
 
 The API can populate `value_mismatch_by_column`, which is a count of value mismatches grouped by `column_name`.
 
@@ -728,7 +802,7 @@ That aggregation is controlled by `validation_value_mismatch_column_stats_max_ro
 
 If the number of value-mismatch rows is too large, the backend skips per-column aggregation to avoid extra memory use.
 
-### 11.2 Sample groups
+### 12.2 Sample groups
 
 The API can also return mismatch sample groups so the UI has a small preview set for each category.
 
@@ -741,11 +815,11 @@ For value mismatches, the sample rows usually include:
 - target value
 - row detail
 
-### 11.3 When there are no mismatches
+### 12.3 When there are no mismatches
 
 If the result is a full match, the backend may still emit a small match sample frame so the response shape stays consistent.
 
-### 11.4 Complexity for API aggregation
+### 12.4 Complexity for API aggregation
 
 The API-side aggregation is linear in the number of returned mismatch rows.
 
@@ -757,7 +831,7 @@ So the response-building work is usually dominated by the size of the mismatch o
 
 ---
 
-## Chapter 12: Practical meaning of the mismatch types
+## Chapter 13: Practical meaning of the mismatch types
 
 A simple way to read the report is:
 
@@ -775,7 +849,7 @@ This meaning is consistent across formats, but the comparison mechanism differs:
 
 ---
 
-## Chapter 13: End-to-end example for tabular data
+## Chapter 14: End-to-end example for tabular data
 
 If you want the shortest mental model for how the backend finds a mismatching column, it is this:
 
@@ -794,32 +868,32 @@ That is how Pegasus knows which column changed instead of only knowing that the 
 
 ---
 
-## Chapter 14: Complexity summary
+## Chapter 15: Complexity summary
 
 This is the short version of the scaling behavior.
 
-### 14.1 Tabular and columnar
+### 15.1 Tabular and columnar
 
 - runtime: roughly $O(n \cdot c)$ plus drilldown on changed rows
 - space: roughly $O(n \cdot c)$ logical volume, but bounded peak memory through partitioning
 - unsorted inputs: handled by hashing and joins, not by positional scanning
 
-### 14.2 Fixed-width
+### 15.2 Fixed-width
 
 - runtime: roughly $O(n \cdot c)$ because each UID row is compared field by field
 - space: roughly $O(n)$ for UID maps plus mismatch output
 
-### 14.3 JSON and NDJSON
+### 15.3 JSON and NDJSON
 
 - runtime: roughly $O(s)$ where $s$ is the size of the JSON tree or records visited, plus path recursion and list matching cost
 - space: roughly $O(d)$ recursion depth for tree walk, plus the output rows
 
-### 14.4 Archives
+### 15.4 Archives
 
 - runtime: roughly $O(e)$ for manifest work plus the cost of any extracted leaf validation
 - space: bounded by manifest size, extracted leaf size, and safety limits
 
-### 14.5 Practical 40 GB note
+### 15.5 Practical 40 GB note
 
 This section gives a worked estimate instead of a summary.
 
@@ -831,7 +905,7 @@ Assume:
 - fingerprint algorithm = `xxhash64`
 - partition preset = `medium` = 2048 partitions
 
-#### 14.5.1 Average raw row size
+#### 15.5.1 Average raw row size
 
 First compute the average raw bytes per row:
 
@@ -849,7 +923,7 @@ $$
 
 That is only an average. Real columns will be uneven, but it is good enough for a planning estimate.
 
-#### 14.5.2 Hash storage
+#### 15.5.2 Hash storage
 
 With `xxhash64`, each row fingerprint is 8 bytes.
 
@@ -869,7 +943,7 @@ So the fingerprints alone take about 763 MiB for 100 million total rows.
 
 If you meant 100 million rows per side rather than total across both sides, double that to about 1.49 GiB of raw digest storage.
 
-#### 14.5.3 Partition sizing
+#### 15.5.3 Partition sizing
 
 With 2048 partitions, the average rows per partition are:
 
@@ -889,7 +963,7 @@ $$
 
 If the data is split evenly between source and target, that is about 10 MiB per side per partition on average.
 
-#### 14.5.4 UID and compare payload estimate
+#### 15.5.4 UID and compare payload estimate
 
 If the 12 columns are split as 2 UID columns and 10 compare columns, then the average bytes per row are:
 
@@ -919,7 +993,7 @@ So one average partition pair carries about:
 
 which sums back to about 20 MiB of raw partition data.
 
-#### 14.5.5 Peak RAM estimate
+#### 15.5.5 Peak RAM estimate
 
 The pipeline does not need to hold the full 40 GiB in memory at once because it spills partitions and reconciles them in waves.
 
@@ -941,7 +1015,7 @@ $$
 
 So a practical per-partition working set is often in the rough range of 40 to 80 MiB, before any unusually large mismatch export or drilldown expansion.
 
-#### 14.5.6 Why the job still does not fit in RAM as a whole
+#### 15.5.6 Why the job still does not fit in RAM as a whole
 
 Even though a single partition is small, the whole job is not just one partition. The backend still has to:
 
@@ -957,7 +1031,7 @@ That is why the correct conclusion for a 40 GiB combined job is:
 - expect spill-based reconciliation
 - expect the full dataset to live on disk, not in RAM
 
-#### 14.5.7 Concrete planning answer
+#### 15.5.7 Concrete planning answer
 
 For a 40 GiB combined source + target dataset with 100 million total rows and 12 columns:
 
@@ -968,7 +1042,7 @@ For a 40 GiB combined source + target dataset with 100 million total rows and 12
 - rough peak RAM per partition pair: about 40 to 80 MiB
 - overall job memory use: dominated by spill files and partition processing, not by holding all 40 GiB in memory
 
-#### 14.5.8 Scaling the same math to 10 GiB and 20 GiB
+#### 15.5.8 Scaling the same math to 10 GiB and 20 GiB
 
 If the row shape stays the same, the math scales linearly with size.
 
@@ -1013,7 +1087,7 @@ If you want the short version in one line: the row-level math is manageable, but
 
 ---
 
-## Chapter 15: Short summary
+## Chapter 16: Short summary
 
 Pegasus validation works by routing each input format into a specialized comparator, but every comparator ultimately feeds the same mismatch report model.
 
