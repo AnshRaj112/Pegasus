@@ -29,6 +29,8 @@ The important idea is that validation is layered:
 14. [Chapter 14: End-to-end example for tabular data](#chapter-14-end-to-end-example-for-tabular-data)
 15. [Chapter 15: Complexity summary](#chapter-15-complexity-summary)
 16. [Chapter 16: Short summary](#chapter-16-short-summary)
+17. [Chapter 17: Visual validation maps](#chapter-17-visual-validation-maps)
+18. [Chapter 18: Partition tables and chunked archive reading](#chapter-18-partition-tables-and-chunked-archive-reading)
 
 ---
 
@@ -134,6 +136,29 @@ The default normalization does the following:
 
 This is what prevents false mismatches caused by formatting differences alone.
 
+Canonicalization happens in two related places:
+
+- identity canonicalization, which is used to build the row key
+- compare canonicalization, which is used to build the row fingerprint and the drilldown payload
+
+Identity canonicalization is intentionally simple. The helper in `fingerprint.py` calls `canonical(record.get(c))` for each UID column, which means the identity path uses the default string normalization rules but does not apply compare-policy field mapping.
+
+Compare canonicalization is more flexible. When a compare policy is active, the backend canonicalizes values using the logical field definition for that side:
+
+- source-side values are normalized with the source mapping
+- target-side values are normalized with the target mapping
+- the canonicalized values are then joined with the field separator `\x1f` before hashing
+
+That means the same logical compare field can be composed from different physical columns on the source and target side, but still land in the same fingerprint comparison.
+
+Practical example:
+
+- source column value ` 12 ` becomes `12`
+- target column value `12.0` may become `12` if the compare policy or field rule normalizes it that way
+- `null`, `None`, blank strings, and equivalent tokens become `__NULL__`
+
+So canonicalization is not just trimming text. It is the normalization step that makes the row comparison deterministic across formatting differences, side-specific mappings, and null-like representations.
+
 ### 3.2 Identity generation
 
 Each tabular row gets a stable identity key from one or more identity columns. The identity parts are canonicalized, then joined with a pipe character.
@@ -190,6 +215,25 @@ flowchart LR
 ```
 
 The partition hash is based on the identity key, so identical identities always land in the same bucket.
+
+The reason this exists is scale and memory control:
+
+- the backend can stream through each input once instead of keeping the whole file in RAM
+- each row is written to a stable bucket immediately after it is normalized and hashed
+- later reconciliation only has to compare matching buckets, not the full dataset
+- the work can be parallelized across partitions or partition waves
+
+The partition count is chosen adaptively from the configured preset and the estimated input size. Larger jobs get more buckets, smaller jobs get fewer buckets, and the goal is to keep each partition small enough that the join and drilldown state fits inside the memory budget.
+
+For unsorted inputs this is the critical point: the backend does not need rows to appear in the same physical order. The partition hash makes the row location deterministic from the UID, so source and target rows with the same identity are routed to the same bucket even if they arrive in different orders.
+
+What is stored in a partition depends on the validation mode:
+
+- at minimum, the identity key and row fingerprint are stored
+- if fingerprint-only spill or lazy drilldown is enabled, compare payloads may also be stored for later lookup
+- the spill files are the working set for reconciliation, not a copy of the original file format
+
+So partitioning is not a sort step. It is a bounded hash-distribution step that turns a full-file compare into a set of smaller compare problems.
 
 ### 3.5 Hash storage cost
 
@@ -257,6 +301,22 @@ The key rule is:
 - each compare column is checked independently
 - if a column differs, a `ColumnDifference` is recorded
 - each difference becomes a `value_mismatch` row with `column_name` set to that logical compare field
+
+This second pass is the drilldown pass. It is where the backend stops talking about “the row changed” and starts talking about “this specific logical column changed.”
+
+The same logical sequence applies in both memory modes:
+
+- in-memory path: the changed rows are already in Polars frames, so drilldown compares the joined rows directly
+- spill path: the changed keys are reloaded from partition artifacts or drilldown cache, then compared column by column
+
+This is the answer to the common “is the file read twice?” question:
+
+- the original source and target files are streamed once during partitioning
+- only the matching partition artifacts are revisited during reconciliation
+- only the changed keys are rehydrated for drilldown
+- the full raw files are not scanned again for every mismatch
+
+So the backend does not do a second full-file read of the original inputs. It does a second, much smaller read of partition spill data or drilldown cache entries for the identities that actually need explanation.
 
 ```mermaid
 flowchart TD
@@ -367,15 +427,47 @@ The partition reconciliation step:
 
 If drilldown is enabled, it rehydrates the changed keys and compares the compare columns to produce `ColumnDifference` entries.
 
+The important detail is that reconciliation works on partition files, not on the original full-size inputs. Each partition file is a narrowed, already-hashed view of one bucket of rows. That is why the spill path can stay bounded even when the inputs are large and completely unsorted.
+
+In practical terms, the spill workflow is:
+
+1. stream source rows, canonicalize them, hash the identity, hash the compare payload, and write them into source partition files
+2. stream target rows the same way into target partition files
+3. compare the source and target partitions with the same partition id
+4. mark missing and extra identities from anti joins
+5. mark changed identities from fingerprint mismatches on inner joins
+6. if drilldown is on, rehydrate only the changed identities and compare compare columns one by one
+
+That means the expensive part is split into two cheaper parts: first the partitioning pass, then the per-partition reconcile pass.
+
 ### 5.4 Why fingerprints are not the final answer
 
 The fingerprint is only a filter. It is fast, but it does not say which column changed. The drilldown step is what converts a changed row into explicit per-column mismatch rows.
+
+This separation is deliberate:
+
+- fingerprint comparison is cheap enough to run for every row
+- column-by-column comparison is only needed for the subset of rows that actually changed
+- that keeps the common case fast while still producing a detailed report for the UI and API
 
 ### 5.5 What happens when files are completely unsorted
 
 Sorting is not required for validation.
 
 The pipeline does not compare rows by physical position. It matches rows by identity key, then by fingerprint, and only then by per-column drilldown. So even if source and target are in completely different orders, the validator still finds the correct counterpart row by joining on the UID.
+
+That means a row being number 10 in the source file and number 1,000,000 in the target file does not matter. Those row numbers are just the physical read order. The validator ignores physical position and instead uses the logical identity key built from the configured UID columns.
+
+The practical lookup flow is:
+
+1. read a source row
+2. canonicalize its UID columns
+3. build the identity key
+4. hash that identity into a partition bucket
+5. do the same for the target row
+6. compare only the source and target rows that land in the same identity bucket
+
+So the backend is not trying to find “row 10” in the target file. It is trying to find “the row with the same identity key” in the target partition.
 
 That is why an input like this still works:
 
@@ -405,9 +497,28 @@ Later, reconciliation only opens the matching partition files:
 
 So the backend does not reload the complete 40 GiB again for each changed row. It reopens only the spill artifacts and drilldown lookups for the partition that contains that UID.
 
+If lazy drilldown is enabled, the backend can avoid reading full payload rows for unrelated keys by using [pegasus-backend/src/pegasus/validation/pipeline/drilldown_cache.py](../pegasus-backend/src/pegasus/validation/pipeline/drilldown_cache.py). That cache stores only the identity plus the compare columns, and `values_for_keys()` filters to the changed keys before building row dictionaries.
+
+If lazy drilldown is not enabled, the spill payload is scanned only for the current partition and only the keys requested for drilldown are materialized. That is still far smaller than rescanning the original input file.
+
 If the job runs in the in-memory fast path, the answer is even simpler: both frames are already loaded in RAM, and the changed UID is resolved by a hash join on identity rather than a file rescan.
 
-### 5.7 What 40 GB combined memory means in practice
+### 5.7 Drilldown versus partition reconcile
+
+These two terms are easy to mix up, but they are different steps:
+
+- partition reconcile decides which UIDs are missing, extra, changed, or matching inside one partition bucket
+- drilldown decides which compare columns differ for the changed UIDs
+
+Partition reconcile works at the row identity level. It uses the partition frame’s identity and fingerprint columns, so it can answer questions like “does this UID exist on both sides?” and “did the row fingerprint change?”
+
+Drilldown works at the compare-field level. It needs the original compare values, either from the persisted drilldown cache or from the partition payload, so it can answer “which logical column changed?”
+
+This is why the code separates `reconcile_partition_core()` from `_apply_drilldown_samples()` in [pegasus-backend/src/pegasus/validation/pipeline/partition_reconcile.py](../pegasus-backend/src/pegasus/validation/pipeline/partition_reconcile.py): first identify the changed keys, then explain them.
+
+The drilldown path is also what makes the mismatch report useful for debugging. A row fingerprint alone would only say “something is different.” Drilldown turns that into the exact `column_name` plus the source and target values.
+
+### 5.8 What 40 GB combined memory means in practice
 
 The backend does not compute one exact RAM number for every dataset because the real peak depends on row width, column count, string cardinality, partition count, and whether drilldown is enabled. But it does have a clear operating mode:
 
@@ -1207,3 +1318,412 @@ For the other formats, the same idea applies with different mechanics:
 - archives use entry metadata and optional leaf validation
 
 The architectural theme is consistent: fast coarse matching first, then precise column/path attribution only for the records that need it.
+
+---
+
+## Chapter 17: Visual validation maps
+
+This chapter gives a structured visual view of how Pegasus validates each supported file family. The diagrams show the backend flow from input selection to mismatch output.
+
+### 17.1 Global validation flow
+
+```mermaid
+flowchart TD
+    A[Source + target inputs] --> B[ValidationService]
+    B --> C{Detected file family}
+    C -->|Delimited / tabular| D[Tabular reconciliation pipeline]
+    C -->|Columnar| D
+    C -->|Fixed-width| E[Fixed-width comparator]
+    C -->|JSON / NDJSON| F[JSON comparator]
+    C -->|Archive| G[Archive comparator]
+
+    D --> H[Identity match]
+    E --> H
+    F --> H
+    G --> H
+
+    H --> I[Canonicalize values]
+    I --> J[Compare / fingerprint / path diff]
+    J --> K{Mismatch found?}
+    K -->|No| L[Match output]
+    K -->|Yes| M[Structured mismatch report]
+```
+
+### 17.2 Delimited and tabular files
+
+This covers CSV, TSV, PSV, DAT, and other tabular text inputs.
+
+```mermaid
+flowchart TD
+    A[Delimited file rows] --> B[Adapter resolves delimiter and headers]
+    B --> C[Build UID from identity columns]
+    C --> D[Canonicalize compare columns]
+    D --> E[Hash compare payload]
+    E --> F[Partition by identity hash]
+    F --> G[Source partition files]
+    F --> H[Target partition files]
+    G --> I[Partition reconcile]
+    H --> I
+    I --> J{UID missing / extra / changed?}
+    J -->|Missing| K[missing_in_target]
+    J -->|Extra| L[extra_in_target]
+    J -->|Changed| M[Drilldown changed row]
+    M --> N[Compare columns one by one]
+    N --> O[value_mismatch rows]
+```
+
+### 17.3 Fixed-width files
+
+Fixed-width validation uses declared field positions instead of delimiters.
+
+```mermaid
+flowchart TD
+    A[Fixed-width file] --> B[Read declared field layout]
+    B --> C[Slice line by start/end positions]
+    C --> D[Build UID row map]
+    D --> E[Compare source and target UID sets]
+    E --> F{UID exists on both sides?}
+    F -->|No| G[missing_in_target or extra_in_target]
+    F -->|Yes| H[Compare each field]
+    H --> I{Field differs?}
+    I -->|No| J[Match for that field]
+    I -->|Yes| K[Emit value_mismatch with field name]
+```
+
+### 17.4 JSON and NDJSON files
+
+JSON validation is path-based and recursive.
+
+```mermaid
+flowchart TD
+    A[JSON / NDJSON input] --> B{Single document or line-delimited?}
+    B -->|Single document| C[Recursive tree walk]
+    B -->|NDJSON| D[Match records by UID]
+    D --> C
+    C --> E[Compare dict keys / array items / scalars]
+    E --> F{Path mismatch?}
+    F -->|Missing path| G[missing_in_target]
+    F -->|Extra path| H[extra_in_target]
+    F -->|Different value| I[value_mismatch with JSON path]
+    F -->|Equal| J[Match]
+```
+
+### 17.5 Parquet, ORC, and Avro
+
+These formats are converted into tabular rows and then follow the same partitioned reconciliation path as delimited files.
+
+```mermaid
+flowchart TD
+    A[Parquet / ORC / Avro file] --> B[Reader / adapter materializes rows]
+    B --> C[Normalize into tabular shape]
+    C --> D[Identity key + compare columns]
+    D --> E[Fingerprint rows]
+    E --> F[Partition spill if needed]
+    F --> G[Compare matching partitions]
+    G --> H[Drilldown changed rows]
+    H --> I[Emit mismatch report]
+```
+
+### 17.6 ZIP and TAR archives
+
+Archive validation first compares archive metadata, then optionally validates the extracted leaf file.
+
+```mermaid
+flowchart TD
+    A[ZIP / TAR input] --> B[Inspect archive metadata]
+    B --> C{Manifest only enough?}
+    C -->|Yes| D[Compare entry names, sizes, digests]
+    C -->|No| E[Extract nested leaf file]
+    E --> F{Leaf type detected?}
+    F -->|Tabular| G[Run tabular pipeline]
+    F -->|Fixed-width| H[Run fixed-width comparator]
+    F -->|JSON| I[Run JSON comparator]
+    F -->|Unsupported leaf| J[Archive-level mismatch only]
+    G --> K[Leaf mismatch report]
+    H --> K
+    I --> K
+    D --> K
+    J --> K
+```
+
+### 17.7 Nested archives
+
+Nested archives are handled by recursively materializing the inner archive until Pegasus reaches a supported leaf type or hits a safety limit.
+
+```mermaid
+flowchart TD
+    A[Outer archive] --> B[Detect nested member]
+    B --> C{Nested member is archive?}
+    C -->|No| D[Validate leaf payload]
+    C -->|Yes| E[Extract inner archive]
+    E --> F{Depth within limit?}
+    F -->|No| G[Stop recursion and report safely]
+    F -->|Yes| B
+    D --> H[Leaf mismatch report]
+    G --> H
+```
+
+### 17.8 One-line reading guide
+
+Use the diagrams this way:
+
+- if the file is row-oriented text, follow the tabular diagram
+- if the file is fixed-width, follow the slicing diagram
+- if the file is JSON, follow the recursive path diagram
+- if the file is Parquet, ORC, or Avro, follow the materialize-then-tabular diagram
+- if the file is ZIP or TAR, follow the archive-and-leaf diagram
+- if the archive contains another archive, follow the nested recursion diagram
+
+---
+
+## Chapter 18: Partition tables and chunked archive reading
+
+This chapter explains two concrete implementation details that are easy to miss from the high-level flow:
+
+- how partition files are built for the spill path
+- how ZIP, TAR, and nested archives are read in chunks without pulling the whole file into memory
+
+### 18.1 How partition tables are made
+
+The partition tables are the spill files written by [pegasus-backend/src/pegasus/validation/pipeline/spill.py](../pegasus-backend/src/pegasus/validation/pipeline/spill.py).
+
+Each row is turned into a compact binary record containing:
+
+- the identity key
+- the row fingerprint
+- optionally, the compare-column payload for drilldown
+
+The writer does not build one giant table. It keeps a small buffer per partition id and flushes each buffer when it grows past the threshold.
+
+```mermaid
+flowchart TD
+    A[Read source row] --> B[Canonicalize identity columns]
+    B --> C[Build identity key]
+    C --> D[Hash identity to partition id]
+    D --> E[Canonicalize compare columns]
+    E --> F[Build row fingerprint]
+    F --> G{Store drilldown payload?}
+    G -->|Yes| H[Encode compare payload]
+    G -->|No| I[Encode identity + fingerprint only]
+    H --> J[Append binary record to partition buffer]
+    I --> J
+    J --> K{Buffer over flush threshold?}
+    K -->|No| L[Keep buffering]
+    K -->|Yes| M[Flush to part_XXXXX.bin]
+    M --> N[Partition file on disk]
+```
+
+The on-disk format is intentionally compact:
+
+- records are binary, not JSON
+- each record stores the identity string and an 8-byte fingerprint
+- if drilldown is enabled, the compare values are stored in column order for later lookup
+
+That means the partition files are not copies of the input file format. They are validation working files made specifically for fast matching and later drilldown.
+
+### 18.2 How partition buckets are named and matched
+
+The bucket name comes from the partition id, not from the physical row number.
+
+In the spill path, Pegasus computes:
+
+- the identity key from the UID columns
+- a partition id from that identity key and the configured partition count
+- a file name from that partition id
+
+The partition id is an integer in the range `0..num_partitions-1`. The file name is written with zero padding so the buckets sort cleanly on disk:
+
+- `source/part_00000.bin`
+- `source/part_00001.bin`
+- `source/part_00042.bin`
+- `target/part_00042.bin`
+- `target/part_02047.bin`
+
+The exact bucket count comes from the adaptive partition planner and the config preset. Larger jobs get more buckets; smaller jobs get fewer buckets. The important part is that the same identity key always produces the same partition id on both source and target.
+
+### 18.2.1 How the bucket count is chosen
+
+The planner does not blindly use the maximum partition count for every file. It estimates the job size first and then picks a bucket count that is large enough to spread the work out, but not so large that most buckets are empty.
+
+The selection rules are:
+
+- estimate the row count from the input size and column count
+- choose a target rows-per-partition value based on the estimated row count
+- cap the bucket count using the file-size tier
+- respect the requested partition count as an upper bound when one is configured
+
+The code applies these planning tiers:
+
+- very small jobs: keep the bucket count low enough to avoid overhead from empty partitions
+- medium jobs: allow more buckets so each bucket stays small
+- large jobs: allow a much higher bucket cap so the spill files stay manageable
+
+In the implementation, the row target changes with scale:
+
+- small jobs aim for about 2,000 rows per bucket
+- medium jobs aim for about 10,000 rows per bucket
+- very large jobs aim for about 5,000 rows per bucket once the estimated row count is high enough
+
+The size caps also change by input size:
+
+- up to about 4 MiB of combined input, the planner keeps the bucket count at or below 16
+- up to about 32 MiB, it keeps the bucket count at or below 64
+- up to about 128 MiB, it keeps the bucket count at or below 256
+- beyond that, the bucket count can grow up to the larger file-size cap
+
+That means small files do not get a huge number of buckets. The planner prefers fewer buckets and fewer files because the cost of many empty partitions would be higher than the benefit.
+
+```mermaid
+flowchart TD
+    A[Estimate input size and rows] --> B{Small file?}
+    B -->|Very small| C[Low bucket cap, avoid empty partitions]
+    B -->|Medium| D[Moderate bucket cap]
+    B -->|Large| E[Higher bucket cap]
+    C --> F[Choose rows per partition]
+    D --> F
+    E --> F
+    F --> G[Respect requested partition count]
+    G --> H[Final num_partitions]
+```
+
+The practical effect is that a tiny dataset might only use a handful of buckets, while a large dataset can use hundreds or thousands. The planner is trying to keep the work balanced without creating a lot of empty `part_XXXXX.bin` files.
+
+### 18.2.2 How both sides still land in the same bucket
+
+Once the final `num_partitions` is chosen, both source and target use the same partition count and the same identity hash function.
+
+That gives the routing rule:
+
+```text
+partition_id = hash(identity_key) mod num_partitions
+```
+
+Because the source and target rows with the same UID generate the same identity key, they also generate the same partition id.
+
+So the bucket is shared by construction:
+
+- source row hashes to bucket 42
+- target row with the same UID hashes to bucket 42
+- both rows are written under the same `source/part_00042.bin` and `target/part_00042.bin` pair
+
+This is the core reason unsorted validation works. Pegasus is not trying to remember where the row was in the original file; it is trying to put the same logical row from both sides into the same bucket.
+
+```mermaid
+flowchart TD
+    A[UID columns] --> B[Canonicalize identity parts]
+    B --> C[Join into identity key]
+    C --> D[partition_id(identity, num_partitions)]
+    D --> E{Partition id}
+    E --> F[source/part_00042.bin]
+    E --> G[target/part_00042.bin]
+```
+
+The reason source and target land in the same bucket is simple: both sides run the same identity canonicalization and the same hash function with the same partition count. If the identity key is identical, the bucket id is identical.
+
+That gives Pegasus an architectural guarantee:
+
+- rows with the same UID never need a global scan to find each other
+- source and target rows with the same identity can be compared inside one bucket
+- unsorted input still works because bucket routing replaces positional matching
+
+You can think of the bucket as a rendezvous point for one identity hash range, not as a physical row-order group.
+
+### 18.3 What a partition file contains
+
+For the default spill path, one partition file is built from the rows whose identity hash landed in that bucket.
+
+Conceptually it looks like this:
+
+```mermaid
+flowchart LR
+    A[Source rows for partition 42] --> B[Binary spill buffer]
+    C[Target rows for partition 42] --> D[Binary spill buffer]
+    B --> E[part_00042.bin]
+    D --> F[part_00042.bin]
+    E --> G[Reconcile partition 42]
+    F --> G
+```
+
+The partition file lets Pegasus compare only rows that can actually match each other. That is why partitioning is so important for unsorted inputs: the same UID always hashes to the same partition bucket, so the source and target versions of that row meet again later in the same `part_XXXXX.bin` pair.
+
+### 18.4 How partition reconcile reads those files
+
+During reconciliation, Pegasus opens the source and target partition files for the same partition id and compares them directly.
+
+```mermaid
+flowchart TD
+    A[part_00042.bin source] --> B[Load partition frame]
+    C[part_00042.bin target] --> D[Load partition frame]
+    B --> E[Rename identity and fingerprint columns]
+    D --> E
+    E --> F[Anti-join identities]
+    E --> G[Inner-join identities]
+    F --> H[Missing or extra rows]
+    G --> I[Compare fingerprints]
+    I --> J{Fingerprint differs?}
+    J -->|No| K[Matching row]
+    J -->|Yes| L[Changed row]
+    L --> M[Optional drilldown]
+```
+
+If drilldown is enabled, the changed keys are then rehydrated from the cached compare payload or from the spill payload itself. That second read is limited to the changed keys, not the whole file.
+
+### 18.5 How ZIP and TAR are read without loading the whole archive
+
+ZIP and TAR validation does not open the whole archive as a single in-memory object. The backend reads archive metadata first, then streams member data when it needs a nested payload.
+
+For ZIP and TAR members, the code reads files in small chunks, typically 1 MiB at a time, and writes only the selected member to a temporary work file if it is going to be validated as a nested leaf.
+
+```mermaid
+flowchart TD
+    A[Open ZIP/TAR archive] --> B[Read manifest / member metadata]
+    B --> C{Need only archive-level compare?}
+    C -->|Yes| D[Compare entry metadata and digests]
+    C -->|No| E[Select one member]
+    E --> F[Stream member bytes in chunks]
+    F --> G[Write selected member to temp work file]
+    G --> H[Detect leaf type]
+    H --> I[Run leaf validator]
+```
+
+The important detail is that the backend does not build a giant in-memory buffer for the whole archive. It only streams the selected member, chunk by chunk, into a bounded temporary file when extraction is needed.
+
+### 18.6 How nested archives are handled without unzipping everything
+
+Nested archives are also bounded. The extractor stops after a small number of levels and only follows members that look like supported archives or supported leaf types.
+
+```mermaid
+flowchart TD
+    A[Outer archive member] --> B{Looks like nested archive?}
+    B -->|No| C[Validate as leaf if supported]
+    B -->|Yes| D[Stream member bytes to temp file]
+    D --> E[Detect inner container type]
+    E --> F{Depth within limit?}
+    F -->|No| G[Stop recursion safely]
+    F -->|Yes| H[Open inner archive]
+    H --> I[Repeat member selection]
+    I --> B
+    C --> J[Leaf mismatch report]
+    G --> J
+```
+
+That means Pegasus does not “unzip everything” first. It only materializes the next member it needs, then recurses if that member itself is another archive. The recursion is bounded by depth and member-size limits, so the backend keeps control over memory and disk use.
+
+### 18.7 Why this keeps memory bounded
+
+The main reason this approach scales is that the backend stores only the current working slice:
+
+- partitioning keeps only one row’s normalized representation at a time before flushing to disk
+- reconciliation loads one partition at a time instead of the whole dataset
+- archive extraction reads members in chunks instead of buffering the entire archive
+- nested archive recursion stops at a small maximum depth
+
+So the answer to “how do we read chunks out of ZIP/TAR/nested files without bringing the whole file into memory?” is:
+
+1. read archive metadata first
+2. pick the member you need
+3. stream that member in small blocks
+4. write only the selected member to a temporary work file if needed
+5. recurse only into that selected member, never the entire archive tree at once
+
+This is the same design principle as partition reconciliation: only materialize the small piece needed for the current step.
