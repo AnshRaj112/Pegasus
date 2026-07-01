@@ -1139,37 +1139,37 @@ This section provides a rigorous mathematical model and worked examples to estim
 #### 15.5.2 Mathematical Models for Resource Allocation
 
 ##### 1. Delimited / Tabular (CSV, TSV, PSV, DAT) & Columnar (Parquet, ORC, Avro, Excel)
-*   **In-Memory Mode** ($F \le \text{auto\_in\_memory\_max\_bytes}$):
+*   **In-Memory Mode** ($F \le \text{auto in memory max bytes}$):
     *   **RAM**: Data is loaded entirely into RAM. Polars representation and decompression buffers introduce an overhead multiplier (default 1.5x - 3.0x).
-        $$\text{RAM}_{\text{in-memory}} = \max\left(\text{min\_ram\_per\_job}, \text{int}(F \times \text{ram\_multiplier}) + \text{base\_overhead}\right)$$
-        Where $\text{base\_overhead} \approx 384 \text{ MiB}$ (for Python interpreter and loaded libraries) and $\text{ram\_multiplier} \approx 2.0$.
+        $$\text{RAM}_{\text{in memory}} = \max\left(\text{min ram per job}, \text{int}(F \times \text{ram multiplier}) + \text{base overhead}\right)$$
+        Where $\text{base overhead} \approx 384 \text{ MiB}$ (for Python interpreter and loaded libraries) and $\text{ram multiplier} \approx 2.0$.
     *   **Disk**: Negligible ($O(1)$) as no files are spilled.
-*   **Spill/Partitioned Mode** ($F > \text{auto\_in\_memory\_max\_bytes}$):
+*   **Spill/Partitioned Mode** ($F > \text{auto in memory max bytes}$):
     *   **RAM**: RAM usage is decoupled from the full file size $F$ and instead scales with worker concurrency $W$, chunk size $N_c$, and active partition wave size.
-        $$\text{RAM}_{\text{spill}} = \text{base\_overhead} + W \times \left( N_c \times W_r \times \text{buffers} + 3.0 \times \frac{F}{P} \right)$$
+        $$\text{RAM}_{\text{spill}} = \text{base overhead} + W \times \left( N_c \times W_r \times \text{buffers} + 3.0 \times \frac{F}{P} \right)$$
         Where:
         *   $\text{buffers} = 2$ (double-buffering for reader and spill writer).
         *   $W_r = \text{max}(32, \text{min}(512, 8 \times C + 24))$ for native extension spill, or $\text{max}(64, \text{min}(2048, 32 \times (C + U)))$ for Python/Polars spill.
         *   $\frac{F}{P}$ represents the average physical size of a partition pair. The factor $3.0$ accounts for Polars dataframe representation and join index structures during reconciliation.
     *   **Disk**: Bounded by the spill files and drilldown caches:
-        $$\text{Disk}_{\text{spill}} = F \times \text{disk\_multiplier} + M \times W_r + W \times \frac{F}{P} \times 2.0$$
-        Where $\text{disk\_multiplier} \approx 1.2$ to $1.5$ (due to normalized character expansion in partition files). $M \times W_r$ represents the space for the lazy drilldown cache.
+        $$\text{Disk}_{\text{spill}} = F \times \text{disk multiplier} + M \times W_r + W \times \frac{F}{P} \times 2.0$$
+        Where $\text{disk multiplier} \approx 1.2$ to $1.5$ (due to normalized character expansion in partition files). $M \times W_r$ represents the space for the lazy drilldown cache.
 
 ##### 2. Fixed-Width Files
 Fixed-width parsing processes lines sequentially using character slicing. Since it avoids sniffer overhead but incurs high Python dictionary overhead when matching UIDs in memory:
 *   **RAM**:
-    *   *In-Memory*: $\text{RAM}_{\text{fixed-width}} = \text{base\_overhead} + F \times 3.5$ (due to Python object overhead for storing parsed field values in string hash maps).
+    *   *In-Memory*: $\text{RAM}_{\text{fixed width}} = \text{base overhead} + F \times 3.5$ (due to Python object overhead for storing parsed field values in string hash maps).
     *   *Spilled*: Follows the Tabular Spill formula, but with $W_r = \text{declared layout width}$.
 *   **Disk**: Same as Tabular Spill when spilled; negligible if fully in-memory.
 
 ##### 3. JSON and NDJSON Files
 *   **Single JSON Document**:
     *   **RAM**: The entire JSON tree structure is parsed into a Python dictionary. Every nested element, dictionary key, and scalar value incurs heavy Python pointer overhead.
-        $$\text{RAM}_{\text{json}} = \text{base\_overhead} + F \times 6.0$$
+        $$\text{RAM}_{\text{json}} = \text{base overhead} + F \times 6.0$$
     *   **Disk**: Negligible (only final mismatch report).
 *   **NDJSON (Line-delimited JSON)**:
     *   **RAM**: NDJSON uses the tabular spill pipeline, but parsing dictionary rows in memory has a higher overhead factor.
-        $$\text{RAM}_{\text{ndjson}} = \text{base\_overhead} + W \times \left( N_c \times W_r \times \text{buffers} + 4.5 \times \frac{F}{P} \right)$$
+        $$\text{RAM}_{\text{ndjson}} = \text{base overhead} + W \times \left( N_c \times W_r \times \text{buffers} + 4.5 \times \frac{F}{P} \right)$$
     *   **Disk**: Spilled partitions write nested data in flattened formats:
         $$\text{Disk}_{\text{ndjson}} = F \times 1.5 + M \times W_r \times 1.5$$
 
@@ -1177,14 +1177,14 @@ Fixed-width parsing processes lines sequentially using character slicing. Since 
 Archive validation operates in two modes:
 *   **Manifest-Only Comparison**:
     *   **RAM**: Stores only manifest records.
-        $$\text{RAM}_{\text{manifest}} = \text{base\_overhead} + E \times 512 \text{ bytes}$$
+        $$\text{RAM}_{\text{manifest}} = \text{base overhead} + E \times 512 \text{ bytes}$$
     *   **Disk**: Negligible ($< 1 \text{ MiB}$ for temporary manifest files).
 *   **Nested Leaf Validation**:
     *   **RAM**: Governed by the memory profile of the leaf validator on the extracted contents.
-        $$\text{RAM}_{\text{archive\_leaf}} = \text{RAM}_{\text{leaf\_validator}}(F \times R_c)$$
+        $$\text{RAM}_{\text{archive leaf}} = \text{RAM}_{\text{leaf validator}}(F \times R_c)$$
     *   **Disk**: Temporary extraction of leaf files must be maintained alongside the archive container:
-        $$\text{Disk}_{\text{archive\_leaf}} = F \times R_c \times (1.0 + \text{spill\_multiplier}) + \text{reserve\_bytes}$$
-        Where $R_c \approx 3.0$ and $\text{spill\_multiplier} \approx 1.2$.
+        $$\text{Disk}_{\text{archive leaf}} = F \times R_c \times (1.0 + \text{spill multiplier}) + \text{reserve bytes}$$
+        Where $R_c \approx 3.0$ and $\text{spill multiplier} \approx 1.2$.
 
 ---
 
