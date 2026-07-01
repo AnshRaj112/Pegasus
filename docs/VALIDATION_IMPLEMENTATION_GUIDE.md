@@ -1,125 +1,158 @@
-# Pegasus validation internals: how validation, hashing, and mismatch detection work
+# Pegasus validation internals
 
-This document explains the validation implementation that exists in the backend code under the Pegasus repository. It is written as a walkthrough for someone seeing the system for the first time, and it focuses on what the code actually does rather than on a generic description.
+This document explains how Pegasus validation actually works in the backend code. It is written as an implementation walkthrough, not as a generic product overview.
 
-The implementation is split across a few layers:
+The important idea is that validation is layered:
 
-- The service layer decides which validator to run.
-- The tabular pipeline handles large CSV-like and columnar files.
-- The fingerprinting module creates canonical values and row hashes.
-- Format-specific modules handle fixed-width, JSON, and archive comparisons.
-- The mismatch report layer produces the structured output that the API and UI consume.
+1. the service layer picks the right validator
+2. the validator normalizes the input into a comparable shape
+3. identities are built from configured key columns or paths
+4. compare values are canonicalized and hashed when needed
+5. changed rows are rehydrated for column-level drilldown
+6. the backend emits a structured mismatch report for the API and UI
+
+## Chapters
+
+1. [Chapter 1: What the backend returns](#chapter-1-what-the-backend-returns)
+2. [Chapter 2: How the service chooses a validator](#chapter-2-how-the-service-chooses-a-validator)
+3. [Chapter 3: The core tabular idea](#chapter-3-the-core-tabular-idea)
+4. [Chapter 4: How Pegasus decides which column is mismatching](#chapter-4-how-pegasus-decides-which-column-is-mismatching)
+5. [Chapter 5: Tabular pipeline for CSV-like and columnar files](#chapter-5-tabular-pipeline-for-csv-like-and-columnar-files)
+6. [Chapter 6: CSV, TSV, PSV, DAT, and other delimited files](#chapter-6-csv-tsv-psv-dat-and-other-delimited-files)
+7. [Chapter 7: Fixed-width files](#chapter-7-fixed-width-files)
+8. [Chapter 8: JSON and NDJSON files](#chapter-8-json-and-ndjson-files)
+9. [Chapter 9: Parquet, ORC, and Avro](#chapter-9-parquet-orc-and-avro)
+10. [Chapter 10: Archives: ZIP and TAR](#chapter-10-archives-zip-and-tar)
+11. [Chapter 11: How the final API report is assembled](#chapter-11-how-the-final-api-report-is-assembled)
+12. [Chapter 12: Practical meaning of the mismatch types](#chapter-12-practical-meaning-of-the-mismatch-types)
+13. [Chapter 13: End-to-end example for tabular data](#chapter-13-end-to-end-example-for-tabular-data)
+14. [Chapter 14: Complexity summary](#chapter-14-complexity-summary)
+15. [Chapter 15: Short summary](#chapter-15-short-summary)
 
 ---
 
-## 1. High-level architecture
+## Chapter 1: What the backend returns
 
-Validation begins in the service layer, which receives the source and target files and routes them to the right execution path.
+All validators eventually produce a `MismatchReport`. The shared schema is defined in [pegasus-backend/src/pegasus/validation/comparators/models.py](../pegasus-backend/src/pegasus/validation/comparators/models.py).
+
+The mismatch frame contains these columns:
+
+- `uid`: the row, record, path, or archive entry identity
+- `mismatch_type`: the category of difference
+- `column_name`: the compare field, JSON path, or metadata field that differs
+- `source_value`: the source-side value for the mismatch cell
+- `target_value`: the target-side value for the mismatch cell
+- `row_detail`: JSON context used for drilldown or debugging
+
+The shared mismatch categories are:
+
+- `missing_in_target`
+- `extra_in_target`
+- `value_mismatch`
+- `value_match`
+
+Important detail: `value_mismatch` is a cell-level mismatch in the report, while `value_mismatch_rows` in summaries counts distinct UIDs that had at least one mismatching cell.
+
+---
+
+## Chapter 2: How the service chooses a validator
+
+The API wires requests through `ValidationService`, which routes by file type and adapter. The routing surface is in [pegasus-backend/src/pegasus/services/validation_service.py](../pegasus-backend/src/pegasus/services/validation_service.py).
+
+In practice, the backend splits input into these families:
+
+- delimited/tabular files such as CSV, TSV, PSV, DAT, and ambiguous flat text
+- columnar files such as Parquet, ORC, and Avro
+- fixed-width files
+- JSON and NDJSON
+- archive files such as ZIP and TAR
+
+The service does not use one monolithic comparator. It delegates to a format-specific path, then converges on the same mismatch model.
 
 ```mermaid
 flowchart TD
     A[API / service call] --> B[ValidationService]
-    B --> C{File type / format}
-    C -->|delimited / csv / tsv / psv / .dat / ambiguous tabular| D[Delimited/tabular validator]
-    C -->|fixed-width| E[Fixed-width validator]
-    C -->|json / ndjson| F[JSON validator]
-    C -->|archive / tar / zip| G[Archive validator]
-    C -->|parquet / orc / avro| H[Columnar/tabular pipeline]
+    B --> C{Input format}
+    C -->|Delimited / tabular| D[Tabular pipeline]
+    C -->|Columnar| D
+    C -->|Fixed-width| E[Fixed-width comparator]
+    C -->|JSON / NDJSON| F[JSON comparator]
+    C -->|Archive| G[Archive comparator]
 
-    D --> I[MismatchReport]
-    E --> I
-    F --> I
-    G --> I
-    H --> I
+    D --> H[MismatchReport]
+    E --> H
+    F --> H
+    G --> H
 ```
 
-The key idea is that validation is not a single monolithic comparer. Instead, the backend uses a layered pipeline:
-
-1. Normalize the input into a format-specific adapter or parser.
-2. Identify which identity columns and compare columns will be used.
-3. Produce a canonical form for each value.
-4. Create hashes or fingerprints for rows.
-5. Find missing rows, extra rows, and changed rows.
-6. Build a structured mismatch report.
-
 ---
 
-## 2. The mismatch model
+## Chapter 3: The core tabular idea
 
-All validators ultimately return a structured mismatch report. The schema is defined in the mismatch model and contains these columns:
+For CSV-like and columnar data, Pegasus compares rows in two stages:
 
-- uid: the identity of the row or document under comparison
-- mismatch_type: one of the supported categories
-- column_name: the field that differs, if applicable
-- source_value: the value from the source side
-- target_value: the value from the target side
-- row_detail: JSON payload with more context for debugging or drilldown
+1. identity matching tells the backend whether a row exists on both sides
+2. fingerprint or drilldown comparison tells the backend whether the row content differs
 
-The supported mismatch categories are:
-
-- missing_in_target
-- extra_in_target
-- value_mismatch
-- value_match
-
-The system uses these categories consistently across delimited files, JSON, fixed-width files, and archives.
-
----
-
-## 3. How hashing and row identity work
-
-The core hashing logic is the foundation for tabular validation. It is implemented in the fingerprinting module and is used by the partition-based reconciliation pipeline.
+That separation matters because a row can be present on both sides but still differ in only one field. The fingerprint catches the change cheaply; the drilldown step explains which column changed.
 
 ### 3.1 Canonicalization
 
-Before anything is hashed, values are normalized into a deterministic string form. The canonicalization step ensures that equivalent values are treated the same.
+Before hashing or comparing, the backend converts values into deterministic strings. The canonicalization logic lives in [pegasus-backend/src/pegasus/validation/pipeline/fingerprint.py](../pegasus-backend/src/pegasus/validation/pipeline/fingerprint.py).
 
-Examples of normalization:
+The default normalization does the following:
 
-- null-like values such as empty string, null, none, na, n/a become a single normalized token
-- strings are trimmed
-- compare-policy rules may override the default behavior for specific columns
+- trims strings
+- treats empty strings and null-like tokens such as `null`, `none`, `na`, and `n/a` as `__NULL__`
+- lets compare-policy rules override the default behavior for specific fields
 
-This is the first step in avoiding false mismatches caused by formatting differences.
+This is what prevents false mismatches caused by formatting differences alone.
 
 ### 3.2 Identity generation
 
-Each row needs a stable identity. The system builds an identity key from one or more identity columns.
+Each tabular row gets a stable identity key from one or more identity columns. The identity parts are canonicalized, then joined with a pipe character.
 
-The identity key is typically built as a pipe-delimited string such as:
+Example:
 
 ```text
 region|customer_id|account_number
 ```
 
-That identity is later used to determine whether a row is:
+Identity is used only for row matching. It is not the same as the compare fingerprint.
 
-- present in both source and target
-- present only in source (missing in target)
-- present only in target (extra in target)
+### 3.2.1 Multiple UID columns
 
-### 3.3 Row fingerprinting
+When more than one UID column is configured, Pegasus treats them as one composite identity rather than as separate matches.
 
-Once the compare columns are canonicalized, the system produces a row fingerprint.
+The implementation behavior is:
 
-The fingerprinting logic uses these building blocks:
+- the configured UID columns are split on commas
+- each UID column is canonicalized on its own
+- the canonical parts are joined into a single identity key with `|`
+- the same composite key is used on both source and target
 
-- canonicalized compare values are joined with a separator
-- the joined payload is hashed
-- xxhash64 is the default algorithm
-- sha256 and other options are also supported if requested
+That means a row is considered the same only if the full UID tuple matches.
 
-The default behavior is:
+Example:
 
-- canonicalize the row payload
-- hash it with xxhash64
-- use the digest as a content fingerprint
+```text
+UID columns: region, customer_id, account_number
+Identity key: region|customer_id|account_number
+```
 
-### 3.4 Partitioning
+If `region` matches but `customer_id` does not, the row is not treated as the same row. It is a different identity entirely. This is what lets the validator handle compound business keys correctly.
 
-For large files, the pipeline does not compare everything in one giant in-memory join. Instead, it partitions rows by identity into buckets.
+For mapped compare fields, the UID columns are excluded from compare-field resolution, so they are used only for identity and not for mismatch drilldown.
 
-A partition ID is computed from the identity key using a hash function. This makes the pipeline scalable and lets the system spill intermediate state to disk when needed.
+### 3.3 Fingerprint generation
+
+After the compare columns are canonicalized, Pegasus joins them with the field separator `\x1f` and hashes the result. The default algorithm is `xxhash64`, with `sha256`, `xxhash128`, and `crc64` supported as options.
+
+The fingerprint answers one question: does this row’s compare payload match the opposite side?
+
+### 3.4 Partitioning for scale
+
+Large tabular jobs are not compared in one giant join. The pipeline partitions rows by identity hash and writes partitions to disk when needed.
 
 ```mermaid
 flowchart LR
@@ -130,342 +163,509 @@ flowchart LR
     E --> F[Spill / reconcile]
 ```
 
-### 3.5 Why this matters
+The partition hash is based on the identity key, so identical identities always land in the same bucket.
 
-The system compares two things for each row:
+### 3.5 Hash storage cost
 
-1. identity presence
-2. content fingerprint
+The row fingerprint itself is small. With the default `xxhash64` path, the digest is 8 bytes per row. Other algorithms change that cost:
 
-That gives a precise rule:
+- `xxhash64`: 8 bytes
+- `xxhash128`: stored as an 8-byte truncated digest in this pipeline path
+- `sha256`: 32 bytes
 
-- if the identity exists only on one side, it is missing or extra
-- if the identity exists on both sides but the fingerprint differs, it is a value mismatch
-- if both identity and fingerprint match, it is a match
+So the fingerprint payload alone costs approximately:
+
+```text
+hash_bytes ~= row_count × digest_size
+```
+
+Examples:
+
+- 10 million rows with `xxhash64` needs about 80 MB just for raw digests
+- 100 million rows with `xxhash64` needs about 800 MB just for raw digests
+- 100 million rows with `sha256` needs about 3.2 GB just for raw digests
+
+That is only the hash bytes. Real memory is higher because the pipeline also stores keys, joins, frame metadata, temporary partitions, and drilldown payloads.
 
 ---
 
-## 4. The tabular reconciliation pipeline for CSV-like and columnar data
+## Chapter 4: How Pegasus decides which column is mismatching
 
-The main high-throughput path for CSV-like and columnar data is the tabular reconciliation pipeline. This path is used for regular CSV/TSV/PSV files and for columnar formats such as parquet, orc, and avro.
+This is the part most people care about.
 
-### 4.1 Entry point and config
+The backend does not infer a mismatching column directly from the row fingerprint. The fingerprint only says that some compare value changed. The actual column attribution comes from a second pass over the changed rows.
 
-The service layer builds a pipeline configuration that includes:
+### 4.1 The first pass only finds changed identities
 
-- estimated row count
-- partition count
-- memory budget
-- whether to use in-memory fast path or disk spill
-- whether to stream mismatches to disk
-- whether to enable drilldown for column-level details
+For tabular data, the pipeline joins source and target by identity, then compares fingerprints.
 
-The pipeline can choose between:
+- if an identity exists only in source, it becomes `missing_in_target`
+- if an identity exists only in target, it becomes `extra_in_target`
+- if an identity exists on both sides but the fingerprints differ, the row is marked changed
 
-- an in-memory fast path for smaller datasets
-- a partition-based spill path for larger ones
-
-### 4.2 Pipeline stages
-
-The tabular pipeline follows this flow:
+That first pass is cheap because it avoids column-by-column comparison for every row.
 
 ```mermaid
 flowchart TD
-    A[Read source and target] --> B[Schema planning]
-    B --> C{Fit in memory?}
-    C -->|Yes| D[In-memory reconcile]
-    C -->|No| E[Partition source and target]
-    E --> F[Write partition files to disk]
-    F --> G[Reconcile partitions]
-    G --> H[Collect missing / extra / changed rows]
-    H --> I[Build mismatch report]
-    D --> I
+    A[Source rows] --> B[Build UID from identity columns]
+    C[Target rows] --> D[Build UID from identity columns]
+    B --> E[Join on UID]
+    D --> E
+    E --> F{UID only on one side?}
+    F -->|Source only| G[missing_in_target]
+    F -->|Target only| H[extra_in_target]
+    F -->|Both sides| I[Compare fingerprints]
+    I --> J{Fingerprint equal?}
+    J -->|Yes| K[Match]
+    J -->|No| L[Changed row]
 ```
 
-### 4.3 In-memory fast path
+### 4.2 The second pass rehydrates compare columns
 
-When files are small enough, the system loads both sides into memory and performs a direct comparison. This path uses the same conceptual rules:
+Once the pipeline has a list of changed identities, it fetches the original row values for only those identities and compares the compare columns one by one.
 
-- join on row identity
-- identify rows missing from target
-- identify rows extra in target
-- compare fingerprints for rows that exist on both sides
+The drilldown path is implemented in [pegasus-backend/src/pegasus/validation/pipeline/in_memory.py](../pegasus-backend/src/pegasus/validation/pipeline/in_memory.py) for RAM jobs and in [pegasus-backend/src/pegasus/validation/pipeline/partition_reconcile.py](../pegasus-backend/src/pegasus/validation/pipeline/partition_reconcile.py) for spill jobs.
 
-This path is simpler and faster for modest datasets.
+The key rule is:
 
-### 4.4 Partitioned spill path
+- each compare column is checked independently
+- if a column differs, a `ColumnDifference` is recorded
+- each difference becomes a `value_mismatch` row with `column_name` set to that logical compare field
 
-For larger files, the system writes partitioned representation of each side to disk. Then it reconciles partition by partition. That avoids loading the entire dataset into memory.
+```mermaid
+flowchart TD
+    A[Changed UID] --> B[Load source row]
+    A --> C[Load target row]
+    B --> D[Check compare column 1]
+    C --> D
+    D --> E{Values equal?}
+    E -->|Yes| F[No mismatch for that column]
+    E -->|No| G[Emit value_mismatch for column]
+    G --> H[Repeat for next compare column]
+```
 
-A partition is reconciled by comparing:
+### 4.3 What `column_name` means in tabular output
 
-- the identity key set
-- the fingerprint for each row
+In tabular validation, `column_name` is the logical compare key, not always the raw physical source column.
 
-The output is a count of:
+This matters when column mappings are used. The mapping resolver in [pegasus-backend/src/pegasus/validation/comparators/mapping_resolver.py](../pegasus-backend/src/pegasus/validation/comparators/mapping_resolver.py) can map one logical compare key to one or more physical source/target columns.
 
-- missing rows
-- extra rows
-- changed rows
-- matching rows
+So the backend may compare:
 
-The system can also produce drilldown samples for changed rows and export mismatch artifacts to NDJSON if enabled.
+- one physical column on both sides
+- multiple physical columns that are joined into one logical compare key
+- different source and target column names under a single logical field
+
+When that happens, the mismatch report still uses the logical key as `column_name`.
+
+### 4.4 How values are compared
+
+The compare policy in [pegasus-backend/src/pegasus/validation/comparators/policy.py](../pegasus-backend/src/pegasus/validation/comparators/policy.py) can change how values are canonicalized and compared.
+
+The policy supports:
+
+- text normalization
+- automatic date parsing for simple columns
+- structured comparisons for nested values
+- regex replacement and prefix stripping per side
+- sensitive-field masking in the returned report
+
+If a field mapping is configured, the policy compares the logical compare key by canonicalizing the source-side physical columns and the target-side physical columns separately, then comparing the canonical results.
+
+### 4.5 How the drilldown payload is built
+
+For each changed row, Pegasus stores `row_detail` so the API can show context.
+
+- source-side details are stored under `source_record`
+- target-side details are stored under `target_record`
+- the record includes the UID plus the compare columns used for the drilldown
+
+This is what lets the UI show not just that a row changed, but what the row looked like on each side.
+
+### 4.6 Concrete example
+
+If a row has identity `region|123|abc` and the compare columns are `name`, `status`, and `amount`:
+
+1. the partition join says the UID exists on both sides
+2. the fingerprints differ
+3. the drilldown step loads the source and target row for that UID
+4. the backend compares `name`, `status`, and `amount` independently
+5. if only `status` changed, the report gets one `value_mismatch` row with `column_name = status`
+6. if `status` and `amount` both changed, the report gets two `value_mismatch` rows for the same UID
+
+That is how the backend knows which column changed.
 
 ---
 
-## 5. CSV and delimited files
+## Chapter 5: Tabular pipeline for CSV-like and columnar files
 
-CSV and similar delimited files follow the delimited adapter path and then the tabular reconciliation pipeline.
+The main high-throughput path is the tabular reconciliation pipeline in [pegasus-backend/src/pegasus/validation/pipeline/pipeline.py](../pegasus-backend/src/pegasus/validation/pipeline/pipeline.py).
 
-### 5.1 How the service handles them
+### 5.1 Entry point and planning
 
-The service creates a delimited adapter for both source and target. It resolves:
+The pipeline first resolves schema, row-count estimates, and compare columns. It also decides whether to use an in-memory fast path or spill to disk.
+
+The configuration can control:
+
+- memory budget
+- auto in-memory threshold
+- partition count
+- whether column drilldown is enabled
+- whether fingerprints should be written to spill files
+- which fingerprint algorithm to use
+
+### 5.2 In-memory fast path
+
+If the datasets are small enough, the backend loads both sides into memory and uses Polars joins directly.
+
+The in-memory path still follows the same logic:
+
+- join by identity
+- find missing and extra identities
+- compare fingerprints for inner-joined rows
+- optionally drill down to column differences
+
+When drilldown is enabled, [pegasus-backend/src/pegasus/validation/pipeline/in_memory.py](../pegasus-backend/src/pegasus/validation/pipeline/in_memory.py) calls `_column_diffs_for_row` to compare compare columns one at a time.
+
+### 5.3 Spill path
+
+For larger datasets, the pipeline partitions source and target rows to disk, then reconciles partitions independently.
+
+The partition reconciliation step:
+
+- loads a partition frame
+- renames identity and fingerprint columns to a common shape
+- performs anti joins for missing and extra identities
+- performs inner joins for changed identities
+- compares fingerprints to identify changed rows
+
+If drilldown is enabled, it rehydrates the changed keys and compares the compare columns to produce `ColumnDifference` entries.
+
+### 5.4 Why fingerprints are not the final answer
+
+The fingerprint is only a filter. It is fast, but it does not say which column changed. The drilldown step is what converts a changed row into explicit per-column mismatch rows.
+
+### 5.5 What happens when files are completely unsorted
+
+Sorting is not required for validation.
+
+The pipeline does not compare rows by physical position. It matches rows by identity key, then by fingerprint, and only then by per-column drilldown. So even if source and target are in completely different orders, the validator still finds the correct counterpart row by joining on the UID.
+
+That is why an input like this still works:
+
+- source rows in random order
+- target rows in a different random order
+- duplicate row positions across files
+
+As long as the UID columns produce the same identity key, the row is matched even if it appears in a totally different place in the file.
+
+One caveat: if the same UID appears more than once on a side, that is no longer a clean one-to-one identity match. The code paths are built around stable identities, so duplicate UIDs make the result ambiguous and can inflate joins or produce duplicate mismatch rows.
+
+### 5.6 How changed UIDs are loaded
+
+When Pegasus needs to inspect a changed UID, it does not start from the top of the original file and scan linearly until it finds the row again.
+
+The backend already did the expensive part during the initial streaming pass:
+
+- each source row and target row was read once from the adapter
+- each row was canonicalized, hashed, and assigned to a partition id
+- the row was written into a partition file for that side
+
+Later, reconciliation only opens the matching partition files:
+
+- `partition_reconcile.py` compares the source and target partition files for that partition id
+- `mismatch_export.py` collects the changed UIDs that need drilldown
+- `drilldown_cache.py` loads only the requested UIDs from persisted drilldown frames when available
+
+So the backend does not reload the complete 40 GiB again for each changed row. It reopens only the spill artifacts and drilldown lookups for the partition that contains that UID.
+
+If the job runs in the in-memory fast path, the answer is even simpler: both frames are already loaded in RAM, and the changed UID is resolved by a hash join on identity rather than a file rescan.
+
+### 5.7 What 40 GB combined memory means in practice
+
+The backend does not compute one exact RAM number for every dataset because the real peak depends on row width, column count, string cardinality, partition count, and whether drilldown is enabled. But it does have a clear operating mode:
+
+- `validation_auto_in_memory_max_bytes` defaults to 256 MiB
+- `TabularPipelineConfig.memory_budget_bytes` defaults to 1 GiB in the pipeline config
+- `validation_memory_budget_bytes` in the service config defaults to 10 GiB
+
+So a 40 GB combined source+target input is far above the in-memory thresholds and will go to spill/partitioned reconciliation.
+
+For a rough partition-size estimate, the default tabular pipeline uses a `medium` partition preset of 2048 partitions. If the combined input is about 40 GiB, the average raw data per partition pair is roughly:
+
+```text
+40 GiB / 2048 ≈ 20 MiB per partition pair
+```
+
+That is only the raw split size before object overhead. The actual peak RAM is higher because each partition still needs frame metadata, hash tables, join state, and optional drilldown rows, but it is still bounded to one partition or one wave of partitions instead of the full 40 GB at once.
+
+If you want a simple summary:
+
+- in-memory fast path: not selected for 40 GB combined
+- spill path: selected
+- raw hash space: 8 bytes per row for `xxhash64`
+- practical RAM: driven by a single partition, not the full dataset
+
+### 5.8 Complexity for tabular validation
+
+For tabular validation, let:
+
+- $n$ = number of rows per side
+- $c$ = number of compare columns
+- $u$ = number of unique identity keys
+- $p$ = number of partitions
+
+The rough cost model is:
+
+- identity canonicalization: $O(n)$
+- fingerprint generation: $O(n \cdot c)$
+- join and partition routing: about $O(n)$ average for hash-based matching
+- drilldown for changed rows: $O(m \cdot c)$ where $m$ is the number of changed rows sampled or fully materialized
+
+So the overall runtime is roughly:
+
+$$
+O(n \cdot c + m \cdot c)
+$$
+
+For unsorted inputs this does not become $O(n^2)$ because the backend does not scan for matching rows linearly; it uses identity hashing and joins.
+
+The space cost is dominated by:
+
+- partition files or in-memory frames
+- hash keys and join state
+- optional drilldown rows
+
+So the space model is roughly:
+
+$$
+O(n \cdot c)
+$$
+
+for the full logical data volume, but the peak resident memory is reduced by partitioning and spill behavior.
+
+---
+
+## Chapter 6: CSV, TSV, PSV, DAT, and other delimited files
+
+Delimited files use the tabular path after the adapter resolves the file layout.
+
+### 6.1 What the adapter resolves
+
+The delimited adapter determines:
 
 - delimiter
-- header presence
-- optional skip rows
-- column mappings
+- whether the file has headers
+- how many rows to skip
+- the effective column names
+- whether synthetic names are needed for headerless data
 
-The pipeline then uses the identity column and compare columns to compare the data.
+DAT files are not a separate algorithm. If the content is recognized as delimited text, they flow through the same delimited/tabular path.
 
-### 5.2 What happens during validation
+### 6.2 How mismatches are formed
 
 For each row:
 
-1. The row identity is derived from the configured identity columns.
-2. The compare columns are canonicalized.
-3. The row fingerprint is created.
-4. The row is placed in a partition bucket.
-5. The reconciler determines whether the row is:
-   - missing in target
-   - extra in target
-   - changed in value
-   - identical
+1. the identity is built from the configured identity columns
+2. compare values are canonicalized
+3. a row fingerprint is computed
+4. the row is grouped into a partition bucket or in-memory join
+5. the backend classifies the row as missing, extra, changed, or matching
+6. changed rows are drilled down into individual columns
 
-### 5.3 Missing and extra rows
+### 6.3 Missing and extra rows
 
-Missing rows are rows present in the source but absent in the target.
+Missing rows are found through identity-set comparison before any column comparison happens.
 
-Extra rows are rows present in the target but absent in the source.
+Extra rows are the same idea from the target side.
 
-These are discovered via identity-set comparison before deeper value comparison.
+These rows do not get a `column_name` because the row itself is the mismatch, not a specific field.
 
-### 5.4 Value mismatches
+### 6.4 Value mismatches
 
-Rows that have the same identity but a different fingerprint are treated as changed. The system may then collect column-level differences for drilldown.
+Rows that exist on both sides but differ in at least one compare column produce one `value_mismatch` record per differing column.
 
-### 5.5 DAT files
-
-DAT files are not a separate algorithm. The implementation treats them as ambiguous tabular content. If the content is recognized as delimited text, the validation service routes the file through the same delimited/tabular path used for CSV-like files. In other words, DAT is effectively handled as a delimited text file after the format is sniffed and resolved.
+If the row differs in three columns, the report will contain three mismatch rows with the same UID and three different `column_name` values.
 
 ---
 
-## 6. Fixed-width files
+## Chapter 7: Fixed-width files
 
-Fixed-width validation uses a different comparator because rows are not separated by delimiters. Instead, the system uses explicit field layouts.
+Fixed-width validation uses explicit field positions instead of delimiters.
 
-### 6.1 Input shape
+### 7.1 Input shape
 
-The validator receives:
+The fixed-width validator receives:
 
 - two fixed-width files
-- a fixed-width configuration that defines field names and start/end positions
+- a layout that defines field names and character ranges
 - a UID field
-- optional compare field rules
+- optional compare rules for field-level normalization
 
-### 6.2 Parsing logic
+### 7.2 Parsing logic
 
-Each non-empty line is sliced according to the fixed-width layout. For every configured field, the system extracts the substring at the declared start/end position.
+Each non-empty line is sliced by its field positions. The code then builds `source_by_uid` and `target_by_uid` maps.
 
-### 6.3 Normalization and comparison rules
+### 7.2.1 How fixed-width knows column width
 
-The system applies per-field rules before comparison:
+Fixed-width does not guess widths from the content. The width comes from the declared layout.
 
-- regex replacements
-- date parsing with configured formats
-- structured-field handling for nested/complex content
-- integer comparison
-- float comparison
-- plain text comparison
+Each field definition provides start and end positions, so the backend knows exactly how many characters belong to the field. For example, if `username` is defined as columns 1 through 5, then the value is always read from that 5-character window.
 
-That makes fixed-width validation more configurable than a simple string compare.
+That means if the file stores `00000` in the username slice, the validator reads the whole 5-character slice and then applies the configured comparison rule to it. If the field is shorter in the source text, the slice still exists logically in the layout and the parser will usually return padding or blank-equivalent content for that region.
 
-### 6.4 How mismatches are found
+The important point is:
 
-The comparison is row-based using the UID field:
+- the field width is declared up front
+- the parser does not infer it dynamically from the value text
+- comparison happens on the extracted slice, not on visual spacing in the file
 
-- if a UID exists in the source but not the target, the row is reported as missing_in_target
-- if a UID exists in the target but not the source, it is reported as extra_in_target
-- if the UID exists on both sides but one or more compare fields differ, the code emits value_mismatch rows for each differing field
+### 7.3 How the mismatch column is chosen
 
-### 6.5 Example of the fixed-width flow
+Fixed-width is simpler than tabular drilldown because each compare field is already explicit.
+
+For each shared UID:
+
+- the code transforms each compare field value
+- the field values are compared with field-specific rules
+- when a field differs, the report emits a `value_mismatch` row with `column_name = field.field_name`
+
+So in fixed-width validation, the field name itself is the column attribution.
+
+### 7.4 Comparison rules
+
+The comparator can apply:
+
+- regex replacement
+- date parsing
+- structured comparisons for nested content
+- integer and float comparisons
+- text comparisons
+- sensitive-field masking
+
+### 7.5 Fixed-width flow
 
 ```mermaid
 flowchart TD
     A[Read fixed-width file] --> B[Slice fields by layout]
-    B --> C[Build source/target row maps by UID]
-    C --> D{UID present in both?}
-    D -->|No| E[Emit missing/extra]
-    D -->|Yes| F[Compare each compare field]
-    F --> G[Emit value mismatch rows]
+    B --> C[Build row maps by UID]
+    C --> D{UID in both files?}
+    D -->|No| E[Emit missing / extra]
+    D -->|Yes| F[Compare each field]
+    F --> G[Emit value_mismatch rows by field]
 ```
 
 ---
 
-## 7. JSON and NDJSON files
+## Chapter 8: JSON and NDJSON files
 
-JSON validation is handled by the JSON comparator module. It is recursive and path-based rather than row-based.
+JSON validation is recursive and path-based.
 
-### 7.1 Two JSON modes
+### 8.1 Two modes
 
-The implementation supports two shapes:
+The JSON comparator supports:
 
 - a single JSON document
 - NDJSON, where each line is a JSON object
 
-### 7.2 Single-document mode
+### 8.2 Single-document mode
 
-When validating a single JSON document, the system compares the two trees recursively.
+In document mode, the comparator recursively walks both trees.
 
-The recursion walks the structure and reports:
+It emits:
 
-- missing keys in the target object
-- extra keys in the target object
-- value differences at a specific path
+- `missing_in_target` when a key or path exists only in the source
+- `extra_in_target` when a key or path exists only in the target
+- `value_mismatch` when both sides exist but differ
 
-### 7.3 NDJSON mode
+The implementation is in [pegasus-backend/src/pegasus/validation/json_compare.py](../pegasus-backend/src/pegasus/validation/json_compare.py).
 
-In NDJSON mode, each record is treated like a row. The system uses the UID column to match records and then compares each document recursively.
+### 8.3 How the column/path is chosen
 
-### 7.4 How path mismatches are represented
+For JSON, `column_name` is usually the JSON path. The helper that appends mismatches sets `column_name` to the current path string unless an explicit override is provided.
 
-Every mismatch is associated with a JSON path such as:
+Examples:
 
-- $.customer.name
-- $.items[0].price
+- `$.customer.name`
+- `$.items[0].price`
 
-This makes the report much richer than a simple field comparison.
+### 8.4 How recursive diffing works
 
-### 7.5 Missing, extra, and value mismatches in JSON
+The comparator checks nested dictionaries and lists separately.
 
-The JSON validator uses the same mismatch types:
+- for dictionaries, it walks keys on both sides and recurses into shared keys
+- for lists, it can compare by index or by unordered matching depending on the mode
+- for scalar values, a differing pair becomes `value_mismatch`
 
-- missing_in_target if a path or key is present only in the source
-- extra_in_target if a path or key is present only in the target
-- value_mismatch if the two sides exist but their values differ
+### 8.5 NDJSON mode
 
-### 7.6 Why JSON comparison is more involved
+In NDJSON mode, each line is treated like a row. The backend matches records by UID, then recursively compares the JSON payload for each matched record.
 
-Unlike tabular comparison, the structure may contain nested objects, arrays, and lists. The code therefore performs recursive walks and can be order-sensitive or order-insensitive depending on the option chosen.
-
----
-
-## 8. Parquet, ORC, and Avro
-
-These columnar formats are not compared by a separate bespoke algorithm. They are routed through the columnar adapter and then into the same tabular reconciliation pipeline used for delimited files.
-
-### 8.1 Why this works
-
-The backend loads the columnar file into a tabular representation and then applies the same logic:
-
-- identity columns are selected
-- compare columns are selected
-- rows are canonicalized
-- fingerprints are computed
-- mismatches are discovered through identity/fingerprint comparison
-
-### 8.2 Practical consequence
-
-Parquet, ORC, and Avro behave like tabular data from the validation system’s point of view. The difference is mostly in the reader and adapter layer, not in the core matching semantics.
+This means NDJSON can behave like tabular validation at the outer level and JSON diffing at the inner level.
 
 ---
 
-## 9. Archives: TAR and ZIP
+## Chapter 9: Parquet, ORC, and Avro
 
-Archive validation is a layered process. The system does not simply compare the archive bytes and stop. It first tries lightweight checks and then may inspect the manifest and even extract nested leaf files for deeper validation.
+Columnar formats are not compared with a separate bespoke diff algorithm. They are converted into a tabular representation and sent through the same tabular pipeline used for delimited files.
 
-### 9.1 Archive validation stages
+### 9.1 What changes and what does not
 
-```mermaid
-flowchart TD
-    A[Validate archive pair] --> B{Same size / same metadata?}
-    B -->|Yes| C[Byte digest precheck]
-    B -->|No| C
-    C -->|Identical| D[Return archive match]
-    C -->|Different| E[Read archive manifest]
-    E --> F{Manifest diff?}
-    F -->|Mismatch| G[Report missing / extra / metadata changes]
-    F -->|No mismatch| H[Try nested leaf validation]
-    H --> I[Extract inner leaf and validate it]
-```
+What changes:
 
-### 9.2 Metadata precheck
+- the reader and adapter layer
+- how rows are loaded into memory or spill files
 
-The archive comparator may first compare metadata such as:
+What does not change:
+
+- identity matching
+- compare-column canonicalization
+- fingerprint generation
+- drilldown behavior
+- mismatch report structure
+
+That is why Parquet, ORC, and Avro behave like tabular inputs from the validation engine’s point of view.
+
+---
+
+## Chapter 10: Archives: ZIP and TAR
+
+Archive validation is layered. The backend can stop early on metadata or digest differences, or continue deeper into manifest and nested-leaf validation.
+
+### 10.1 First checks
+
+The archive comparator may inspect:
 
 - compressed size
 - uncompressed size
-- crc32
-- compression type
+- CRC32 or CRC32C
+- MD5 or content digest when available
 
-If the metadata already proves the archives are different, the system can surface the mismatch quickly.
+If those checks already prove the archives differ, the backend can emit a fast mismatch.
 
-### 9.3 Streaming byte digest
+### 10.2 Manifest comparison
 
-If the archive sizes or metadata do not immediately identify a difference, the code may compute a streaming digest over the archive bytes. This is an efficient precheck that avoids full decompression.
+If the byte-level precheck does not settle the answer, the comparator reads the archive manifest and compares entry paths and metadata.
 
-### 9.4 Manifest comparison
+That can produce:
 
-The manifest is a catalog of archive entries. The system compares the entry paths and metadata. This can surface:
+- `missing_in_target` for absent entries
+- `extra_in_target` for unexpected entries
+- `value_mismatch` for entry metadata differences such as digest or size
 
-- entries missing from the target archive
-- entries extra in the target archive
-- metadata differences for shared entries
+### 10.3 How archive column names work
 
-### 9.5 Nested archives
+In archive comparison, `column_name` is usually a manifest or metadata field. For example, a digest mismatch may use `content_digest`.
 
-The manifest logic can also expand nested archive members such as:
+### 10.4 Nested archives and leaf validation
 
-- nested zip inside zip
-- nested tar inside tar
-- nested archives inside larger archive trees
+The archive code can also inspect nested archive members and, if a leaf file is recognized, hand it off to the correct validator.
 
-The expansion is limited by:
+Possible leaf types include:
 
-- max nesting depth
-- max nested member size
-- max declared size
-- max compression ratio
-
-This is a safety mechanism to avoid pathological archive expansion.
-
----
-
-## 10. Nested archive leaf validation
-
-A particularly important behavior is that the archive validator can inspect the contents of an archive and, when it finds a leaf file, run a more specific validator on that leaf.
-
-### 10.1 Leaf detection
-
-The system looks for likely leaf members such as:
-
-- CSV / TSV / PSV / TXT / DAT files inside the archive
-- JSON / NDJSON files inside the archive
-- fixed-width files inside the archive
-
-This is done by the archive leaf selection logic.
-
-### 10.2 Extraction flow
-
-If a nested leaf is found, the backend:
-
-1. materializes the archive leaf to a temporary directory
-2. identifies whether it is tabular, JSON, or fixed-width
-3. runs the appropriate validator on the extracted file pair
-
-### 10.3 Why this matters
-
-A tar or zip archive may contain a CSV payload, a JSON payload, or a fixed-width payload. The archive validator can therefore validate the actual data inside the archive rather than only the archive structure itself.
+- CSV / TSV / PSV / TXT / DAT
+- JSON / NDJSON
+- fixed-width data
 
 ```mermaid
 flowchart TD
@@ -478,54 +678,356 @@ flowchart TD
     F --> G
 ```
 
+### 10.5 Safety limits
+
+Nested expansion is bounded by limits such as:
+
+- maximum nesting depth
+- maximum nested member size
+- maximum declared size
+- maximum compression ratio
+
+That keeps archive inspection from exploding on pathological inputs.
+
+### 10.6 Complexity for archive validation
+
+Let $e$ be the number of archive entries and $d$ be the nesting depth.
+
+- metadata precheck: $O(1)$ per archive pair
+- manifest comparison: $O(e)$
+- nested-leaf discovery: about $O(e)$ per archive level, bounded by depth limits
+- leaf validation: follows the complexity of the extracted leaf type
+
+So archive validation is typically:
+
+$$
+O(e + \text{leaf validation cost})
+$$
+
+with safety bounds preventing unbounded recursive expansion.
+
 ---
 
-## 11. How the final report is built
+## Chapter 11: How the final API report is assembled
 
-After the comparison logic runs, the system builds a mismatch frame and a summary.
+After validation completes, the backend builds the API response from the mismatch report and summary counters.
 
-The summary typically contains counts for:
+The summary includes counts for:
 
 - missing rows or paths
 - extra rows or paths
 - value mismatches
 
-The mismatch frame is the detailed row-by-row output consumed by the API and UI.
+The API layer also computes a per-column breakdown for value mismatches when the result set is small enough.
 
-### 11.1 Report assembly behavior
+### 11.1 Per-column aggregation in the API
 
-- if mismatches exist, the report contains those rows
-- if there are no mismatches, the system may still emit a small match sample frame so the UI has a consistent shape
-- if mismatch artifact export is enabled, the detailed mismatch data may be written to disk as NDJSON
+The API can populate `value_mismatch_by_column`, which is a count of value mismatches grouped by `column_name`.
+
+That aggregation is controlled by `validation_value_mismatch_column_stats_max_rows` in [pegasus-backend/src/pegasus/core/config.py](../pegasus-backend/src/pegasus/core/config.py).
+
+If the number of value-mismatch rows is too large, the backend skips per-column aggregation to avoid extra memory use.
+
+### 11.2 Sample groups
+
+The API can also return mismatch sample groups so the UI has a small preview set for each category.
+
+For value mismatches, the sample rows usually include:
+
+- UID
+- mismatch type
+- column name
+- source value
+- target value
+- row detail
+
+### 11.3 When there are no mismatches
+
+If the result is a full match, the backend may still emit a small match sample frame so the response shape stays consistent.
+
+### 11.4 Complexity for API aggregation
+
+The API-side aggregation is linear in the number of returned mismatch rows.
+
+- summary counts: $O(r)$ where $r$ is mismatch row count
+- per-column counts: $O(r)$
+- sample grouping: about $O(r)$
+
+So the response-building work is usually dominated by the size of the mismatch output, not by the original source file size.
 
 ---
 
-## 12. The practical meaning of the three main mismatch types
+## Chapter 12: Practical meaning of the mismatch types
 
-A beginner-friendly way to think about the system is this:
+A simple way to read the report is:
 
-- missing_in_target: the record exists in the source but not in the target
-- extra_in_target: the record exists in the target but not in the source
-- value_mismatch: the record exists in both places, but the content is different
+- `missing_in_target`: the record exists in source but not in target
+- `extra_in_target`: the record exists in target but not in source
+- `value_mismatch`: the record exists on both sides, but one field or path differs
+- `value_match`: the record matched, usually used for sample or preview output
 
-This rule applies across the supported formats, with the exact comparison mechanism differing by file type:
+This meaning is consistent across formats, but the comparison mechanism differs:
 
-- for tabular files, the comparison is identity-based and fingerprint-based
-- for fixed-width files, it is UID-based and field-based
-- for JSON, it is path-based and recursive
-- for archives, it is manifest-based and optionally leaf-based
+- tabular files use identity + fingerprint + drilldown
+- fixed-width files use UID + field comparison
+- JSON uses recursive path diffing
+- archives use entry metadata and optional leaf validation
 
 ---
 
-## 13. Short summary
+## Chapter 13: End-to-end example for tabular data
 
-At a high level, Pegasus validation works like this:
+If you want the shortest mental model for how the backend finds a mismatching column, it is this:
 
-1. the service chooses the correct validator for the input format
-2. the validator normalizes rows or JSON structure into a comparable form
-3. identity is derived from the configured key columns
-4. content is canonicalized and hashed
-5. the system finds missing, extra, and changed records
-6. it emits a structured mismatch report that the API and UI can consume
+1. read the source and target rows
+2. build the UID from the identity columns
+3. canonicalize the compare columns
+4. hash the compare payload to get a fingerprint
+5. join source and target by UID
+6. if the UID is on only one side, emit missing or extra
+7. if the UID is on both sides but the fingerprint differs, mark the row changed
+8. rehydrate the original row values for that UID
+9. compare each compare column one by one
+10. emit one `value_mismatch` row per differing column
 
-The important architectural theme is that the backend uses a consistent mismatch framework even though the underlying comparison logic differs by format.
+That is how Pegasus knows which column changed instead of only knowing that the row changed.
+
+---
+
+## Chapter 14: Complexity summary
+
+This is the short version of the scaling behavior.
+
+### 14.1 Tabular and columnar
+
+- runtime: roughly $O(n \cdot c)$ plus drilldown on changed rows
+- space: roughly $O(n \cdot c)$ logical volume, but bounded peak memory through partitioning
+- unsorted inputs: handled by hashing and joins, not by positional scanning
+
+### 14.2 Fixed-width
+
+- runtime: roughly $O(n \cdot c)$ because each UID row is compared field by field
+- space: roughly $O(n)$ for UID maps plus mismatch output
+
+### 14.3 JSON and NDJSON
+
+- runtime: roughly $O(s)$ where $s$ is the size of the JSON tree or records visited, plus path recursion and list matching cost
+- space: roughly $O(d)$ recursion depth for tree walk, plus the output rows
+
+### 14.4 Archives
+
+- runtime: roughly $O(e)$ for manifest work plus the cost of any extracted leaf validation
+- space: bounded by manifest size, extracted leaf size, and safety limits
+
+### 14.5 Practical 40 GB note
+
+This section gives a worked estimate instead of a summary.
+
+Assume:
+
+- combined source + target size = 40 GiB
+- total rows across both sides = 100,000,000
+- total columns = 12
+- fingerprint algorithm = `xxhash64`
+- partition preset = `medium` = 2048 partitions
+
+#### 14.5.1 Average raw row size
+
+First compute the average raw bytes per row:
+
+$$
+\frac{40 \times 2^{30}}{100,000,000} = \frac{42,949,672,960}{100,000,000} = 429.4967296 \text{ bytes/row}
+$$
+
+So the average row is about 429.5 bytes across the combined source and target dataset.
+
+If the 12 columns are evenly distributed, the average raw bytes per column are:
+
+$$
+\frac{429.4967296}{12} = 35.79139413 \text{ bytes/column/row}
+$$
+
+That is only an average. Real columns will be uneven, but it is good enough for a planning estimate.
+
+#### 14.5.2 Hash storage
+
+With `xxhash64`, each row fingerprint is 8 bytes.
+
+So the raw fingerprint storage is:
+
+$$
+100,000,000 \times 8 = 800,000,000 \text{ bytes}
+$$
+
+Convert that to MiB:
+
+$$
+\frac{800,000,000}{2^{20}} = 762.939453125 \text{ MiB}
+$$
+
+So the fingerprints alone take about 763 MiB for 100 million total rows.
+
+If you meant 100 million rows per side rather than total across both sides, double that to about 1.49 GiB of raw digest storage.
+
+#### 14.5.3 Partition sizing
+
+With 2048 partitions, the average rows per partition are:
+
+$$
+\frac{100,000,000}{2048} = 48,828.125 \text{ rows/partition}
+$$
+
+The average raw bytes per partition pair are:
+
+$$
+\frac{40 \times 2^{30}}{2048} = 20,971,520 \text{ bytes}
+$$
+
+$$
+= 20 \text{ MiB}
+$$
+
+If the data is split evenly between source and target, that is about 10 MiB per side per partition on average.
+
+#### 14.5.4 UID and compare payload estimate
+
+If the 12 columns are split as 2 UID columns and 10 compare columns, then the average bytes per row are:
+
+$$
+2 \times 35.79139413 = 71.58278826 \text{ bytes}
+$$
+
+$$
+10 \times 35.79139413 = 357.9139413 \text{ bytes}
+$$
+
+Per partition, that becomes approximately:
+
+$$
+71.58278826 \times 48,828.125 \approx 3,495,000 \text{ bytes}
+$$
+
+$$
+357.9139413 \times 48,828.125 \approx 17,456,520 \text{ bytes}
+$$
+
+So one average partition pair carries about:
+
+- 3.33 MiB of UID payload
+- 16.65 MiB of compare payload
+- 0.37 MiB of fingerprint bytes
+
+which sums back to about 20 MiB of raw partition data.
+
+#### 14.5.5 Peak RAM estimate
+
+The pipeline does not need to hold the full 40 GiB in memory at once because it spills partitions and reconciles them in waves.
+
+A rough working-set estimate for one partition pair is:
+
+$$
+\approx \text{source partition} + \text{target partition} + \text{join overhead} + \text{drilldown overhead}
+$$
+
+If we treat the raw partition pair as 20 MiB, then a conservative multiplier of 2x to 4x for join tables, frame overhead, and intermediate buffers gives:
+
+$$
+20 \text{ MiB} \times 2 = 40 \text{ MiB}
+$$
+
+$$
+20 \text{ MiB} \times 4 = 80 \text{ MiB}
+$$
+
+So a practical per-partition working set is often in the rough range of 40 to 80 MiB, before any unusually large mismatch export or drilldown expansion.
+
+#### 14.5.6 Why the job still does not fit in RAM as a whole
+
+Even though a single partition is small, the whole job is not just one partition. The backend still has to:
+
+- maintain partition metadata
+- read and write partition files
+- build joins or hashes for each partition
+- keep drilldown rows for changed keys
+- assemble the final mismatch output
+
+That is why the correct conclusion for a 40 GiB combined job is:
+
+- do not expect the in-memory fast path
+- expect spill-based reconciliation
+- expect the full dataset to live on disk, not in RAM
+
+#### 14.5.7 Concrete planning answer
+
+For a 40 GiB combined source + target dataset with 100 million total rows and 12 columns:
+
+- raw average row size: about 429.5 bytes
+- raw average column size: about 35.8 bytes
+- raw fingerprint storage: about 763 MiB
+- average partition pair size at 2048 partitions: 20 MiB
+- rough peak RAM per partition pair: about 40 to 80 MiB
+- overall job memory use: dominated by spill files and partition processing, not by holding all 40 GiB in memory
+
+#### 14.5.8 Scaling the same math to 10 GiB and 20 GiB
+
+If the row shape stays the same, the math scales linearly with size.
+
+Using the 40 GiB case as the baseline:
+
+- 10 GiB is one quarter of 40 GiB, so it has about 25,000,000 total rows
+- 20 GiB is one half of 40 GiB, so it has about 50,000,000 total rows
+- 40 GiB is the baseline, so it has about 100,000,000 total rows
+
+##### 10 GiB case
+
+- total rows: 25,000,000
+- fingerprint storage: $25,000,000 \times 8 = 200,000,000$ bytes, about 190.7 MiB
+- average partition pair size: $10 \text{ GiB} / 2048 \approx 5 \text{ MiB}$
+- rough peak RAM per partition pair: about 10 to 20 MiB
+
+##### 20 GiB case
+
+- total rows: 50,000,000
+- fingerprint storage: $50,000,000 \times 8 = 400,000,000$ bytes, about 381.5 MiB
+- average partition pair size: $20 \text{ GiB} / 2048 \approx 10 \text{ MiB}$
+- rough peak RAM per partition pair: about 20 to 40 MiB
+
+##### 40 GiB case
+
+- total rows: 100,000,000
+- fingerprint storage: $100,000,000 \times 8 = 800,000,000$ bytes, about 762.9 MiB
+- average partition pair size: $40 \text{ GiB} / 2048 \approx 20 \text{ MiB}$
+- rough peak RAM per partition pair: about 40 to 80 MiB
+
+##### Practical reading
+
+The key pattern is:
+
+- disk and partition volume scale linearly with file size
+- fingerprint bytes scale linearly with row count
+- peak RAM does not scale to the full dataset because only one partition wave is active at a time
+
+So the overall answer is not “40 GiB in RAM.” It is “40 GiB on disk, partitioned into about 20 MiB logical chunks, with a working set sized to one chunk plus join/drilldown overhead.”
+
+If you want the short version in one line: the row-level math is manageable, but the full 40 GiB dataset is far above the in-memory thresholds, so the backend must spill and reconcile partition by partition.
+
+---
+
+## Chapter 15: Short summary
+
+Pegasus validation works by routing each input format into a specialized comparator, but every comparator ultimately feeds the same mismatch report model.
+
+For tabular data, the important sequence is:
+
+1. identity match
+2. fingerprint compare
+3. column drilldown
+4. mismatch report assembly
+
+For the other formats, the same idea applies with different mechanics:
+
+- fixed-width uses explicit field slices
+- JSON uses recursive paths
+- archives use entry metadata and optional leaf validation
+
+The architectural theme is consistent: fast coarse matching first, then precise column/path attribution only for the records that need it.
