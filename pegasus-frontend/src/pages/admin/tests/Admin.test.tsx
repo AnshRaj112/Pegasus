@@ -23,28 +23,26 @@ describe('AdminView', () => {
 
   it('shows a loading spinner while checking the admin session', () => {
     mockFetchAdminMe.mockReturnValue(new Promise(() => {}))
-    const { container } = render(<AdminView />, { route: '/admin/workspace-management' })
+    const { container } = render(<AdminView />, { route: '/admin/configure-store' })
     expect(container.querySelector('.ant-spin')).toBeInTheDocument()
   })
 
   it('renders the admin shell after session is verified', async () => {
     mockFetchAdminMe.mockResolvedValue({ email: 'admin@pegasus.io' })
-    render(<AdminView />, { route: '/admin/workspace-management' })
+    render(<AdminView />, { route: '/admin/configure-store' })
 
     await waitFor(() => {
       expect(screen.getByText('Admin Center')).toBeInTheDocument()
     })
 
     expect(screen.getByText('admin@pegasus.io')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /workspace management/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /configure store/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /configure settings/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /admin sign out/i })).toBeInTheDocument()
   })
 
   it('renders navigation without email when session check fails', async () => {
     mockFetchAdminMe.mockRejectedValue(new Error('Unauthorized'))
-    render(<AdminView />, { route: '/admin/workspace-management' })
+    render(<AdminView />, { route: '/admin/configure-store' })
 
     await waitFor(() => {
       expect(screen.getByText('Admin Center')).toBeInTheDocument()

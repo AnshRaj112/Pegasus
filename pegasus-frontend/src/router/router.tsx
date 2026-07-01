@@ -92,7 +92,8 @@ export const router = createHashRouter([
             children: [
               {
                 index: true,
-                element: <Navigate to="workspace-management" replace />,
+                // element: <Navigate to="workspace-management" replace />,
+                element: <Navigate to="configure-store" replace />,
               },
               {
                 path: 'workspace-management',
