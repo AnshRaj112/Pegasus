@@ -7,6 +7,37 @@ import type { MismatchSampleRow, ValidationHistoryDetail } from '../../shared/ap
 
 type ReportListKey = 'activeReports' | 'completedReports' | 'savedReports';
 
+const activeReportKey = (item: ReportItem): string =>
+  item.jobId ?? `${item.sourcePath}\0${item.targetPath}`;
+
+/** Keep file names when a background refresh returns incomplete queue rows. */
+export const mergeActiveReportItems = (existing: ReportItem[], incoming: ReportItem[]): ReportItem[] => {
+  const merged = new Map<string, ReportItem>();
+
+  for (const item of incoming) {
+    merged.set(activeReportKey(item), item);
+  }
+
+  for (const item of existing) {
+    const key = activeReportKey(item);
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, item);
+      continue;
+    }
+    merged.set(key, {
+      ...current,
+      sourceTitle: current.sourceTitle === '—' && item.sourceTitle !== '—' ? item.sourceTitle : current.sourceTitle,
+      jobTitle: current.jobTitle === '—' && item.jobTitle !== '—' ? item.jobTitle : current.jobTitle,
+      sourcePath: current.sourcePath || item.sourcePath,
+      targetPath: current.targetPath || item.targetPath,
+      sourceSubtitle: current.sourceSubtitle || item.sourceSubtitle,
+    });
+  }
+
+  return [...merged.values()];
+};
+
 const tabToListKey = (tab: TabType): ReportListKey => {
   switch (tab) {
     case 'Active':
@@ -89,7 +120,9 @@ const reportSlice = createSlice({
     fetchReportsSuccess: (state, action: PayloadAction<{ tab: TabType; data: ReportItem[] }>) => {
       const listKey = tabToListKey(action.payload.tab);
       state[listKey].isFetching = false;
-      state[listKey].data = action.payload.data;
+      state[listKey].data = action.payload.tab === 'Active'
+        ? mergeActiveReportItems(state.activeReports.data, action.payload.data)
+        : action.payload.data;
     },
     fetchReportsFailure: (state, action: PayloadAction<{ tab: TabType; error: string }>) => {
       const listKey = tabToListKey(action.payload.tab);

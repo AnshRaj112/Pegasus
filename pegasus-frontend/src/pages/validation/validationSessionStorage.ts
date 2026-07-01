@@ -49,6 +49,16 @@ export const removeActiveSession = (jobId: string) => {
 export const getActiveSession = (jobId: string): ActiveValidationSession | undefined =>
   readAll().find((s) => s.jobId === jobId);
 
+export const replaceActiveSessionJobId = (pendingJobId: string, jobId: string): void => {
+  const sessions = readAll();
+  const pending = sessions.find((s) => s.jobId === pendingJobId);
+  if (!pending) return;
+  const withoutDuplicate = sessions.filter((s) => s.jobId !== jobId);
+  writeAll(
+    withoutDuplicate.map((s) => (s.jobId === pendingJobId ? { ...s, jobId } : s)),
+  );
+};
+
 export const clearAllActiveSessions = () => {
   sessionStorage.removeItem(STORAGE_KEY);
 };

@@ -1,8 +1,9 @@
 import React from 'react';
-import { ClockCircleOutlined, SyncOutlined } from '@ant-design/icons';
+import { ClockCircleOutlined } from '@ant-design/icons';
 import { Api, ValidationHistorySummary } from '../../shared/api/Api';
 import { ReportItem } from './Report.interface';
 import { decodeReportPairId, encodeReportPairId, pairIdFromPathSegment, pairIdToPathSegment } from './reportPairId';
+import { buildActiveReportItem } from './reportActiveItem';
 import { getActiveSessions } from '../validation/validationSessionStorage';
 
 const pairKey = (item: ValidationHistorySummary) =>
@@ -135,88 +136,32 @@ export const ReportService = {
 
   fetchActive: async (): Promise<ReportItem[]> => {
     const sessions = getActiveSessions();
-    let activeJobs: import('../../shared/api/Api').QueueJobSnapshot[] = [];
+    const queueByJobId = new Map<string, import('../../shared/api/Api').QueueJobSnapshot>();
     try {
       const { data: queue } = await Api.getValidationQueue();
-      activeJobs = queue.jobs.filter(
-        (j) => j.state === 'queued' || j.state === 'running',
-      );
+      for (const job of queue.jobs) {
+        if (job.state === 'queued' || job.state === 'running') {
+          queueByJobId.set(job.job_id, job);
+        }
+      }
     } catch {
       // Fall back to browser session entries when the queue API is unavailable.
     }
-    const seen = new Set<string>();
-    const items: ReportItem[] = [];
 
-    for (const job of activeJobs) {
-      seen.add(job.job_id);
-      const session = sessions.find((s) => s.jobId === job.job_id);
-      const sourcePath = session?.sourcePath ?? '';
-      const targetPath = session?.targetPath ?? '';
-      const mappingId = sourcePath && targetPath
-        ? pairIdToPathSegment(encodeReportPairId(sourcePath, targetPath))
-        : job.job_id;
-      const sourceTitle = sessionSourceTitle(session, sourcePath);
-      const targetTitle = sessionTargetTitle(session, targetPath);
-      const latest = {
-        run_id: job.job_id,
-        status: job.state,
-        uid_column: '',
-        delimiter: 'auto',
-        mismatch_counts: { missing_in_target: 0, extra_in_target: 0, value_mismatch: 0 },
-        mapping_count: 0,
-        source_path: sourcePath || null,
-        target_path: targetPath || null,
-        source_filename: sourceTitle !== '—' ? sourceTitle : null,
-        target_filename: targetTitle !== '—' ? targetTitle : null,
-        completed_at: null,
-        created_at: new Date(job.enqueued_at * 1000).toISOString(),
-        is_match: null,
-      } as ValidationHistorySummary;
-      items.push({
-        ...toReportItem([latest], mappingId),
-        jobId: job.job_id,
-        jobSubtitle: job.state === 'queued' ? 'Queued…' : 'Validating…',
-        badges: [
-          { type: 'icon', content: React.createElement(SyncOutlined, { spin: true, style: { fontSize: '12px' } }) },
-          { type: 'text', content: job.state === 'queued' ? 'Queued' : 'Running' },
-        ],
-      });
-    }
-
-    for (const session of sessions) {
-      if (seen.has(session.jobId)) continue;
-      const mappingId = pairIdToPathSegment(
-        encodeReportPairId(session.sourcePath, session.targetPath),
-      );
+    return sessions.map((session) => {
+      const queueJob = queueByJobId.get(session.jobId);
       const sourceTitle = sessionSourceTitle(session, session.sourcePath);
       const targetTitle = sessionTargetTitle(session, session.targetPath);
-      const latest = {
-        run_id: session.jobId,
-        status: 'running',
-        uid_column: '',
-        delimiter: 'auto',
-        mismatch_counts: { missing_in_target: 0, extra_in_target: 0, value_mismatch: 0 },
-        mapping_count: 0,
-        source_path: session.sourcePath,
-        target_path: session.targetPath,
-        source_filename: sourceTitle !== '—' ? sourceTitle : null,
-        target_filename: targetTitle !== '—' ? targetTitle : null,
-        completed_at: null,
-        created_at: new Date(session.startedAt).toISOString(),
-        is_match: null,
-      } as ValidationHistorySummary;
-      items.push({
-        ...toReportItem([latest], mappingId),
+      const status = queueJob?.state === 'queued' ? 'queued' : 'running';
+      return buildActiveReportItem({
         jobId: session.jobId,
-        jobSubtitle: 'Validating…',
-        badges: [
-          { type: 'icon', content: React.createElement(SyncOutlined, { spin: true, style: { fontSize: '12px' } }) },
-          { type: 'text', content: 'Running' },
-        ],
+        sourcePath: session.sourcePath,
+        targetPath: session.targetPath,
+        sourceTitle,
+        targetTitle,
+        status,
       });
-    }
-
-    return items;
+    });
   },
 
   fetchCompleted: async (): Promise<ReportItem[]> => {

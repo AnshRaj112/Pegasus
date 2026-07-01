@@ -1,4 +1,4 @@
-import { reportActions, reportReducer, initialState } from '../Report.reducer'
+import { reportActions, reportReducer, initialState, mergeActiveReportItems } from '../Report.reducer'
 import {
   activeReportsError,
   activeReportsLoading,
@@ -87,6 +87,31 @@ describe('Report reducer', () => {
         ...initialState,
         activeReports: activeReportsError,
       })
+    })
+    it('merges refreshed active rows without losing known file names', () => {
+      const state = { ...initialState, activeReports: activeReportsSuccess }
+      const refreshed = [{
+        ...mockActiveReport,
+        sourceTitle: '—',
+        jobTitle: '—',
+      }]
+      const result = reportReducer(
+        state,
+        reportActions.fetchReportsSuccess({ tab: 'Active', data: refreshed }),
+      )
+      expect(result.activeReports.data[0].sourceTitle).toBe('source.csv')
+      expect(result.activeReports.data[0].jobTitle).toBe('target.csv')
+    })
+  })
+
+  describe('mergeActiveReportItems', () => {
+    it('keeps existing titles when incoming rows are blank', () => {
+      const merged = mergeActiveReportItems(
+        [mockActiveReport],
+        [{ ...mockActiveReport, sourceTitle: '—', jobTitle: '—' }],
+      )
+      expect(merged[0].sourceTitle).toBe('source.csv')
+      expect(merged[0].jobTitle).toBe('target.csv')
     })
   })
 

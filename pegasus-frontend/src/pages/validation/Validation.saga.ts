@@ -15,6 +15,7 @@ import { validationActions } from './Validation.reducer';
 import { ValidationServiceApi } from './Validation.service';
 import {
   removeActiveSession,
+  replaceActiveSessionJobId,
   upsertActiveSession,
 } from './validationSessionStorage';
 import { formFromHistory, enrichFormWithConnections, validateRequestFromForm } from './validationRerun';
@@ -129,15 +130,7 @@ function* submitValidationSaga() {
     );
     jobId = accepted.data.job_id;
 
-    removeActiveSession(pendingJobId);
-    yield call(persistActiveSession, {
-      jobId,
-      sourcePath,
-      targetPath,
-      sourceTitle,
-      targetTitle,
-      validationForm,
-    });
+    replaceActiveSessionJobId(pendingJobId, jobId);
     yield put(reportActions.reconcileActiveValidationJobId({ pendingJobId, jobId }));
     yield put(reportActions.fetchActiveReportsRequest());
     yield fork(backgroundPollSaga, jobId, sourcePath, targetPath);
@@ -215,15 +208,7 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
     );
     jobId = accepted.data.job_id;
 
-    removeActiveSession(pendingJobId);
-    yield call(persistActiveSession, {
-      jobId,
-      sourcePath,
-      targetPath,
-      sourceTitle,
-      targetTitle,
-      validationForm,
-    });
+    replaceActiveSessionJobId(pendingJobId, jobId);
     yield put(reportActions.reconcileActiveValidationJobId({ pendingJobId, jobId }));
     yield put(reportActions.fetchActiveReportsRequest());
     yield fork(backgroundPollSaga, jobId, sourcePath, targetPath);
