@@ -3,12 +3,16 @@
 .page {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  max-width: tokens.$container-max;
-  margin: 0 auto;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 .header {
+  flex-shrink: 0;
   margin-bottom: tokens.$spacing-lg;
 }
 
@@ -26,6 +30,10 @@
 }
 
 .card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   background-color: tokens.$surface-container-lowest;
   border-radius: tokens.$spacing-sm;
   border: 0.0625rem solid tokens.$border-1;
@@ -95,4 +103,7 @@
 .content {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
