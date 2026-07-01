@@ -10,6 +10,9 @@ describe('Completed', () => {
     expect(screen.getByText('completed-source.csv')).toBeInTheDocument()
     expect(screen.getByText('completed-target.csv')).toBeInTheDocument()
     expect(screen.getByText('Jun 12, 26')).toBeInTheDocument()
+    expect(screen.getAllByText('P')).toHaveLength(2)
+    expect(screen.getByText('F')).toBeInTheDocument()
+    expect(screen.queryByText(/run\(s\)/i)).not.toBeInTheDocument()
   })
 
   it('shows loading message while completed reports are fetching', () => {

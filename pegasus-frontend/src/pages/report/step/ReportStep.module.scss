@@ -141,6 +141,17 @@
   font-family: tokens.$font-mono;
 }
 
+.badgePill1 {
+  display: flex;
+  align-items: center;
+  border: 0.0625rem solid rgba(0, 87, 194, 0.3);
+  border-radius: 50%;
+  padding: 0.4rem tokens.$spacing-sm;
+  color: tokens.$primary;
+  font-size: 0.6875rem;
+  font-family: tokens.$font-mono;
+}
+
 .badgeSep {
   margin: 0 0.375rem;
   opacity: 0.4;
@@ -151,6 +162,28 @@
   border-radius: 0.25rem;
   padding: 0 0.25rem;
   font-weight: 700;
+}
+
+.badgeBoxPass {
+  border: 0.0625rem solid tokens.$status-pass;
+  border-radius: 0.25rem;
+  padding: 0 0.25rem;
+  font-weight: 700;
+  color: tokens.$status-pass;
+}
+
+.badgeBoxFail {
+  border: 0.0625rem solid tokens.$status-fail;
+  border-radius: 0.25rem;
+  padding: 0 0.25rem;
+  font-weight: 700;
+  color: tokens.$status-fail;
+}
+
+.draftBadge {
+  display: flex;
+  align-items: center;
+  cursor: default;
 }
 
 .badgeContent {

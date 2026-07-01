@@ -23,7 +23,8 @@ describe('Saved', () => {
 
     expect(screen.getByText('saved-source.csv')).toBeInTheDocument()
     expect(screen.getByText('saved-target.csv')).toBeInTheDocument()
-    expect(screen.getByText('Draft')).toBeInTheDocument()
+    expect(screen.queryByText('Draft')).not.toBeInTheDocument()
+    expect(screen.getByTitle('Jun 10, 26')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /run/i })).toBeInTheDocument()
   })
 
