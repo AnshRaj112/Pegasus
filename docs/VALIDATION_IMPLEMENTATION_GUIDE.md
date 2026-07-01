@@ -1073,6 +1073,108 @@ Using the 40 GiB case as the baseline:
 - average partition pair size: $40 \text{ GiB} / 2048 \approx 20 \text{ MiB}$
 - rough peak RAM per partition pair: about 40 to 80 MiB
 
+##### 15.5.9 Assumptions used in the per-format estimates
+
+The numbers below are planning estimates for validation work, not exact byte-for-byte measurements.
+
+They assume:
+
+- the source and target files are completely unsorted
+- the backend uses identity hashing and joins rather than positional scanning
+- `2048` partitions are used for the large spill path
+- the disk figures are additional validation working disk, not the original input files already stored on disk
+- mismatch output is small compared with the input size
+
+Because the files are unsorted, the validator does not need a sort buffer. It pays for hash tables, partition files, extracted leaves, and drilldown lookups instead.
+
+##### 15.5.10 Tabular, CSV-like, PSV, TSV, and DAT
+
+These are the base numbers for the hash-join pipeline.
+
+| Combined input size | Average partition pair | Rough peak RAM | Additional temp disk |
+| --- | ---: | ---: | ---: |
+| 10 GiB | about 5 MiB | about 10 to 20 MiB | about 10 to 11 GiB |
+| 20 GiB | about 10 MiB | about 20 to 40 MiB | about 20 to 22 GiB |
+| 40 GiB | about 20 MiB | about 40 to 80 MiB | about 40 to 44 GiB |
+
+The disk number is higher than the raw input because the backend writes normalized partition spill files, join state, and drilldown artifacts. The job still stays bounded because only one partition wave is active at a time.
+
+##### 15.5.11 Fixed-width
+
+Fixed-width jobs use the same identity-and-drilldown idea, but they do not pay delimiter-sniffing overhead.
+
+| Combined input size | Average partition pair | Rough peak RAM | Additional temp disk |
+| --- | ---: | ---: | ---: |
+| 10 GiB | about 5 MiB | about 8 to 15 MiB | about 10 to 11 GiB |
+| 20 GiB | about 10 MiB | about 15 to 30 MiB | about 20 to 22 GiB |
+| 40 GiB | about 20 MiB | about 30 to 60 MiB | about 40 to 44 GiB |
+
+The width itself is not inferred from the content. Because the layout is declared up front, fixed-width validation tends to be a little lighter on parser overhead than free-form delimited text, but the spill footprint is still broadly similar.
+
+##### 15.5.12 JSON and NDJSON
+
+JSON is the least uniform case because the memory profile depends on whether Pegasus is comparing NDJSON rows or a single recursive JSON document.
+
+For NDJSON / JSONL, the numbers are usually close to the tabular path.
+
+| Combined input size | Average partition pair | Rough peak RAM | Additional temp disk |
+| --- | ---: | ---: | ---: |
+| 10 GiB | about 5 MiB | about 12 to 25 MiB | about 10 to 12 GiB |
+| 20 GiB | about 10 MiB | about 25 to 50 MiB | about 20 to 24 GiB |
+| 40 GiB | about 20 MiB | about 50 to 100 MiB | about 40 to 48 GiB |
+
+For a single large JSON document, use the higher end of the memory range because the recursive tree can keep more nested structure alive while the diff walks the object graph.
+
+##### 15.5.13 Parquet, ORC, and Avro
+
+These columnar formats are converted into a tabular representation before reconciliation, so their memory behavior is close to the base tabular pipeline.
+
+| Combined input size | Average partition pair | Rough peak RAM | Additional temp disk |
+| --- | ---: | ---: | ---: |
+| 10 GiB | about 5 MiB | about 10 to 20 MiB | about 10 to 12 GiB |
+| 20 GiB | about 10 MiB | about 20 to 40 MiB | about 20 to 24 GiB |
+| 40 GiB | about 20 MiB | about 40 to 80 MiB | about 40 to 48 GiB |
+
+The disk is a little higher than the raw size estimate because the reader expands columnar data into row-oriented validation artifacts and then writes partitioned spill files.
+
+##### 15.5.14 ZIP, TAR, and nested archives
+
+Archive validation has two different modes:
+
+- manifest-only comparison, where the backend checks archive entries and metadata
+- nested leaf validation, where extracted files are handed to the inner validator
+
+For manifest-only work, memory is tiny compared with the file size, and the additional temp disk is usually just the archive manifest and metadata frame.
+
+| Combined archive size | Rough peak RAM | Additional temp disk |
+| --- | ---: | ---: |
+| 10 GiB | a few MiB | about 0.1 to 0.5 GiB |
+| 20 GiB | a few MiB | about 0.1 to 0.5 GiB |
+| 40 GiB | a few MiB | about 0.1 to 0.5 GiB |
+
+For nested leaf validation, the archive must first be expanded into a leaf payload, and then that leaf is validated using its own file-type rules. In practice, the temp disk requirement is:
+
+temp disk is roughly archive size + extracted leaf size + leaf spill
+
+So if an archive expands to roughly 2x its compressed size, a planning estimate is:
+
+| Combined archive size | Rough peak RAM | Additional temp disk |
+| --- | ---: | ---: |
+| 10 GiB | about 10 to 25 MiB for the active leaf partition | about 20 to 30 GiB |
+| 20 GiB | about 20 to 50 MiB for the active leaf partition | about 40 to 60 GiB |
+| 40 GiB | about 40 to 100 MiB for the active leaf partition | about 80 to 120 GiB |
+
+Nested archives add another layer of extraction, so the real disk requirement can be higher if the inner archive also expands significantly. The safety limits in the archive extractor keep that from becoming unbounded, but they do not remove the need for enough temporary disk.
+
+##### 15.5.15 Quick cross-format summary
+
+If you want one short planning rule, use this:
+
+- tabular, fixed-width, Parquet, ORC, Avro, and NDJSON: expect roughly the input size again on temporary disk, plus a small overhead for partitioning and drilldown
+- single-document JSON: expect a similar disk profile, but a higher and less predictable memory peak
+- ZIP and TAR without leaf validation: expect very small disk and memory overhead
+- ZIP, TAR, and nested archives with leaf validation: expect archive size plus extracted-leaf size on disk, then apply the leaf validator’s own memory profile
+
 ##### Practical reading
 
 The key pattern is:
