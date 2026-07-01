@@ -108,6 +108,50 @@ def test_pipeline_uses_native_drilldown_path() -> None:
 
 
 @pytest.mark.skipif(not native_extension_available(), reason="pegasus_native not built")
+def test_fingerprint_only_spill_writes_native_drilldown_without_column_drilldown() -> None:
+    """Disk drilldown for snippet export must work when column drilldown is disabled (GCS path)."""
+    src = _REPO / "test-data/generated-10k-12cols/source.csv"
+    tgt = _REPO / "test-data/generated-10k-12cols/target.csv"
+    if not src.is_file() or not tgt.is_file():
+        pytest.skip("fixture missing")
+    cols = [c for c in src.read_text(encoding="utf-8").splitlines()[0].split("||") if c != "id"]
+    cfg = TabularPipelineConfig(
+        enable_in_memory_reconcile=False,
+        auto_in_memory_max_bytes=0,
+        force_disk_spill=True,
+        enable_column_drilldown=False,
+        force_native_multichar_spill=True,
+        fingerprint_only_spill=True,
+    )
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td)
+        result = TabularReconciliationPipeline(
+            FileDelimitedAdapter(src, delimiter="||"),
+            FileDelimitedAdapter(tgt, delimiter="||"),
+            identity_columns=["id"],
+            compare_columns=cols,
+            config=cfg,
+        ).run(workspace=work)
+        assert result.extra_stats.get("path") == "spill_native_multichar_drilldown"
+        assert native_drilldown_path(work, "source").is_file()
+        assert native_drilldown_path(work, "target").is_file()
+
+        from pegasus.validation.pipeline.mismatch_export import (
+            export_workspace_mismatches_ndjson,
+            ndjson_row_detail_lacks_columns,
+        )
+
+        out_path = work / "mismatches.ndjson"
+        stats = export_workspace_mismatches_ndjson(
+            work,
+            out_path,
+            compare_columns=cols,
+        )
+        if stats.total > 0:
+            assert not ndjson_row_detail_lacks_columns(out_path, cols)
+
+
+@pytest.mark.skipif(not native_extension_available(), reason="pegasus_native not built")
 def test_native_mmap_spill_matches_python_fingerprint() -> None:
     if not _FIXTURE.is_file():
         pytest.skip("fixture missing")
