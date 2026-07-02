@@ -36,6 +36,10 @@ const writeAll = (sessions: ActiveValidationSession[]) => {
 
 export const getActiveSessions = (): ActiveValidationSession[] => readAll();
 
+export const setActiveSessions = (sessions: ActiveValidationSession[]) => {
+  writeAll(sessions);
+};
+
 export const upsertActiveSession = (session: ActiveValidationSession) => {
   const sessions = readAll().filter((s) => s.jobId !== session.jobId);
   sessions.unshift(session);

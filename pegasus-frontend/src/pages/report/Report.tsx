@@ -10,7 +10,8 @@ import styles from './Report.module.scss';
 
 const Report: React.FC = () => {
   const dispatch = useAppDispatch();
-  const { activeTab, searchQuery } = useAppSelector((s) => s.report);
+  const { activeTab, searchQuery, activeReports } = useAppSelector((s) => s.report);
+  const activeReportCount = activeReports.data.length;
 
   useEffect(() => {
     dispatch(reportActions.fetchReportsRequest());
@@ -18,9 +19,10 @@ const Report: React.FC = () => {
 
   useEffect(() => {
     if (activeTab !== 'Active') return;
+    if (activeReportCount === 0) return;
     const timer = setInterval(() => dispatch(reportActions.fetchReportsRequest()), 5000);
     return () => clearInterval(timer);
-  }, [activeTab, dispatch]);
+  }, [activeTab, activeReportCount, dispatch]);
 
   const renderStep = () => {
     switch (activeTab) {

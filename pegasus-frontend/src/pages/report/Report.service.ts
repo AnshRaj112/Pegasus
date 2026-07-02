@@ -4,7 +4,49 @@ import { Api, ValidationHistorySummary } from '../../shared/api/Api';
 import { ReportItem } from './Report.interface';
 import { decodeReportPairId, encodeReportPairId, pairIdFromPathSegment, pairIdToPathSegment } from './reportPairId';
 import { buildActiveReportItem } from './reportActiveItem';
-import { getActiveSessions } from '../validation/validationSessionStorage';
+import {
+  ActiveValidationSession,
+  getActiveSessions,
+  setActiveSessions,
+} from '../validation/validationSessionStorage';
+
+const isTerminalJobStatus = (status: string) => status === 'completed' || status === 'failed';
+
+const pruneInactiveSessions = async (
+  sessions: ActiveValidationSession[],
+  queueJobs: import('../../shared/api/Api').QueueJobSnapshot[],
+): Promise<ActiveValidationSession[]> => {
+  const queueByJobId = new Map(queueJobs.map((job) => [job.job_id, job]));
+  const kept: ActiveValidationSession[] = [];
+
+  for (const session of sessions) {
+    if (session.jobId.startsWith('pending-')) {
+      kept.push(session);
+      continue;
+    }
+
+    const queueJob = queueByJobId.get(session.jobId);
+    if (queueJob && isTerminalJobStatus(queueJob.state)) {
+      continue;
+    }
+    if (queueJob?.state === 'queued' || queueJob?.state === 'running') {
+      kept.push(session);
+      continue;
+    }
+
+    try {
+      const { data } = await Api.getValidationJob(session.jobId, { summaryOnly: true });
+      if (isTerminalJobStatus(data.status)) {
+        continue;
+      }
+      kept.push(session);
+    } catch {
+      // Drop sessions with no queue row and no live job artifact.
+    }
+  }
+
+  return kept;
+};
 
 const pairKey = (item: ValidationHistorySummary) =>
   `${item.source_path ?? item.source_filename ?? ''}\0${item.target_path ?? item.target_filename ?? ''}`;
@@ -138,15 +180,19 @@ export const ReportService = {
   },
 
   fetchActive: async (): Promise<ReportItem[]> => {
-    const sessions = getActiveSessions();
+    let sessions = getActiveSessions();
     const queueByJobId = new Map<string, import('../../shared/api/Api').QueueJobSnapshot>();
     try {
       const { data: queue } = await Api.getValidationQueue();
       for (const job of queue.jobs) {
-        if (job.state === 'queued' || job.state === 'running') {
-          queueByJobId.set(job.job_id, job);
-        }
+        queueByJobId.set(job.job_id, job);
       }
+
+      const keptSessions = await pruneInactiveSessions(sessions, queue.jobs);
+      if (keptSessions.length !== sessions.length) {
+        setActiveSessions(keptSessions);
+      }
+      sessions = keptSessions;
     } catch {
       // Fall back to browser session entries when the queue API is unavailable.
     }
