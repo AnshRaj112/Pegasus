@@ -4,7 +4,7 @@ import { Api, ValidationHistorySummary } from '../../shared/api/Api';
 import { ReportItem } from './Report.interface';
 import { decodeReportPairId, encodeReportPairId, pairIdFromPathSegment, pairIdToPathSegment } from './reportPairId';
 import { buildActiveReportItem } from './reportActiveItem';
-import { getActiveSessions } from '../validation/validationSessionStorage';
+import { getActiveSessions, setActiveSessions } from '../validation/validationSessionStorage';
 
 const pairKey = (item: ValidationHistorySummary) =>
   `${item.source_path ?? item.source_filename ?? ''}\0${item.target_path ?? item.target_filename ?? ''}`;
@@ -138,7 +138,7 @@ export const ReportService = {
   },
 
   fetchActive: async (): Promise<ReportItem[]> => {
-    const sessions = getActiveSessions();
+    let sessions = getActiveSessions();
     const queueByJobId = new Map<string, import('../../shared/api/Api').QueueJobSnapshot>();
     try {
       const { data: queue } = await Api.getValidationQueue();
@@ -147,6 +147,10 @@ export const ReportService = {
           queueByJobId.set(job.job_id, job);
         }
       }
+
+      // The queue is the source of truth when available; drop stale browser entries.
+      sessions = sessions.filter((session) => queueByJobId.has(session.jobId));
+      setActiveSessions(sessions);
     } catch {
       // Fall back to browser session entries when the queue API is unavailable.
     }

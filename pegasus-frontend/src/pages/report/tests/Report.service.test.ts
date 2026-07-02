@@ -23,25 +23,25 @@ describe('ReportService.fetchActive', () => {
         startedAt: Date.now(),
       },
     ])
+    vi.spyOn(sessionStorage, 'setActiveSessions').mockImplementation(() => {})
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('builds active rows from browser sessions with stored file names', async () => {
+  it('drops stale sessions when the queue reports no active jobs', async () => {
     vi.mocked(Api.getValidationQueue).mockResolvedValue({
       data: { running: 0, pending: 0, jobs: [] },
     } as never)
 
     const items = await ReportService.fetchActive()
 
-    expect(items).toHaveLength(1)
-    expect(items[0].sourceTitle).toBe('source.csv')
-    expect(items[0].jobTitle).toBe('target.csv')
+    expect(items).toEqual([])
+    expect(sessionStorage.setActiveSessions).toHaveBeenCalledWith([])
   })
 
-  it('ignores queue jobs that have no matching browser session', async () => {
+  it('drops browser sessions when only unrelated queue jobs remain', async () => {
     vi.mocked(Api.getValidationQueue).mockResolvedValue({
       data: {
         running: 1,
@@ -52,9 +52,8 @@ describe('ReportService.fetchActive', () => {
 
     const items = await ReportService.fetchActive()
 
-    expect(items).toHaveLength(1)
-    expect(items[0].jobId).toBe('job-1')
-    expect(items[0].sourceTitle).toBe('source.csv')
+    expect(items).toEqual([])
+    expect(sessionStorage.setActiveSessions).toHaveBeenCalledWith([])
   })
 
   it('uses queue state to mark a session as queued', async () => {
@@ -70,6 +69,17 @@ describe('ReportService.fetchActive', () => {
 
     expect(items[0].jobSubtitle).toBe('Queued…')
     expect(items[0].badges.some((b) => b.type === 'text' && b.content === 'Queued')).toBe(true)
+  })
+
+  it('falls back to browser sessions when the queue API is unavailable', async () => {
+    vi.mocked(Api.getValidationQueue).mockRejectedValue(new Error('offline'))
+
+    const items = await ReportService.fetchActive()
+
+    expect(items).toHaveLength(1)
+    expect(items[0].sourceTitle).toBe('source.csv')
+    expect(items[0].jobTitle).toBe('target.csv')
+    expect(sessionStorage.setActiveSessions).not.toHaveBeenCalled()
   })
 })
 

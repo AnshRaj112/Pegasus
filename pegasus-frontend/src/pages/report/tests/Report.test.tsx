@@ -41,6 +41,22 @@ describe('Report', () => {
     })
   })
 
+  it('does not start polling when there are no active rows', () => {
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval')
+
+    render(<Report />)
+
+    expect(setIntervalSpy).not.toHaveBeenCalled()
+  })
+
+  it('starts polling when active rows are present', () => {
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval')
+
+    render(<Report />, { preloadedState: { report: reportStateWithActiveData } })
+
+    expect(setIntervalSpy).toHaveBeenCalled()
+  })
+
   it('switches active tab when a tab button is clicked', async () => {
     const user = userEvent.setup()
     const { store } = render(<Report />, { preloadedState: { report: reportStateWithActiveData } })
