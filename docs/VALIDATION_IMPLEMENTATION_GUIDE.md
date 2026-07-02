@@ -31,6 +31,7 @@ The important idea is that validation is layered:
 16. [Chapter 16: Short summary](#chapter-16-short-summary)
 17. [Chapter 17: Visual validation maps](#chapter-17-visual-validation-maps)
 18. [Chapter 18: Partition tables and chunked archive reading](#chapter-18-partition-tables-and-chunked-archive-reading)
+19. [Chapter 19: Short questions](#chapter-19-short-questions)
 
 ---
 
@@ -1808,3 +1809,23 @@ So the answer to “how do we read chunks out of ZIP/TAR/nested files without br
 5. recurse only into that selected member, never the entire archive tree at once
 
 This is the same design principle as partition reconciliation: only materialize the small piece needed for the current step.
+
+---
+
+## Chapter 19: Short questions
+
+### 19.1 Tabular validation & disk space usage
+
+#### Q: During hash partitioning, since only hashes are processed initially, does the system reread the original files to investigate column-level mismatches?
+No. The original raw files are streamed exactly once. During the initial pass, the system extracts the actual column values (the compare payload), canonicalizes them, hashes them (generating the fingerprint), and stores both the hashes and the raw values in binary partition spill files (or a local drilldown cache) on disk. When a mismatch is identified via the fingerprints, the system rehydrates the original column values directly from these partition spill files or the cache rather than re-scanning the original inputs.
+
+#### Q: Doesn't storing the original values alongside the hashes in partition spill files consume too much disk space?
+Yes, it does use additional hard drive space during the validation run, but this is a deliberate design trade-off to minimize RAM (memory) usage. By spilling this data to the hard drive, the system can load only one small partition bucket into memory at a time, preventing Out-Of-Memory (OOM) crashes on large datasets. The spill files are stored in a highly compact binary format and are permanently deleted as soon as the comparison job completes.
+
+### 19.2 Fixed-width boundary detection
+
+#### Q: How does the fixed-width validator know where a column ends if a long value (e.g., first name) occupies the entire column with no spaces separating it from the next column?
+The fixed-width parser operates strictly on character ranges defined in a layout configuration (e.g., characters 1–10 for First Name, 11–20 for Last Name). It acts as a "cookie cutter," slicing the text at those exact indices regardless of whether there are space characters separating the names.
+
+#### Q: If no layout is provided and Pegasus is auto-detecting boundaries, how does it know they are separate columns if the first row has no space between the columns?
+Pegasus does not look at only the first row. The automatic layout inference engine samples a chunk of lines (e.g., the first 20 lines) and aligns them. It looks for vertical "gutters" of whitespace that are shared across different lines in the sample. Even if one row has a name that fills the entire column width, other rows with shorter names will reveal the column boundaries. If no gutters can be aligned across the sample, the system merges individual row content runs or prompts the user to define the boundaries manually.
