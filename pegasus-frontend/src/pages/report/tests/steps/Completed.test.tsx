@@ -73,4 +73,29 @@ describe('Completed', () => {
     expect(screen.getByText('other-completed.csv')).toBeInTheDocument()
     expect(screen.queryByText('completed-source.csv')).not.toBeInTheDocument()
   })
+
+  it('paginates completed reports with 10 items per page', () => {
+    const data = Array.from({ length: 11 }, (_, index) => ({
+      ...mockCompletedReport,
+      id: `${index + 1}`,
+      sourceTitle: `completed-source-${index + 1}.csv`,
+      jobTitle: `completed-target-${index + 1}.csv`,
+    }))
+
+    render(<Completed />, {
+      preloadedState: {
+        report: {
+          ...reportStateWithCompletedData,
+          completedReports: {
+            ...completedReportsSuccess,
+            data,
+          },
+        },
+      },
+    })
+
+    expect(screen.getByText('completed-source-1.csv')).toBeInTheDocument()
+    expect(screen.queryByText('completed-source-11.csv')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /next/i })).toBeInTheDocument()
+  })
 })
