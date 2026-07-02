@@ -14,6 +14,7 @@ import { ValidationReducerState } from './Validation.interface';
 import { validationActions } from './Validation.reducer';
 import { ValidationServiceApi } from './Validation.service';
 import {
+  getActiveSession,
   removeActiveSession,
   replaceActiveSessionJobId,
   upsertActiveSession,
@@ -142,6 +143,28 @@ const persistActiveSession = (params: {
   });
 };
 
+const ensureActiveSessionJobId = (params: {
+  pendingJobId: string;
+  jobId: string;
+  sourcePath: string;
+  targetPath: string;
+  sourceTitle: string;
+  targetTitle: string;
+  validationForm: ValidationReducerState['validationForm'];
+}) => {
+  replaceActiveSessionJobId(params.pendingJobId, params.jobId);
+  if (!getActiveSession(params.jobId)) {
+    persistActiveSession({
+      jobId: params.jobId,
+      sourcePath: params.sourcePath,
+      targetPath: params.targetPath,
+      sourceTitle: params.sourceTitle,
+      targetTitle: params.targetTitle,
+      validationForm: params.validationForm,
+    });
+  }
+};
+
 function* submitValidationSaga() {
   let jobId: string | null = null;
   let pendingJobId: string | null = null;
@@ -179,7 +202,15 @@ function* submitValidationSaga() {
     );
     jobId = accepted.data.job_id;
 
-    replaceActiveSessionJobId(pendingJobId, jobId);
+    yield call(ensureActiveSessionJobId, {
+      pendingJobId,
+      jobId,
+      sourcePath,
+      targetPath,
+      sourceTitle,
+      targetTitle,
+      validationForm,
+    });
     yield put(reportActions.reconcileActiveValidationJobId({ pendingJobId, jobId }));
     yield put(reportActions.fetchActiveReportsRequest());
     yield fork(backgroundPollSaga, jobId, sourcePath, targetPath);
@@ -256,7 +287,15 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
     );
     jobId = accepted.data.job_id;
 
-    replaceActiveSessionJobId(pendingJobId, jobId);
+    yield call(ensureActiveSessionJobId, {
+      pendingJobId,
+      jobId,
+      sourcePath,
+      targetPath,
+      sourceTitle,
+      targetTitle,
+      validationForm,
+    });
     yield put(reportActions.reconcileActiveValidationJobId({ pendingJobId, jobId }));
     yield put(reportActions.fetchActiveReportsRequest());
     yield fork(backgroundPollSaga, jobId, sourcePath, targetPath);
