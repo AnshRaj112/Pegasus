@@ -1,10 +1,10 @@
-import { call, fork, put, select, takeLatest, takeLeading, all } from 'redux-saga/effects';
+import { all, call, cancelled, fork, put, select, takeLatest, takeLeading } from 'redux-saga/effects';
 import { notification } from 'antd';
 import { AxiosError } from 'axios';
 import { PayloadAction } from '@reduxjs/toolkit';
 
 import { Api, ValidationJobAcceptedResponse } from '../../shared/api/Api';
-import { getApiErrorMessage } from '../../shared/api/apiError';
+import { getApiErrorMessage, isTransientPollError } from '../../shared/api/apiError';
 import { NOTIFICATION_SERVICE_TYPES } from '~/shared/constants/common.constants';
 import { reportActions } from '../report/Report.reducer';
 import { buildActiveReportItem, fileDisplayName } from '../report/reportActiveItem';
@@ -19,6 +19,55 @@ import {
   upsertActiveSession,
 } from './validationSessionStorage';
 import { formFromHistory, enrichFormWithConnections, validateRequestFromForm } from './validationRerun';
+
+/** True when POST /validate/local may have succeeded but the browser gave up waiting. */
+const isLikelyAcceptedValidationTimeout = (error: unknown): boolean =>
+  isTransientPollError(error);
+
+function* handleValidationSubmitFailure(
+  error: unknown,
+  opts: {
+    pendingJobId: string | null;
+    jobId: string | null;
+    fallback: string;
+    notify?: { message: string; descriptionFallback: string };
+  },
+) {
+  if (opts.jobId) {
+    return;
+  }
+  if (yield cancelled()) {
+    return;
+  }
+
+  const likelyAccepted = isLikelyAcceptedValidationTimeout(error) && Boolean(opts.pendingJobId);
+  if (!likelyAccepted) {
+    if (opts.pendingJobId) removeActiveSession(opts.pendingJobId);
+  }
+  if (opts.pendingJobId || opts.jobId) {
+    yield put(reportActions.fetchActiveReportsRequest());
+  }
+
+  const description = likelyAccepted
+    ? 'The request took longer than expected. The validation may still be running — check Reports → Active or execution history.'
+    : getApiErrorMessage(error, opts.notify?.descriptionFallback ?? opts.fallback);
+
+  if (opts.notify) {
+    if (likelyAccepted) {
+      notification.warning({
+        message: 'Validation may be starting',
+        description,
+      });
+    } else {
+      notification.error({
+        message: opts.notify.message,
+        description,
+      });
+    }
+  }
+
+  yield put(validationActions.submitValidationError(description));
+}
 
 function* navigateToReportsActive() {
   yield put(validationActions.navigateToReportsActive());
@@ -135,12 +184,11 @@ function* submitValidationSaga() {
     yield put(reportActions.fetchActiveReportsRequest());
     yield fork(backgroundPollSaga, jobId, sourcePath, targetPath);
   } catch (error: unknown) {
-    if (pendingJobId) removeActiveSession(pendingJobId);
-    if (jobId) removeActiveSession(jobId);
-    if (pendingJobId || jobId) {
-      yield put(reportActions.fetchActiveReportsRequest());
-    }
-    yield put(validationActions.submitValidationError(getApiErrorMessage(error, 'Validation submission failed')));
+    yield* handleValidationSubmitFailure(error, {
+      pendingJobId,
+      jobId,
+      fallback: 'Validation submission failed',
+    });
   }
 }
 
@@ -213,13 +261,15 @@ function* runFromHistorySaga(action: ReturnType<typeof validationActions.runVali
     yield put(reportActions.fetchActiveReportsRequest());
     yield fork(backgroundPollSaga, jobId, sourcePath, targetPath);
   } catch (error: unknown) {
-    if (pendingJobId) removeActiveSession(pendingJobId);
-    if (jobId) removeActiveSession(jobId);
-    notification.error({
-      message: 'Could not start validation',
-      description: getApiErrorMessage(error, 'Failed to run from saved configuration'),
+    yield* handleValidationSubmitFailure(error, {
+      pendingJobId,
+      jobId,
+      fallback: 'Failed to run validation',
+      notify: {
+        message: 'Could not start validation',
+        descriptionFallback: 'Failed to run from saved configuration',
+      },
     });
-    yield put(validationActions.submitValidationError(getApiErrorMessage(error, 'Failed to run validation')));
   }
 }
 
@@ -381,7 +431,7 @@ export function* saveDraftSaga(action: ReturnType<typeof validationActions.saveD
 export default function* validationSaga() {
   yield all([
     takeLatest(validationActions.submitValidationRequest.type, submitValidationSaga),
-    takeLatest(validationActions.runValidationFromHistoryRequest.type, runFromHistorySaga),
+    takeLeading(validationActions.runValidationFromHistoryRequest.type, runFromHistorySaga),
     takeLatest(validationActions.listCloudConnectionsRequest.type, listCloudConnectionsSaga),
     takeLatest(validationActions.browseCloudRequest.type, browseCloudSaga),
     takeLeading(validationActions.profileCloudFilesRequest.type, profileCloudFilesSaga),

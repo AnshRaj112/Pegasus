@@ -12,30 +12,20 @@ const activeReportKey = (item: ReportItem): string =>
 
 /** Keep file names when a background refresh returns incomplete queue rows. */
 export const mergeActiveReportItems = (existing: ReportItem[], incoming: ReportItem[]): ReportItem[] => {
-  const merged = new Map<string, ReportItem>();
+  const existingByKey = new Map(existing.map((item) => [activeReportKey(item), item]));
 
-  for (const item of incoming) {
-    merged.set(activeReportKey(item), item);
-  }
-
-  for (const item of existing) {
-    const key = activeReportKey(item);
-    const current = merged.get(key);
-    if (!current) {
-      merged.set(key, item);
-      continue;
-    }
-    merged.set(key, {
-      ...current,
-      sourceTitle: current.sourceTitle === '—' && item.sourceTitle !== '—' ? item.sourceTitle : current.sourceTitle,
-      jobTitle: current.jobTitle === '—' && item.jobTitle !== '—' ? item.jobTitle : current.jobTitle,
-      sourcePath: current.sourcePath || item.sourcePath,
-      targetPath: current.targetPath || item.targetPath,
-      sourceSubtitle: current.sourceSubtitle || item.sourceSubtitle,
-    });
-  }
-
-  return [...merged.values()];
+  return incoming.map((item) => {
+    const prior = existingByKey.get(activeReportKey(item));
+    if (!prior) return item;
+    return {
+      ...item,
+      sourceTitle: item.sourceTitle === '—' && prior.sourceTitle !== '—' ? prior.sourceTitle : item.sourceTitle,
+      jobTitle: item.jobTitle === '—' && prior.jobTitle !== '—' ? prior.jobTitle : item.jobTitle,
+      sourcePath: item.sourcePath || prior.sourcePath,
+      targetPath: item.targetPath || prior.targetPath,
+      sourceSubtitle: item.sourceSubtitle || prior.sourceSubtitle,
+    };
+  });
 };
 
 const tabToListKey = (tab: TabType): ReportListKey => {

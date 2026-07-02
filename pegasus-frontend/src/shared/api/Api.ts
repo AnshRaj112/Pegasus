@@ -511,13 +511,13 @@ export const Api = {
 
   /** POST /validate/local — queue validation job (202); use source_cloud + target_cloud for GCS */
   submitValidation: (body: ValidateRequest): Promise<AxiosResponse<ValidationJobAcceptedResponse>> =>
-    httpClient.post(E.validateLocal, body),
+    httpClient.post(E.validateLocal, body, { timeout: VALIDATION_CLOUD_TIMEOUT_MS }),
 
   /** POST /validate/local/batch — queue multi-pair batch validation */
   submitBatchValidation: (
     body: BatchValidateRequest,
   ): Promise<AxiosResponse<ValidationJobAcceptedResponse>> =>
-    httpClient.post(E.validateLocalBatch, body),
+    httpClient.post(E.validateLocalBatch, body, { timeout: VALIDATION_CLOUD_TIMEOUT_MS }),
 
   /** GET /validate/jobs/{job_id} — poll job status/result */
   getValidationJob: (

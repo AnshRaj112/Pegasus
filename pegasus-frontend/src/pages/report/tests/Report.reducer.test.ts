@@ -102,6 +102,15 @@ describe('Report reducer', () => {
       expect(result.activeReports.data[0].sourceTitle).toBe('source.csv')
       expect(result.activeReports.data[0].jobTitle).toBe('target.csv')
     })
+
+    it('clears active rows when refresh finds no running sessions', () => {
+      const state = { ...initialState, activeReports: activeReportsSuccess }
+      const result = reportReducer(
+        state,
+        reportActions.fetchReportsSuccess({ tab: 'Active', data: [] }),
+      )
+      expect(result.activeReports.data).toEqual([])
+    })
   })
 
   describe('mergeActiveReportItems', () => {
@@ -112,6 +121,11 @@ describe('Report reducer', () => {
       )
       expect(merged[0].sourceTitle).toBe('source.csv')
       expect(merged[0].jobTitle).toBe('target.csv')
+    })
+
+    it('drops completed rows when refresh returns no active sessions', () => {
+      const merged = mergeActiveReportItems([mockActiveReport], [])
+      expect(merged).toEqual([])
     })
   })
 
