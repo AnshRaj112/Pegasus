@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-07-01T10:19:19Z
+# Last edited: 2026-07-02T05:37:38Z
 # --- END GENERATED FILE METADATA ---
 
 """Broad accuracy sweep (~80 cases) for file-type detection and display labels."""
