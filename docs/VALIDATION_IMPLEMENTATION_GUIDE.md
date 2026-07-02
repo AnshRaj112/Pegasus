@@ -1224,10 +1224,23 @@ Here we evaluate two concrete delimited/tabular validation scenarios on a target
         $$\text{RAM}_{\text{spill}} = 384 \text{ MiB} + 4 \times (114.4 \text{ MiB} + 60 \text{ MiB}) \approx 1081.6 \text{ MiB} \approx 1.06 \text{ GiB}$$
         *Fits comfortably inside the 15 GiB RAM / 10.5 GiB usable safety cap.*
 5.  **SSD Disk Sizing**:
-    $$\text{Disk}_{\text{spill}} = 40 \text{ GiB} \times 1.2 + M \times W_r + 4 \times 20 \text{ MiB} \times 2 \approx 48 \text{ GiB} + \text{drilldown cache} + 160 \text{ MiB}$$
-    With a $5\%$ mismatch rate ($M = 5,000,000$ changed rows), the drilldown cache takes:
-    $$\text{Disk}_{\text{drilldown}} = 5,000,000 \times 120 \text{ bytes} \approx 572.2 \text{ MiB}$$
-    Total additional SSD space needed $\approx 48.7 \text{ GiB}$.
+    $$
+    \text{Disk}_{\text{spill}} = 40\,\text{GiB} \times 1.2 + M\,W_r + 4 \times 20\,\text{MiB} \times 2
+    $$
+    $$
+    \approx 48\,\text{GiB} + M\,W_r + 160\,\text{MiB}
+    $$
+    With a $5\%$ mismatch rate ($M = 5{,}000{,}000$ changed rows) and $W_r = 120\,\text{bytes}$, the drilldown cache is
+    $$
+    \text{Disk}_{\text{drilldown}} = 5{,}000{,}000 \times 120\,\text{bytes}
+    \approx 572.2\,\text{MiB}
+    \approx 0.56\,\text{GiB}.
+    $$
+    The total additional SSD space is therefore approximately
+    $$
+    \text{Disk}_{\text{additional}} \approx 48\,\text{GiB} + 0.56\,\text{GiB} + 0.16\,\text{GiB}
+    \approx 48.7\,\text{GiB}.
+    $$
     *Fits comfortably within the 200 GB SSD.*
 
 ##### Scenario B: 10 GiB Delimited File (100 Million Rows, 4 Columns)
@@ -1692,12 +1705,12 @@ This is the core reason unsorted validation works. Pegasus is not trying to reme
 
 ```mermaid
 flowchart TD
-    A[UID columns] --> B[Canonicalize identity parts]
-    B --> C[Join into identity key]
-    C --> D[partition_id(identity, num_partitions)]
-    D --> E{Partition id}
-    E --> F[source/part_00042.bin]
-    E --> G[target/part_00042.bin]
+    A["UID columns"] --> B["Canonicalize identity parts"]
+    B --> C["Join into identity key"]
+    C --> D["partition_id(identity, num_partitions)"]
+    D --> E{"Partition id"}
+    E --> F["source/part_00042.bin"]
+    E --> G["target/part_00042.bin"]
 ```
 
 The reason source and target land in the same bucket is simple: both sides run the same identity canonicalization and the same hash function with the same partition count. If the identity key is identical, the bucket id is identical.
