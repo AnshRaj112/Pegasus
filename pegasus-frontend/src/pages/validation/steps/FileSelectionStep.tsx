@@ -239,6 +239,8 @@ export const FileSelectionStep: React.FC = () => {
 
   const currentBrowsePathId = browsePathId(browse);
   const isBrowsing = loadingBrowseKey != null && loadingBrowseKey === currentBrowsePathId;
+  const isBrowseRequestActive = browseCloudState.isFetching && browseCloudState.pathId === currentBrowsePathId;
+  const shouldShowBrowseSkeleton = (isBrowsing || isBrowseRequestActive) && browseEntries.length === 0 && !browseError;
 
   // ⚡ Helper to wipe filters when changing environments
   const resetFilters = () => {
@@ -480,8 +482,7 @@ export const FileSelectionStep: React.FC = () => {
 
   const activeConnection = connections.find((c) => c.id === browse.connectionId) ?? null;
   const isMultiBucketConnection = Boolean(activeConnection && !activeConnection.bucket?.trim());
-  const isFileTableLocked = isBrowsing;
-  const showBrowseSkeleton = isBrowsing && browseEntries.length === 0 && !browseError;
+  const isFileTableLocked = isBrowsing || isBrowseRequestActive;
 
   const handleRowClick = (file: FileExplorerItem) => {
     if (isFileTableLocked) return;
@@ -746,7 +747,7 @@ export const FileSelectionStep: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {showBrowseSkeleton ? (
+                {shouldShowBrowseSkeleton ? (
                   <BrowseSkeletonRows />
                 ) : (
                   <>

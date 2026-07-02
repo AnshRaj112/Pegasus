@@ -88,4 +88,29 @@ describe('Active', () => {
     expect(screen.getByText('other-source.csv')).toBeInTheDocument()
     expect(screen.queryByText('source.csv')).not.toBeInTheDocument()
   })
+
+  it('paginates active reports with 10 items per page', () => {
+    const data = Array.from({ length: 11 }, (_, index) => ({
+      ...mockActiveReport,
+      id: `pair-${index + 1}`,
+      sourceTitle: `source-${index + 1}.csv`,
+      jobTitle: `target-${index + 1}.csv`,
+    }))
+
+    render(<Active />, {
+      preloadedState: {
+        report: {
+          ...reportStateWithActiveData,
+          activeReports: {
+            ...activeReportsSuccess,
+            data,
+          },
+        },
+      },
+    })
+
+    expect(screen.getByText('source-1.csv')).toBeInTheDocument()
+    expect(screen.queryByText('source-11.csv')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /next/i })).toBeInTheDocument()
+  })
 })

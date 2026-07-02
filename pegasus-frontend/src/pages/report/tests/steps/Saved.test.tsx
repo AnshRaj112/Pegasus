@@ -95,4 +95,29 @@ describe('Saved', () => {
     expect(screen.getByText('other-saved.csv')).toBeInTheDocument()
     expect(screen.queryByText('saved-source.csv')).not.toBeInTheDocument()
   })
+
+  it('paginates saved mappings with 10 items per page', () => {
+    const data = Array.from({ length: 11 }, (_, index) => ({
+      ...mockSavedReport,
+      id: `saved-pair-${index + 1}`,
+      sourceTitle: `saved-source-${index + 1}.csv`,
+      jobTitle: `saved-target-${index + 1}.csv`,
+    }))
+
+    render(<Saved />, {
+      preloadedState: {
+        report: {
+          ...reportStateWithSavedData,
+          savedReports: {
+            ...savedReportsSuccess,
+            data,
+          },
+        },
+      },
+    })
+
+    expect(screen.getByText('saved-source-1.csv')).toBeInTheDocument()
+    expect(screen.queryByText('saved-source-11.csv')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /next/i })).toBeInTheDocument()
+  })
 })

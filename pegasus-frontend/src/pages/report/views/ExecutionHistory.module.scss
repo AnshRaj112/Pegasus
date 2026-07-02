@@ -300,3 +300,84 @@
 .metricValueError {
   color: var(--status-fail, #{tokens.$status-fail});
 }
+
+.skeletonPage {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.skeletonCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  background-color: tokens.$surface-container-lowest;
+  border: 1px solid tokens.$surface-variant;
+  border-radius: 0.5rem;
+}
+
+.skeletonHeader,
+.skeletonLine,
+.skeletonLineWide {
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.08) 25%, rgba(0, 0, 0, 0.14) 50%, rgba(0, 0, 0, 0.08) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s infinite linear;
+}
+
+.skeletonHeader {
+  width: 45%;
+  height: 1rem;
+}
+
+.skeletonLine {
+  width: 70%;
+  height: 0.75rem;
+}
+
+.skeletonLineWide {
+  width: 90%;
+  height: 0.75rem;
+}
+
+.paginationRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 1rem;
+  gap: 1rem;
+}
+
+.paginationInfo {
+  color: tokens.$text-muted;
+  font-size: 0.8125rem;
+}
+
+.paginationActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.paginationBtn {
+  border: 1px solid var(--outline-variant, #{tokens.$outline-variant});
+  border-radius: 999px;
+  background: tokens.$surface-container-lowest;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.paginationBtnDisabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}

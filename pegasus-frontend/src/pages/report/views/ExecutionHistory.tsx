@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   PlayCircleOutlined,
   BranchesOutlined,
@@ -15,6 +15,20 @@ import { ValidationHistorySummary } from '../../../shared/api/Api';
 import { validationActions } from '../../validation/Validation.reducer';
 import { TruncatedPath } from '../components/TruncatedPath';
 import styles from './ExecutionHistory.module.scss';
+
+const ITEMS_PER_PAGE = 10;
+
+const ExecutionHistorySkeleton: React.FC = () => (
+  <div className={styles.skeletonPage} role="status" aria-live="polite" aria-label="Loading execution history">
+    {Array.from({ length: 3 }).map((_, index) => (
+      <div key={`history-skeleton-${index}`} className={styles.skeletonCard}>
+        <div className={styles.skeletonHeader} />
+        <div className={styles.skeletonLine} />
+        <div className={styles.skeletonLineWide} />
+      </div>
+    ))}
+  </div>
+);
 
 const formatEnd = (iso: string | null | undefined) => {
   if (!iso) return '—';
@@ -47,9 +61,14 @@ const ExecutionHistory: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pairLabel, setPairLabel] = useState('');
+  const [page, setPage] = useState(0);
 
   const [sourceFileInfo, setSourceFileInfo] = useState<{ name: string; path: string } | null>(null);
   const [targetFileInfo, setTargetFileInfo] = useState<{ name: string; path: string } | null>(null);
+
+  useEffect(() => {
+    setPage(0);
+  }, [mappingId]);
 
   useEffect(() => {
     if (!mappingId) return;
@@ -80,9 +99,15 @@ const ExecutionHistory: React.FC = () => {
   }, [mappingId]);
 
   const MAPPING_NAME = pairLabel;
+  const totalPages = Math.max(1, Math.ceil(runs.length / ITEMS_PER_PAGE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const visibleRuns = useMemo(() => runs.slice(
+    currentPage * ITEMS_PER_PAGE,
+    (currentPage + 1) * ITEMS_PER_PAGE,
+  ), [currentPage, runs]);
 
   if (loading) {
-    return <div className={styles.loading}>Loading execution history…</div>;
+    return <ExecutionHistorySkeleton />;
   }
 
   if (error) {
@@ -160,8 +185,9 @@ const ExecutionHistory: React.FC = () => {
       {runs.length === 0 ? (
         <div className={styles.emptyState}>No validation runs for this file pair yet.</div>
       ) : (
-        <div className={styles.runsList}>
-          {runs.map((run, idx) => {
+        <>
+          <div className={styles.runsList}>
+            {visibleRuns.map((run, idx) => {
             const mc = run.mismatch_counts;
             const totalRowMismatched = mc.value_mismatch_rows != null ? mc.value_mismatch_rows : mc.value_mismatch;
             const totalRowErrors = totalRowMismatched + mc.extra_in_target + mc.missing_in_target;
@@ -207,8 +233,35 @@ const ExecutionHistory: React.FC = () => {
                 </div>
               </div>
             );
-          })}
-        </div>
+            })}
+          </div>
+
+          {totalPages > 1 && (
+            <div className={styles.paginationRow}>
+              <span className={styles.paginationInfo}>
+                Showing {Math.min(currentPage * ITEMS_PER_PAGE + 1, runs.length)}-{Math.min((currentPage + 1) * ITEMS_PER_PAGE, runs.length)} of {runs.length}
+              </span>
+              <div className={styles.paginationActions}>
+                <button
+                  type="button"
+                  className={`${styles.paginationBtn} ${currentPage <= 0 ? styles.paginationBtnDisabled : ''}`}
+                  onClick={() => setPage((value) => Math.max(0, value - 1))}
+                  disabled={currentPage <= 0}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.paginationBtn} ${currentPage >= totalPages - 1 ? styles.paginationBtnDisabled : ''}`}
+                  onClick={() => setPage((value) => Math.min(totalPages - 1, value + 1))}
+                  disabled={currentPage >= totalPages - 1}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
