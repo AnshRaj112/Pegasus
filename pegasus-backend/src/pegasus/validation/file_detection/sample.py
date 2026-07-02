@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-07-02T05:37:38Z
+# Last edited: 2026-07-02T05:38:31Z
 # --- END GENERATED FILE METADATA ---
 
 """Bounded prefix reads for file detection (never load entire files)."""

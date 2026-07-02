@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-07-02T05:37:38Z
+# Last edited: 2026-07-02T05:38:31Z
 # --- END GENERATED FILE METADATA ---
 
 """Build local or GCS streaming delimited inputs (no full-object download)."""
