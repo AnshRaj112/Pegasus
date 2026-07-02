@@ -1,6 +1,6 @@
 # --- BEGIN GENERATED FILE METADATA ---
 # Authors: Ansh Raj
-# Last edited: 2026-07-01T09:36:09Z
+# Last edited: 2026-07-01T10:19:19Z
 # --- END GENERATED FILE METADATA ---
 
 """CLI entrypoint for distributed partition reconcile workers."""
