@@ -32,7 +32,7 @@ function* handleValidationSubmitFailure(
     fallback: string;
     notify?: { message: string; descriptionFallback: string };
   },
-) {
+): Generator<unknown, void, unknown> {
   if (opts.jobId) {
     return;
   }
